@@ -1,0 +1,28 @@
+# Goose Configuration for BASEDATA Pipeline Builder
+#
+# Copy this to ~/.config/goose/config.yaml
+# Or run: cp config.yaml ~/.config/goose/config.yaml
+#
+# Also copy the custom provider:
+#   mkdir -p ~/.config/goose/custom_providers
+#   cp custom_providers/pnnl.json ~/.config/goose/custom_providers/
+
+GOOSE_PROVIDER: pnnl
+GOOSE_MODEL: claude-sonnet-4-20250514
+
+extensions:
+  # Built-in developer tools (file operations, shell, etc.)
+  developer:
+    enabled: true
+    name: developer
+    type: builtin
+  
+  # BASEDATA MCP server
+  basedata:
+    enabled: true
+    name: basedata
+    type: stdio
+    cmd: python
+    args:
+      - /path/to/basedata/mcp_server.py  # UPDATE THIS PATH
+    timeout: 300

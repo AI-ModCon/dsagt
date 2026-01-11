@@ -1,0 +1,92 @@
+# BASEDATA Tool Registry
+#
+# Each tool entry defines:
+#   name: Unique identifier for the tool
+#   description: What the tool does (shown to agents)
+#   executable: Command to run (can include interpreter)
+#   parameters: Input schema for the tool
+#
+# Parameter fields:
+#   type: string | integer | number | boolean | array | object
+#   required: true | false (default: false)
+#   default: Default value if not provided
+#   description: Help text for the parameter
+
+tools:
+  - name: load_csv
+    description: Load a CSV file and output basic info (row count, columns)
+    executable: python tools/load_csv.py
+    parameters:
+      location:
+        type: string
+        required: true
+        description: Path to CSV file
+      delimiter:
+        type: string
+        default: ","
+        description: Field delimiter character
+
+  - name: profile_data
+    description: Generate summary statistics for a CSV file
+    executable: python tools/profile_data.py
+    parameters:
+      input:
+        type: string
+        required: true
+        description: Path to input CSV file
+      output:
+        type: string
+        default: "profile.json"
+        description: Path for output profile JSON
+
+  - name: validate_schema
+    description: Validate CSV against expected column types
+    executable: python tools/validate_schema.py
+    parameters:
+      input:
+        type: string
+        required: true
+        description: Path to input CSV file
+      schema:
+        type: string
+        required: true
+        description: Path to schema JSON file
+
+  - name: split_data
+    description: Split data into train/dev/test sets
+    executable: python tools/split_data.py
+    parameters:
+      input:
+        type: string
+        required: true
+        description: Path to input CSV file
+      output_dir:
+        type: string
+        required: true
+        description: Directory for output splits
+      train_ratio:
+        type: number
+        default: 0.7
+        description: Fraction for training set
+      seed:
+        type: integer
+        default: 42
+        description: Random seed for reproducibility
+
+  - name: count_lines
+    description: Count lines in a file using wc (CLI example)
+    executable: wc -l
+    parameters:
+      file:
+        type: string
+        required: true
+        description: Path to file
+
+  - name: summarize_csv
+    description: Summarize CSV file using shell script (bash example)
+    executable: bash tools/summarize.sh
+    parameters:
+      file:
+        type: string
+        required: true
+        description: Path to CSV file
