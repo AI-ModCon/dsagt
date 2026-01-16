@@ -1,0 +1,33 @@
+[project]
+name = "dsagt"
+version = "0.1.0"
+description = "Data Smith Agent Toolkit - AI-assisted data pipeline builder"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = {text = "TBD"}
+authors = [
+    {name = "BASE-DATA Team", email = "aaron.tuor@pnnl.gov"}
+]
+keywords = ["data", "pipeline", "agent", "mcp", "ai"]
+
+dependencies = [
+    "pyyaml>=6.0",
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["registry", "mcp_server"]
+
+[tool.setuptools.package-data]
+"*" = ["registry.yaml", "models.txt", ".goosehints"]

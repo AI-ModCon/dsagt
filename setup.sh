@@ -1,81 +1,76 @@
 #!/bin/bash
-# BASEDATA Setup Script
-#
-# Sets up Goose with the BASEDATA MCP server and PNNL API provider.
+# DSAGT Setup Script
 #
 # Usage:
+#   export PNNL_API_KEY="your-key"
 #   ./setup.sh
-#   ./setup.sh --api-key YOUR_KEY
+#   ./setup.sh --model gpt-4o-project
+#
+# See models.txt for available models
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GOOSE_CONFIG_DIR="${HOME}/.config/goose"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Parse arguments
-# ═══════════════════════════════════════════════════════════════════════════════
+# Defaults
+MODEL="claude-sonnet-4-20250514-v1-project"
 
-API_KEY=""
+# Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --api-key)
-            API_KEY="$2"
+        --model)
+            MODEL="$2"
             shift 2
+            ;;
+        --list-models)
+            cat "${SCRIPT_DIR}/models.txt"
+            exit 0
             ;;
         *)
             echo "Unknown option: $1"
+            echo "Usage: ./setup.sh [--model MODEL_NAME] [--list-models]"
             exit 1
             ;;
     esac
 done
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Check dependencies
-# ═══════════════════════════════════════════════════════════════════════════════
+echo "DSAGT Setup"
+echo "==========="
+echo "Model: $MODEL"
 
-echo "Checking dependencies..."
+# Check for API key
+if [ -z "$PNNL_API_KEY" ]; then
+    echo ""
+    echo "ERROR: PNNL_API_KEY not set"
+    echo ""
+    echo "Run:"
+    echo "  export PNNL_API_KEY='your-key-here'"
+    echo "  ./setup.sh"
+    exit 1
+fi
 
+# Check for Goose
 if ! command -v goose &> /dev/null; then
     echo "ERROR: Goose not found."
-    echo "Install with: curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash"
+    echo "Install with:"
+    echo "  curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash"
     exit 1
 fi
 
-if ! command -v python &> /dev/null; then
-    echo "ERROR: Python not found."
-    exit 1
-fi
-
+# Check Python deps
 if ! python -c "import yaml" 2>/dev/null; then
     echo "Installing PyYAML..."
     pip install pyyaml
 fi
 
-if ! python -c "import mcp" 2>/dev/null; then
-    echo "Installing MCP..."
-    pip install mcp
-fi
+# Create config directory
+mkdir -p "$GOOSE_CONFIG_DIR"
 
-echo "✓ Dependencies OK"
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Setup Goose configuration
-# ═══════════════════════════════════════════════════════════════════════════════
-
-echo ""
-echo "Setting up Goose configuration..."
-
-mkdir -p "$GOOSE_CONFIG_DIR/custom_providers"
-
-# Copy custom provider
-cp "$SCRIPT_DIR/custom_providers/pnnl.json" "$GOOSE_CONFIG_DIR/custom_providers/"
-echo "✓ Copied custom provider: pnnl"
-
-# Create config.yaml with correct path
+# Write config.yaml
 cat > "$GOOSE_CONFIG_DIR/config.yaml" << EOF
-GOOSE_PROVIDER: pnnl
-GOOSE_MODEL: claude-sonnet-4-20250514
+GOOSE_PROVIDER: openai
+GOOSE_MODEL: ${MODEL}
 
 extensions:
   developer:
@@ -83,45 +78,31 @@ extensions:
     name: developer
     type: builtin
   
-  basedata:
+  dsagt:
     enabled: true
-    name: basedata
+    name: dsagt
     type: stdio
     cmd: python
     args:
       - ${SCRIPT_DIR}/mcp_server.py
     timeout: 300
 EOF
-echo "✓ Created config.yaml"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Setup API key
-# ═══════════════════════════════════════════════════════════════════════════════
+echo "✓ Created config.yaml (model: ${MODEL})"
 
-if [ -n "$API_KEY" ]; then
-    export PNNL_API_KEY="$API_KEY"
-    echo "✓ API key set from argument"
-elif [ -z "$PNNL_API_KEY" ]; then
-    echo ""
-    echo "Set your PNNL API key:"
-    echo "  export PNNL_API_KEY='your-key-here'"
-    echo ""
-    echo "Or add to your shell profile (~/.bashrc, ~/.zshrc):"
-    echo "  echo 'export PNNL_API_KEY=\"your-key-here\"' >> ~/.bashrc"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Done
-# ═══════════════════════════════════════════════════════════════════════════════
-
+# Write shell profile hint
 echo ""
-echo "════════════════════════════════════════════════════════════"
-echo "Setup complete!"
-echo "════════════════════════════════════════════════════════════"
+echo "Add these to your shell profile (~/.bashrc or ~/.zshrc):"
 echo ""
-echo "To start the pipeline builder:"
-echo "  cd $SCRIPT_DIR"
+echo "  export PNNL_API_KEY=\"your-key\""
+echo "  export OPENAI_API_KEY=\"\${PNNL_API_KEY}\""
+echo "  export OPENAI_HOST=\"https://ai-incubator-api.pnnl.gov\""
+echo ""
+echo "Or run now:"
+echo ""
+echo "  export OPENAI_API_KEY=\"${PNNL_API_KEY}\""
+echo "  export OPENAI_HOST=\"https://ai-incubator-api.pnnl.gov\""
+echo ""
+echo "Then start:"
+echo "  cd ${SCRIPT_DIR}"
 echo "  goose session"
-echo ""
-echo "The .goosehints file in this directory will guide the agent."
-echo ""

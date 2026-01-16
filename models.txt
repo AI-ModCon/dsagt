@@ -1,0 +1,37 @@
+# Available PNNL API Models
+#
+# Use with: ./setup.sh --model MODEL_NAME
+
+# Claude (Anthropic)
+claude-sonnet-4-20250514-v1-project        # Default - good balance
+claude-sonnet-4-5-20250929-v1-project      # Newer Sonnet
+claude-opus-4-20250514-v1-project          # Most capable
+claude-opus-4-5-20251101-v1-project        # Newer Opus
+claude-haiku-4-5-20251001-v1-project       # Fast/cheap
+claude-3-5-haiku-20241022-project          # Older Haiku
+
+# OpenAI GPT
+gpt-4o-project
+gpt-4.1-project
+gpt-5-project
+gpt-5.1-project
+gpt-5.2-project
+
+# OpenAI Reasoning
+o3-project
+o3-mini-project
+o4-mini-project
+
+# Google Gemini
+gemini-2.5-pro-project
+gemini-2.5-flash-project
+
+# xAI Grok
+grok-4-project
+grok-4-fast-reasoning-project
+grok-4-fast-non-reasoning-project
+
+# Embeddings (not for chat)
+text-embedding-3-small-project
+text-embedding-3-large-project
+gemini-embedding-001-project
