@@ -14,10 +14,7 @@ import os
 import sys
 from pathlib import Path
 
-# Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from registry import ToolRegistry
+from dsagt import ToolRegistry
 
 
 def print_header(text):
@@ -54,7 +51,11 @@ def main():
     
     # Initialize registry with runtime in demo folder
     runtime_dir = demo_dir / "runtime"
-    registry = ToolRegistry(runtime_dir=str(runtime_dir))
+    registry_file = demo_dir.parent / "registry.yaml"
+    registry = ToolRegistry(
+        source_registry=str(registry_file),
+        runtime_dir=str(runtime_dir)
+    )
     
     # ─────────────────────────────────────────────────────────────────────────
     # Step 1: List available tools

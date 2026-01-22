@@ -13,7 +13,12 @@ keywords = ["data", "pipeline", "agent", "mcp", "ai"]
 dependencies = [
     "pyyaml>=6.0",
     "mcp>=1.0.0",
+    "httpx>=0.27.0",
 ]
+
+[project.scripts]
+dsagt-pipeline-server = "dsagt.servers.pipeline_server:main"
+dsagt-registry-builder = "dsagt.servers.registry_builder_server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -27,7 +32,21 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["registry", "mcp_server"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
-"*" = ["registry.yaml", "models.txt", ".goosehints"]
+dsagt = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]

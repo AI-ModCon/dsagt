@@ -15,9 +15,6 @@ from typing import Any
 import yaml
 
 
-DEFAULT_REGISTRY = str(Path(__file__).parent / "registry.yaml")
-
-
 class ToolRegistry:
     """
     Manages tool definitions and execution.
@@ -27,8 +24,8 @@ class ToolRegistry:
     """
     
     def __init__(
-        self, 
-        source_registry: str = DEFAULT_REGISTRY,
+        self,
+        source_registry: str,
         runtime_dir: str = "./runtime",
     ):
         self.runtime_dir = Path(runtime_dir)

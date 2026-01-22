@@ -1,13 +1,12 @@
-#!/usr/bin/env python
 """
-DSAGT MCP Server
+DSAGT Pipeline MCP Server
 
 Exposes data processing tools to MCP-compatible agents (Goose, Claude, etc.).
 
 Usage:
-    python mcp_server.py
-    python mcp_server.py --registry ./my_registry.yaml
-    python mcp_server.py --runtime-dir ./my_session
+    dsagt-pipeline-server
+    dsagt-pipeline-server --registry ./my_registry.yaml
+    dsagt-pipeline-server --runtime-dir ./my_session
 """
 
 import argparse
@@ -19,7 +18,7 @@ import mcp.types as types
 from mcp.server.lowlevel import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 
-from registry import ToolRegistry, DEFAULT_REGISTRY
+from dsagt.core.registry import ToolRegistry
 
 
 def create_server(registry: ToolRegistry) -> Server:
@@ -76,10 +75,10 @@ async def run_server(registry_path: str, runtime_dir: str):
 
 def main():
     parser = argparse.ArgumentParser(description="DSAGT MCP Server")
-    parser.add_argument("--registry", default=DEFAULT_REGISTRY, help="Source registry YAML")
+    parser.add_argument("--registry", default="registry.yaml", help="Source registry YAML")
     parser.add_argument("--runtime-dir", default="./runtime", help="Runtime directory")
     args = parser.parse_args()
-    
+
     asyncio.run(run_server(args.registry, args.runtime_dir))
 
 

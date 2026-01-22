@@ -82,9 +82,10 @@ extensions:
     enabled: true
     name: dsagt
     type: stdio
-    cmd: python
+    cmd: dsagt-pipeline-server
     args:
-      - ${SCRIPT_DIR}/mcp_server.py
+      - --registry
+      - ${SCRIPT_DIR}/registry.yaml
     timeout: 300
 EOF
 

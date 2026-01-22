@@ -17,12 +17,13 @@ extensions:
     name: developer
     type: builtin
   
-  # BASEDATA MCP server
-  basedata:
+  # DSAGT MCP server
+  dsagt:
     enabled: true
-    name: basedata
+    name: dsagt
     type: stdio
-    cmd: python
+    cmd: dsagt-pipeline-server
     args:
-      - /path/to/basedata/mcp_server.py  # UPDATE THIS PATH
+      - --registry
+      - /path/to/dsagt/registry.yaml  # UPDATE THIS PATH
     timeout: 300
