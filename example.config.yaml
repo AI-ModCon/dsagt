@@ -1,4 +1,4 @@
-# Goose Configuration for BASEDATA Pipeline Builder
+# Goose Configuration for DSAGT
 #
 # Copy this to ~/.config/goose/config.yaml
 # Or run: cp config.yaml ~/.config/goose/config.yaml
@@ -16,8 +16,8 @@ extensions:
     enabled: true
     name: developer
     type: builtin
-  
-  # DSAGT MCP server
+
+  # DSAGT Pipeline Server
   dsagt:
     enabled: true
     name: dsagt
@@ -26,4 +26,15 @@ extensions:
     args:
       - --registry
       - /path/to/dsagt/registry.yaml  # UPDATE THIS PATH
+    timeout: 300
+
+  # DSAGT Registry Builder
+  registry_builder:
+    enabled: true
+    name: tool-registry-server
+    type: stdio
+    cmd: dsagt-registry-builder
+    args:
+      - --registry
+      - /path/to/dsagt/registry.yaml  # Same registry file
     timeout: 300
