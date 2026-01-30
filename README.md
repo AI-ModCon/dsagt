@@ -2,10 +2,11 @@
 
 **D**ata **S**mith **A**gent **T**oolkit - AI-assisted data pipeline builder.
 
-DSAGT helps you build reproducible data processing pipelines using AI agents like Goose. It provides two MCP servers:
+DSAGT helps you build reproducible data processing pipelines using AI agents like Goose. It provides three MCP servers:
 
 1. **Pipeline Server** - Executes data processing tools from a registry
 2. **Registry Builder** - Helps you add new tools by analyzing documentation
+3. **Knowledge Base** - Semantic search over indexed documentation
 
 ## Installation
 
@@ -30,9 +31,41 @@ uv pip install -e .
 pip install -e .
 ```
 
-This installs two command-line tools:
+This installs three command-line tools:
 - `dsagt-pipeline-server` - Run the pipeline execution server
 - `dsagt-registry-builder` - Run the registry builder server
+- `dsagt-knowledge-server` - Run the knowledge base server
+
+### Set Up the Knowledge Base
+
+The knowledge base provides semantic search over documentation for NeMo Curator, AIDRIN, and other indexed sources. Run the setup script to download and index the core collections:
+
+```bash
+# Set your API key for embeddings (PNNL AI Incubator or OpenAI-compatible)
+export LLM_API_KEY="your-api-key"
+
+# Run the setup script
+python scripts/setup_core_kb.py
+```
+
+This will:
+1. Clone the NeMo Curator repository (docs, code, tutorials)
+2. Clone the AIDRIN repository (data readiness framework)
+3. Download relevant arXiv papers
+4. Chunk and embed all documents into a FAISS index
+
+The index is saved to `kb_index/` by default. You can customize the location:
+
+```bash
+# Use a custom index directory
+python scripts/setup_core_kb.py --index-dir /path/to/my_index
+
+# Set up only one collection
+python scripts/setup_core_kb.py --collection nemo_curator
+python scripts/setup_core_kb.py --collection aidrin
+```
+
+**Note:** The initial setup requires network access to GitHub and arXiv, and may take several minutes depending on your connection and the embedding API response time.
 
 ## Running the MCP Servers
 
@@ -53,15 +86,32 @@ dsagt-pipeline-server --registry registry.yaml --runtime-dir ./my_session
 
 ### Registry Builder Server
 
-The registry builder helps you add new tools to your registry:
+The registry builder helps you add new tools to the session registry:
 
 ```bash
-# Save to default tool_registry.yaml
+# Writes to default ./runtime/registry.yaml (pipeline's session registry)
 dsagt-registry-builder
 
-# Save to a specific file
-dsagt-registry-builder --registry path/to/my_tools.yaml
+# Specify a different registry file
+dsagt-registry-builder --registry path/to/registry.yaml
 ```
+
+### Knowledge Base Server
+
+The knowledge base server provides semantic search over indexed documentation. It copies base indexes to a session-specific runtime directory at startup:
+
+```bash
+# Use defaults (base: ./kb_index, runtime: ./runtime)
+dsagt-knowledge-server
+
+# Specify directories
+dsagt-knowledge-server --base-index-dir path/to/kb_index --runtime-dir ./runtime
+
+# Disable reranking for faster (but less accurate) results
+dsagt-knowledge-server --no-rerank
+```
+
+To index documentation, place files in a folder and ingest via the `kb_ingest` tool. Add a `DESCRIPTION.md` file to the folder for agent discovery.
 
 ## Using with Goose
 
@@ -81,14 +131,14 @@ Run Goose with the DSAGT servers for a single session:
 ```bash
 goose session \
   --with-extension 'dsagt-pipeline-server --registry registry.yaml' \
-  --with-extension 'dsagt-registry-builder --registry registry.yaml'
+  --with-extension 'dsagt-registry-builder'
 ```
 
 **If using uv:**
 ```bash
 goose session \
   --with-extension 'uv run dsagt-pipeline-server --registry registry.yaml' \
-  --with-extension 'uv run dsagt-registry-builder --registry registry.yaml'
+  --with-extension 'uv run dsagt-registry-builder'
 ```
 
 ### Option 2: Configuration File (Persistent)
@@ -110,7 +160,9 @@ extensions:
     cmd: dsagt-pipeline-server
     args:
       - --registry
-      - /path/to/registry.yaml  # Use absolute path for global config
+      - /path/to/registry.yaml  # Base registry to copy from
+      - --runtime-dir
+      - /path/to/runtime
     timeout: 300
 
   registry_builder:
@@ -120,7 +172,19 @@ extensions:
     cmd: dsagt-registry-builder
     args:
       - --registry
-      - /path/to/registry.yaml  # Same registry file
+      - /path/to/runtime/registry.yaml  # Session registry (written by pipeline server)
+    timeout: 300
+
+  knowledge_base:
+    enabled: true
+    name: knowledge-base
+    type: stdio
+    cmd: dsagt-knowledge-server
+    args:
+      - --base-index-dir
+      - /path/to/kb_index
+      - --runtime-dir
+      - /path/to/runtime
     timeout: 300
 ```
 
@@ -136,7 +200,9 @@ extensions:
       - run
       - dsagt-pipeline-server
       - --registry
-      - /path/to/registry.yaml  # Use absolute path for global config
+      - /path/to/registry.yaml  # Base registry to copy from
+      - --runtime-dir
+      - /path/to/runtime
     timeout: 300
 
   registry_builder:
@@ -148,7 +214,21 @@ extensions:
       - run
       - dsagt-registry-builder
       - --registry
-      - /path/to/registry.yaml  # Same registry file
+      - /path/to/runtime/registry.yaml  # Session registry (written by pipeline server)
+    timeout: 300
+
+  knowledge_base:
+    enabled: true
+    name: knowledge-base
+    type: stdio
+    cmd: uv
+    args:
+      - run
+      - dsagt-knowledge-server
+      - --base-index-dir
+      - /path/to/kb_index
+      - --runtime-dir
+      - /path/to/runtime
     timeout: 300
 ```
 
@@ -202,9 +282,9 @@ goose session --config goose.yaml
 
 ### Pipeline Execution
 
-1. Goose uses the **dsagt** extension to run tools defined in `registry.yaml`
-2. Each tool execution is logged to a provenance file for reproducibility
-3. Results are saved to a runtime directory (default: `./runtime`)
+1. The pipeline server copies the base `registry.yaml` to `runtime/registry.yaml` at startup
+2. Goose uses the **dsagt** extension to run tools from the session registry
+3. Each tool execution is logged to a provenance file for reproducibility
 
 ### Adding New Tools
 
@@ -217,8 +297,7 @@ goose session --config goose.yaml
    - `get_registry` - View all registered tools
    - `search_registry` - Search for tools by name or description
 
-3. New tools are saved to `tool_registry.yaml` in the correct format
-4. You can then copy tools from `tool_registry.yaml` to your main `registry.yaml`
+3. New tools are saved directly to the session registry and are immediately available
 
 ## Tool Registry Format
 
@@ -275,11 +354,15 @@ pytest --cov=dsagt
 ├── src/
 │   └── dsagt/
 │       ├── core/           # Core registry management
+│       ├── knowledge/      # Knowledge base for semantic search
 │       ├── servers/        # MCP servers
 │       └── tools/          # Package metadata
+├── scripts/
+│   └── setup_core_kb.py    # Knowledge base setup script
 ├── tools/                  # Example data processing tools
 ├── demo/                   # Example usage
 ├── tests/                  # Test suite
+├── kb_index/               # Knowledge base index (generated)
 ├── registry.yaml           # Example tool registry
 └── goose.yaml             # Goose configuration
 ```
@@ -294,6 +377,7 @@ If Goose reports that it can't find the MCP servers:
 # Verify installation
 which dsagt-pipeline-server
 which dsagt-registry-builder
+which dsagt-knowledge-server
 
 # Reinstall if needed
 uv pip install -e . --force-reinstall

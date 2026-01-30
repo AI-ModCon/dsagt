@@ -38,3 +38,16 @@ extensions:
       - --registry
       - /path/to/dsagt/registry.yaml  # Same registry file
     timeout: 300
+
+  # DSAGT Knowledge Base - semantic search over documentation
+  knowledge_base:
+    enabled: true
+    name: knowledge-base
+    type: stdio
+    cmd: dsagt-knowledge-server
+    args:
+      - --base-index-dir
+      - /path/to/dsagt/kb_index  # UPDATE THIS PATH
+      - --runtime-dir
+      - /path/to/dsagt/runtime   # Session-specific directory
+    timeout: 300

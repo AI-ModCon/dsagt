@@ -303,8 +303,8 @@ def main():
     parser = argparse.ArgumentParser(description="DSAGT Registry Builder MCP Server")
     parser.add_argument(
         "--registry",
-        default="tool_registry.yaml",
-        help="Path to the registry YAML file to create/update (default: tool_registry.yaml)"
+        default="./runtime/registry.yaml",
+        help="Path to the registry YAML file to create/update (default: ./runtime/registry.yaml)"
     )
     args = parser.parse_args()
 
