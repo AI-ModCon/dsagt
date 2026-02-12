@@ -23,9 +23,9 @@ dependencies = [
 ]
 
 [project.scripts]
-dsagt-pipeline-server = "dsagt.servers.pipeline_server:main"
-dsagt-registry-builder = "dsagt.servers.registry_builder_server:main"
-dsagt-knowledge-server = "dsagt.servers.knowledge_server:main"
+dsagt-pipeline-server = "dsagt.pipeline_server:main"
+dsagt-registry-server = "dsagt.registry_server:main"
+dsagt-knowledge-server = "dsagt.knowledge_server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -56,4 +56,7 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:importlib._bootstrap",
 ]

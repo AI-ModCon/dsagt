@@ -23,27 +23,37 @@ class ToolRegistry:
     All modifications happen to the runtime copy.
     """
     
+    # Default registry shipped with the package
+    _PACKAGE_DIR = Path(__file__).parent
+    _DEFAULT_REGISTRY = _PACKAGE_DIR / "registry.yaml"
+
     def __init__(
         self,
-        source_registry: str,
+        source_registry: str | None = None,
         runtime_dir: str = "./runtime",
     ):
         self.runtime_dir = Path(runtime_dir)
         self.runtime_registry = self.runtime_dir / "registry.yaml"
         self.provenance_log = self.runtime_dir / "provenance.log"
         
+        # Resolve source registry: explicit path > default bundled
+        if source_registry and Path(source_registry).exists():
+            source = Path(source_registry)
+        else:
+            source = self._DEFAULT_REGISTRY
+        
         # Store base directory for resolving relative tool paths
-        self.base_dir = Path(source_registry).parent
+        self.base_dir = source.parent
         
         # Create runtime directory and copy registry
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(source_registry, self.runtime_registry)
+        shutil.copy(source, self.runtime_registry)
         
         # Initialize provenance log
         with open(self.provenance_log, "a") as f:
             f.write(f"# Session started: {datetime.now().isoformat()}\n")
-            f.write(f"# Source registry: {source_registry}\n\n")
-    
+            f.write(f"# Source registry: {source}\n\n")
+        
     def _load_registry(self) -> dict:
         with open(self.runtime_registry) as f:
             return yaml.safe_load(f)
@@ -125,32 +135,6 @@ class ToolRegistry:
             "output": result.stdout,
             "error": result.stderr if result.returncode != 0 else None,
         }
-    
-    def register_tool(
-        self,
-        name: str,
-        description: str,
-        executable: str,
-        parameters: dict[str, dict],
-    ) -> dict[str, Any]:
-        """Register a new tool."""
-        registry = self._load_registry()
-        
-        for tool in registry.get("tools", []):
-            if tool["name"] == name:
-                return {"success": False, "error": f"Tool '{name}' already exists"}
-        
-        registry.setdefault("tools", []).append({
-            "name": name,
-            "description": description,
-            "executable": executable,
-            "parameters": parameters,
-        })
-        
-        self._save_registry(registry)
-        self._log_provenance("_register_tool", {"name": name, "executable": executable}, f"Registered: {name}")
-        
-        return {"success": True}
     
     def _log_provenance(self, tool: str, args: dict, cmd: str) -> None:
         with open(self.provenance_log, "a") as f:

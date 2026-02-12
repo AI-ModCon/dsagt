@@ -14,41 +14,38 @@ Usage:
 
 import argparse
 import asyncio
-import json
-import shutil
 from pathlib import Path
 
-import mcp.server.stdio
-import mcp.types as types
-from mcp.server.lowlevel import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
-
 from dsagt.knowledge import KnowledgeBase
+from dsagt.mcp_utils import create_server, run_stdio, text_result, types
 
 
 def setup_runtime_kb(base_index_dir: Path, runtime_dir: Path) -> Path:
     """
-    Copy base indexes to runtime directory for session isolation.
+    Symlink base indexes into runtime directory for session isolation.
+    
+    Pre-built collections are symlinked (read-only, zero-cost).
+    New collections created via kb_ingest are written directly to runtime.
     
     Returns the runtime index directory path.
     """
     runtime_kb_dir = runtime_dir / "kb_index"
     runtime_kb_dir.mkdir(parents=True, exist_ok=True)
     
-    # Copy existing collections from base to runtime
+    # Symlink existing collections from base to runtime
     if base_index_dir.exists():
         for collection_dir in base_index_dir.iterdir():
             if collection_dir.is_dir() and (collection_dir / "index.faiss").exists():
                 dest = runtime_kb_dir / collection_dir.name
                 if not dest.exists():
-                    shutil.copytree(collection_dir, dest)
+                    dest.symlink_to(collection_dir.resolve())
     
     return runtime_kb_dir
 
 
-def create_server(kb: KnowledgeBase, use_rerank: bool) -> Server:
+def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
     """Create and configure the MCP server."""
-    server = Server("dsagt-knowledge")
+    server = create_server("knowledge")
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
@@ -91,13 +88,17 @@ def create_server(kb: KnowledgeBase, use_rerank: bool) -> Server:
             ),
             types.Tool(
                 name="kb_ingest",
-                description="Index a folder as a new collection. The folder name becomes the collection name. Include a DESCRIPTION.md file in the folder for agent discovery.",
+                description="Index a folder as a new collection. By default the folder name becomes the collection name. Include a DESCRIPTION.md file in the folder for agent discovery.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "folder_path": {
                             "type": "string",
                             "description": "Path to folder containing documents to index",
+                        },
+                        "collection_name": {
+                            "type": "string",
+                            "description": "Name for the collection (default: folder name)",
                         },
                         "file_types": {
                             "type": "array",
@@ -127,7 +128,9 @@ def create_server(kb: KnowledgeBase, use_rerank: bool) -> Server:
                 top_k = arguments.get("top_k", 5)
                 rerank = arguments.get("rerank", use_rerank)
 
-                results = kb.search(
+                # Run in thread — kb.search makes blocking HTTP calls
+                results = await asyncio.to_thread(
+                    kb.search,
                     query=query,
                     collection=collection,
                     top_k=top_k,
@@ -154,9 +157,8 @@ def create_server(kb: KnowledgeBase, use_rerank: bool) -> Server:
                 }
 
             elif name == "kb_ingest":
-                from pathlib import Path
-
                 folder_path = Path(arguments["folder_path"])
+                collection_name = arguments.get("collection_name")
                 file_types = arguments.get("file_types")
 
                 if not folder_path.exists():
@@ -164,13 +166,39 @@ def create_server(kb: KnowledgeBase, use_rerank: bool) -> Server:
                 elif not folder_path.is_dir():
                     result = {"status": "error", "error": f"Not a directory: {folder_path}"}
                 else:
-                    ingest_result = kb.ingest(folder_path, file_types=file_types)
+                    # Deconflict collection name if it already exists
+                    target_name = collection_name or folder_path.name
+                    coll_dest = kb.index_dir / target_name
+                    if coll_dest.exists() or coll_dest.is_symlink():
+                        original_name = target_name
+                        n = 1
+                        while coll_dest.exists() or coll_dest.is_symlink():
+                            target_name = f"{original_name}{n}"
+                            coll_dest = kb.index_dir / target_name
+                            n += 1
+                        warning = f"Collection '{original_name}' already exists, using '{target_name}'"
+                    else:
+                        warning = None
+
+                    # Build kwargs — only pass collection_name if overridden
+                    kwargs = {}
+                    if target_name != folder_path.name:
+                        kwargs["collection_name"] = target_name
+                    if file_types:
+                        kwargs["file_types"] = file_types
+
+                    # Run in thread — kb.ingest makes blocking HTTP calls
+                    ingest_result = await asyncio.to_thread(
+                        kb.ingest, folder_path, **kwargs,
+                    )
                     result = {
                         "status": "ok",
                         "collection": ingest_result["collection"],
                         "files_indexed": ingest_result["files"],
                         "chunks_created": ingest_result["chunks"],
                     }
+                    if warning:
+                        result["warning"] = warning
 
             else:
                 result = {"status": "error", "error": f"Unknown tool: {name}"}
@@ -180,7 +208,7 @@ def create_server(kb: KnowledgeBase, use_rerank: bool) -> Server:
         except Exception as e:
             result = {"status": "error", "error": f"Unexpected error: {e}"}
 
-        return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+        return text_result(result)
 
     return server
 
@@ -195,22 +223,10 @@ async def run_server(base_index_dir: str, runtime_dir: str, chunk_size: int, use
     
     # Create KB pointing to runtime directory
     kb = KnowledgeBase(index_dir=runtime_kb_dir, chunk_size=chunk_size)
-    server = create_server(kb, use_rerank)
+    server = create_knowledge_server(kb, use_rerank)
 
     try:
-        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                InitializationOptions(
-                    server_name="dsagt-knowledge",
-                    server_version="0.1.0",
-                    capabilities=server.get_capabilities(
-                        notification_options=NotificationOptions(),
-                        experimental_capabilities={},
-                    ),
-                ),
-            )
+        await run_stdio(server, "knowledge")
     finally:
         kb.close()
 
@@ -244,7 +260,7 @@ def main():
         args.base_index_dir,
         args.runtime_dir,
         args.chunk_size,
-        not args.no_rerank
+        not args.no_rerank,
     ))
 
 
