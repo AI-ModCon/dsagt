@@ -279,7 +279,7 @@ After the session, check these artifacts from the project root:
 cat runtime/registry.yaml
 ```
 
-You should see the bundled default tools (scan_directory, compare_schemas, load_csv, etc.) plus a `greet` entry added by the agent, with `name`, `executable`, `description`, and `parameters`.
+You should see the bundled default tools (scan_directory) plus a `greet` entry added by the agent, with `name`, `executable`, `description`, and `parameters`.
 
 **Provenance was logged:**
 
@@ -341,21 +341,22 @@ Required parameters are passed as positional arguments. Optional parameters use 
 │   ├── __init__.py
 │   ├── mcp_utils.py                # Shared MCP server utilities
 │   ├── registry.py                 # Tool registry management
-│   ├── knowledge_base.py           # Semantic search over document collections
+│   ├── registry.yaml               # Default tool registry (bundled with package)
+│   ├── knowledge.py                # Semantic search over document collections
 │   ├── pipeline_server.py          # MCP server: tool execution
-│   ├── registry_server.py  # MCP server: tool discovery and registration
+│   ├── registry_server.py          # MCP server: tool discovery and registration
 │   └── knowledge_server.py         # MCP server: knowledge base search
 ├── tests/
 │   ├── test_registry.py                # ToolRegistry unit tests
-│   ├── test_registry_server.py # Registry builder server handler tests
-│   ├── test_knowledge_base.py          # KnowledgeBase and EmbeddingClient tests
+│   ├── test_registry_server.py         # Registry builder server handler tests
+│   ├── test_knowledge_base.py          # KnowledgeBase and APIEmbeddingClient tests
 │   ├── test_knowledge_server.py        # Knowledge server handler tests
+│   ├── test_knowledge_integration.py   # Integration tests (require API key)
 │   └── smoke_test/                     # End-to-end smoke test fixtures
 │       ├── greet.py                    # Sample CLI tool
 │       └── knowledge/                  # Sample documents for KB ingestion
 ├── scripts/
 │   └── setup_core_kb.py            # Knowledge base setup script
-├── registry.yaml                   # Default tool registry (bundled with package)
 ├── pyproject.toml
 └── README.md
 ```
@@ -389,7 +390,7 @@ pytest tests/test_registry.py::TestCallTool
 pytest tests/test_registry.py::TestCallTool::test_success -v
 ```
 
-The registry tests mock `subprocess.run` so they don't execute real commands. The server tests invoke MCP handlers directly without starting the stdio transport, so they run fast and need no network access. The knowledge base tests mock the embedding API and use real FAISS indexes on temp files — no API key or network needed.
+The registry tests mock `subprocess.run` so they don't execute real commands. The server tests invoke MCP handlers directly without starting the stdio transport, so they run fast and need no network access. The knowledge base tests mock the embedding API and use real FAISS indexes on temp files — no API key or network needed. The knowledge server tests use async helpers to exercise the background job pattern for ingest and append operations.
 
 ## Troubleshooting
 

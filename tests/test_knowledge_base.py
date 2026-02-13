@@ -1,8 +1,8 @@
 """
-Tests for KnowledgeBase and EmbeddingClient.
+Tests for KnowledgeBase and APIEmbeddingClient.
 
-EmbeddingClient tests mock httpx to avoid network calls.
-KnowledgeBase tests mock EmbeddingClient with deterministic vectors
+APIEmbeddingClient tests mock httpx to avoid network calls.
+KnowledgeBase tests mock APIEmbeddingClient with deterministic vectors
 and use real FAISS indexes and llama-index chunking on temp files.
 Reranking is mocked since sentence-transformers is a heavy dependency.
 """
@@ -20,7 +20,7 @@ import pytest
 # Ensure a dummy API key is set before importing
 os.environ.setdefault("LLM_API_KEY", "test-key")
 
-from dsagt.knowledge import EmbeddingClient, KnowledgeBase, CODE_LANGUAGES
+from dsagt.knowledge import APIEmbeddingClient, KnowledgeBase, CODE_LANGUAGES
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +82,10 @@ def create_test_docs(folder: Path):
 
 
 # ---------------------------------------------------------------------------
-# EmbeddingClient
+# APIEmbeddingClient
 # ---------------------------------------------------------------------------
 
-class TestEmbeddingClient:
+class TestAPIEmbeddingClient:
 
     def test_missing_api_key_raises(self):
         """Constructor raises ValueError when no API key is available."""
@@ -96,37 +96,37 @@ class TestEmbeddingClient:
             env.pop("OPENAI_API_KEY", None)
             with patch.dict(os.environ, env, clear=True):
                 with pytest.raises(ValueError, match="API key required"):
-                    EmbeddingClient(api_key=None)
+                    APIEmbeddingClient(api_key=None)
 
     def test_explicit_api_key(self):
         """Constructor accepts an explicit API key."""
-        client = EmbeddingClient(api_key="explicit-key")
+        client = APIEmbeddingClient(api_key="explicit-key")
         assert client.api_key == "explicit-key"
         client.close()
 
     def test_embed_empty_list(self):
         """Embedding an empty list returns an empty array."""
-        client = EmbeddingClient(api_key="test-key")
+        client = APIEmbeddingClient(api_key="test-key")
         result = client.embed([])
         assert result.shape == (0,)
         assert result.dtype == np.float32
         client.close()
 
-    @patch("dsagt.knowledge.httpx.Client")
+    @patch("httpx.Client")
     def test_embed_single_batch(self, mock_client_cls):
         """Texts within batch_size make a single API call."""
         mock_client = MagicMock()
         mock_client.post.return_value = make_mock_response(["a", "b"])
         mock_client_cls.return_value = mock_client
 
-        client = EmbeddingClient(api_key="test-key", batch_size=10)
+        client = APIEmbeddingClient(api_key="test-key", batch_size=10)
         result = client.embed(["a", "b"])
 
         assert result.shape == (2, EMBEDDING_DIM)
         assert mock_client.post.call_count == 1
         client.close()
 
-    @patch("dsagt.knowledge.httpx.Client")
+    @patch("httpx.Client")
     def test_embed_multiple_batches(self, mock_client_cls):
         """Texts exceeding batch_size are split into multiple API calls."""
         mock_client = MagicMock()
@@ -138,7 +138,7 @@ class TestEmbeddingClient:
         mock_client.post.side_effect = dynamic_response
         mock_client_cls.return_value = mock_client
 
-        client = EmbeddingClient(api_key="test-key", batch_size=2)
+        client = APIEmbeddingClient(api_key="test-key", batch_size=2)
         # 5 texts with batch_size=2 -> 3 API calls (2+2+1)
         result = client.embed(["a", "b", "c", "d", "e"])
 
@@ -146,14 +146,14 @@ class TestEmbeddingClient:
         assert mock_client.post.call_count == 3
         client.close()
 
-    @patch("dsagt.knowledge.httpx.Client")
+    @patch("httpx.Client")
     def test_embed_sends_correct_payload(self, mock_client_cls):
         """API call includes correct model and input texts."""
         mock_client = MagicMock()
         mock_client.post.return_value = make_mock_response(["hello"])
         mock_client_cls.return_value = mock_client
 
-        client = EmbeddingClient(
+        client = APIEmbeddingClient(
             api_key="my-key",
             model="test-model",
             base_url="https://example.com",
@@ -178,7 +178,7 @@ class TestKnowledgeBaseIngest:
     def kb(self, tmp_path):
         """KnowledgeBase with mocked embedding client."""
         index_dir = tmp_path / "index"
-        with patch("dsagt.knowledge.EmbeddingClient") as mock_cls:
+        with patch("dsagt.knowledge.APIEmbeddingClient") as mock_cls:
             mock_client = MagicMock()
             mock_client.embed = fake_embed
             mock_cls.return_value = mock_client
@@ -303,7 +303,7 @@ class TestKnowledgeBaseSearch:
         source_folder.mkdir()
         create_test_docs(source_folder)
 
-        with patch("dsagt.knowledge.EmbeddingClient") as mock_cls:
+        with patch("dsagt.knowledge.APIEmbeddingClient") as mock_cls:
             mock_client = MagicMock()
             mock_client.embed = fake_embed
             mock_cls.return_value = mock_client
@@ -384,7 +384,7 @@ class TestKnowledgeBaseSearch:
         folder_b.mkdir()
         (folder_b / "doc.txt").write_text("Beta collection content about submarines.")
 
-        with patch("dsagt.knowledge.EmbeddingClient") as mock_cls:
+        with patch("dsagt.knowledge.APIEmbeddingClient") as mock_cls:
             mock_client = MagicMock()
             mock_client.embed = fake_embed
             mock_cls.return_value = mock_client
@@ -413,7 +413,7 @@ class TestKnowledgeBaseLoad:
         source_folder.mkdir()
         (source_folder / "file.txt").write_text("Content for caching test.")
 
-        with patch("dsagt.knowledge.EmbeddingClient") as mock_cls:
+        with patch("dsagt.knowledge.APIEmbeddingClient") as mock_cls:
             mock_client = MagicMock()
             mock_client.embed = fake_embed
             mock_cls.return_value = mock_client
@@ -444,7 +444,7 @@ class TestGetParser:
 
     @pytest.fixture
     def kb(self, tmp_path):
-        with patch("dsagt.knowledge.EmbeddingClient"):
+        with patch("dsagt.knowledge.APIEmbeddingClient"):
             kb = KnowledgeBase(index_dir=tmp_path / "index")
             yield kb
             kb.close()
@@ -478,7 +478,7 @@ class TestGetParser:
 class TestContextManager:
 
     def test_context_manager_calls_close(self, tmp_path):
-        with patch("dsagt.knowledge.EmbeddingClient") as mock_cls:
+        with patch("dsagt.knowledge.APIEmbeddingClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 

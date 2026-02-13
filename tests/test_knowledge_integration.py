@@ -15,7 +15,6 @@ Usage:
 import asyncio
 import json
 import os
-import shutil
 from pathlib import Path
 
 import pytest
@@ -42,6 +41,32 @@ def call_tool(server, name: str, arguments: dict) -> dict:
     handler = server.request_handlers[types.CallToolRequest]
     result = asyncio.run(handler(req))
     return json.loads(result.root.content[0].text)
+
+
+async def _call_tool_async(server, name: str, arguments: dict) -> dict:
+    """Invoke a tool handler inside a running event loop."""
+    req = types.CallToolRequest(
+        method="tools/call",
+        params=types.CallToolRequestParams(name=name, arguments=arguments),
+    )
+    handler = server.request_handlers[types.CallToolRequest]
+    result = await handler(req)
+    return json.loads(result.root.content[0].text)
+
+
+async def call_tool_and_await_job(server, name: str, arguments: dict) -> tuple[dict, dict]:
+    """Call a tool that starts a background job, wait for it, return (initial, final)."""
+    initial = await _call_tool_async(server, name, arguments)
+    assert initial["status"] == "started"
+    job_id = initial["job_id"]
+
+    for _ in range(300):  # longer timeout for real embedding calls
+        await asyncio.sleep(0.1)
+        status = await _call_tool_async(server, "kb_job_status", {"job_id": job_id})
+        if status["status"] != "running":
+            return initial, status
+
+    raise TimeoutError(f"Job {job_id} did not complete")
 
 
 # ---------------------------------------------------------------------------
@@ -87,19 +112,23 @@ class TestIngestIntegration:
     def test_ingest_smoke_test_docs(self, tmp_path, smoke_test_dir):
         """Ingest smoke test documents through the MCP handler."""
 
-
         kb = KnowledgeBase(index_dir=tmp_path / "kb_index")
         server = create_knowledge_server(kb, use_rerank=False)
 
-        result = call_tool(server, "kb_ingest", {
-            "folder_path": str(smoke_test_dir),
-        })
+        async def run():
+            initial, final = await call_tool_and_await_job(
+                server, "kb_ingest", {"folder_path": str(smoke_test_dir)}
+            )
+            assert final["status"] == "complete"
+            result = final["result"]
+            assert result["files"] > 0
+            assert result["chunks"] > 0
+            assert result["collection"] == "knowledge"
 
-        assert result["status"] == "ok"
-        assert result["files_indexed"] > 0
-        assert result["chunks_created"] > 0
-        assert result["collection"] == "knowledge"
-        kb.close()
+        try:
+            asyncio.run(run())
+        finally:
+            kb.close()
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +146,7 @@ class TestSearchIntegration:
 
         assert result["status"] == "ok"
         assert result["result_count"] > 0
-        # Troubleshooting doc should be the top hit
+        # Troubleshooting doc should be among the results
         sources = [r["source_file"] for r in result["results"]]
         assert any("troubleshooting" in s for s in sources)
 

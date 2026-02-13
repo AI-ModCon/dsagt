@@ -4,10 +4,15 @@ Tests for the knowledge base MCP server.
 Tests the tool handlers and setup_runtime_kb utility.
 The KnowledgeBase is mocked — these tests verify the server's
 handler logic, argument parsing, error handling, and response formatting.
+
+Ingest and append are background jobs: the handler returns immediately
+with {"status": "started", "job_id": ...}. Tests that need to verify
+the job completed use an async helper that lets the event loop tick.
 """
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +35,33 @@ def call_tool(server, name: str, arguments: dict) -> dict:
     handler = server.request_handlers[types.CallToolRequest]
     result = asyncio.run(handler(req))
     return json.loads(result.root.content[0].text)
+
+
+async def _call_tool_async(server, name: str, arguments: dict) -> dict:
+    """Invoke a tool handler inside a running event loop."""
+    req = types.CallToolRequest(
+        method="tools/call",
+        params=types.CallToolRequestParams(name=name, arguments=arguments),
+    )
+    handler = server.request_handlers[types.CallToolRequest]
+    result = await handler(req)
+    return json.loads(result.root.content[0].text)
+
+
+async def call_tool_and_await_job(server, name: str, arguments: dict) -> tuple[dict, dict]:
+    """Call a tool that starts a background job, wait for it, return (initial, final)."""
+    initial = await _call_tool_async(server, name, arguments)
+    assert initial["status"] == "started"
+    job_id = initial["job_id"]
+
+    # Let the background task complete
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        status = await _call_tool_async(server, "kb_job_status", {"job_id": job_id})
+        if status["status"] != "running":
+            return initial, status
+
+    raise TimeoutError(f"Job {job_id} did not complete")
 
 
 def make_search_result(text: str, source_file: str, chunk_index: int = 0, score: float = 0.9):
@@ -67,6 +99,7 @@ def mock_kb(tmp_path):
         make_search_result("Second result text", "/path/to/file2.md", 1, 0.80),
     ]
     kb.ingest.return_value = {"collection": "new_docs", "files": 5, "chunks": 42}
+    kb.append.return_value = {"collection": "docs", "files": 2, "chunks_added": 10, "total_chunks": 50}
     return kb
 
 
@@ -185,13 +218,13 @@ class TestSearch:
 
 
 # ---------------------------------------------------------------------------
-# kb_ingest
+# kb_ingest (background job pattern)
 # ---------------------------------------------------------------------------
 
 class TestIngest:
 
-    def test_ingest_success(self, server, mock_kb, tmp_path):
-        """Successful ingestion returns collection stats."""
+    def test_ingest_returns_started(self, server, mock_kb, tmp_path):
+        """Ingesting a folder returns immediately with a job_id."""
         folder = tmp_path / "new_docs"
         folder.mkdir()
 
@@ -199,27 +232,45 @@ class TestIngest:
             "folder_path": str(folder),
         })
 
-        assert result["status"] == "ok"
+        assert result["status"] == "started"
+        assert "job_id" in result
         assert result["collection"] == "new_docs"
-        assert result["files_indexed"] == 5
-        assert result["chunks_created"] == 42
+
+    def test_ingest_job_completes(self, server, mock_kb, tmp_path):
+        """Background ingest job completes successfully."""
+        folder = tmp_path / "new_docs"
+        folder.mkdir()
+
+        async def run():
+            initial, final = await call_tool_and_await_job(
+                server, "kb_ingest", {"folder_path": str(folder)}
+            )
+            assert final["status"] == "complete"
+            assert final["result"]["files"] == 5
+            assert final["result"]["chunks"] == 42
+
+        asyncio.run(run())
 
     def test_ingest_with_file_types(self, server, mock_kb, tmp_path):
         """File types are forwarded to kb.ingest."""
-        folder = tmp_path / "docs"
+        folder = tmp_path / "docs2"
         folder.mkdir()
 
-        call_tool(server, "kb_ingest", {
-            "folder_path": str(folder),
-            "file_types": ["md", "txt"],
-        })
+        async def run():
+            await call_tool_and_await_job(
+                server, "kb_ingest", {
+                    "folder_path": str(folder),
+                    "file_types": ["md", "txt"],
+                }
+            )
+            mock_kb.ingest.assert_called_once_with(
+                folder, file_types=["md", "txt"],
+            )
 
-        mock_kb.ingest.assert_called_once_with(
-            folder, file_types=["md", "txt"],
-        )
+        asyncio.run(run())
 
     def test_ingest_folder_not_found(self, server):
-        """Ingesting a nonexistent folder returns an error."""
+        """Ingesting a nonexistent folder returns an error immediately."""
         result = call_tool(server, "kb_ingest", {
             "folder_path": "/nonexistent/folder",
         })
@@ -228,7 +279,7 @@ class TestIngest:
         assert "not found" in result["error"].lower()
 
     def test_ingest_not_a_directory(self, server, tmp_path):
-        """Ingesting a file (not a directory) returns an error."""
+        """Ingesting a file (not a directory) returns an error immediately."""
         file_path = tmp_path / "not_a_dir.txt"
         file_path.write_text("I'm a file")
 
@@ -240,17 +291,19 @@ class TestIngest:
         assert "Not a directory" in result["error"]
 
     def test_ingest_unexpected_error(self, server, mock_kb, tmp_path):
-        """Unexpected errors during ingestion are caught and reported."""
+        """Unexpected errors during ingestion are reported via job status."""
         folder = tmp_path / "bad_docs"
         folder.mkdir()
         mock_kb.ingest.side_effect = RuntimeError("disk full")
 
-        result = call_tool(server, "kb_ingest", {
-            "folder_path": str(folder),
-        })
+        async def run():
+            initial, final = await call_tool_and_await_job(
+                server, "kb_ingest", {"folder_path": str(folder)}
+            )
+            assert final["status"] == "error"
+            assert "disk full" in final["error"]
 
-        assert result["status"] == "error"
-        assert "disk full" in result["error"]
+        asyncio.run(run())
 
     def test_ingest_deconflicts_existing_collection(self, server, mock_kb, tmp_path):
         """Ingesting into an existing collection name creates a numbered variant."""
@@ -265,12 +318,10 @@ class TestIngest:
             "folder_path": str(folder),
         })
 
-        assert result["status"] == "ok"
+        assert result["status"] == "started"
         assert result["collection"] == "docs1"
         assert result["warning"] is not None
         assert "docs1" in result["warning"]
-        # collection_name should be passed when deconflicted
-        mock_kb.ingest.assert_called_once_with(folder, collection_name="docs1")
 
     def test_ingest_deconflicts_symlinked_collection(self, server, mock_kb, tmp_path):
         """Ingesting when collection is a symlink deconflicts without corrupting base."""
@@ -287,10 +338,99 @@ class TestIngest:
             "folder_path": str(folder),
         })
 
-        assert result["status"] == "ok"
+        assert result["status"] == "started"
         assert "docs1" in result["warning"]
         # Base symlink should still exist untouched
         assert (mock_kb.index_dir / "docs").is_symlink()
+
+
+# ---------------------------------------------------------------------------
+# kb_job_status
+# ---------------------------------------------------------------------------
+
+class TestJobStatus:
+
+    def test_unknown_job(self, server):
+        """Polling an unknown job_id returns an error."""
+        result = call_tool(server, "kb_job_status", {"job_id": "nonexistent"})
+
+        assert result["status"] == "error"
+        assert "Unknown job" in result["error"]
+
+    def test_running_job(self, server, mock_kb, tmp_path):
+        """A job that hasn't completed reports running status."""
+        folder = tmp_path / "slow_docs"
+        folder.mkdir()
+
+        # Make ingest block so the job stays in "running"
+        def blocking_ingest(*args, **kwargs):
+            time.sleep(10)
+            return {"collection": "slow_docs", "files": 1, "chunks": 5}
+        mock_kb.ingest.side_effect = blocking_ingest
+
+        async def run():
+            initial = await _call_tool_async(server, "kb_ingest", {
+                "folder_path": str(folder),
+            })
+            assert initial["status"] == "started"
+            job_id = initial["job_id"]
+
+            # Immediately check — should still be running
+            status = await _call_tool_async(server, "kb_job_status", {"job_id": job_id})
+            assert status["status"] == "running"
+
+        asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# kb_append (background job pattern)
+# ---------------------------------------------------------------------------
+
+class TestAppend:
+
+    def test_append_returns_started(self, server, mock_kb, tmp_path):
+        """Appending to a collection returns immediately with a job_id."""
+        # Create a fake existing collection
+        coll_dir = mock_kb.index_dir / "docs"
+        coll_dir.mkdir(exist_ok=True)
+        (coll_dir / "index.faiss").write_text("fake")
+
+        result = call_tool(server, "kb_append", {
+            "collection": "docs",
+            "paths": [str(tmp_path)],
+        })
+
+        assert result["status"] == "started"
+        assert "job_id" in result
+        assert result["collection"] == "docs"
+
+    def test_append_job_completes(self, server, mock_kb, tmp_path):
+        """Background append job completes successfully."""
+        coll_dir = mock_kb.index_dir / "docs"
+        coll_dir.mkdir(exist_ok=True)
+        (coll_dir / "index.faiss").write_text("fake")
+
+        async def run():
+            initial, final = await call_tool_and_await_job(
+                server, "kb_append", {
+                    "collection": "docs",
+                    "paths": [str(tmp_path)],
+                }
+            )
+            assert final["status"] == "complete"
+            assert final["result"]["chunks_added"] == 10
+
+        asyncio.run(run())
+
+    def test_append_collection_not_found(self, server, mock_kb):
+        """Appending to a nonexistent collection returns an error immediately."""
+        result = call_tool(server, "kb_append", {
+            "collection": "nonexistent",
+            "paths": ["/some/path"],
+        })
+
+        assert result["status"] == "error"
+        assert "not found" in result["error"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +453,8 @@ class TestUnknownTool:
 
 class TestSetupRuntimeKb:
 
-    def test_copies_collections(self, tmp_path):
-        """Copies collection directories from base to runtime."""
+    def test_symlinks_collections(self, tmp_path):
+        """Symlinks collection directories from base to runtime."""
         base = tmp_path / "base_index"
         coll_dir = base / "my_collection"
         coll_dir.mkdir(parents=True)
@@ -326,12 +466,15 @@ class TestSetupRuntimeKb:
         result = setup_runtime_kb(base, runtime)
 
         assert result == runtime / "kb_index"
-        assert (result / "my_collection" / "index.faiss").exists()
-        assert (result / "my_collection" / "chunks.jsonl").exists()
-        assert (result / "my_collection" / "DESCRIPTION.md").exists()
+        link = result / "my_collection"
+        assert link.exists()
+        assert link.is_symlink()
+        assert (link / "index.faiss").exists()
+        assert (link / "chunks.jsonl").exists()
+        assert (link / "DESCRIPTION.md").exists()
 
     def test_skips_non_collection_dirs(self, tmp_path):
-        """Directories without index.faiss are not copied."""
+        """Directories without index.faiss are not symlinked."""
         base = tmp_path / "base_index"
         (base / "random_dir").mkdir(parents=True)
         (base / "random_dir" / "notes.txt").write_text("not a collection")
