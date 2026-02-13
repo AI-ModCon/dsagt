@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Iterator
 
-import httpx
+logger = logging.getLogger(__name__)
+
 import numpy as np
 
 from llama_index.core import SimpleDirectoryReader
@@ -23,27 +25,60 @@ CODE_LANGUAGES = {
 }
 
 
-class EmbeddingClient:
+class LocalEmbeddingClient:
+    """Generate text embeddings using a local sentence-transformers model."""
+
+    def __init__(
+        self,
+        model: str = "BAAI/bge-base-en-v1.5",
+        batch_size: int = 256,
+        device: str | None = None,
+    ):
+        from sentence_transformers import SentenceTransformer
+
+        self.batch_size = batch_size
+        self._model = SentenceTransformer(model, device=device)
+        logger.info("Loaded local embedding model: %s (dim=%d)",
+                     model, self._model.get_sentence_embedding_dimension())
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        """Embed texts, returns array of shape (n_texts, embedding_dim)."""
+        if not texts:
+            return np.array([], dtype=np.float32)
+        return self._model.encode(
+            texts,
+            batch_size=self.batch_size,
+            show_progress_bar=False,
+            normalize_embeddings=True,
+        ).astype(np.float32)
+
+    def close(self):
+        pass
+
+
+class APIEmbeddingClient:
     """Generate text embeddings via OpenAI-compatible API."""
-    
+
     def __init__(
         self,
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        timeout: float = 300.0,  # FIX: Increased from 60s to 300s (5 min)
-        batch_size: int = 100,   # FIX: Add batching to avoid overloading API
+        timeout: float = 300.0,
+        batch_size: int = 100,
     ):
+        import httpx
+
         self.model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small-project")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://ai-incubator-api.pnnl.gov")
         self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
         self.batch_size = batch_size
-        
+
         if not self.api_key:
             raise ValueError("API key required via argument or LLM_API_KEY env var")
-        
+
         self._client = httpx.Client(timeout=timeout)
-    
+
     def _embed_batch(self, texts: list[str]) -> np.ndarray:
         """Embed a single batch of texts."""
         response = self._client.post(
@@ -52,28 +87,30 @@ class EmbeddingClient:
             json={"input": texts, "model": self.model},
         )
         response.raise_for_status()
-        
+
         data = sorted(response.json()["data"], key=lambda x: x["index"])
         return np.array([d["embedding"] for d in data], dtype=np.float32)
-    
+
     def embed(self, texts: list[str]) -> np.ndarray:
         """Embed texts with batching, returns array of shape (n_texts, embedding_dim)."""
         if not texts:
             return np.array([], dtype=np.float32)
-        
-        # FIX: Process in batches to avoid timeouts and memory issues
+
         if len(texts) <= self.batch_size:
             return self._embed_batch(texts)
-        
+
         all_embeddings = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i:i + self.batch_size]
-            print(f"    Embedding batch {i//self.batch_size + 1}/{(len(texts) + self.batch_size - 1)//self.batch_size} ({len(batch)} texts)...")
+            logger.info("Embedding batch %d/%d (%d texts)",
+                        i // self.batch_size + 1,
+                        (len(texts) + self.batch_size - 1) // self.batch_size,
+                        len(batch))
             embeddings = self._embed_batch(batch)
             all_embeddings.append(embeddings)
-        
+
         return np.vstack(all_embeddings)
-    
+
     def close(self):
         self._client.close()
 
@@ -84,6 +121,10 @@ class KnowledgeBase:
     
     Each collection is a folder with its own FAISS index.
     Include DESCRIPTION.md in source folders for agent discovery.
+    
+    Embedding backend:
+        - "local" (default): Uses sentence-transformers locally. Fast, no API needed.
+        - "api": Uses OpenAI-compatible API. Requires LLM_API_KEY env var.
     """
     
     FILE_TYPES = ["pdf", "md", "txt", "py", "docx", "json", "yaml", "yml"]
@@ -93,9 +134,11 @@ class KnowledgeBase:
         index_dir: str | Path,
         chunk_size: int = 1024,
         chunk_overlap: int = 128,
-        rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        embedding_timeout: float = 300.0,  # FIX: Configurable timeout
-        embedding_batch_size: int = 100,   # FIX: Configurable batch size
+        rerank_model: str = "BAAI/bge-reranker-v2-m3",
+        embedding_backend: str = "api",
+        embedding_model: str | None = None,
+        embedding_batch_size: int | None = None,
+        embedding_timeout: float = 300.0,
     ):
         self.index_dir = Path(index_dir)
         self.chunk_size = chunk_size
@@ -104,10 +147,20 @@ class KnowledgeBase:
         
         self.index_dir.mkdir(parents=True, exist_ok=True)
         
-        self._client = EmbeddingClient(
-            timeout=embedding_timeout,
-            batch_size=embedding_batch_size,
-        )
+        # Select embedding backend
+        backend = os.getenv("DSAGT_EMBEDDING_BACKEND", embedding_backend).lower()
+        if backend == "local":
+            self._client = LocalEmbeddingClient(
+                model=embedding_model or "BAAI/bge-base-en-v1.5",
+                batch_size=embedding_batch_size or 256,
+            )
+        else:
+            self._client = APIEmbeddingClient(
+                model=embedding_model,
+                timeout=embedding_timeout,
+                batch_size=embedding_batch_size or 100,
+            )
+        
         self._reranker = None
         self._cache: dict[str, tuple] = {}
     
@@ -126,14 +179,14 @@ class KnowledgeBase:
             result.append({"name": name, "description": description})
         return result
     
-    def ingest(self, folder: str | Path, file_types: list[str] | None = None) -> dict:
+    def ingest(self, folder: str | Path, collection_name: str | None = None, file_types: list[str] | None = None) -> dict:
         """
         Ingest folder as collection. Collection name = folder name.
         
         Copies DESCRIPTION.md from source folder if present.
         """
         folder = Path(folder)
-        collection = folder.name
+        collection = collection_name or folder.name
         file_types = file_types or self.FILE_TYPES
         
         # Setup collection directory
@@ -147,10 +200,10 @@ class KnowledgeBase:
         
         # Collect and chunk files
         files = [f for ext in file_types for f in folder.glob(f"**/*.{ext}")]
-        print(f"  Found {len(files)} files to process...")
+        logger.info("Found %d files to process", len(files))
         
         chunks = [chunk for f in files for chunk in self._chunk_file(f, collection)]
-        print(f"  Created {len(chunks)} chunks...")
+        logger.info("Created %d chunks", len(chunks))
         
         if not chunks:
             return {"collection": collection, "files": 0, "chunks": 0}
@@ -173,13 +226,90 @@ class KnowledgeBase:
         
         self._cache[collection] = (index, chunks)
         return {"collection": collection, "files": len(files), "chunks": len(chunks)}
+
+    def append(
+        self,
+        collection: str,
+        paths: list[str | Path],
+        file_types: list[str] | None = None,
+    ) -> dict:
+        """
+        Append documents to an existing collection.
+
+        Accepts a list of file or folder paths. Folders are expanded
+        recursively using *file_types*. New chunks are embedded, added
+        to the existing FAISS index, and appended to chunks.jsonl.
+
+        Returns counts of files processed and chunks added.
+        """
+        import faiss
+
+        file_types = file_types or self.FILE_TYPES
+
+        # Load existing index + chunks (creates cache entry)
+        index, existing_chunks = self._load(collection)
+        coll_dir = self.index_dir / collection
+
+        # Resolve paths → individual files
+        files: list[Path] = []
+        for p in paths:
+            p = Path(p)
+            if p.is_file():
+                files.append(p)
+            elif p.is_dir():
+                files.extend(
+                    f for ext in file_types for f in p.glob(f"**/*.{ext}")
+                )
+            else:
+                logger.warning("Path not found, skipping: %s", p)
+
+        if not files:
+            return {"collection": collection, "files": 0, "chunks_added": 0,
+                    "total_chunks": len(existing_chunks)}
+
+        logger.info("Appending %d files to collection '%s'", len(files), collection)
+
+        # Chunk new files
+        new_chunks = [
+            chunk for f in files for chunk in self._chunk_file(f, collection)
+        ]
+        logger.info("Created %d new chunks", len(new_chunks))
+
+        if not new_chunks:
+            return {"collection": collection, "files": len(files),
+                    "chunks_added": 0, "total_chunks": len(existing_chunks)}
+
+        # Embed and normalize
+        embeddings = self._client.embed([c["text"] for c in new_chunks])
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings = embeddings / np.where(norms > 0, norms, 1)
+
+        # Add to existing FAISS index
+        index.add(embeddings)
+        faiss.write_index(index, str(coll_dir / "index.faiss"))
+
+        # Append to chunks file
+        with open(coll_dir / "chunks.jsonl", "a") as f:
+            for chunk in new_chunks:
+                f.write(json.dumps(chunk) + "\n")
+
+        # Update cache
+        all_chunks = existing_chunks + new_chunks
+        self._cache[collection] = (index, all_chunks)
+
+        return {
+            "collection": collection,
+            "files": len(files),
+            "chunks_added": len(new_chunks),
+            "total_chunks": len(all_chunks),
+        }
     
     def search(
         self,
         query: str,
         collection: str,
         top_k: int = 5,
-        rerank: bool = True,
+        rerank: bool = False,
     ) -> list[dict]:
         """Search a collection."""
         index, chunks = self._load(collection)
@@ -218,7 +348,7 @@ class KnowledgeBase:
         try:
             docs = SimpleDirectoryReader(input_files=[str(path)]).load_data()
         except Exception as e:
-            print(f"    Warning: Could not read {path}: {e}")
+            logger.warning("Could not read %s: %s", path, e)
             return
         
         if not docs:
@@ -230,7 +360,7 @@ class KnowledgeBase:
         try:
             nodes = parser.get_nodes_from_documents(docs)
         except Exception as e:
-            print(f"    Warning: Could not parse {path}: {e}")
+            logger.warning("Could not parse %s: %s", path, e)
             return
         
         for i, node in enumerate(nodes):

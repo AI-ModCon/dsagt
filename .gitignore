@@ -2,6 +2,7 @@
 *runtime/
 *data/
 kb_index/
+knowledge/
 
 # Python
 __pycache__/

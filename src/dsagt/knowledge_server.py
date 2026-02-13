@@ -3,8 +3,11 @@ DSAGT Knowledge Base MCP Server
 
 Provides semantic search over document collections for MCP-compatible agents.
 
-At startup, copies base indexes to a session-specific runtime directory.
-All modifications (ingestion) happen in the runtime copy.
+At startup, symlinks base indexes into a session-specific runtime directory.
+All modifications (ingestion, append) happen in the runtime copy.
+
+Long-running operations (ingest, append) run in the background and return
+immediately with a job_id. Use kb_job_status to poll for completion.
 
 Usage:
     dsagt-knowledge-server
@@ -14,38 +17,62 @@ Usage:
 
 import argparse
 import asyncio
+import logging
+import uuid
 from pathlib import Path
 
 from dsagt.knowledge import KnowledgeBase
 from dsagt.mcp_utils import create_server, run_stdio, text_result, types
 
+logger = logging.getLogger(__name__)
+
 
 def setup_runtime_kb(base_index_dir: Path, runtime_dir: Path) -> Path:
     """
     Symlink base indexes into runtime directory for session isolation.
-    
+
     Pre-built collections are symlinked (read-only, zero-cost).
     New collections created via kb_ingest are written directly to runtime.
-    
+
     Returns the runtime index directory path.
     """
     runtime_kb_dir = runtime_dir / "kb_index"
     runtime_kb_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Symlink existing collections from base to runtime
+
     if base_index_dir.exists():
         for collection_dir in base_index_dir.iterdir():
             if collection_dir.is_dir() and (collection_dir / "index.faiss").exists():
                 dest = runtime_kb_dir / collection_dir.name
                 if not dest.exists():
                     dest.symlink_to(collection_dir.resolve())
-    
+
     return runtime_kb_dir
 
 
 def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
     """Create and configure the MCP server."""
     server = create_server("knowledge")
+
+    # Background job tracking: job_id -> {status, result, error}
+    jobs: dict[str, dict] = {}
+
+    def _start_job(coro) -> str:
+        """Launch a coroutine as a background task, return job_id."""
+        job_id = uuid.uuid4().hex[:8]
+        jobs[job_id] = {"status": "running", "result": None, "error": None}
+
+        async def _run():
+            try:
+                result = await coro
+                jobs[job_id]["status"] = "complete"
+                jobs[job_id]["result"] = result
+            except Exception as e:
+                jobs[job_id]["status"] = "error"
+                jobs[job_id]["error"] = str(e)
+                logger.error("Job %s failed: %s", job_id, e)
+
+        asyncio.get_event_loop().create_task(_run())
+        return job_id
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
@@ -88,7 +115,12 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
             ),
             types.Tool(
                 name="kb_ingest",
-                description="Index a folder as a new collection. By default the folder name becomes the collection name. Include a DESCRIPTION.md file in the folder for agent discovery.",
+                description=(
+                    "Index a folder as a new collection. Returns immediately with a "
+                    "job_id -- use kb_job_status to check progress. By default the "
+                    "folder name becomes the collection name. Include a DESCRIPTION.md "
+                    "file in the folder for agent discovery."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -107,6 +139,48 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                         },
                     },
                     "required": ["folder_path"],
+                },
+            ),
+            types.Tool(
+                name="kb_append",
+                description=(
+                    "Add documents to an existing collection. Returns immediately "
+                    "with a job_id -- use kb_job_status to check progress. Accepts "
+                    "file paths and/or folder paths."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "collection": {
+                            "type": "string",
+                            "description": "Name of the existing collection to append to",
+                        },
+                        "paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of file or folder paths to add",
+                        },
+                        "file_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "File extensions to include when expanding folders (e.g., ['pdf', 'md', 'py']). Defaults to common document types.",
+                        },
+                    },
+                    "required": ["collection", "paths"],
+                },
+            ),
+            types.Tool(
+                name="kb_job_status",
+                description="Check the status of a background ingest or append job.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": "Job ID returned by kb_ingest or kb_append",
+                        },
+                    },
+                    "required": ["job_id"],
                 },
             ),
         ]
@@ -128,7 +202,6 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                 top_k = arguments.get("top_k", 5)
                 rerank = arguments.get("rerank", use_rerank)
 
-                # Run in thread — kb.search makes blocking HTTP calls
                 results = await asyncio.to_thread(
                     kb.search,
                     query=query,
@@ -137,7 +210,6 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                     rerank=rerank,
                 )
 
-                # Format results for readability
                 formatted = []
                 for r in results:
                     formatted.append({
@@ -180,25 +252,61 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                     else:
                         warning = None
 
-                    # Build kwargs — only pass collection_name if overridden
                     kwargs = {}
                     if target_name != folder_path.name:
                         kwargs["collection_name"] = target_name
                     if file_types:
                         kwargs["file_types"] = file_types
 
-                    # Run in thread — kb.ingest makes blocking HTTP calls
-                    ingest_result = await asyncio.to_thread(
-                        kb.ingest, folder_path, **kwargs,
+                    job_id = _start_job(
+                        asyncio.to_thread(kb.ingest, folder_path, **kwargs)
                     )
                     result = {
-                        "status": "ok",
-                        "collection": ingest_result["collection"],
-                        "files_indexed": ingest_result["files"],
-                        "chunks_created": ingest_result["chunks"],
+                        "status": "started",
+                        "job_id": job_id,
+                        "collection": target_name,
+                        "message": f"Ingestion started. Use kb_job_status(job_id='{job_id}') to check progress.",
                     }
                     if warning:
                         result["warning"] = warning
+
+            elif name == "kb_append":
+                collection = arguments["collection"]
+                paths = arguments["paths"]
+                if isinstance(paths, str):
+                    paths = [paths]
+                file_types = arguments.get("file_types")
+
+                coll_dir = kb.index_dir / collection
+                if not (coll_dir / "index.faiss").exists():
+                    result = {"status": "error",
+                              "error": f"Collection '{collection}' not found"}
+                else:
+                    kwargs = {}
+                    if file_types:
+                        kwargs["file_types"] = file_types
+
+                    job_id = _start_job(
+                        asyncio.to_thread(kb.append, collection, paths, **kwargs)
+                    )
+                    result = {
+                        "status": "started",
+                        "job_id": job_id,
+                        "collection": collection,
+                        "message": f"Append started. Use kb_job_status(job_id='{job_id}') to check progress.",
+                    }
+
+            elif name == "kb_job_status":
+                job_id = arguments["job_id"]
+                if job_id not in jobs:
+                    result = {"status": "error", "error": f"Unknown job: {job_id}"}
+                else:
+                    job = jobs[job_id]
+                    result = {"status": job["status"]}
+                    if job["result"] is not None:
+                        result["result"] = job["result"]
+                    if job["error"] is not None:
+                        result["error"] = job["error"]
 
             else:
                 result = {"status": "error", "error": f"Unknown tool: {name}"}
@@ -213,16 +321,26 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
     return server
 
 
-async def run_server(base_index_dir: str, runtime_dir: str, chunk_size: int, use_rerank: bool):
+async def run_server(
+    base_index_dir: str,
+    runtime_dir: str,
+    chunk_size: int,
+    use_rerank: bool,
+    embedding_backend: str,
+    embedding_model: str | None,
+):
     """Run the MCP server with session-isolated indexes."""
     base_path = Path(base_index_dir)
     runtime_path = Path(runtime_dir)
-    
-    # Copy base indexes to runtime directory
+
     runtime_kb_dir = setup_runtime_kb(base_path, runtime_path)
-    
-    # Create KB pointing to runtime directory
-    kb = KnowledgeBase(index_dir=runtime_kb_dir, chunk_size=chunk_size)
+
+    kb = KnowledgeBase(
+        index_dir=runtime_kb_dir,
+        chunk_size=chunk_size,
+        embedding_backend=embedding_backend,
+        embedding_model=embedding_model,
+    )
     server = create_knowledge_server(kb, use_rerank)
 
     try:
@@ -254,6 +372,17 @@ def main():
         action="store_true",
         help="Disable cross-encoder reranking by default",
     )
+    parser.add_argument(
+        "--embedding-backend",
+        choices=["local", "api"],
+        default="api",
+        help="Embedding backend: 'local' (sentence-transformers) or 'api' (OpenAI-compatible). Default: api",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=None,
+        help="Override embedding model name (default: BAAI/bge-base-en-v1.5 for local, text-embedding-3-small-project for api)",
+    )
     args = parser.parse_args()
 
     asyncio.run(run_server(
@@ -261,6 +390,8 @@ def main():
         args.runtime_dir,
         args.chunk_size,
         not args.no_rerank,
+        args.embedding_backend,
+        args.embedding_model,
     ))
 
 

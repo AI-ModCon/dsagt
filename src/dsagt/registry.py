@@ -35,24 +35,18 @@ class ToolRegistry:
         self.runtime_dir = Path(runtime_dir)
         self.runtime_registry = self.runtime_dir / "registry.yaml"
         self.provenance_log = self.runtime_dir / "provenance.log"
-        
-        # Resolve source registry: explicit path > default bundled
-        if source_registry and Path(source_registry).exists():
-            source = Path(source_registry)
-        else:
-            source = self._DEFAULT_REGISTRY
-        
-        # Store base directory for resolving relative tool paths
-        self.base_dir = source.parent
-        
-        # Create runtime directory and copy registry
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(source, self.runtime_registry)
+
+        # Seed from source only if no runtime registry exists yet
+        if not self.runtime_registry.exists():
+            source = Path(source_registry) if source_registry and Path(source_registry).exists() else self._DEFAULT_REGISTRY
+            shutil.copy(source, self.runtime_registry)
+
+        self.base_dir = self.runtime_dir
         
         # Initialize provenance log
         with open(self.provenance_log, "a") as f:
             f.write(f"# Session started: {datetime.now().isoformat()}\n")
-            f.write(f"# Source registry: {source}\n\n")
         
     def _load_registry(self) -> dict:
         with open(self.runtime_registry) as f:
