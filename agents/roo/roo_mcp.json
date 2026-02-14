@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "dsagt-pipeline": {
+      "command": "dsagt-pipeline-server",
+      "args": [],
+      "disabled": false
+    },
+    "dsagt-registry": {
+      "command": "dsagt-registry-server",
+      "args": [],
+      "disabled": false
+    },
+    "dsagt-knowledge": {
+      "command": "dsagt-knowledge-server",
+      "args": ["--no-rerank"],
+      "disabled": false
+    }
+  }
+}

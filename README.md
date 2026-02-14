@@ -2,20 +2,20 @@
 
 **D**ata **S**mith **A**gent **T**oolkit — AI-assisted data pipeline builder.
 
-DSAGT helps you build reproducible data processing pipelines using AI agents like [Goose](https://github.com/block/goose). Instead of manually writing tool registries, you point the agent at a CLI tool or its documentation and the agent figures out the interface, registers it, and makes it available for pipeline execution.
+DSAGT is a compartmentalized agent setup for building AI-ready scientific data pipelines. It pairs an MCP-compatible AI agent with three specialized servers and curated agent guidance, giving you a simple, extendable architecture:
 
-DSAGT provides three MCP servers:
+1. **Pipeline Server** — General-purpose AI-ready data processing, evaluation, and shipping tools (including American Science Cloud targets), extendable to domain-specific processing workflows
+2. **Registry Builder** — Generation and registry of domain-specific bespoke processing tools by analyzing documentation, help output, and API specs
+3. **Knowledge Base** — Base knowledge for AI-ready scientific data practices, extendable to domain-specific concerns and existing vector databases
 
-1. **Pipeline Server** — Executes data processing tools from a registry
-2. **Registry Builder** — Discovers and registers new tools by analyzing documentation, help output, and API specs
-3. **Knowledge Base** — Semantic search over indexed documentation
+Each agent platform gets its own directory under `agents/` containing config files and curated instructions that condition the agent's behavior. The core servers are platform-agnostic — all three speak MCP over stdio — so the same pipeline, registry, and knowledge base work identically regardless of which agent you use. The result is a clean separation: servers provide capability, agent guidance provides direction, and the config wires them together.
 
 ## Installation
 
 ### Prerequisites
 
 - Python 3.10–3.13
-- [Goose](https://github.com/block/goose) installed
+- An MCP-compatible agent (see [Agent Setup](#agent-setup))
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
 ### Install DSAGT
@@ -112,56 +112,25 @@ dsagt-knowledge-server
 dsagt-knowledge-server --base-index-dir path/to/kb_index --runtime-dir ./runtime --no-rerank
 ```
 
-## Using with Goose
+## Agent Setup
 
-### Quick Start
+DSAGT works with any MCP-compatible agent. All three platforms speak MCP over stdio — the servers are identical, only the configuration format differs.
+
+Platform-specific configuration and quickstart guides are in the `agents/` directory:
+
+- **Goose**: [`agents/goose/README.md`](agents/goose/README.md)
+
+Each directory contains the config files to copy into your project and setup instructions.
+
+### Path Considerations
+
+The servers use relative paths by default (`--runtime-dir ./runtime`, `--base-index-dir ./kb_index`). These resolve relative to the working directory where the agent launches the server process. This works for all platforms as long as the agent's working directory is the DSAGT project root.
+
+If your agent launches servers from a different working directory, pass absolute paths via args:
 
 ```bash
-goose session \
-  --with-extension 'dsagt-pipeline-server' \
-  --with-extension 'dsagt-registry-server' \
-  --with-extension 'dsagt-knowledge-server'
+dsagt-knowledge-server --base-index-dir /absolute/path/to/kb_index
 ```
-
-No flags required — each server uses sensible defaults. The pipeline server copies the bundled default registry into `./runtime/` and the registry builder writes new tools to the same location. If installed with uv, prefix commands with `uv run`.
-
-To use a custom registry from a previous session:
-
-```bash
-goose session \
-  --with-extension 'dsagt-pipeline-server --registry my_registry.yaml' \
-  --with-extension 'dsagt-registry-server' \
-  --with-extension 'dsagt-knowledge-server'
-```
-
-### Configuration File
-
-For persistent setup, add to `~/.config/goose/config.yaml` (global) or `goose.yaml` (project-local):
-
-```yaml
-extensions:
-  pipeline:
-    enabled: true
-    type: stdio
-    cmd: dsagt-pipeline-server
-    timeout: 300
-
-  registry:
-    enabled: true
-    type: stdio
-    cmd: dsagt-registry-server
-    timeout: 300
-
-  knowledge:
-    enabled: true
-    type: stdio
-    cmd: dsagt-knowledge-server
-    timeout: 300
-```
-
-To customize paths, add `args:` with flags like `--registry`, `--runtime-dir`, `--base-index-dir`.
-
-Then run: `goose session` or `goose session --config goose.yaml`
 
 ### Example Session
 
@@ -203,22 +172,11 @@ python tests/smoke_test/greet.py World
 
 Should print `{"message": "Hello, World!", "status": "ok"}`.
 
-### 2. Start Goose with all three servers
+### 2. Start a session with all three servers
 
-From the project root:
+Follow your platform's quickstart in `agents/<platform>/README.md` to launch a session with all three servers. Use `--no-rerank` on the knowledge server to skip the cross-encoder model download for faster startup.
 
-```bash
-export LLM_API_KEY="your-api-key"
-
-goose session \
-  --with-extension 'dsagt-pipeline-server' \
-  --with-extension 'dsagt-registry-server' \
-  --with-extension 'dsagt-knowledge-server --no-rerank'
-```
-
-The `--no-rerank` flag skips the cross-encoder model download so the smoke test runs faster.
-
-If you don't have an embedding API key, drop the knowledge server line and skip steps 5–6.
+If you don't have an embedding API key, omit the knowledge server and skip steps 5–6.
 
 ### 3. Register a tool
 
@@ -346,6 +304,8 @@ Required parameters are passed as positional arguments. Optional parameters use 
 │   ├── pipeline_server.py          # MCP server: tool execution
 │   ├── registry_server.py          # MCP server: tool discovery and registration
 │   └── knowledge_server.py         # MCP server: knowledge base search
+├── agents/
+│   └── goose/                      # Goose agent config and quickstart
 ├── tests/
 │   ├── test_registry.py                # ToolRegistry unit tests
 │   ├── test_registry_server.py         # Registry builder server handler tests
