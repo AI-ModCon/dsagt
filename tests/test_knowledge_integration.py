@@ -60,7 +60,7 @@ async def call_tool_and_await_job(server, name: str, arguments: dict) -> tuple[d
     assert initial["status"] == "started"
     job_id = initial["job_id"]
 
-    for _ in range(300):  # longer timeout for real embedding calls
+    for _ in range(600):  # 60s timeout for real embedding API calls
         await asyncio.sleep(0.1)
         status = await _call_tool_async(server, "kb_job_status", {"job_id": job_id})
         if status["status"] != "running":

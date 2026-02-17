@@ -3,17 +3,20 @@
     "dsagt-pipeline": {
       "command": "uv",
       "args": ["run", "dsagt-pipeline-server"],
-      "disabled": false
+      "disabled": false,
+      "alwaysAllow": []
     },
     "dsagt-registry": {
       "command": "uv",
       "args": ["run", "dsagt-registry-server"],
-      "disabled": false
+      "disabled": false,
+      "alwaysAllow": []
     },
     "dsagt-knowledge": {
       "command": "uv",
       "args": ["run", "dsagt-knowledge-server"],
-      "disabled": false
+      "disabled": false,
+      "alwaysAllow": []
     }
   }
 }

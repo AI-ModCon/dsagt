@@ -169,6 +169,80 @@ class TestAPIEmbeddingClient:
 
 
 # ---------------------------------------------------------------------------
+# APIEmbeddingClient - error handling
+# ---------------------------------------------------------------------------
+
+class TestAPIEmbeddingClientErrors:
+    """Tests for embedding API failure modes that could cause 'transport closed'."""
+
+    @patch("httpx.Client")
+    def test_http_401_raises(self, mock_client_cls):
+        """Unauthorized (wrong/expired API key) raises HTTPStatusError."""
+        import httpx
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "401 Unauthorized", request=MagicMock(), response=mock_response,
+        )
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value = mock_client
+
+        client = APIEmbeddingClient(api_key="bad-key")
+        with pytest.raises(httpx.HTTPStatusError):
+            client.embed(["test"])
+        client.close()
+
+    @patch("httpx.Client")
+    def test_http_500_raises(self, mock_client_cls):
+        """Server error (500) raises HTTPStatusError."""
+        import httpx
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500 Internal Server Error", request=MagicMock(), response=mock_response,
+        )
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value = mock_client
+
+        client = APIEmbeddingClient(api_key="test-key")
+        with pytest.raises(httpx.HTTPStatusError):
+            client.embed(["test"])
+        client.close()
+
+    @patch("httpx.Client")
+    def test_connection_error_raises(self, mock_client_cls):
+        """Network unreachable raises ConnectError."""
+        import httpx
+
+        mock_client = MagicMock()
+        mock_client.post.side_effect = httpx.ConnectError("Connection refused")
+        mock_client_cls.return_value = mock_client
+
+        client = APIEmbeddingClient(api_key="test-key")
+        with pytest.raises(httpx.ConnectError):
+            client.embed(["test"])
+        client.close()
+
+    @patch("httpx.Client")
+    def test_timeout_raises(self, mock_client_cls):
+        """Embedding API timeout raises ReadTimeout."""
+        import httpx
+
+        mock_client = MagicMock()
+        mock_client.post.side_effect = httpx.ReadTimeout("Read timed out")
+        mock_client_cls.return_value = mock_client
+
+        client = APIEmbeddingClient(api_key="test-key")
+        with pytest.raises(httpx.ReadTimeout):
+            client.embed(["test"])
+        client.close()
+
+
+# ---------------------------------------------------------------------------
 # KnowledgeBase - collections and ingest
 # ---------------------------------------------------------------------------
 

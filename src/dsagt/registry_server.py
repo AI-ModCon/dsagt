@@ -14,12 +14,37 @@ Usage:
 import argparse
 import asyncio
 import subprocess
+import sys
 from pathlib import Path
 
 import httpx
 import yaml
 
 from dsagt.mcp_utils import create_server, run_stdio, text_result, types
+
+
+def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
+    """Install packages using uv pip install. Returns a status string."""
+    cmd = ["uv", "pip", "install", "--python", sys.executable] + packages
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode == 0:
+            output = result.stdout.strip()
+            return f"Successfully installed: {', '.join(packages)}\n{output}"
+        else:
+            return (
+                f"Installation failed (exit code {result.returncode}):\n"
+                f"{result.stderr.strip()}"
+            )
+    except subprocess.TimeoutExpired:
+        return f"Installation timed out after {timeout}s for: {', '.join(packages)}"
+    except FileNotFoundError:
+        return "Error: 'uv' command not found. Install uv: https://github.com/astral-sh/uv"
 
 
 def create_registry_server(registry_path: Path):
@@ -118,6 +143,11 @@ def create_registry_server(registry_path: Path):
                                         "required": ["type", "description"],
                                     },
                                 },
+                                "dependencies": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "Python packages to install (e.g., ['pandas>=2.0', 'numpy'])",
+                                },
                             },
                             "required": ["name", "description", "executable", "parameters"],
                         },
@@ -141,6 +171,19 @@ def create_registry_server(registry_path: Path):
                     "properties": {
                         "query": {"type": "string", "description": "Search query"},
                         "category": {"type": "string", "description": "Filter by category"},
+                    },
+                },
+            ),
+            types.Tool(
+                name="install_dependencies",
+                description="Install Python dependencies for one or all tools in the registry using uv pip install",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "tool_name": {
+                            "type": "string",
+                            "description": "Install deps for a specific tool (omit for all tools)",
+                        },
                     },
                 },
             ),
@@ -231,10 +274,17 @@ def create_registry_server(registry_path: Path):
                 with open(registry_path, "w") as f:
                     yaml.dump(registry, f, default_flow_style=False, sort_keys=False)
 
-                return text_result(
+                message = (
                     f"Tool '{spec['name']}' {action} successfully. "
                     f"Registry now contains {len(registry['tools'])} tools."
                 )
+
+                deps = spec.get("dependencies", [])
+                if deps:
+                    dep_result = _install_dependencies(deps)
+                    message += f"\n\nDependency installation:\n{dep_result}"
+
+                return text_result(message)
             except Exception as e:
                 return text_result(f"Error saving tool spec: {e}")
 
@@ -283,6 +333,44 @@ def create_registry_server(registry_path: Path):
                     return text_result("No tools found matching the criteria.")
             except Exception as e:
                 return text_result(f"Error searching registry: {e}")
+
+        elif name == "install_dependencies":
+            tool_name = arguments.get("tool_name")
+            try:
+                if not registry_path.exists():
+                    return text_result("Registry is empty. No tools registered yet.")
+
+                with open(registry_path) as f:
+                    registry = yaml.safe_load(f)
+
+                all_deps = []
+                tools_with_deps = []
+                for tool in registry.get("tools", []):
+                    if tool_name and tool["name"] != tool_name:
+                        continue
+                    tool_deps = tool.get("dependencies", [])
+                    if tool_deps:
+                        all_deps.extend(tool_deps)
+                        tools_with_deps.append(tool["name"])
+
+                if not all_deps:
+                    scope = f"tool '{tool_name}'" if tool_name else "registry"
+                    return text_result(f"No dependencies declared in {scope}.")
+
+                # Deduplicate while preserving order
+                seen = set()
+                unique_deps = []
+                for dep in all_deps:
+                    if dep not in seen:
+                        seen.add(dep)
+                        unique_deps.append(dep)
+
+                result = _install_dependencies(unique_deps)
+                return text_result(
+                    f"Installing dependencies for: {', '.join(tools_with_deps)}\n\n{result}"
+                )
+            except Exception as e:
+                return text_result(f"Error installing dependencies: {e}")
 
         raise ValueError(f"Unknown tool: {name}")
 

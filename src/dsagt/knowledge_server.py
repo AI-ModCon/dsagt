@@ -12,12 +12,17 @@ immediately with a job_id. Use kb_job_status to poll for completion.
 Usage:
     dsagt-knowledge-server
     dsagt-knowledge-server --base-index-dir ./kb_index --runtime-dir ./runtime
-    dsagt-knowledge-server --no-rerank
+    dsagt-knowledge-server --rerank
 """
 
 import argparse
 import asyncio
 import logging
+import os
+
+# Prevent fatal OpenMP crash when multiple libraries (FAISS, PyTorch/
+# sentence-transformers) each bundle their own libomp.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import uuid
 from pathlib import Path
 
@@ -106,8 +111,8 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                         },
                         "rerank": {
                             "type": "boolean",
-                            "description": "Use cross-encoder reranking (slower but more accurate)",
-                            "default": True,
+                            "description": "Use cross-encoder reranking (slower but more accurate). Only available when server started with --rerank.",
+                            "default": use_rerank,
                         },
                     },
                     "required": ["query", "collection"],
@@ -368,9 +373,9 @@ def main():
         help="Chunk size for text splitting (default: 1024)",
     )
     parser.add_argument(
-        "--no-rerank",
+        "--rerank",
         action="store_true",
-        help="Disable cross-encoder reranking by default",
+        help="Enable cross-encoder reranking (downloads model on first use)",
     )
     parser.add_argument(
         "--embedding-backend",
@@ -389,7 +394,7 @@ def main():
         args.base_index_dir,
         args.runtime_dir,
         args.chunk_size,
-        not args.no_rerank,
+        args.rerank,
         args.embedding_backend,
         args.embedding_model,
     ))

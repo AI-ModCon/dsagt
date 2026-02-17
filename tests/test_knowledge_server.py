@@ -434,6 +434,99 @@ class TestAppend:
 
 
 # ---------------------------------------------------------------------------
+# kb_search — error handling (transport-closed diagnostics)
+# ---------------------------------------------------------------------------
+
+class TestSearchErrorHandling:
+    """Verify the server returns error responses (not crashes) for common
+    failure modes that would otherwise cause 'transport closed'."""
+
+    def test_search_httpx_connect_error(self, mock_kb):
+        """Network unreachable during search returns error, not crash."""
+        import httpx
+        mock_kb.search.side_effect = httpx.ConnectError("Connection refused")
+        server = create_knowledge_server(mock_kb, use_rerank=False)
+
+        result = call_tool(server, "kb_search", {
+            "query": "test", "collection": "docs",
+        })
+
+        assert result["status"] == "error"
+        assert "Connection refused" in result["error"]
+
+    def test_search_httpx_timeout(self, mock_kb):
+        """Embedding API timeout during search returns error, not crash."""
+        import httpx
+        mock_kb.search.side_effect = httpx.ReadTimeout("Read timed out")
+        server = create_knowledge_server(mock_kb, use_rerank=False)
+
+        result = call_tool(server, "kb_search", {
+            "query": "test", "collection": "docs",
+        })
+
+        assert result["status"] == "error"
+        assert "timed out" in result["error"].lower()
+
+    def test_search_httpx_401(self, mock_kb):
+        """Expired/invalid API key during search returns error, not crash."""
+        import httpx
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_kb.search.side_effect = httpx.HTTPStatusError(
+            "401 Unauthorized", request=MagicMock(), response=mock_resp,
+        )
+        server = create_knowledge_server(mock_kb, use_rerank=False)
+
+        result = call_tool(server, "kb_search", {
+            "query": "test", "collection": "docs",
+        })
+
+        assert result["status"] == "error"
+        assert "401" in result["error"]
+
+    def test_search_httpx_500(self, mock_kb):
+        """Embedding API server error returns error, not crash."""
+        import httpx
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_kb.search.side_effect = httpx.HTTPStatusError(
+            "500 Internal Server Error", request=MagicMock(), response=mock_resp,
+        )
+        server = create_knowledge_server(mock_kb, use_rerank=False)
+
+        result = call_tool(server, "kb_search", {
+            "query": "test", "collection": "docs",
+        })
+
+        assert result["status"] == "error"
+        assert "500" in result["error"]
+
+    def test_search_runtime_error(self, mock_kb):
+        """Unexpected RuntimeError during search returns error, not crash."""
+        mock_kb.search.side_effect = RuntimeError("FAISS segfault simulation")
+        server = create_knowledge_server(mock_kb, use_rerank=False)
+
+        result = call_tool(server, "kb_search", {
+            "query": "test", "collection": "docs",
+        })
+
+        assert result["status"] == "error"
+        assert "FAISS segfault" in result["error"]
+
+    def test_search_os_error(self, mock_kb):
+        """OS-level error (disk, permissions) returns error, not crash."""
+        mock_kb.search.side_effect = OSError("Permission denied: index.faiss")
+        server = create_knowledge_server(mock_kb, use_rerank=False)
+
+        result = call_tool(server, "kb_search", {
+            "query": "test", "collection": "docs",
+        })
+
+        assert result["status"] == "error"
+        assert "Permission denied" in result["error"]
+
+
+# ---------------------------------------------------------------------------
 # Unknown tool
 # ---------------------------------------------------------------------------
 
@@ -507,3 +600,65 @@ class TestSetupRuntimeKb:
         setup_runtime_kb(base, runtime)
 
         assert (runtime_coll / "index.faiss").read_text() == "runtime version"
+
+
+# ---------------------------------------------------------------------------
+# Regression: OpenMP duplicate library crash (transport closed)
+# ---------------------------------------------------------------------------
+
+class TestOpenMPWorkaround:
+    """Importing knowledge_server must set KMP_DUPLICATE_LIB_OK to prevent
+    a fatal OpenMP crash when FAISS and sentence-transformers (PyTorch)
+    both bundle libomp. Without this, kb_search with rerank=true kills
+    the server process, producing 'transport closed' in MCP clients."""
+
+    def test_kmp_duplicate_lib_ok_is_set(self):
+        """KMP_DUPLICATE_LIB_OK is set after importing the knowledge server."""
+        import os
+        import dsagt.knowledge_server  # noqa: F401
+
+        assert os.environ.get("KMP_DUPLICATE_LIB_OK") == "TRUE"
+
+
+# ---------------------------------------------------------------------------
+# Regression: rerank schema default must match server config
+# ---------------------------------------------------------------------------
+
+class TestRerankSchemaDefault:
+    """The kb_search schema previously hardcoded 'default': True for the
+    rerank parameter, causing agents to request reranking even when the
+    server wasn't started with --rerank. This triggered the OpenMP crash."""
+
+    def _get_rerank_default(self, server):
+        """Extract the rerank default from the kb_search tool schema."""
+        req = types.ListToolsRequest(method="tools/list")
+        handler = server.request_handlers[types.ListToolsRequest]
+        result = asyncio.run(handler(req))
+        for tool in result.root.tools:
+            if tool.name == "kb_search":
+                return tool.inputSchema["properties"]["rerank"]["default"]
+        raise AssertionError("kb_search tool not found")
+
+    def test_rerank_default_false_when_disabled(self, mock_kb):
+        """Schema advertises rerank default=false when server has rerank off."""
+        server = create_knowledge_server(mock_kb, use_rerank=False)
+        assert self._get_rerank_default(server) is False
+
+    def test_rerank_default_true_when_enabled(self, mock_kb):
+        """Schema advertises rerank default=true when server has rerank on."""
+        server = create_knowledge_server(mock_kb, use_rerank=True)
+        assert self._get_rerank_default(server) is True
+
+    def test_search_defaults_rerank_false_when_disabled(self, mock_kb):
+        """With use_rerank=False, omitting rerank passes rerank=False to KB."""
+        server = create_knowledge_server(mock_kb, use_rerank=False)
+        call_tool(server, "kb_search", {
+            "query": "test",
+            "collection": "docs",
+        })
+        mock_kb.search.assert_called_once_with(
+            query="test",
+            collection="docs",
+            top_k=5,
+            rerank=False,
+        )

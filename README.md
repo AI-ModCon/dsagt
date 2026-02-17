@@ -15,20 +15,15 @@ The servers are platform-agnostic and communicate over MCP stdio.
 ### Prerequisites
 
 - Python 3.10–3.13
+- [uv](https://github.com/astral-sh/uv) — required for portable MCP server configs across agent platforms
 - An MCP-compatible agent (see [Agent Setup](#agent-setup))
-- [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
 ### Install
 
 ```bash
 git clone <repository-url>
 cd dsagt
-
-# Using uv (recommended)
-uv pip install -e .
-
-# Or using pip
-pip install -e .
+uv sync --all-groups
 ```
 
 This installs three CLI entry points:
@@ -71,7 +66,7 @@ To set up the core collections (NeMo Curator, AIDRIN):
 
 ```bash
 export LLM_API_KEY="your-api-key"
-python scripts/setup_core_kb.py
+uv run python scripts/setup_core_kb.py
 ```
 
 This clones repos, downloads papers, chunks content, and builds FAISS indexes in `kb_index/`. Run `python scripts/setup_core_kb.py --help` for options.
@@ -82,33 +77,33 @@ This clones repos, downloads papers, chunks content, and builds FAISS indexes in
 
 ```bash
 # Default bundled registry
-dsagt-pipeline-server
+uv run dsagt-pipeline-server
 
 # Custom registry from a previous session
-dsagt-pipeline-server --registry my_registry.yaml
+uv run dsagt-pipeline-server --registry my_registry.yaml
 
 # Specify registry file and runtime directory
-dsagt-pipeline-server --registry path/to/registry.yaml --runtime-dir ./my_session
+uv run dsagt-pipeline-server --registry path/to/registry.yaml --runtime-dir ./my_session
 ```
 
 ### Registry Builder Server
 
 ```bash
 # Default: writes to ./runtime/registry.yaml
-dsagt-registry-server
+uv run dsagt-registry-server
 
 # Custom registry path
-dsagt-registry-server --registry path/to/registry.yaml
+uv run dsagt-registry-server --registry path/to/registry.yaml
 ```
 
 ### Knowledge Base Server
 
 ```bash
 # Defaults: base=./kb_index, runtime=./runtime
-dsagt-knowledge-server
+uv run dsagt-knowledge-server
 
-# Custom directories, no reranking
-dsagt-knowledge-server --base-index-dir path/to/kb_index --runtime-dir ./runtime --no-rerank
+# Custom directories, with reranking
+uv run dsagt-knowledge-server --base-index-dir path/to/kb_index --runtime-dir ./runtime --rerank
 ```
 
 ## Agent Setup
@@ -118,6 +113,9 @@ DSAGT works with any MCP-compatible agent. The servers are identical across plat
 Platform-specific configs and quickstart guides live in `agents/`:
 
 - **Goose**: [`agents/goose/README.md`](agents/goose/README.md)
+- **Roo Code** (VS Code): [`agents/roo/README.md`](agents/roo/README.md)
+- **Claude Code**: [`agents/claude-code/README.md`](agents/claude-code/README.md)
+- **Cline** (VS Code): [`agents/cline/README.md`](agents/cline/README.md)
 
 ### Path Considerations
 
@@ -126,7 +124,7 @@ Servers use relative paths by default (`--runtime-dir ./runtime`, `--base-index-
 If your agent launches from elsewhere, use absolute paths:
 
 ```bash
-dsagt-knowledge-server --base-index-dir /absolute/path/to/kb_index
+uv run dsagt-knowledge-server --base-index-dir /absolute/path/to/kb_index
 ```
 
 ### Example Session
@@ -163,14 +161,14 @@ tests/smoke_test/
 ### 1. Verify the test script
 
 ```bash
-python tests/smoke_test/greet.py World
+uv run python tests/smoke_test/greet.py World
 ```
 
 Expected output: `{"message": "Hello, World!", "status": "ok"}`
 
 ### 2. Start a session with all three servers
 
-Follow `agents/<platform>/README.md` to launch a session. Use `--no-rerank` on the knowledge server to skip cross-encoder model download.
+Follow `agents/<platform>/README.md` to launch a session. The knowledge server runs without reranking by default; add `--rerank` to enable cross-encoder reranking (triggers model download on first use).
 
 Without an embedding API key, omit the knowledge server and skip steps 5–6.
 
@@ -253,6 +251,9 @@ tools:
   - name: tool_name
     description: What the tool does
     executable: command to run (e.g., "python script.py")
+    dependencies:                        # optional
+      - pandas>=2.0
+      - scikit-learn
     parameters:
       param_name:
         type: string|integer|number|boolean|array|object
@@ -262,6 +263,8 @@ tools:
 ```
 
 Required parameters are passed as positional arguments. Optional parameters use `--flag value` syntax.
+
+When a tool spec includes `dependencies`, the registry server automatically installs them via `uv pip install` at registration time. Dependencies are stored in the registry YAML for reproducibility. Use `install_dependencies` to reinstall all deps from an existing registry (e.g., after setting up a fresh environment).
 
 ## Project Structure
 
@@ -276,7 +279,9 @@ Required parameters are passed as positional arguments. Optional parameters use 
 │   ├── registry_server.py          # MCP server: tool registration
 │   └── knowledge_server.py         # MCP server: knowledge base search
 ├── agents/
-│   └── goose/                      # Goose agent config and quickstart
+│   ├── goose/                      # Goose agent config and quickstart
+│   ├── roo/                        # Roo Code (VS Code) config and quickstart
+│   └── claude-code/                # Claude Code config and quickstart
 ├── tests/
 │   ├── test_registry.py
 │   ├── test_registry_server.py
@@ -295,18 +300,17 @@ Required parameters are passed as positional arguments. Optional parameters use 
 ## Tests
 
 ```bash
-pip install -e ".[dev]"
-pytest
+uv run pytest
 ```
 
 Run specific tests:
 
 ```bash
-pytest tests/test_registry.py
-pytest tests/test_registry_server.py
-pytest tests/test_knowledge_server.py
-pytest tests/test_knowledge_base.py
-pytest tests/test_registry.py::TestCallTool::test_success -v
+uv run pytest tests/test_registry.py
+uv run pytest tests/test_registry_server.py
+uv run pytest tests/test_knowledge_server.py
+uv run pytest tests/test_knowledge_base.py
+uv run pytest tests/test_registry.py::TestCallTool::test_success -v
 ```
 
 Registry tests mock `subprocess.run`. Server tests invoke MCP handlers directly (no stdio transport, no network). Knowledge base tests mock the embedding API and use FAISS on temp files. Knowledge server tests use async helpers for background ingest/append jobs.
@@ -316,12 +320,12 @@ Registry tests mock `subprocess.run`. Server tests invoke MCP handlers directly 
 ### MCP Server Not Found
 
 ```bash
-which dsagt-pipeline-server
-which dsagt-registry-server
-which dsagt-knowledge-server
+uv run which dsagt-pipeline-server
+uv run which dsagt-registry-server
+uv run which dsagt-knowledge-server
 
 # Reinstall if needed
-pip install -e . --force-reinstall
+uv sync --reinstall
 ```
 
 ### Tools Not Executing

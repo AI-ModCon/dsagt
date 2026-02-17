@@ -15,20 +15,20 @@ extensions:
     enabled: true
     name: dsagt
     type: stdio
-    cmd: dsagt-pipeline-server
+    cmd: uv run dsagt-pipeline-server
     timeout: 300
     
   registry:
     enabled: true
     name: registry
     type: stdio
-    cmd: dsagt-registry-server
+    cmd: uv run dsagt-registry-server
     timeout: 300
 
   knowledge:
     enabled: true
     name: knowledge
     type: stdio
-    cmd: dsagt-knowledge-server
+    cmd: uv run dsagt-knowledge-server
     timeout: 300
 GOOSE_MODE: approve

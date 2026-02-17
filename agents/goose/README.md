@@ -31,20 +31,20 @@ cp agents/goose/.goosehints .goosehints
 
 # Start a session with all three servers
 goose session \
-  --with-extension 'dsagt-pipeline-server' \
-  --with-extension 'dsagt-registry-server' \
-  --with-extension 'dsagt-knowledge-server'
+  --with-extension 'uv run dsagt-pipeline-server' \
+  --with-extension 'uv run dsagt-registry-server' \
+  --with-extension 'uv run dsagt-knowledge-server'
 ```
 
-No server flags required — each server uses sensible defaults. The pipeline server copies the bundled default registry into `./runtime/` and the registry builder writes new tools to the same location. If installed with uv, prefix commands with `uv run`.
+No server flags required — each server uses sensible defaults. The pipeline server copies the bundled default registry into `./runtime/` and the registry builder writes new tools to the same location.
 
 To use a custom registry from a previous session:
 
 ```bash
 goose session \
-  --with-extension 'dsagt-pipeline-server --registry my_registry.yaml' \
-  --with-extension 'dsagt-registry-server' \
-  --with-extension 'dsagt-knowledge-server'
+  --with-extension 'uv run dsagt-pipeline-server --registry my_registry.yaml' \
+  --with-extension 'uv run dsagt-registry-server' \
+  --with-extension 'uv run dsagt-knowledge-server'
 ```
 
 ## Configuration
@@ -64,19 +64,19 @@ extensions:
   pipeline:
     enabled: true
     type: stdio
-    cmd: dsagt-pipeline-server
+    cmd: uv run dsagt-pipeline-server
     timeout: 300
 
   registry:
     enabled: true
     type: stdio
-    cmd: dsagt-registry-server
+    cmd: uv run dsagt-registry-server
     timeout: 300
 
   knowledge:
     enabled: true
     type: stdio
-    cmd: dsagt-knowledge-server
+    cmd: uv run dsagt-knowledge-server
     timeout: 300
 ```
 
@@ -87,7 +87,7 @@ extensions:
   pipeline:
     enabled: true
     type: stdio
-    cmd: dsagt-pipeline-server
+    cmd: uv run dsagt-pipeline-server
     args:
       - --registry
       - /absolute/path/to/registry.yaml
@@ -110,27 +110,21 @@ Follow the [smoke test instructions](../../README.md#smoke-test) in the main REA
 
 ```bash
 goose session \
-  --with-extension 'dsagt-pipeline-server' \
-  --with-extension 'dsagt-registry-server' \
-  --with-extension 'dsagt-knowledge-server --no-rerank'
+  --with-extension 'uv run dsagt-pipeline-server' \
+  --with-extension 'uv run dsagt-registry-server' \
+  --with-extension 'uv run dsagt-knowledge-server'
 ```
 
-The `--no-rerank` flag skips the cross-encoder model download so the smoke test runs faster. If you don't have an embedding API key, drop the knowledge server line and skip the knowledge base steps.
+If you don't have an embedding API key, drop the knowledge server line and skip the knowledge base steps. To enable cross-encoder reranking (triggers a model download on first use), add `--rerank`.
 
 ## Troubleshooting
 
 ### Servers not connecting
 
-Verify the server commands are on your PATH:
+Verify uv can find the server commands:
 
 ```bash
-which dsagt-pipeline-server
-```
-
-If you installed with uv, you may need to prefix commands in the config:
-
-```yaml
-cmd: uv run dsagt-pipeline-server
+uv run which dsagt-pipeline-server
 ```
 
 ### Extension timeout

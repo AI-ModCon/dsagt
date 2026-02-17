@@ -7,7 +7,10 @@ save_tool_spec, get_registry, search_registry, read_file, run_command.
 
 import asyncio
 import json
+import subprocess
+import sys
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
 import yaml
@@ -31,9 +34,10 @@ def call_tool(server, name: str, arguments: dict) -> str:
     return result.root.content[0].text
 
 
-def make_spec(name="test_tool", description="A test tool", executable="echo hello"):
+def make_spec(name="test_tool", description="A test tool", executable="echo hello",
+              dependencies=None):
     """Create a minimal valid tool spec."""
-    return {
+    spec = {
         "name": name,
         "description": description,
         "executable": executable,
@@ -45,6 +49,9 @@ def make_spec(name="test_tool", description="A test tool", executable="echo hell
             },
         },
     }
+    if dependencies is not None:
+        spec["dependencies"] = dependencies
+    return spec
 
 
 # ---------------------------------------------------------------------------
@@ -225,3 +232,145 @@ class TestRunCommand:
             "timeout": 0.1,
         })
         assert "timed out" in text
+
+
+# ---------------------------------------------------------------------------
+# save_tool_spec — dependency installation
+# ---------------------------------------------------------------------------
+
+class TestSaveToolSpecDependencies:
+
+    @patch("dsagt.registry_server.subprocess.run")
+    def test_deps_installed_on_save(self, mock_run, server, registry_path):
+        """When dependencies are provided, uv pip install is called."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="Successfully installed pandas-2.1.0", stderr=""
+        )
+        spec = make_spec("tool_with_deps", dependencies=["pandas>=2.0", "numpy"])
+        text = call_tool(server, "save_tool_spec", {"spec": spec})
+
+        assert "added" in text
+        assert "Successfully installed" in text
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["uv", "pip", "install", "--python", sys.executable,
+                        "pandas>=2.0", "numpy"]
+
+    @patch("dsagt.registry_server.subprocess.run")
+    def test_deps_failure_still_saves_spec(self, mock_run, server, registry_path):
+        """Even if uv pip install fails, the spec is saved to the registry."""
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="No matching distribution for bogus-pkg"
+        )
+        spec = make_spec("tool_bad_deps", dependencies=["bogus-pkg"])
+        text = call_tool(server, "save_tool_spec", {"spec": spec})
+
+        assert "added" in text
+        assert "Installation failed" in text
+
+        registry = yaml.safe_load(registry_path.read_text())
+        assert registry["tools"][0]["name"] == "tool_bad_deps"
+        assert registry["tools"][0]["dependencies"] == ["bogus-pkg"]
+
+    @patch("dsagt.registry_server.subprocess.run")
+    def test_deps_timeout(self, mock_run, server):
+        """Timeout during install is reported, spec is still saved."""
+        mock_run.side_effect = subprocess.TimeoutExpired("uv", 120)
+        spec = make_spec("tool_slow_deps", dependencies=["heavy-pkg"])
+        text = call_tool(server, "save_tool_spec", {"spec": spec})
+
+        assert "added" in text
+        assert "timed out" in text
+
+    def test_no_deps_no_install_message(self, server, registry_path):
+        """When no dependencies are provided, no install message appears."""
+        spec = make_spec("tool_no_deps")
+        text = call_tool(server, "save_tool_spec", {"spec": spec})
+
+        assert "added" in text
+        assert "Dependency" not in text
+
+    @patch("dsagt.registry_server.subprocess.run")
+    def test_deps_persisted_in_yaml(self, mock_run, server, registry_path):
+        """Dependencies are stored in the registry YAML for reproducibility."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        spec = make_spec("dep_tool", dependencies=["requests>=2.28"])
+        call_tool(server, "save_tool_spec", {"spec": spec})
+
+        registry = yaml.safe_load(registry_path.read_text())
+        assert registry["tools"][0]["dependencies"] == ["requests>=2.28"]
+
+    @patch("dsagt.registry_server.subprocess.run")
+    def test_uv_not_found(self, mock_run, server):
+        """FileNotFoundError from missing uv is reported gracefully."""
+        mock_run.side_effect = FileNotFoundError("uv")
+        spec = make_spec("tool_no_uv", dependencies=["pandas"])
+        text = call_tool(server, "save_tool_spec", {"spec": spec})
+
+        assert "added" in text
+        assert "'uv' command not found" in text
+
+
+# ---------------------------------------------------------------------------
+# install_dependencies
+# ---------------------------------------------------------------------------
+
+class TestInstallDependencies:
+
+    @patch("dsagt.registry_server.subprocess.run")
+    def test_install_all(self, mock_run, registry_path):
+        """install_dependencies with no tool_name installs all unique deps."""
+        registry = {
+            "tools": [
+                make_spec("tool_a", dependencies=["pandas", "numpy"]),
+                make_spec("tool_b", dependencies=["numpy", "scipy"]),
+            ],
+        }
+        registry_path.write_text(yaml.dump(registry, sort_keys=False))
+        server = create_registry_server(registry_path)
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        text = call_tool(server, "install_dependencies", {})
+
+        assert "tool_a" in text
+        assert "tool_b" in text
+        cmd = mock_run.call_args[0][0]
+        # numpy should appear only once (deduplication)
+        assert cmd == ["uv", "pip", "install", "--python", sys.executable,
+                        "pandas", "numpy", "scipy"]
+
+    @patch("dsagt.registry_server.subprocess.run")
+    def test_install_single_tool(self, mock_run, registry_path):
+        """install_dependencies with tool_name targets only that tool."""
+        registry = {
+            "tools": [
+                make_spec("tool_a", dependencies=["pandas"]),
+                make_spec("tool_b", dependencies=["scipy"]),
+            ],
+        }
+        registry_path.write_text(yaml.dump(registry, sort_keys=False))
+        server = create_registry_server(registry_path)
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        text = call_tool(server, "install_dependencies", {"tool_name": "tool_b"})
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["uv", "pip", "install", "--python", sys.executable, "scipy"]
+        assert "tool_b" in text
+        assert "tool_a" not in text
+
+    def test_no_deps_in_registry(self, server):
+        """install_dependencies on empty registry reports no tools."""
+        text = call_tool(server, "install_dependencies", {})
+        assert "empty" in text.lower() or "No tools" in text
+
+    def test_tools_without_deps(self, registry_path):
+        """Tools without dependencies field are skipped gracefully."""
+        registry = {
+            "tools": [make_spec("nodep_tool")],
+        }
+        registry_path.write_text(yaml.dump(registry, sort_keys=False))
+        server = create_registry_server(registry_path)
+
+        text = call_tool(server, "install_dependencies", {})
+        assert "No dependencies" in text

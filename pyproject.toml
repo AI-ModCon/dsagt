@@ -27,7 +27,7 @@ dsagt-pipeline-server = "dsagt.pipeline_server:main"
 dsagt-registry-server = "dsagt.registry_server:main"
 dsagt-knowledge-server = "dsagt.knowledge_server:main"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=7.0",
     "black>=23.0",
