@@ -1,0 +1,206 @@
+# HDMF Schema Example: Complex Table Columns
+#
+# Use case: DynamicTable with n-dimensional and ragged array columns
+# Pattern: VectorData columns can be multi-dimensional or ragged (with VectorIndex)
+
+groups:
+  # Example 1: Table with n-dimensional array columns
+  - data_type_def: ImageDataset
+    data_type_inc: DynamicTable
+    doc: Dataset where each row has associated image data and metadata
+    datasets:
+      # Simple scalar columns
+      - name: image_id
+        data_type_inc: VectorData
+        dtype: text
+        doc: Unique image identifier
+
+      - name: label
+        data_type_inc: VectorData
+        dtype: int32
+        doc: Classification label (0-9)
+
+      - name: timestamp
+        data_type_inc: VectorData
+        dtype: float64
+        doc: Capture timestamp (Unix time)
+
+      # N-dimensional column: 3D array per row [height, width, channels]
+      - name: pixel_data
+        data_type_inc: VectorData
+        dtype: uint8
+        dims:
+          - num_rows
+          - height
+          - width
+          - channels
+        shape:
+          - null
+          - 224
+          - 224
+          - 3
+        doc: RGB image data (224x224x3) for each row
+
+      # 2D array column: feature vector per row
+      - name: feature_embedding
+        data_type_inc: VectorData
+        dtype: float32
+        dims:
+          - num_rows
+          - embedding_dim
+        shape:
+          - null
+          - 512
+        doc: 512-dimensional feature embedding for each row
+
+  # Example 2: Table with ragged array columns
+  - data_type_def: TextDataset
+    data_type_inc: DynamicTable
+    doc: Dataset where each row has variable-length text sequences
+    datasets:
+      # Simple scalar columns
+      - name: document_id
+        data_type_inc: VectorData
+        dtype: text
+        doc: Unique document identifier
+
+      - name: category
+        data_type_inc: VectorData
+        dtype: text
+        doc: Document category
+
+      - name: word_count
+        data_type_inc: VectorData
+        dtype: int32
+        doc: Total word count
+
+      # Ragged array column: variable-length tokens per row
+      - name: tokens
+        data_type_inc: VectorData
+        dtype: text
+        dims:
+          - total_tokens
+        shape:
+          - null
+        doc: Tokenized text (variable length per document)
+
+      - name: tokens_index
+        data_type_inc: VectorIndex
+        dtype: uint64
+        dims:
+          - num_rows
+        shape:
+          - null
+        doc: Index marking end of tokens for each row in this table
+        attributes:
+          - name: target
+            dtype:
+              target_type: VectorData
+              reftype: object
+            doc: Reference to tokens column
+
+      # Ragged 2D array column: variable-length embeddings per row
+      - name: token_embeddings
+        data_type_inc: VectorData
+        dtype: float32
+        dims:
+          - total_tokens
+          - embedding_dim
+        shape:
+          - null
+          - 384
+        doc: Token embeddings (variable number of tokens, fixed 384 dims per token)
+
+      - name: token_embeddings_index
+        data_type_inc: VectorIndex
+        dtype: uint64
+        dims:
+          - num_rows
+        shape:
+          - null
+        doc: Index marking end of embeddings for each row (shares indexing with tokens)
+        attributes:
+          - name: target
+            dtype:
+              target_type: VectorData
+              reftype: object
+            doc: Reference to token_embeddings column
+
+  # Example 3: Table with both n-dimensional and ragged columns
+  - data_type_def: TimeSeriesDataset
+    data_type_inc: DynamicTable
+    doc: Dataset combining fixed-length and variable-length time series
+    datasets:
+      # Scalar columns
+      - name: series_id
+        data_type_inc: VectorData
+        dtype: text
+        doc: Unique time series identifier
+
+      - name: sampling_rate
+        data_type_inc: VectorData
+        dtype: float32
+        doc: Sampling rate in Hz
+
+      # Fixed-length 2D column: [num_rows, timesteps, features]
+      - name: fixed_sequence
+        data_type_inc: VectorData
+        dtype: float32
+        dims:
+          - num_rows
+          - timesteps
+          - features
+        shape:
+          - null
+          - 100  # fixed 100 timesteps
+          - 32   # 32 features
+        doc: Fixed-length time series (100 timesteps, 32 features)
+
+      # Variable-length ragged column
+      - name: event_times
+        data_type_inc: VectorData
+        dtype: float64
+        dims:
+          - total_events
+        shape:
+          - null
+        doc: Variable number of event timestamps per row
+
+      - name: event_times_index
+        data_type_inc: VectorIndex
+        dtype: uint64
+        dims:
+          - num_rows
+        shape:
+          - null
+        doc: Index marking end of events for each row
+        attributes:
+          - name: target
+            dtype:
+              target_type: VectorData
+              reftype: object
+            doc: Reference to event_times column
+
+      - name: event_labels
+        data_type_inc: VectorData
+        dtype: text
+        dims:
+          - total_events
+        shape:
+          - null
+        doc: Labels for each event (parallel to event_times, uses same index)
+
+  # Example 4: Container holding multiple complex tables
+  - data_type_def: MLDatasetContainer
+    data_type_inc: Container
+    doc: Container for machine learning datasets with complex column types
+    groups:
+      - data_type_inc: ImageDataset
+        doc: Image dataset with n-dimensional columns
+        quantity: '?'
+      - data_type_inc: TextDataset
+        doc: Text dataset with ragged columns
+        quantity: '?'
+      - data_type_inc: TimeSeriesDataset
+        doc: Time series dataset with both fixed and ragged columns
+        quantity: '?'

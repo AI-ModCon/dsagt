@@ -1,0 +1,148 @@
+# HDMF Schema Example: Ragged Arrays (Variable-Length Data)
+#
+# Use case: Variable-length sequences and arrays
+# Pattern: VectorData + VectorIndex for ragged arrays
+
+groups:
+  - data_type_def: RaggedDataContainer
+    data_type_inc: Container
+    doc: Container for variable-length sequence data using VectorIndex pattern
+    datasets:
+      # Example 1: Variable-length text sequences (e.g., tokenized documents)
+      - name: tokens
+        data_type_inc: VectorData
+        dtype: text
+        dims:
+          - total_tokens
+        shape:
+          - null
+        doc: Flattened array of all tokens from all documents concatenated
+
+      - name: tokens_index
+        data_type_inc: VectorIndex
+        dtype: uint64
+        dims:
+          - num_documents
+        shape:
+          - null
+        doc: Index into tokens array marking end position of each document
+        attributes:
+          - name: target
+            dtype:
+              target_type: VectorData
+              reftype: object
+            doc: Reference to the tokens VectorData that this indexes
+
+      # Example 2: Variable-length event sequences
+      - name: event_times
+        data_type_inc: VectorData
+        dtype: float64
+        dims:
+          - total_events
+        shape:
+          - null
+        doc: Flattened array of event timestamps across all sequences
+        attributes:
+          - name: unit
+            dtype: text
+            doc: Unit of measurement
+            value: seconds
+
+      - name: event_times_index
+        data_type_inc: VectorIndex
+        dtype: uint64
+        dims:
+          - num_sequences
+        shape:
+          - null
+        doc: Index into event_times array marking end position of each sequence
+        attributes:
+          - name: target
+            dtype:
+              target_type: VectorData
+              reftype: object
+            doc: Reference to the event_times VectorData that this indexes
+
+      - name: event_types
+        data_type_inc: VectorData
+        dtype: int32
+        dims:
+          - total_events
+        shape:
+          - null
+        doc: Event type codes corresponding to event_times (parallel, same indexing applies)
+
+      # Example 3: Variable-length numeric feature vectors
+      - name: feature_values
+        data_type_inc: VectorData
+        dtype: float32
+        dims:
+          - total_features
+        shape:
+          - null
+        doc: Flattened array of feature values from sparse/variable-length vectors
+
+      - name: feature_values_index
+        data_type_inc: VectorIndex
+        dtype: uint64
+        dims:
+          - num_samples
+        shape:
+          - null
+        doc: Index into feature_values array marking end position of each sample
+        attributes:
+          - name: target
+            dtype:
+              target_type: VectorData
+              reftype: object
+            doc: Reference to the feature_values VectorData that this indexes
+
+      # Example 4: 2D ragged arrays (ragged in first dimension, fixed in second)
+      - name: ragged_matrix_data
+        data_type_inc: VectorData
+        dtype: float32
+        dims:
+          - total_rows
+          - fixed_columns
+        shape:
+          - null
+          - 128  # fixed width per row
+        doc: Variable number of rows per sample, but fixed columns per row
+
+      - name: ragged_matrix_index
+        data_type_inc: VectorIndex
+        dtype: uint64
+        dims:
+          - num_samples
+        shape:
+          - null
+        doc: Index into ragged_matrix_data marking end row position for each sample
+        attributes:
+          - name: target
+            dtype:
+              target_type: VectorData
+              reftype: object
+            doc: Reference to the ragged_matrix_data VectorData that this indexes
+
+    groups:
+      # Metadata table for ragged sequences
+      - name: sequence_metadata
+        data_type_inc: DynamicTable
+        doc: Metadata for each variable-length sequence (rows aligned with indices)
+        datasets:
+          - name: sequence_id
+            data_type_inc: VectorData
+            dtype: text
+            doc: Unique sequence identifier
+          - name: length
+            data_type_inc: VectorData
+            dtype: uint32
+            doc: Length of this sequence (number of elements)
+          - name: source
+            data_type_inc: VectorData
+            dtype: text
+            doc: Source or origin of sequence
+          - name: mean_value
+            data_type_inc: VectorData
+            dtype: float32
+            doc: Mean value of elements in sequence

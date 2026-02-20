@@ -1,0 +1,106 @@
+# HDMF Schema Example: Tabular Data
+#
+# Use case: Structured tabular data using DynamicTable
+# Pattern: DynamicTable with VectorData columns
+
+groups:
+  - data_type_def: ProductCatalog
+    data_type_inc: DynamicTable
+    doc: Table of products with metadata
+    datasets:
+      - name: product_id
+        data_type_inc: VectorData
+        dtype: text
+        doc: Unique product identifier
+      - name: category
+        data_type_inc: VectorData
+        dtype: text
+        doc: Product category
+      - name: name
+        data_type_inc: VectorData
+        dtype: text
+        doc: Product name
+      - name: price
+        data_type_inc: VectorData
+        dtype: float32
+        doc: Price in USD
+      - name: in_stock
+        data_type_inc: VectorData
+        dtype: bool
+        doc: Whether product is currently in stock
+      - name: quantity
+        data_type_inc: VectorData
+        dtype: int32
+        doc: Quantity available
+
+  - data_type_def: OrdersTable
+    data_type_inc: DynamicTable
+    doc: Table of customer orders
+    datasets:
+      - name: order_id
+        data_type_inc: VectorData
+        dtype: int64
+        doc: Unique order identifier
+      - name: product_id
+        data_type_inc: VectorData
+        dtype: text
+        doc: Reference to product (foreign key to ProductCatalog)
+      - name: customer_id
+        data_type_inc: VectorData
+        dtype: text
+        doc: Customer identifier
+      - name: order_date
+        data_type_inc: VectorData
+        dtype: text
+        doc: Order date (ISO 8601 format)
+      - name: quantity
+        data_type_inc: VectorData
+        dtype: int32
+        doc: Quantity ordered
+      - name: total_price
+        data_type_inc: VectorData
+        dtype: float32
+        doc: Total order price in USD
+      - name: status
+        data_type_inc: VectorData
+        dtype: text
+        doc: Order status (pending, shipped, delivered, cancelled)
+
+  - data_type_def: DailySalesTable
+    data_type_inc: DynamicTable
+    doc: Aggregated daily sales statistics
+    datasets:
+      - name: date
+        data_type_inc: VectorData
+        dtype: text
+        doc: Date (YYYY-MM-DD)
+      - name: total_orders
+        data_type_inc: VectorData
+        dtype: int32
+        doc: Total number of orders
+      - name: total_revenue
+        data_type_inc: VectorData
+        dtype: float64
+        doc: Total revenue in USD
+      - name: avg_order_value
+        data_type_inc: VectorData
+        dtype: float32
+        doc: Average order value
+      - name: unique_customers
+        data_type_inc: VectorData
+        dtype: int32
+        doc: Number of unique customers
+
+  - data_type_def: SalesDataContainer
+    data_type_inc: Container
+    doc: Container for all sales-related tables
+    groups:
+      - data_type_inc: ProductCatalog
+        doc: Product catalog table
+        quantity: '?'
+      - data_type_inc: OrdersTable
+        doc: Orders table
+        quantity: '?'
+      - data_type_inc: DailySalesTable
+        doc: Daily sales statistics table
+        quantity: '?'

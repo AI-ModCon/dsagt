@@ -1,0 +1,135 @@
+# HDMF Schema Example: N-Dimensional Arrays
+#
+# Use case: Multi-dimensional tensor data for ML/AI applications
+# Pattern: VectorData with multiple dimensions specified
+
+groups:
+  - data_type_def: TensorDataContainer
+    data_type_inc: Container
+    doc: Container for multi-dimensional array datasets
+    datasets:
+      # Example 1: 2D feature matrix [samples, features]
+      - name: feature_embeddings
+        data_type_inc: VectorData
+        dtype: float32
+        dims:
+          - samples
+          - features
+        shape:
+          - null  # variable number of samples
+          - 512   # fixed feature dimension
+        doc: 2D matrix of feature embeddings for each sample
+        attributes:
+          - name: model_name
+            dtype: text
+            doc: Name of the model that generated these embeddings
+            value: bert-base
+          - name: normalization
+            dtype: text
+            doc: Normalization method applied
+            value: L2 normalized
+
+      # Example 2: 3D image stack [images, height, width]
+      - name: grayscale_images
+        data_type_inc: VectorData
+        dtype: uint8
+        dims:
+          - num_images
+          - height
+          - width
+        shape:
+          - null   # variable number of images
+          - 256    # fixed height
+          - 256    # fixed width
+        doc: Stack of grayscale images
+        attributes:
+          - name: resolution
+            dtype: text
+            doc: Image resolution description
+            value: 256x256 pixels
+          - name: bit_depth
+            dtype: int32
+            doc: Bit depth per pixel
+            value: 8
+
+      # Example 3: 4D RGB images [samples, height, width, channels]
+      - name: rgb_images
+        data_type_inc: VectorData
+        dtype: uint8
+        dims:
+          - num_images
+          - height
+          - width
+          - channels
+        shape:
+          - null   # variable number of images
+          - 224    # height
+          - 224    # width
+          - 3      # RGB channels
+        doc: RGB image data in standard format
+        attributes:
+          - name: channel_order
+            dtype: text
+            doc: Order of color channels
+            value: RGB
+
+      # Example 4: 3D time-series sequences [samples, timesteps, features]
+      - name: time_series_sequences
+        data_type_inc: VectorData
+        dtype: float32
+        dims:
+          - num_sequences
+          - timesteps
+          - features
+        shape:
+          - null  # variable number of sequences
+          - 100   # fixed sequence length
+          - 64    # feature dimension
+        doc: Fixed-length time series sequences with features at each timestep
+        attributes:
+          - name: sequence_length
+            dtype: int32
+            doc: Length of each sequence
+            value: 100
+          - name: sampling_rate_hz
+            dtype: float32
+            doc: Sampling rate in Hz
+            value: 10.0
+
+      # Example 5: 1D labels
+      - name: labels
+        data_type_inc: VectorData
+        dtype: int32
+        dims:
+          - num_samples
+        shape:
+          - null
+        doc: Classification labels for samples (aligned with other datasets)
+        attributes:
+          - name: num_classes
+            dtype: int32
+            doc: Number of distinct classes
+            value: 10
+
+    groups:
+      # Nested group with metadata table aligned with arrays
+      - name: sample_metadata
+        data_type_inc: DynamicTable
+        doc: Metadata for each sample (rows aligned with first dimension of arrays)
+        datasets:
+          - name: sample_id
+            data_type_inc: VectorData
+            dtype: text
+            doc: Unique sample identifier
+          - name: source
+            data_type_inc: VectorData
+            dtype: text
+            doc: Data source or origin
+          - name: timestamp
+            data_type_inc: VectorData
+            dtype: float64
+            doc: Collection timestamp (Unix time)
+          - name: quality_score
+            data_type_inc: VectorData
+            dtype: float32
+            doc: Quality score (0.0 to 1.0)
