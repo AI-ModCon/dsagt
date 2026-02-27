@@ -1,3 +1,9 @@
+# dsagt
+*runtime/
+*data/
+kb_index/
+knowledge/
+
 # Python
 __pycache__/
 *.py[cod]

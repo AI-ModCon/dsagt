@@ -1,234 +1,259 @@
 # DSAGT
 
-**D**ata **S**mith **A**gent **T**oolkit - AI-assisted data pipeline builder.
+**D**ata **S**cience **A**gent **T**oolkit — AI-assisted data pipeline builder.
 
-DSAGT helps you build reproducible data processing pipelines using AI agents like Goose. It provides two MCP servers:
+DSAGT connects an MCP-compatible AI agent to three servers for building scientific data pipelines:
 
-1. **Pipeline Server** - Executes data processing tools from a registry
-2. **Registry Builder** - Helps you add new tools by analyzing documentation
+1. **Pipeline Server** — Runs registered tools, logs provenance. Supports general-purpose processing and American Science Cloud targets; extendable to domain-specific workflows.
+2. **Registry Builder** — Analyzes CLI tools, documentation, and APIs to generate and store tool specifications.
+3. **Knowledge Base** — Semantic search over indexed document collections (FAISS + optional cross-encoder reranking).
+
+The servers are platform-agnostic and communicate over MCP stdio.
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.10 or higher
-- [Goose](https://github.com/block/goose) installed
-- [uv](https://github.com/astral-sh/uv) (recommended) or pip
+- Python 3.10–3.13
+- [uv](https://github.com/astral-sh/uv) — required for portable MCP server configs across agent platforms
+- An MCP-compatible agent (see [Agent Setup](#agent-setup))
 
-### Install DSAGT
-
-Clone the repository and install the package:
+### Install
 
 ```bash
 git clone <repository-url>
-cd data_agent.git
-
-# Using uv (recommended)
-uv pip install -e .
-
-# Or using pip
-pip install -e .
+cd dsagt
+uv sync --all-groups
 ```
 
-This installs two command-line tools:
-- `dsagt-pipeline-server` - Run the pipeline execution server
-- `dsagt-registry-builder` - Run the registry builder server
+This installs three CLI entry points:
 
-## Running the MCP Servers
+- `dsagt-pipeline-server`
+- `dsagt-registry-server`
+- `dsagt-knowledge-server`
+
+## How It Works
+
+### Tool Registration
+
+The default registry ships with general-purpose data tools. To register additional tools, use the registry server through your agent:
+
+1. Point the agent at a CLI tool, its `--help` output, or documentation
+2. The agent uses the registry builder to analyze the interface (it can read files, fetch URLs, and run commands)
+3. The agent proposes a tool spec and saves it via `save_tool_spec`
+4. The tool is immediately available through the pipeline server
+
+Registry builder tools exposed to the agent:
+
+- `read_file` — Read local files
+- `http_request` — Fetch URLs
+- `run_command` — Execute commands (e.g., `tool --help`)
+- `save_tool_spec` — Save a tool specification to the registry
+- `get_registry` — List all registered tools
+- `search_registry` — Search tools by name or description
+
+### Pipeline Execution
+
+1. The pipeline server copies the base `registry.yaml` to `runtime/registry.yaml` at startup
+2. The agent runs tools from the session registry
+3. Each execution is logged to a provenance file
+
+### Knowledge Base
+
+The knowledge base provides semantic search over indexed document collections using FAISS, with optional cross-encoder reranking.
+
+To set up the core collections (NeMo Curator, AIDRIN):
+
+```bash
+export LLM_API_KEY="your-api-key"
+uv run python scripts/setup_core_kb.py
+```
+
+This clones repos, downloads papers, chunks content, and builds FAISS indexes in `kb_index/`. Run `python scripts/setup_core_kb.py --help` for options.
+
+## Running the Servers
 
 ### Pipeline Server
 
-The pipeline server executes tools defined in a registry YAML file:
-
 ```bash
-# Use default registry.yaml in current directory
-dsagt-pipeline-server
+# Default bundled registry
+uv run dsagt-pipeline-server
 
-# Use a specific registry file
-dsagt-pipeline-server --registry path/to/my_registry.yaml
+# Custom registry from a previous session
+uv run dsagt-pipeline-server --registry my_registry.yaml
 
-# Specify runtime directory for session data
-dsagt-pipeline-server --registry registry.yaml --runtime-dir ./my_session
+# Specify registry file and runtime directory
+uv run dsagt-pipeline-server --registry path/to/registry.yaml --runtime-dir ./my_session
 ```
 
 ### Registry Builder Server
 
-The registry builder helps you add new tools to your registry:
+```bash
+# Default: writes to ./runtime/registry.yaml
+uv run dsagt-registry-server
+
+# Custom registry path
+uv run dsagt-registry-server --registry path/to/registry.yaml
+```
+
+### Knowledge Base Server
 
 ```bash
-# Save to default tool_registry.yaml
-dsagt-registry-builder
+# Defaults: base=./kb_index, runtime=./runtime
+uv run dsagt-knowledge-server
 
-# Save to a specific file
-dsagt-registry-builder --registry path/to/my_tools.yaml
+# Custom directories, with reranking
+uv run dsagt-knowledge-server --base-index-dir path/to/kb_index --runtime-dir ./runtime --rerank
 ```
 
-## Using with Goose
+## Agent Setup
 
-**Important**: The MCP server commands (`dsagt-pipeline-server` and `dsagt-registry-builder`) must be accessible in your PATH when running Goose. Depending on how you installed DSAGT, you may need to:
+DSAGT works with any MCP-compatible agent. The servers are identical across platforms; only the agent configuration format differs.
 
-- **If installed with `pip install -e .`**: Commands should be available globally
-- **If installed with `uv pip install -e .`**: Prefix commands with `uv run` (see examples below)
-- **If using a virtual environment**: Activate the environment before running Goose, or use absolute paths to the commands
+Platform-specific configs and quickstart guides live in `agents/`:
 
-There are three ways to configure Goose to use DSAGT's MCP servers:
+- **Goose**: [`agents/goose/README.md`](agents/goose/README.md)
+- **Roo Code** (VS Code): [`agents/roo/README.md`](agents/roo/README.md)
+- **Claude Code**: [`agents/claude-code/README.md`](agents/claude-code/README.md)
+- **Cline** (VS Code): [`agents/cline/README.md`](agents/cline/README.md)
 
-### Option 1: Using `--with-extension` Flag (One-time use)
+### Path Considerations
 
-Run Goose with the DSAGT servers for a single session:
+Servers use relative paths by default (`--runtime-dir ./runtime`, `--base-index-dir ./kb_index`), resolved from the agent's working directory. This works as long as the agent launches from the DSAGT project root.
 
-**If installed globally (pip install -e .):**
+If your agent launches from elsewhere, use absolute paths:
+
 ```bash
-goose session \
-  --with-extension 'dsagt-pipeline-server --registry registry.yaml' \
-  --with-extension 'dsagt-registry-builder --registry registry.yaml'
+uv run dsagt-knowledge-server --base-index-dir /absolute/path/to/kb_index
 ```
 
-**If using uv:**
+### Example Session
+
+```
+User: I have a script at scripts/preprocess.py that cleans CSV files.
+      Register it as a pipeline tool.
+
+Agent: [reads the file, runs --help, proposes a spec]
+       Registered "preprocess" with parameters for input_file,
+       output_file, and --drop-nulls. Want to try it?
+
+User: Run it on data/raw.csv
+
+Agent: [executes via pipeline server]
+       Output written to data/cleaned.csv. 142 rows processed,
+       3 null rows dropped.
+```
+
+## Smoke Test
+
+`tests/smoke_test/` contains fixtures for verifying all three servers end-to-end. Knowledge base steps require an embedding API key; skip them if you don't have one.
+
+```
+tests/smoke_test/
+├── greet.py                  # Simple CLI tool to register and execute
+└── knowledge/                # Documents for KB ingestion
+    ├── DESCRIPTION.md
+    ├── installation.md
+    ├── api_reference.md
+    └── troubleshooting.md
+```
+
+### 1. Verify the test script
+
 ```bash
-goose session \
-  --with-extension 'uv run dsagt-pipeline-server --registry registry.yaml' \
-  --with-extension 'uv run dsagt-registry-builder --registry registry.yaml'
+uv run python tests/smoke_test/greet.py World
 ```
 
-### Option 2: Configuration File (Persistent)
+Expected output: `{"message": "Hello, World!", "status": "ok"}`
 
-Add the DSAGT extension configurations to one of these files:
+### 2. Start a session with all three servers
 
-- **Global**: `~/.config/goose/config.yaml` - Available in all Goose sessions
-- **Project-local**: `goose.yaml` in your project directory - Only for this project
+Follow `agents/<platform>/README.md` to launch a session. The knowledge server runs without reranking by default; add `--rerank` to enable cross-encoder reranking (triggers model download on first use).
 
-Then add this configuration under the `extensions:` section:
+Without an embedding API key, omit the knowledge server and skip steps 5–6.
 
-**If installed globally (pip install -e .):**
-```yaml
-extensions:
-  dsagt:
-    enabled: true
-    name: dsagt
-    type: stdio
-    cmd: dsagt-pipeline-server
-    args:
-      - --registry
-      - /path/to/registry.yaml  # Use absolute path for global config
-    timeout: 300
+### 3. Register a tool
 
-  registry_builder:
-    enabled: true
-    name: tool-registry-server
-    type: stdio
-    cmd: dsagt-registry-builder
-    args:
-      - --registry
-      - /path/to/registry.yaml  # Same registry file
-    timeout: 300
+```
+Register tests/smoke_test/greet.py as a pipeline tool.
+Run "python tests/smoke_test/greet.py --help" to see its interface.
 ```
 
-**If using uv:**
-```yaml
-extensions:
-  dsagt:
-    enabled: true
-    name: dsagt
-    type: stdio
-    cmd: uv
-    args:
-      - run
-      - dsagt-pipeline-server
-      - --registry
-      - /path/to/registry.yaml  # Use absolute path for global config
-    timeout: 300
+The agent should run `--help` via the registry builder, then call `save_tool_spec`.
 
-  registry_builder:
-    enabled: true
-    name: tool-registry-server
-    type: stdio
-    cmd: uv
-    args:
-      - run
-      - dsagt-registry-builder
-      - --registry
-      - /path/to/registry.yaml  # Same registry file
-    timeout: 300
+### 4. Execute the tool
+
+```
+Run the greet tool with name "World" and greeting "Hi".
 ```
 
-Then run Goose:
+Expected: JSON output with `"message": "Hi, World!"`.
+
+### 5. Ingest documents
+
+```
+Ingest the folder tests/smoke_test/knowledge into the knowledge base.
+```
+
+The agent should call `kb_ingest` and report file/chunk counts.
+
+### 6. Search the knowledge base
+
+```
+Search the knowledge collection for "how to handle large files".
+```
+
+Top results should come from `troubleshooting.md` (lazy loading, OOM errors).
+
+```
+List all knowledge base collections.
+```
+
+Should show `knowledge` with the description from `DESCRIPTION.md`.
+
+### 7. Verify artifacts
+
+After the session, check from the project root:
+
+**Registry** (should contain default tools plus `greet`):
 ```bash
-# If using global config
-goose session
-
-# If using project-local config
-goose session --config goose.yaml
+cat runtime/registry.yaml
 ```
 
-## Quick Start Example
+**Provenance log** (timestamped entry with tool name, args, full command):
+```bash
+cat runtime/provenance.log
+```
 
-1. **Install DSAGT**:
-   ```bash
-   uv pip install -e .
-   ```
+**Knowledge base index**:
+```bash
+ls runtime/kb_index/knowledge/
+# Expected: index.faiss, chunks.jsonl, DESCRIPTION.md
+```
 
-2. **Create a tool registry** (`registry.yaml`):
-   ```yaml
-   tools:
-     - name: load_csv
-       description: Load a CSV file and output basic info
-       executable: python tools/load_csv.py
-       parameters:
-         location:
-           type: string
-           required: true
-           description: Path to CSV file
-   ```
+**Chunk format** (JSON objects with `id`, `text`, `metadata`):
+```bash
+head -3 runtime/kb_index/knowledge/chunks.jsonl
+```
 
-3. **Start a Goose session**:
-   ```bash
-   goose session --config goose.yaml
-   ```
+### Cleanup
 
-4. **Ask Goose to build a pipeline**:
-   ```
-   User: I have data at data/customers.csv.
-         Can you help me prepare it for machine learning?
-
-   Goose: I'll help you build that pipeline. Let me gather some information first:
-          1. Have you worked with this data before? Any known quality issues?
-          2. What are you trying to predict or analyze?
-          3. What train/validation/test split ratios would you prefer?
-          ...
-   ```
-
-## How It Works
-
-### Pipeline Execution
-
-1. Goose uses the **dsagt** extension to run tools defined in `registry.yaml`
-2. Each tool execution is logged to a provenance file for reproducibility
-3. Results are saved to a runtime directory (default: `./runtime`)
-
-### Adding New Tools
-
-1. Goose uses the **tool-registry-server** extension to analyze documentation
-2. Available tools for building the registry:
-   - `read_file` - Read local documentation files
-   - `http_request` - Fetch documentation from URLs
-   - `run_command` - Execute commands to get help output (e.g., `--help`)
-   - `save_tool_spec` - Save a tool specification to the registry
-   - `get_registry` - View all registered tools
-   - `search_registry` - Search for tools by name or description
-
-3. New tools are saved to `tool_registry.yaml` in the correct format
-4. You can then copy tools from `tool_registry.yaml` to your main `registry.yaml`
+```bash
+rm -rf runtime
+```
 
 ## Tool Registry Format
 
-Tools are defined in YAML format:
+Tools are defined in YAML:
 
 ```yaml
 tools:
   - name: tool_name
     description: What the tool does
     executable: command to run (e.g., "python script.py")
+    dependencies:                        # optional
+      - pandas>=2.0
+      - scikit-learn
     parameters:
       param_name:
         type: string|integer|number|boolean|array|object
@@ -237,101 +262,92 @@ tools:
         default: optional_default_value
 ```
 
-## Examples
+Required parameters are passed as positional arguments. Optional parameters use `--flag value` syntax.
 
-See the `demo/` directory for complete examples:
+When a tool spec includes `dependencies`, the registry server automatically installs them via `uv pip install` at registration time. Dependencies are stored in the registry YAML for reproducibility. Use `install_dependencies` to reinstall all deps from an existing registry (e.g., after setting up a fresh environment).
+
+## Project Structure
+
+```
+├── src/dsagt/
+│   ├── __init__.py
+│   ├── mcp_utils.py                # Shared MCP server utilities
+│   ├── registry.py                 # Tool registry management
+│   ├── registry.yaml               # Default tool registry (bundled)
+│   ├── knowledge.py                # Semantic search over document collections
+│   ├── pipeline_server.py          # MCP server: tool execution
+│   ├── registry_server.py          # MCP server: tool registration
+│   └── knowledge_server.py         # MCP server: knowledge base search
+├── agents/
+│   ├── goose/                      # Goose agent config and quickstart
+│   ├── roo/                        # Roo Code (VS Code) config and quickstart
+│   └── claude-code/                # Claude Code config and quickstart
+├── tests/
+│   ├── test_registry.py
+│   ├── test_registry_server.py
+│   ├── test_knowledge_base.py
+│   ├── test_knowledge_server.py
+│   ├── test_knowledge_integration.py   # Requires API key
+│   └── smoke_test/
+│       ├── greet.py
+│       └── knowledge/
+├── scripts/
+│   └── setup_core_kb.py
+├── pyproject.toml
+└── README.md
+```
+
+## Tests
 
 ```bash
-# Run the demo
-cd demo
-python demo_test.py
+uv run pytest
 ```
 
-This demonstrates:
-- Loading and profiling data
-- Registering custom preprocessing scripts
-- Building a complete pipeline
-- Viewing provenance logs
-
-## Development
-
-### Running Tests
+Run specific tests:
 
 ```bash
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/test_registry_builder.py
-
-# Run with coverage
-pytest --cov=dsagt
+uv run pytest tests/test_registry.py
+uv run pytest tests/test_registry_server.py
+uv run pytest tests/test_knowledge_server.py
+uv run pytest tests/test_knowledge_base.py
+uv run pytest tests/test_registry.py::TestCallTool::test_success -v
 ```
 
-### Project Structure
-
-```
-.
-├── src/
-│   └── dsagt/
-│       ├── core/           # Core registry management
-│       ├── servers/        # MCP servers
-│       └── tools/          # Package metadata
-├── tools/                  # Example data processing tools
-├── demo/                   # Example usage
-├── tests/                  # Test suite
-├── registry.yaml           # Example tool registry
-└── goose.yaml             # Goose configuration
-```
+Registry tests mock `subprocess.run`. Server tests invoke MCP handlers directly (no stdio transport, no network). Knowledge base tests mock the embedding API and use FAISS on temp files. Knowledge server tests use async helpers for background ingest/append jobs.
 
 ## Troubleshooting
 
 ### MCP Server Not Found
 
-If Goose reports that it can't find the MCP servers:
-
 ```bash
-# Verify installation
-which dsagt-pipeline-server
-which dsagt-registry-builder
+uv run which dsagt-pipeline-server
+uv run which dsagt-registry-server
+uv run which dsagt-knowledge-server
 
 # Reinstall if needed
-uv pip install -e . --force-reinstall
-```
-
-### Registry File Not Found
-
-Make sure the registry paths in your configuration are absolute or relative to where you run Goose:
-
-```yaml
-# Absolute path (recommended for global config)
-args:
-  - --registry
-  - /full/path/to/registry.yaml
-
-# Relative path (works from project directory)
-args:
-  - --registry
-  - registry.yaml
+uv sync --reinstall
 ```
 
 ### Tools Not Executing
 
-Check the provenance log to see what command was run:
+Check what command was run:
 
 ```bash
 cat runtime/provenance.log
 ```
 
-Verify that:
-- The executable path is correct
-- Any interpreter (python, Rscript, etc.) is in your PATH
-- The tool script has necessary dependencies installed
+Verify the executable path and that any interpreter (python, Rscript, etc.) is in your PATH.
 
-## Contributing
+### Registry File Not Found
 
-See `IMPROVEMENTS.md` for a roadmap of planned enhancements.
+Use absolute paths in configuration:
+
+```yaml
+args:
+  - --registry
+  - /full/path/to/registry.yaml
+```
 
 ## License
 
-[Add your license here]
+TBD

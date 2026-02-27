@@ -1,0 +1,124 @@
+tools:
+- description: Scan a data directory and produce structured report with file counts,
+    sizes, and directory tree
+  executable: python tools/scan_directory.py
+  name: scan_directory
+  parameters:
+    directory:
+      description: Path to directory to scan
+      required: true
+      type: string
+    max_depth:
+      default: 5
+      description: Maximum directory depth to traverse
+      required: false
+      type: integer
+    top_n:
+      default: 20
+      description: Number of largest files to list
+      required: false
+      type: integer
+- name: convert_star_to_csv
+  description: Convert STAR files to CSV format for cryo-EM particle data
+  executable: python knowledge_set/cryoppp/post_processing_scripts/convert_start_to_csv_file.py
+  parameters:
+    project_dir:
+      type: string
+      description: Base directory containing cryo-EM projects
+      required: false
+      default: /Users/tuor472/Library/CloudStorage/OneDrive-PNNL/Documents/dsagt_knowledge_complete/DSAGT/data/cryoem/
+- description: Generate box files (coordinate files) for each micrograph from particle
+    selections
+  executable: python knowledge_set/cryoppp/post_processing_scripts/generate_box_files_for_each_micrographs.py
+  name: generate_box_files
+  parameters:
+    project_dir:
+      default: /Users/tuor472/Library/CloudStorage/OneDrive-PNNL/Documents/dsagt_knowledge_complete/DSAGT/data/cryoem/
+      description: Base directory containing cryo-EM projects
+      required: false
+      type: string
+    empiar_ids:
+      default:
+      - '10017'
+      description: List of EMPIAR dataset IDs to process
+      required: false
+      type: array
+    particle_diameters:
+      default:
+      - 186
+      description: Particle diameters in pixels corresponding to each EMPIAR ID
+      required: false
+      type: array
+- description: Process protein particle annotations and coordinate manipulations for
+    cryo-EM datasets
+  executable: python knowledge_set/cryoppp/post_processing_scripts/protein_particle_annotation_manipulations.py
+  name: process_particle_annotations
+  parameters:
+    empiar_ids:
+      default:
+      - '10017'
+      description: List of EMPIAR dataset IDs to process
+      required: false
+      type: array
+    project_dir:
+      default: data/cryoem/
+      description: Base directory containing cryo-EM projects
+      required: false
+      type: string
+- description: Convert STAR files to CSV format for cryo-EM particle data processing
+  executable: python knowledge_set/cryoppp/post_processing_scripts/convert_start_to_csv_file.py
+  name: convert_star_to_csv_cryoppp
+  parameters:
+    project_dir:
+      default: data/cryoem/
+      description: Base directory containing cryo-EM projects
+      required: false
+      type: string
+- description: Generate coordinate box files for each micrograph from particle selections
+  executable: python knowledge_set/cryoppp/post_processing_scripts/generate_box_files_for_each_micrographs.py
+  name: generate_coordinate_boxes
+  parameters:
+    project_dir:
+      default: data/cryoem/
+      description: Base directory containing cryo-EM projects
+      required: false
+      type: string
+    empiar_ids:
+      description: List of EMPIAR dataset IDs to process
+      required: true
+      type: array
+    particle_diameters:
+      description: Particle diameters in pixels for each EMPIAR ID
+      required: true
+      type: array
+- description: Convert raw gain files to refined motion correction format for cryo-EM
+    processing
+  executable: python knowledge_set/cryoppp/raw_data_curation_scripts/raw_to_refined_dataset/raw_gain_to_refined_motion_correction.py
+  name: refine_motion_correction
+  parameters:
+    input_dir:
+      description: Input directory containing raw gain files
+      required: true
+      type: string
+    output_dir:
+      description: Output directory for refined motion correction files
+      required: true
+      type: string
+- description: Convert raw microimages to refined dataset with 1000 images for cryo-EM
+    processing
+  executable: python knowledge_set/cryoppp/raw_data_curation_scripts/raw_to_refined_dataset/raw_microimages_to_refined_1000_images.py
+  name: refine_microimages
+  parameters:
+    input_dir:
+      description: Input directory containing raw microimages
+      required: true
+      type: string
+    output_dir:
+      description: Output directory for refined 1000 images
+      required: true
+      type: string
+    max_images:
+      default: 1000
+      description: Maximum number of images to include in refined dataset
+      required: false
+      type: integer
