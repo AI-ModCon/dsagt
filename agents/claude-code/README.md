@@ -53,10 +53,6 @@ Copy to `.mcp.json` in the project root. Claude Code reads this file to discover
 ```json
 {
   "mcpServers": {
-    "dsagt-pipeline": {
-      "command": "uv",
-      "args": ["run", "dsagt-pipeline-server"]
-    },
     "dsagt-registry": {
       "command": "uv",
       "args": ["run", "dsagt-registry-server"]
@@ -74,7 +70,7 @@ To customize paths, add flags to `args`:
 ```json
 {
   "command": "uv",
-  "args": ["run", "dsagt-pipeline-server", "--registry", "/absolute/path/to/registry.yaml"]
+  "args": ["run", "dsagt-registry-server", "--runtime-dir", "/absolute/path/to/session"]
 }
 ```
 
@@ -123,7 +119,7 @@ Check MCP server status with the `/mcp` command inside Claude Code. This shows w
 Verify uv can find the server commands:
 
 ```bash
-uv run which dsagt-pipeline-server
+uv run which dsagt-registry-server
 ```
 
 ### Working directory

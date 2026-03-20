@@ -57,11 +57,6 @@ Copy to `.roo/mcp.json` in the project root. Roo reads this file to discover and
 ```json
 {
   "mcpServers": {
-    "dsagt-pipeline": {
-      "command": "uv",
-      "args": ["run", "dsagt-pipeline-server"],
-      "disabled": false
-    },
     "dsagt-registry": {
       "command": "uv",
       "args": ["run", "dsagt-registry-server"],
@@ -81,7 +76,7 @@ To customize paths, add flags to `args`. For example:
 ```json
 {
   "command": "uv",
-  "args": ["run", "dsagt-pipeline-server", "--registry", "/absolute/path/to/registry.yaml"],
+  "args": ["run", "dsagt-registry-server", "--runtime-dir", "/absolute/path/to/session"],
   "disabled": false
 }
 ```
@@ -136,7 +131,7 @@ Open the MCP settings panel and check whether the servers show a connected statu
 Verify uv can find the server commands from within VS Code's integrated terminal:
 
 ```bash
-uv run which dsagt-pipeline-server
+uv run which dsagt-registry-server
 ```
 
 ### Python/node version managers (pyenv, nvm, fnm)
@@ -161,7 +156,7 @@ Roo launches server processes from the VS Code workspace root. Make sure the DSA
 ```json
 {
   "command": "uv",
-  "args": ["run", "dsagt-pipeline-server"],
+  "args": ["run", "dsagt-registry-server"],
   "cwd": "/absolute/path/to/dsagt",
   "disabled": false
 }

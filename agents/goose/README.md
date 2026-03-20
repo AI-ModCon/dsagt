@@ -29,21 +29,19 @@ From the DSAGT project root, copy the agent instructions and start a session:
 # Copy agent guidance to project root (required)
 cp agents/goose/.goosehints .goosehints
 
-# Start a session with all three servers
+# Start a session with both servers
 goose session \
-  --with-extension 'uv run dsagt-pipeline-server' \
   --with-extension 'uv run dsagt-registry-server' \
   --with-extension 'uv run dsagt-knowledge-server'
 ```
 
-No server flags required — each server uses sensible defaults. The pipeline server copies the bundled default registry into `./runtime/` and the registry builder writes new tools to the same location.
+No server flags required — each server uses sensible defaults. The registry server seeds `./runtime/skills/` from the bundled default skills on first run.
 
-To use a custom registry from a previous session:
+To resume a previous session's tool registry:
 
 ```bash
 goose session \
-  --with-extension 'uv run dsagt-pipeline-server --registry my_registry.yaml' \
-  --with-extension 'uv run dsagt-registry-server' \
+  --with-extension 'uv run dsagt-registry-server --runtime-dir my_session' \
   --with-extension 'uv run dsagt-knowledge-server'
 ```
 
@@ -61,12 +59,6 @@ GOOSE_PROVIDER: openai
 GOOSE_MODEL: claude-sonnet-4-20250514
 
 extensions:
-  pipeline:
-    enabled: true
-    type: stdio
-    cmd: uv run dsagt-pipeline-server
-    timeout: 300
-
   registry:
     enabled: true
     type: stdio
@@ -80,17 +72,17 @@ extensions:
     timeout: 300
 ```
 
-To customize paths, add `args:` with flags like `--registry`, `--runtime-dir`, or `--base-index-dir`. For example:
+To customize paths, add `args:` with flags like `--runtime-dir` or `--base-index-dir`. For example:
 
 ```yaml
 extensions:
-  pipeline:
+  registry:
     enabled: true
     type: stdio
-    cmd: uv run dsagt-pipeline-server
+    cmd: uv run dsagt-registry-server
     args:
-      - --registry
-      - /absolute/path/to/registry.yaml
+      - --runtime-dir
+      - /absolute/path/to/session
     timeout: 300
 ```
 
@@ -110,7 +102,6 @@ Follow the [smoke test instructions](../../README.md#smoke-test) in the main REA
 
 ```bash
 goose session \
-  --with-extension 'uv run dsagt-pipeline-server' \
   --with-extension 'uv run dsagt-registry-server' \
   --with-extension 'uv run dsagt-knowledge-server'
 ```
@@ -124,7 +115,7 @@ If you don't have an embedding API key, drop the knowledge server line and skip 
 Verify uv can find the server commands:
 
 ```bash
-uv run which dsagt-pipeline-server
+uv run which dsagt-registry-server
 ```
 
 ### Extension timeout
