@@ -105,19 +105,31 @@ class ToolRegistry:
         params = tool.get("parameters", {})
         
         for param_name, param_def in params.items():
-            value = arguments.get(param_name, param_def.get("default"))
-            if value is not None:
-                if param_def.get("required", False):
-                    cmd += f" {shlex.quote(str(value))}"
-                else:
-                    cmd += f" --{param_name} {shlex.quote(str(value))}"
-        
+            # Only include params explicitly passed by the agent
+            if param_name in arguments:
+                value = arguments[param_name]
+            elif param_def.get("required", False) and "default" in param_def:
+                value = param_def["default"]
+            else:
+                continue
+
+            is_boolean = param_def.get("type") == "boolean"
+            is_positional = param_def.get("positional", False)
+
+            if is_positional:
+                cmd += f" {shlex.quote(str(value))}"
+            elif is_boolean:
+                if value:
+                    cmd += f" --{param_name}"
+            else:
+                cmd += f" --{param_name} {shlex.quote(str(value))}"
+
         self._log_provenance(name, arguments, cmd)
-        
+
         # Run from base directory so relative tool paths resolve correctly
+        # Use login shell so user-configured tools (conda, etc.) are available
         result = subprocess.run(
-            cmd,
-            shell=True,
+            ["bash", "-lc", cmd],
             capture_output=True,
             text=True,
             timeout=300,

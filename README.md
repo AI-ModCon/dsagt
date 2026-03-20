@@ -266,9 +266,27 @@ Required parameters are passed as positional arguments. Optional parameters use 
 
 When a tool spec includes `dependencies`, the registry server automatically installs them via `uv pip install` at registration time. Dependencies are stored in the registry YAML for reproducibility. Use `install_dependencies` to reinstall all deps from an existing registry (e.g., after setting up a fresh environment).
 
+## Demo Folder
+
+`demo/` contains a complete microbial isolate demonstration package:
+
+- `demo/isolate_demo.md` — End-to-end demo instructions (asset collection, setup, prompts, and validation)
+- `demo/isolate_session.txt` — Prompt script used to drive the demo interaction
+- `demo/genomics.md` — Pipeline context document for knowledge ingestion
+- `demo/fastp_megahit_best_practices.md` — Fastp/Megahit best-practices reference
+- `demo/demoplan.md` — Short demo plan outline
+
+Run the isolate demo by following `demo/isolate_demo.md` from the DSAGT project root.
+
 ## Project Structure
 
 ```
+├── demo/
+│   ├── isolate_demo.md            # Microbial isolate demo runbook
+│   ├── isolate_session.txt        # Prompt sequence
+│   ├── genomics.md                # Domain context doc
+│   ├── fastp_megahit_best_practices.md
+│   └── demoplan.md
 ├── src/dsagt/
 │   ├── __init__.py
 │   ├── mcp_utils.py                # Shared MCP server utilities
@@ -348,6 +366,39 @@ args:
   - /full/path/to/registry.yaml
 ```
 
-## License
+# DSAGT Development Plan
 
-TBD
+## Motivation
+
+DSAGT currently shows high run-to-run variance (even at temperature 0). The root issue appears to be limited structure in tool description, invocation, and management. This plan focuses on improving reliability, reproducibility, and observability.
+
+## Track 1: Structured Tool Execution
+
+- **Goal:** Reduce stochastic behavior with stronger execution structure.
+- **Problem:** Routing through the MCP pipeline server adds indirection and limits direct access to Unix return codes/process signals. Registry entries are too sparse for consistent tool selection and invocation.
+- **Plan:**
+  - Extend the registry so each tool is paired with a skill (usage patterns, expected I/O, invocation examples).
+  - Use an agent-driven skill builder (in progress by Jean-Luca) to generate/refine tool skills as tools are registered.
+  - Move tool execution to direct shell invocation so the agent can use return codes, stderr, and standard Unix process controls.
+
+## Track 2: Container-Based Package Management
+
+- **Goal:** Improve reproducibility and isolation of tool execution environments.
+- **Problem:** Ad hoc dependency handling creates conflicts and weak cross-machine reproducibility.
+- **Plan:**
+  - Build a container-builder skill to generate Dockerized tool runtimes (dependencies, data paths, runtime config).
+  - Evaluate the Docker Agent tool shared by Shreyas (assessment led by Andrew) for reuse or adaptation.
+
+## Track 3: Observability and Logging
+
+- **Goal:** Add structured telemetry for debugging, evaluation, and cost tracking.
+- **Problem:** No consistent logs for agent decisions, tool calls, or token usage, which blocks diagnosis and improvement tracking.
+- **Plan:**
+  - Integrate OpenTelemetry for standards-based tracing/logging.
+  - Add MLflow wrappers for experiment tracking and token-usage monitoring.
+
+## Track 4: Resource management
+
+- **Goal:** Add skills that estimate compute needs and prevent resource overcommit during pipeline execution.
+- **Plan:**
+  - Create a resource-assessment skill that probes tool behavior, learns feasible operating ranges under current constraints, and recommends alternatives when resources are insufficient.

@@ -27,11 +27,13 @@ TOOL_WITH_MIXED_PARAMS = {
         "input_file": {
             "type": "string",
             "required": True,
+            "positional": True,
             "description": "Path to input file",
         },
         "output_file": {
             "type": "string",
             "required": True,
+            "positional": True,
             "description": "Path to output file",
         },
         "threshold": {
@@ -201,7 +203,7 @@ class TestCallTool:
 
     @patch("dsagt.registry.subprocess.run")
     def test_command_construction_required_params(self, mock_run, registry):
-        """Required params are positional, optional use --flag syntax."""
+        """Positional params are bare, optional use --flag syntax."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         registry.call_tool("process", {
@@ -211,26 +213,25 @@ class TestCallTool:
         })
 
         cmd = mock_run.call_args[0][0]
-        # Required params are positional (no -- prefix)
-        assert "in.csv" in cmd
-        assert "out.csv" in cmd
-        # Optional param uses flag syntax
-        assert "--threshold" in cmd
+        cmd_str = cmd[2] if isinstance(cmd, list) else cmd
+        assert "in.csv" in cmd_str
+        assert "out.csv" in cmd_str
+        assert "--threshold" in cmd_str
 
     @patch("dsagt.registry.subprocess.run")
-    def test_default_values_used_when_omitted(self, mock_run, registry):
-        """Optional params use defaults when not provided in arguments."""
+    def test_omitted_optional_params_excluded(self, mock_run, registry):
+        """Optional params omitted by caller are excluded from command."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         registry.call_tool("process", {
             "input_file": "in.csv",
             "output_file": "out.csv",
-            # threshold omitted, should use default 0.5
+            # threshold omitted — should NOT appear in command
         })
 
         cmd = mock_run.call_args[0][0]
-        assert "--threshold" in cmd
-        assert "0.5" in cmd
+        cmd_str = cmd[2] if isinstance(cmd, list) else cmd
+        assert "--threshold" not in cmd_str
 
     @patch("dsagt.registry.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300))
     def test_timeout(self, mock_run, registry):
