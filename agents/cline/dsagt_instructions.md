@@ -73,7 +73,7 @@ If user has custom processing scripts, register them using `save_tool_spec`.
 
 Survey what's available before proceeding:
 ```
-list_tools()
+get_registry()
 kb_list_collections()
 ```
 
@@ -85,7 +85,7 @@ For **each data manipulation step**, cycle through:
 
 1. UNDERSTAND what needs to happen at this step
 2. EXPLORE knowledge base (`kb_list_collections`, `kb_search`)
-3. APPLY tool preference hierarchy (`list_tools` first)
+3. APPLY tool preference hierarchy (`get_registry()` to list registered tools)
 4. DESIGN the check and operation (confirm with user)
 5. GENERATE code for check tool AND operation tool
 6. REGISTER new tools in session registry

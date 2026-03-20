@@ -53,14 +53,22 @@ TOOL_NO_PARAMS = {
 }
 
 
+def _write_skill(skills_dir, spec: dict) -> None:
+    """Write a minimal skill file for the given spec dict."""
+    path = skills_dir / f"{spec['name']}.md"
+    frontmatter = yaml.dump(spec, default_flow_style=False, sort_keys=False)
+    path.write_text(f"---\n{frontmatter}---\n\n# {spec['name']}\n")
+
+
 def make_registry(tmp_path, tools: list[dict]) -> ToolRegistry:
     """Create a ToolRegistry with the given tool definitions."""
-    registry_path = tmp_path / "registry.yaml"
-    registry_path.write_text(yaml.dump({"tools": tools}, sort_keys=False))
-    runtime_dir = tmp_path / "runtime"
+    skills_dir = tmp_path / "source_skills"
+    skills_dir.mkdir()
+    for tool in tools:
+        _write_skill(skills_dir, tool)
     return ToolRegistry(
-        source_registry=str(registry_path),
-        runtime_dir=str(runtime_dir),
+        source_skills_dir=str(skills_dir),
+        runtime_dir=str(tmp_path / "runtime"),
     )
 
 
@@ -106,7 +114,7 @@ class TestListTools:
         assert "threshold" not in required
 
     def test_default_values_propagate(self, registry):
-        """Default values from the registry appear in the MCP schema."""
+        """Default values from the skill file appear in the MCP schema."""
         tool = registry.list_tools()[0]
         props = tool["inputSchema"]["properties"]
 
@@ -114,17 +122,17 @@ class TestListTools:
         assert "default" not in props["input_file"]
 
     def test_empty_registry(self, empty_registry):
-        """An empty registry gives an empty tool list."""
+        """An empty skills directory gives an empty tool list."""
         assert empty_registry.list_tools() == []
 
     def test_multiple_tools(self, tmp_path):
-        """Multiple tools are listed in order."""
+        """Multiple tools are listed in alphabetical filename order."""
         reg = make_registry(tmp_path, [TOOL_WITH_MIXED_PARAMS, TOOL_NO_PARAMS])
         tools = reg.list_tools()
 
         assert len(tools) == 2
-        assert tools[0]["name"] == "process"
-        assert tools[1]["name"] == "ping"
+        names = {t["name"] for t in tools}
+        assert names == {"process", "ping"}
 
     def test_no_params_tool(self, tmp_path):
         """Tool with empty parameters gives empty properties and required."""
@@ -226,7 +234,6 @@ class TestCallTool:
         registry.call_tool("process", {
             "input_file": "in.csv",
             "output_file": "out.csv",
-            # threshold omitted — should NOT appear in command
         })
 
         cmd = mock_run.call_args[0][0]
@@ -244,38 +251,80 @@ class TestCallTool:
 
 
 # ---------------------------------------------------------------------------
+# save_tool
+# ---------------------------------------------------------------------------
+
+class TestSaveTool:
+
+    def test_add_new_tool(self, empty_registry):
+        """Saving a new tool creates a skill file."""
+        empty_registry.save_tool(TOOL_NO_PARAMS)
+
+        tool = empty_registry.get_tool("ping")
+        assert tool is not None
+        assert tool["name"] == "ping"
+        assert tool["executable"] == "echo pong"
+
+    def test_add_returns_added(self, empty_registry):
+        """save_tool returns 'added' for new tools."""
+        assert empty_registry.save_tool(TOOL_NO_PARAMS) == "added"
+
+    def test_update_returns_updated(self, empty_registry):
+        """save_tool returns 'updated' when overwriting an existing tool."""
+        empty_registry.save_tool(TOOL_NO_PARAMS)
+        assert empty_registry.save_tool(TOOL_NO_PARAMS) == "updated"
+
+    def test_update_preserves_body(self, empty_registry):
+        """Updating a tool preserves any hand-edited markdown body."""
+        skill_path = empty_registry.skills_dir / "ping.md"
+        spec = TOOL_NO_PARAMS
+        fm = __import__("yaml").dump(spec, default_flow_style=False, sort_keys=False)
+        skill_path.write_text(f"---\n{fm}---\n\n# Custom docs written by hand.\n")
+
+        updated = {**spec, "description": "Updated description"}
+        empty_registry.save_tool(updated)
+
+        content = skill_path.read_text()
+        assert "Custom docs written by hand." in content
+
+    def test_update_overwrites_frontmatter(self, empty_registry):
+        """Updating a tool writes the new spec into the frontmatter."""
+        empty_registry.save_tool(TOOL_NO_PARAMS)
+        updated = {**TOOL_NO_PARAMS, "description": "New description"}
+        empty_registry.save_tool(updated)
+
+        tool = empty_registry.get_tool("ping")
+        assert tool["description"] == "New description"
+
+
+# ---------------------------------------------------------------------------
 # Runtime isolation
 # ---------------------------------------------------------------------------
 
 class TestRuntimeIsolation:
 
     def test_source_unchanged_after_init(self, tmp_path):
-        """Source registry is not modified; runtime copy is separate."""
-        source_path = tmp_path / "registry.yaml"
-        source_content = yaml.dump({"tools": [TOOL_NO_PARAMS]}, sort_keys=False)
-        source_path.write_text(source_content)
+        """Source skills directory is not modified; runtime copy is separate."""
+        source_dir = tmp_path / "source_skills"
+        source_dir.mkdir()
+        _write_skill(source_dir, TOOL_NO_PARAMS)
 
         runtime_dir = tmp_path / "runtime"
         reg = ToolRegistry(
-            source_registry=str(source_path),
+            source_skills_dir=str(source_dir),
             runtime_dir=str(runtime_dir),
         )
 
-        # Modify runtime copy
-        runtime_data = reg._load_registry()
-        runtime_data["tools"].append({
-            "name": "new_tool",
-            "description": "added",
-            "executable": "echo",
-            "parameters": {},
-        })
-        reg._save_registry(runtime_data)
+        # Add a tool to runtime
+        reg.save_tool(TOOL_WITH_MIXED_PARAMS)
 
         # Source should be unchanged
-        assert source_path.read_text() == source_content
+        source_files = list(source_dir.glob("*.md"))
+        assert len(source_files) == 1
+        assert source_files[0].stem == "ping"
 
-        # Runtime should have the new tool
-        assert len(reg._load_registry()["tools"]) == 2
+        # Runtime should have both tools
+        assert len(reg.list_tools()) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -302,56 +351,32 @@ class TestProvenance:
 
 
 # ---------------------------------------------------------------------------
-# Default Registry
+# Default skills
 # ---------------------------------------------------------------------------
 
-class TestDefaultRegistry:
-    """Validate the bundled registry.yaml that ships with the package."""
+class TestDefaultSkills:
+    """Validate the skill files that ship with the package."""
 
-    def test_default_registry_is_valid_yaml(self):
-        """The shipped registry.yaml must parse without errors."""
-        registry_path = ToolRegistry._DEFAULT_REGISTRY
-        assert registry_path.exists(), f"Default registry not found at {registry_path}"
+    def test_skills_directory_exists(self):
+        """The package ships a skills directory."""
+        assert ToolRegistry._PACKAGE_SKILLS_DIR.exists()
+        assert ToolRegistry._PACKAGE_SKILLS_DIR.is_dir()
 
-        with open(registry_path) as f:
-            data = yaml.safe_load(f)
+    def test_skills_are_valid(self):
+        """Every skill file must parse cleanly and have required fields."""
+        skill_files = list(ToolRegistry._PACKAGE_SKILLS_DIR.glob("*.md"))
+        assert len(skill_files) > 0, "No skill files found in package"
 
-        assert "tools" in data
-        assert len(data["tools"]) > 0
+        for path in skill_files:
+            tool = ToolRegistry._parse_skill_file(path)
+            assert tool.get("name"), f"{path.name}: missing 'name'"
+            assert tool.get("description"), f"{path.name}: missing 'description'"
+            assert tool.get("executable"), f"{path.name}: missing 'executable'"
+            assert "parameters" in tool, f"{path.name}: missing 'parameters'"
 
-    def test_default_registry_round_trips(self):
-        """The shipped registry.yaml must survive a dump/reload cycle.
-
-        This is critical because save_tool_spec reads and re-dumps the
-        registry. If the YAML contains syntax that doesn't round-trip
-        cleanly (e.g., unquoted colons in values), writes will corrupt it.
-        """
-        with open(ToolRegistry._DEFAULT_REGISTRY) as f:
-            data = yaml.safe_load(f)
-
-        dumped = yaml.dump(data, default_flow_style=False, sort_keys=False)
-        reloaded = yaml.safe_load(dumped)
-
-        assert len(reloaded["tools"]) == len(data["tools"])
-        original_names = [t["name"] for t in data["tools"]]
-        reloaded_names = [t["name"] for t in reloaded["tools"]]
-        assert original_names == reloaded_names
-
-    def test_default_registry_tools_have_required_fields(self):
-        """Every tool in the default registry must have name, description,
-        executable, and parameters."""
-        with open(ToolRegistry._DEFAULT_REGISTRY) as f:
-            data = yaml.safe_load(f)
-
-        for tool in data["tools"]:
-            assert "name" in tool, f"Tool missing 'name': {tool}"
-            assert "description" in tool, f"Tool {tool['name']} missing 'description'"
-            assert "executable" in tool, f"Tool {tool['name']} missing 'executable'"
-            assert "parameters" in tool, f"Tool {tool['name']} missing 'parameters'"
-
-    def test_default_registry_init_fallback(self, tmp_path):
-        """ToolRegistry with no source_registry falls back to default."""
-        reg = ToolRegistry(source_registry=None, runtime_dir=str(tmp_path / "rt"))
+    def test_default_init_fallback(self, tmp_path):
+        """ToolRegistry with no source_skills_dir falls back to package skills."""
+        reg = ToolRegistry(source_skills_dir=None, runtime_dir=str(tmp_path / "rt"))
         tools = reg.list_tools()
         assert len(tools) > 0
         names = [t["name"] for t in tools]

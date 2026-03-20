@@ -1,10 +1,5 @@
 {
   "mcpServers": {
-    "dsagt-pipeline": {
-      "command": "uv",
-      "args": ["run", "dsagt-pipeline-server"],
-      "disabled": false
-    },
     "dsagt-registry": {
       "command": "uv",
       "args": ["run", "dsagt-registry-server"],

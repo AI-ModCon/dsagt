@@ -63,7 +63,6 @@ From DSAGT project root:
 
 ```bash
 goose session \
-  --with-extension 'uv run dsagt-pipeline-server' \
   --with-extension 'uv run dsagt-registry-server' \
   --with-extension 'uv run dsagt-knowledge-server'
 ```

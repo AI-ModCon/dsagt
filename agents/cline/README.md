@@ -33,12 +33,6 @@ VS Code must be launched from a terminal where this variable is set, or you can 
 ```json
 {
   "mcpServers": {
-    "dsagt-pipeline": {
-      "command": "uv",
-      "args": ["run", "dsagt-pipeline-server"],
-      "disabled": false,
-      "alwaysAllow": []
-    },
     "dsagt-registry": {
       "command": "uv",
       "args": ["run", "dsagt-registry-server"],
@@ -81,7 +75,7 @@ To customize paths, add flags to `args`. For example:
 ```json
 {
   "command": "uv",
-  "args": ["run", "dsagt-pipeline-server", "--registry", "/absolute/path/to/registry.yaml"],
+  "args": ["run", "dsagt-registry-server", "--runtime-dir", "/absolute/path/to/session"],
   "disabled": false,
   "alwaysAllow": []
 }
@@ -108,9 +102,9 @@ To auto-approve specific tools so Cline doesn't prompt for each call, add tool n
 ```json
 {
   "command": "uv",
-  "args": ["run", "dsagt-pipeline-server"],
+  "args": ["run", "dsagt-registry-server"],
   "disabled": false,
-  "alwaysAllow": ["list_tools"]
+  "alwaysAllow": ["get_registry", "search_registry"]
 }
 ```
 
@@ -142,7 +136,7 @@ Click **MCP Servers** in the Cline panel to check server status. If a server sho
 Verify uv can find the server commands from within VS Code's integrated terminal:
 
 ```bash
-uv run which dsagt-pipeline-server
+uv run which dsagt-registry-server
 ```
 
 ### Python/node version managers (pyenv, nvm, fnm)

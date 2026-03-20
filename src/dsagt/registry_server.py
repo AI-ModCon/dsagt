@@ -4,23 +4,23 @@ DSAGT Registry MCP Server
 Provides tools for building a tool registry by reading documentation,
 fetching web resources, and running commands to extract tool specifications.
 
-The registry is saved in YAML format compatible with the DSAGT pipeline server.
+Tool specs are saved as skill markdown files in the runtime skills directory.
 
 Usage:
     dsagt-registry-server
-    dsagt-registry-server --registry ./my_registry.yaml
+    dsagt-registry-server --runtime-dir ./my_session
 """
 
 import argparse
 import asyncio
 import subprocess
 import sys
-from pathlib import Path
 
 import httpx
 import yaml
 
 from dsagt.mcp_utils import create_server, run_stdio, text_result, types
+from dsagt.registry import ToolRegistry
 
 
 def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
@@ -47,7 +47,7 @@ def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
         return "Error: 'uv' command not found. Install uv: https://github.com/astral-sh/uv"
 
 
-def create_registry_server(registry_path: Path):
+def create_registry_server(registry: ToolRegistry):
     """Create and configure the MCP server."""
     server = create_server("registry")
 
@@ -98,13 +98,13 @@ def create_registry_server(registry_path: Path):
             ),
             types.Tool(
                 name="save_tool_spec",
-                description="Save a tool specification to the registry",
+                description="Save a tool specification to the registry as a skill file",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "spec": {
                             "type": "object",
-                            "description": "Tool specification matching DSAGT registry schema",
+                            "description": "Tool specification",
                             "properties": {
                                 "name": {
                                     "type": "string",
@@ -165,7 +165,7 @@ def create_registry_server(registry_path: Path):
             ),
             types.Tool(
                 name="search_registry",
-                description="Search for tools in the registry by name or category",
+                description="Search for tools in the registry by name or description",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -192,6 +192,7 @@ def create_registry_server(registry_path: Path):
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         if name == "read_file":
+            from pathlib import Path
             path = Path(arguments["path"])
             try:
                 content = path.read_text()
@@ -203,7 +204,6 @@ def create_registry_server(registry_path: Path):
             url = arguments["url"]
             method = arguments.get("method", "GET")
             headers = arguments.get("headers", {})
-
             try:
                 async with httpx.AsyncClient(follow_redirects=True) as client:
                     response = await client.request(
@@ -220,7 +220,6 @@ def create_registry_server(registry_path: Path):
             command = arguments["command"]
             args = arguments.get("args", [])
             timeout = arguments.get("timeout", 10)
-
             try:
                 result = subprocess.run(
                     [command] + args,
@@ -228,16 +227,13 @@ def create_registry_server(registry_path: Path):
                     text=True,
                     timeout=timeout,
                 )
-
                 output = ""
                 if result.stdout:
                     output += f"STDOUT:\n{result.stdout}\n"
                 if result.stderr:
                     output += f"STDERR:\n{result.stderr}\n"
                 output += f"\nReturn code: {result.returncode}"
-
                 return text_result(output)
-
             except subprocess.TimeoutExpired:
                 return text_result(f"Command timed out after {timeout} seconds")
             except FileNotFoundError:
@@ -247,130 +243,79 @@ def create_registry_server(registry_path: Path):
 
         elif name == "save_tool_spec":
             spec = arguments["spec"]
-
             try:
-                if registry_path.exists():
-                    with open(registry_path) as f:
-                        registry = yaml.safe_load(f) or {}
-                else:
-                    registry = {}
-
-                if "tools" not in registry:
-                    registry["tools"] = []
-
-                existing_idx = None
-                for idx, tool in enumerate(registry["tools"]):
-                    if tool["name"] == spec["name"]:
-                        existing_idx = idx
-                        break
-
-                if existing_idx is not None:
-                    registry["tools"][existing_idx] = spec
-                    action = "updated"
-                else:
-                    registry["tools"].append(spec)
-                    action = "added"
-
-                with open(registry_path, "w") as f:
-                    yaml.dump(registry, f, default_flow_style=False, sort_keys=False)
-
+                action = registry.save_tool(spec)
+                tool_count = len(registry.list_tools_raw())
                 message = (
                     f"Tool '{spec['name']}' {action} successfully. "
-                    f"Registry now contains {len(registry['tools'])} tools."
+                    f"Registry now contains {tool_count} tools."
                 )
-
                 deps = spec.get("dependencies", [])
                 if deps:
                     dep_result = _install_dependencies(deps)
                     message += f"\n\nDependency installation:\n{dep_result}"
-
                 return text_result(message)
             except Exception as e:
                 return text_result(f"Error saving tool spec: {e}")
 
         elif name == "get_registry":
-            try:
-                if not registry_path.exists():
-                    return text_result("Registry is empty. No tools registered yet.")
-
-                with open(registry_path) as f:
-                    registry = yaml.safe_load(f)
-
-                return text_result(
-                    yaml.dump(registry, default_flow_style=False, sort_keys=False)
-                )
-            except Exception as e:
-                return text_result(f"Error reading registry: {e}")
+            tools = registry.list_tools_raw()
+            if not tools:
+                return text_result("Registry is empty. No tools registered yet.")
+            return text_result(
+                yaml.dump({"tools": tools}, default_flow_style=False, sort_keys=False)
+            )
 
         elif name == "search_registry":
             query = arguments.get("query", "").lower()
             category = arguments.get("category", "").lower()
 
-            try:
-                if not registry_path.exists():
-                    return text_result("Registry is empty.")
+            tools = registry.list_tools_raw()
+            if not tools:
+                return text_result("Registry is empty.")
 
-                with open(registry_path) as f:
-                    registry = yaml.safe_load(f)
+            results = []
+            for tool in tools:
+                if query and query not in tool.get("name", "").lower() and query not in tool.get("description", "").lower():
+                    continue
+                if category and tool.get("category", "").lower() != category:
+                    continue
+                results.append(tool)
 
-                results = []
-                for tool in registry.get("tools", []):
-                    matches = True
-                    if query and query not in tool["name"].lower() and query not in tool["description"].lower():
-                        matches = False
-                    if category and tool.get("category", "").lower() != category:
-                        matches = False
-
-                    if matches:
-                        results.append(tool)
-
-                if results:
-                    return text_result(
-                        f"Found {len(results)} tool(s):\n\n"
-                        + yaml.dump(results, default_flow_style=False, sort_keys=False)
-                    )
-                else:
-                    return text_result("No tools found matching the criteria.")
-            except Exception as e:
-                return text_result(f"Error searching registry: {e}")
+            if results:
+                return text_result(
+                    f"Found {len(results)} tool(s):\n\n"
+                    + yaml.dump(results, default_flow_style=False, sort_keys=False)
+                )
+            return text_result("No tools found matching the criteria.")
 
         elif name == "install_dependencies":
             tool_name = arguments.get("tool_name")
-            try:
-                if not registry_path.exists():
-                    return text_result("Registry is empty. No tools registered yet.")
+            tools = registry.list_tools_raw()
+            if not tools:
+                return text_result("Registry is empty. No tools registered yet.")
 
-                with open(registry_path) as f:
-                    registry = yaml.safe_load(f)
+            all_deps = []
+            tools_with_deps = []
+            for tool in tools:
+                if tool_name and tool.get("name") != tool_name:
+                    continue
+                tool_deps = tool.get("dependencies", [])
+                if tool_deps:
+                    all_deps.extend(tool_deps)
+                    tools_with_deps.append(tool["name"])
 
-                all_deps = []
-                tools_with_deps = []
-                for tool in registry.get("tools", []):
-                    if tool_name and tool["name"] != tool_name:
-                        continue
-                    tool_deps = tool.get("dependencies", [])
-                    if tool_deps:
-                        all_deps.extend(tool_deps)
-                        tools_with_deps.append(tool["name"])
+            if not all_deps:
+                scope = f"tool '{tool_name}'" if tool_name else "registry"
+                return text_result(f"No dependencies declared in {scope}.")
 
-                if not all_deps:
-                    scope = f"tool '{tool_name}'" if tool_name else "registry"
-                    return text_result(f"No dependencies declared in {scope}.")
+            seen = set()
+            unique_deps = [d for d in all_deps if not (d in seen or seen.add(d))]
 
-                # Deduplicate while preserving order
-                seen = set()
-                unique_deps = []
-                for dep in all_deps:
-                    if dep not in seen:
-                        seen.add(dep)
-                        unique_deps.append(dep)
-
-                result = _install_dependencies(unique_deps)
-                return text_result(
-                    f"Installing dependencies for: {', '.join(tools_with_deps)}\n\n{result}"
-                )
-            except Exception as e:
-                return text_result(f"Error installing dependencies: {e}")
+            result = _install_dependencies(unique_deps)
+            return text_result(
+                f"Installing dependencies for: {', '.join(tools_with_deps)}\n\n{result}"
+            )
 
         raise ValueError(f"Unknown tool: {name}")
 
@@ -381,22 +326,22 @@ def main():
     """Entry point for the registry builder server."""
     parser = argparse.ArgumentParser(description="DSAGT Registry Builder MCP Server")
     parser.add_argument(
-        "--registry",
-        default="./runtime/registry.yaml",
-        help="Path to the registry YAML file to create/update (default: ./runtime/registry.yaml)",
-    )
-    parser.add_argument(
         "--runtime-dir",
         default="./runtime",
         help="Runtime directory (default: ./runtime)",
     )
+    parser.add_argument(
+        "--source-skills-dir",
+        default=None,
+        help="Source skills directory to seed from (default: bundled skills)",
+    )
     args = parser.parse_args()
 
-    # Ensure registry parent directory exists
-    registry_path = Path(args.registry)
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
-
-    server = create_registry_server(registry_path)
+    registry = ToolRegistry(
+        source_skills_dir=args.source_skills_dir,
+        runtime_dir=args.runtime_dir,
+    )
+    server = create_registry_server(registry)
     asyncio.run(run_stdio(server, "registry"))
 
 

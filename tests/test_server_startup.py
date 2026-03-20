@@ -173,40 +173,13 @@ pytestmark = pytest.mark.skipif(not _uv_available, reason="uv not available")
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestPipelineServerStartup:
-
-    def test_starts_and_lists_tools(self, tmp_path):
-        """Pipeline server starts, completes MCP handshake, and lists tools."""
-        registry = tmp_path / "registry.yaml"
-        registry.write_text("tools: []\n")
-        runtime = tmp_path / "runtime"
-
-        proc = _start_server([
-            sys.executable, "-m", "dsagt.pipeline_server",
-            "--registry", str(registry),
-            "--runtime-dir", str(runtime),
-        ])
-        try:
-            resp = _mcp_initialize(proc)
-            assert "result" in resp, f"Init failed: {resp}"
-
-            tools_resp = _mcp_list_tools(proc)
-            assert "result" in tools_resp, f"list_tools failed: {tools_resp}"
-            assert "tools" in tools_resp["result"]
-        finally:
-            proc.terminate()
-            proc.wait(timeout=5)
-
-
 class TestRegistryServerStartup:
 
     def test_starts_and_lists_tools(self, tmp_path):
         """Registry server starts, completes MCP handshake, and lists tools."""
-        registry = tmp_path / "registry.yaml"
-
         proc = _start_server([
             sys.executable, "-m", "dsagt.registry_server",
-            "--registry", str(registry),
+            "--runtime-dir", str(tmp_path / "runtime"),
         ])
         try:
             resp = _mcp_initialize(proc)

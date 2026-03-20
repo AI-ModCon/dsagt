@@ -98,7 +98,7 @@ This makes user's existing work part of the pipeline.
 
 Survey what's available before proceeding:
 ```
-list_tools()
+get_registry()
 kb_list_collections()
 ```
 
@@ -124,7 +124,7 @@ For **each data manipulation step**, cycle through:
 │        implementation examples, metrics definitions        │
 │                                                             │
 │   3. APPLY tool preference hierarchy                        │
-│      - list_tools() — existing tool? Use it.               │
+│      - get_registry() — list registered tools               │
 │      - kb_search for packages — leverage if available       │
 │      - Otherwise, design custom implementation             │
 │                                                             │
@@ -211,10 +211,16 @@ Both are registered in the session registry and become part of the reproducible 
 
 ## TOOL REFERENCE
 
-### Pipeline Server
-- `list_tools()` — Show registered tools
-- `register_tool(name, description, executable, parameters)` — Add tool
-- `[tool_name](...)` — Call any registered tool
+### Tool Skills
+- Skills live in `runtime/skills/*.md` — read a skill file to see the exact shell command and parameters
+- Execute tools directly via shell (developer extension `shell` tool)
+- List available tools: `ls runtime/skills/` or `get_registry()`
+
+### Registry Server
+- `save_tool_spec(spec)` — Register a new tool (creates a skill file in `runtime/skills/`)
+- `get_registry()` — List all registered tools
+- `search_registry(query)` — Find tools by name or description
+- `install_dependencies(tool_name)` — Install Python deps for a tool
 
 ### Knowledge Server
 - `kb_list_collections()` — Available collections
