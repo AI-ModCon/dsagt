@@ -1,4 +1,4 @@
-"""Knowledge base for DSAGT agent."""
+"""Knowledge base for DSAGT agent — with pluggable embedder & vector-DB routing."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Iterator
 
@@ -25,8 +26,45 @@ CODE_LANGUAGES = {
 }
 
 
-class LocalEmbeddingClient:
-    """Generate text embeddings using a local sentence-transformers model."""
+class BaseEmbeddingClient(ABC):
+    """Common interface for all embedding backends."""
+
+    @abstractmethod
+    def embed(self, texts: list[str]) -> np.ndarray:
+        """Return float32 array of shape (n_texts, dim), L2-normalized."""
+
+    def close(self) -> None:
+        pass
+
+
+class BaseVectorIndex(ABC):
+    """Common interface for all vector-index backends."""
+
+    @abstractmethod
+    def add(self, embeddings: np.ndarray) -> None:
+        """Append pre-normalized embeddings."""
+
+    @abstractmethod
+    def search(self, query_vec: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        """Return (scores, int_indices) arrays of length k."""
+
+    @abstractmethod
+    def save(self, directory: Path) -> None:
+        """Persist index to *directory*."""
+
+    @classmethod
+    @abstractmethod
+    def load(cls, directory: Path) -> "BaseVectorIndex":
+        """Load index from *directory*."""
+
+    @property
+    @abstractmethod
+    def size(self) -> int:
+        """Number of vectors stored."""
+
+
+class LocalEmbeddingClient(BaseEmbeddingClient):
+    """sentence-transformers, runs fully offline."""
 
     def __init__(
         self,
@@ -35,14 +73,12 @@ class LocalEmbeddingClient:
         device: str | None = None,
     ):
         from sentence_transformers import SentenceTransformer
-
         self.batch_size = batch_size
         self._model = SentenceTransformer(model, device=device)
         logger.info("Loaded local embedding model: %s (dim=%d)",
-                     model, self._model.get_sentence_embedding_dimension())
+                    model, self._model.get_sentence_embedding_dimension())
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        """Embed texts, returns array of shape (n_texts, embedding_dim)."""
         if not texts:
             return np.array([], dtype=np.float32)
         return self._model.encode(
@@ -52,12 +88,9 @@ class LocalEmbeddingClient:
             normalize_embeddings=True,
         ).astype(np.float32)
 
-    def close(self):
-        pass
 
-
-class APIEmbeddingClient:
-    """Generate text embeddings via OpenAI-compatible API."""
+class APIEmbeddingClient(BaseEmbeddingClient):
+    """OpenAI-compatible REST API."""
 
     def __init__(
         self,
@@ -70,7 +103,7 @@ class APIEmbeddingClient:
         import httpx
 
         self.model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small-project")
-        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://ai-incubator-api.pnnl.gov")
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
         self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
         self.batch_size = batch_size
 
@@ -80,150 +113,423 @@ class APIEmbeddingClient:
         self._client = httpx.Client(timeout=timeout)
 
     def _embed_batch(self, texts: list[str]) -> np.ndarray:
-        """Embed a single batch of texts."""
         response = self._client.post(
             f"{self.base_url.rstrip('/')}/embeddings",
             headers={"Authorization": f"Bearer {self.api_key}"},
             json={"input": texts, "model": self.model},
         )
         response.raise_for_status()
-
         data = sorted(response.json()["data"], key=lambda x: x["index"])
         return np.array([d["embedding"] for d in data], dtype=np.float32)
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        """Embed texts with batching, returns array of shape (n_texts, embedding_dim)."""
         if not texts:
             return np.array([], dtype=np.float32)
-
         if len(texts) <= self.batch_size:
             return self._embed_batch(texts)
-
-        all_embeddings = []
+        batches = []
         for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
+            batch = texts[i : i + self.batch_size]
             logger.info("Embedding batch %d/%d (%d texts)",
                         i // self.batch_size + 1,
                         (len(texts) + self.batch_size - 1) // self.batch_size,
                         len(batch))
-            embeddings = self._embed_batch(batch)
-            all_embeddings.append(embeddings)
+            batches.append(self._embed_batch(batch))
+        return np.vstack(batches)
 
-        return np.vstack(all_embeddings)
-
-    def close(self):
+    def close(self) -> None:
         self._client.close()
+
+class FAISSIndex(BaseVectorIndex):
+    """Inner-product FAISS flat index (cosine similarity on L2-normed vecs)."""
+
+    _FILENAME = "index.faiss"
+
+    def __init__(self, dim: int | None = None):
+        self._dim = dim
+        self._index = None  # lazy-init on first add
+
+    def _ensure_init(self, dim: int) -> None:
+        if self._index is None:
+            import faiss
+            self._dim = dim
+            self._index = faiss.IndexFlatIP(dim)
+
+    def add(self, embeddings: np.ndarray) -> None:
+        self._ensure_init(embeddings.shape[1])
+        self._index.add(embeddings)
+
+    def search(self, query_vec: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        k = min(k, self._index.ntotal)
+        scores, indices = self._index.search(query_vec.reshape(1, -1), k)
+        return scores[0], indices[0]
+
+    def save(self, directory: Path) -> None:
+        import faiss
+        faiss.write_index(self._index, str(directory / self._FILENAME))
+
+    @classmethod
+    def load(cls, directory: Path) -> "FAISSIndex":
+        import faiss
+        obj = cls()
+        obj._index = faiss.read_index(str(directory / cls._FILENAME))
+        obj._dim = obj._index.d
+        return obj
+
+    @property
+    def size(self) -> int:
+        return 0 if self._index is None else self._index.ntotal
+
+
+class ChromaIndex(BaseVectorIndex):
+    """ChromaDB-backed index.  Requires ``chromadb`` package."""
+
+    _META_FILE = "chroma_ids.json"  # maps int position → chroma id
+
+    def __init__(self, collection_name: str, persist_dir: Path | None = None):
+        import chromadb
+
+        self._name = collection_name
+        self._persist_dir = persist_dir
+        if persist_dir:
+            self._client = chromadb.PersistentClient(path=str(persist_dir))
+        else:
+            # chromadb.Client() was removed in v0.4+; use EphemeralClient for in-memory
+            self._client = chromadb.EphemeralClient()
+        self._col = self._client.get_or_create_collection(
+            collection_name, metadata={"hnsw:space": "cosine"}
+        )
+        self._ids: list[str] = []  # positional id list for int-index mapping
+
+    # ChromaDB stores ids internally; we maintain a positional list so that
+    # returned integer indices are consistent with the chunk list.
+    def add(self, embeddings: np.ndarray) -> None:
+        start = len(self._ids)
+        new_ids = [str(start + i) for i in range(len(embeddings))]
+        self._ids.extend(new_ids)
+        self._col.add(ids=new_ids, embeddings=embeddings.tolist())
+
+    def search(self, query_vec: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        k = min(k, len(self._ids))
+        results = self._col.query(query_embeddings=[query_vec.tolist()], n_results=k)
+        chroma_ids = results["ids"][0]
+        distances = results["distances"][0]  # cosine distance (0=identical)
+        scores = np.array([1.0 - d for d in distances], dtype=np.float32)
+        indices = np.array([int(cid) for cid in chroma_ids], dtype=np.int64)
+        return scores, indices
+
+    def save(self, directory: Path) -> None:
+        # ChromaDB PersistentClient auto-saves; just write id list for rebuild.
+        (directory / self._META_FILE).write_text(json.dumps(self._ids))
+
+    @classmethod
+    def load(cls, directory: Path) -> "ChromaIndex":
+        meta_path = directory / cls._META_FILE
+        name = directory.name
+        obj = cls(collection_name=name, persist_dir=directory)
+        if meta_path.exists():
+            obj._ids = json.loads(meta_path.read_text())
+        return obj
+
+    @property
+    def size(self) -> int:
+        return len(self._ids)
+
+
+# map short names to embedding client constructors
+EMBEDDER_REGISTRY: dict[str, type[BaseEmbeddingClient]] = {
+    "local": LocalEmbeddingClient,
+    "api": APIEmbeddingClient,
+}
+
+# map short names to vector-index constructors
+VECTORINDEX_REGISTRY: dict[str, type[BaseVectorIndex]] = {
+    "faiss": FAISSIndex,
+    "chroma": ChromaIndex,
+}
+
+
+def _make_embedder(backend: str, **kwargs) -> BaseEmbeddingClient:
+    backend = backend.lower()
+    if backend not in EMBEDDER_REGISTRY:
+        raise ValueError(f"Unknown embedding backend '{backend}'. "
+                         f"Choose from: {list(EMBEDDER_REGISTRY)}")
+    return EMBEDDER_REGISTRY[backend](**kwargs)
+
+
+def _make_index(backend: str, **kwargs) -> BaseVectorIndex:
+    backend = backend.lower()
+    if backend not in VECTORINDEX_REGISTRY:
+        raise ValueError(f"Unknown vector-index backend '{backend}'. "
+                         f"Choose from: {list(VECTORINDEX_REGISTRY)}")
+    return VECTORINDEX_REGISTRY[backend](**kwargs)
+
+
+class CollectionRoute:
+    """
+    Describes which embedding client and vector-index backend to use for a
+    named collection.
+
+    Parameters
+    ----------
+    embedding_backend : str
+        Key in EMBEDDER_REGISTRY, e.g. ``"local"`` or ``"api"``.
+    vector_db : str
+        Key in VECTORINDEX_REGISTRY, e.g. ``"faiss"`` or ``"chroma"``.
+    embedder_kwargs : dict
+        Extra kwargs forwarded to the embedding client constructor.
+    index_kwargs : dict
+        Extra kwargs forwarded to the vector-index constructor.
+    description : str
+        Human-readable note shown in ``list_collections()`` when no
+        DESCRIPTION.md file exists.
+    """
+
+    def __init__(
+        self,
+        embedding_backend: str = "api",
+        vector_db: str = "faiss",
+        embedder_kwargs: dict | None = None,
+        index_kwargs: dict | None = None,
+        description: str = "",
+    ):
+        self.embedding_backend = embedding_backend
+        self.vector_db = vector_db
+        self.embedder_kwargs: dict = embedder_kwargs or {}
+        self.index_kwargs: dict = index_kwargs or {}
+        self.description = description
+
+    def to_dict(self) -> dict:
+        return {
+            "embedding_backend": self.embedding_backend,
+            "vector_db": self.vector_db,
+            "embedder_kwargs": self.embedder_kwargs,
+            "index_kwargs": self.index_kwargs,
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "CollectionRoute":
+        return cls(**d)
+
+
+# default route used when no collection-specific route is registered.
+DEFAULT_ROUTE = CollectionRoute(
+    embedding_backend=os.getenv("DSAGT_EMBEDDING_BACKEND", "api"),
+    vector_db="faiss",
+    embedder_kwargs={"model": os.getenv("EMBEDDING_MODEL", "nomic-embed-text")},
+)
 
 
 class KnowledgeBase:
     """
-    Collection-based document retrieval.
-    
-    Each collection is a folder with its own FAISS index.
-    Include DESCRIPTION.md in source folders for agent discovery.
-    
-    Embedding backend:
-        - "local" (default): Uses sentence-transformers locally. Fast, no API needed.
-        - "api": Uses OpenAI-compatible API. Requires LLM_API_KEY env var.
+    Collection-based document retrieval with pluggable embedder & vector-DB routing.
+
+    Each collection lives in ``<index_dir>/<collection_name>/`` and may use a
+    *different* embedding model and vector-index backend.  Routing is controlled
+    by a dictionary of :class:`CollectionRoute` objects keyed on collection name.
+
+    Quick-start
+    -----------
+    .. code-block:: python
+
+        from knowledge_base import KnowledgeBase, CollectionRoute
+
+        kb = KnowledgeBase(
+            index_dir="./kb_store",
+            routes={
+                # GPU-heavy research docs → local model + FAISS
+                "research": CollectionRoute(
+                    embedding_backend="local",
+                    vector_db="faiss",
+                    embedder_kwargs={"model": "BAAI/bge-base-en-v1.5"},
+                ),
+                # Fast live ingestion → API + Chroma
+                "support": CollectionRoute(
+                    embedding_backend="api",
+                    vector_db="chroma",
+                    embedder_kwargs={"model": "text-embedding-3-small"},
+                ),
+            },
+        )
+
+        kb.ingest("./docs/research", "research")
+        results = kb.search("transformer architecture", "research")
+
+    Embedding backends
+    ------------------
+    ``"local"``
+        sentence-transformers, no network required.
+    ``"api"``
+        OpenAI-compatible REST API.  Reads ``LLM_API_KEY`` env var.
+
+    Vector-index backends
+    ---------------------
+    ``"faiss"``
+        Flat inner-product index (default).  No extra service needed.
+    ``"chroma"``
+        ChromaDB HNSW index.  ``pip install chromadb``.
     """
-    
+
     FILE_TYPES = ["pdf", "md", "txt", "py", "docx", "json", "yaml", "yml"]
-    
+    _ROUTE_FILE = "route.json"
+
     def __init__(
         self,
         index_dir: str | Path,
         chunk_size: int = 1024,
         chunk_overlap: int = 128,
         rerank_model: str = "BAAI/bge-reranker-v2-m3",
-        embedding_backend: str = "api",
-        embedding_model: str | None = None,
-        embedding_batch_size: int | None = None,
-        embedding_timeout: float = 300.0,
+        # Global default route (used when collection has no specific route)
+        default_embedder: str | None = None,
+        default_index: str | None = None,
+        # Per-collection routing registry
+        routes: dict[str, CollectionRoute] | None = None,
     ):
         self.index_dir = Path(index_dir)
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.rerank_model = rerank_model
-        
+
         self.index_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Select embedding backend
-        backend = os.getenv("DSAGT_EMBEDDING_BACKEND", embedding_backend).lower()
-        if backend == "local":
-            self._client = LocalEmbeddingClient(
-                model=embedding_model or "BAAI/bge-base-en-v1.5",
-                batch_size=embedding_batch_size or 256,
-            )
-        else:
-            self._client = APIEmbeddingClient(
-                model=embedding_model,
-                timeout=embedding_timeout,
-                batch_size=embedding_batch_size or 100,
-            )
-        
+
+        # Build default route
+        self._default_route = CollectionRoute(
+            embedding_backend=default_embedder or os.getenv("DSAGT_EMBEDDING_BACKEND", "api"),
+            vector_db=default_index or "faiss",
+            embedder_kwargs={"model": os.getenv("EMBEDDING_MODEL", "nomic-embed-text")},
+        )
+
+        # Per-collection route registry
+        self._routes: dict[str, CollectionRoute] = routes or {}
+
+        # Shared embedder cache: embedder_key → client instance
+        # Key is "<embedding_backend>|<sorted embedder_kwargs>" so identical configs share one client.
+        self._embedder_cache: dict[str, BaseEmbeddingClient] = {}
+
+        # Collection runtime cache: name → (BaseVectorIndex, list[dict])
+        self._cache: dict[str, tuple[BaseVectorIndex, list[dict]]] = {}
+
         self._reranker = None
-        self._cache: dict[str, tuple] = {}
-    
+
+    # route management
+
+    def register_route(self, collection: str, route: CollectionRoute) -> None:
+        """Register (or update) a routing rule for *collection*."""
+        self._routes[collection] = route
+        logger.info("Registered route for '%s': embedder=%s index=%s",
+                    collection, route.embedding_backend, route.vector_db)
+
+    def _get_route(self, collection: str) -> CollectionRoute:
+        return self._routes.get(collection, self._default_route)
+
+    def _get_embedder(self, route: CollectionRoute) -> BaseEmbeddingClient:
+        """Return (possibly cached) embedder matching *route*."""
+        key = f"{route.embedding_backend}|{sorted(route.embedder_kwargs.items())}"
+        if key not in self._embedder_cache:
+            self._embedder_cache[key] = _make_embedder(
+                route.embedding_backend, **route.embedder_kwargs
+            )
+        return self._embedder_cache[key]
+
     @property
     def collections(self) -> list[str]:
-        """Available collection names."""
-        return [p.name for p in self.index_dir.iterdir() 
-                if p.is_dir() and (p / "index.faiss").exists()]
-    
+        return [p.name for p in self.index_dir.iterdir() if p.is_dir() and
+                ((p / "index.faiss").exists() or (p / "chroma_ids.json").exists())]
+
     def list_collections(self) -> list[dict]:
-        """Collections with descriptions for agent discovery."""
         result = []
         for name in self.collections:
-            desc_path = self.index_dir / name / "DESCRIPTION.md"
-            description = desc_path.read_text() if desc_path.exists() else ""
-            result.append({"name": name, "description": description})
+            coll_dir = self.index_dir / name
+            desc_path = coll_dir / "DESCRIPTION.md"
+
+            # Ensure the persisted route is loaded into _routes so we always
+            # report the actual model/backend, not the server default.
+            if name not in self._routes:
+                persisted = self._load_route(name)
+                if persisted:
+                    self._routes[name] = persisted
+
+            route = self._routes.get(name, self._default_route)
+            description = (
+                desc_path.read_text() if desc_path.exists()
+                else route.description
+            )
+            result.append({
+                "name": name,
+                "description": description,
+                "embedding_backend": route.embedding_backend,
+                "embedding_model": route.embedder_kwargs.get("model", "default"),
+                "vector_db": route.vector_db,
+            })
         return result
-    
-    def ingest(self, folder: str | Path, collection_name: str | None = None, file_types: list[str] | None = None) -> dict:
+
+    def ingest(
+        self,
+        folder: str | Path,
+        collection_name: str | None = None,
+        file_types: list[str] | None = None,
+        route: CollectionRoute | None = None,
+    ) -> dict:
         """
-        Ingest folder as collection. Collection name = folder name.
-        
-        Copies DESCRIPTION.md from source folder if present.
+        Ingest *folder* as a new collection.
+
+        Parameters
+        ----------
+        folder : path
+            Source directory.
+        collection_name : str, optional
+            Defaults to folder name.
+        file_types : list[str], optional
+            Extensions to include (without leading dot).
+        route : CollectionRoute, optional
+            Override routing for this collection.  Persisted to disk so
+            subsequent ``search`` / ``append`` calls use the same backend.
         """
         folder = Path(folder)
         collection = collection_name or folder.name
         file_types = file_types or self.FILE_TYPES
-        
-        # Setup collection directory
+
+        # Register route (if provided) into memory
+        if route is not None:
+            self.register_route(collection, route)
+        active_route = self._get_route(collection)
+
         coll_dir = self.index_dir / collection
         coll_dir.mkdir(exist_ok=True)
-        
-        # Copy description if present
+
+        # Record source folder so the MCP server can detect re-ingests vs. conflicts.
+        (coll_dir / "source.txt").write_text(str(folder.resolve()))
+
         desc_src = folder / "DESCRIPTION.md"
         if desc_src.exists():
             (coll_dir / "DESCRIPTION.md").write_text(desc_src.read_text())
-        
-        # Collect and chunk files
+
         files = [f for ext in file_types for f in folder.glob(f"**/*.{ext}")]
         logger.info("Found %d files to process", len(files))
-        
+
         chunks = [chunk for f in files for chunk in self._chunk_file(f, collection)]
         logger.info("Created %d chunks", len(chunks))
-        
+
         if not chunks:
             return {"collection": collection, "files": 0, "chunks": 0}
-        
-        # Embed and normalize (with batching)
-        embeddings = self._client.embed([c["text"] for c in chunks])
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        embeddings = embeddings / np.where(norms > 0, norms, 1)
-        
-        # Create and save index (infer dimension from embeddings)
-        import faiss
-        embedding_dim = embeddings.shape[1]
-        index = faiss.IndexFlatIP(embedding_dim)
+
+        embedder = self._get_embedder(active_route)
+        embeddings = self._normalize(embedder.embed([c["text"] for c in chunks]))
+
+        index = _make_index(active_route.vector_db,
+                            **self._index_init_kwargs(active_route, coll_dir))
         index.add(embeddings)
-        faiss.write_index(index, str(coll_dir / "index.faiss"))
-        
+        index.save(coll_dir)
+
+        # Persist route AFTER index is built — guarantees route.json always
+        # reflects what was actually used, never overwritten by a racing job.
+        self._save_route(collection, active_route)
+
         with open(coll_dir / "chunks.jsonl", "w") as f:
             for chunk in chunks:
                 f.write(json.dumps(chunk) + "\n")
-        
+
         self._cache[collection] = (index, chunks)
         return {"collection": collection, "files": len(files), "chunks": len(chunks)}
 
@@ -233,33 +539,20 @@ class KnowledgeBase:
         paths: list[str | Path],
         file_types: list[str] | None = None,
     ) -> dict:
-        """
-        Append documents to an existing collection.
-
-        Accepts a list of file or folder paths. Folders are expanded
-        recursively using *file_types*. New chunks are embedded, added
-        to the existing FAISS index, and appended to chunks.jsonl.
-
-        Returns counts of files processed and chunks added.
-        """
-        import faiss
-
+        """Append documents to an existing collection."""
         file_types = file_types or self.FILE_TYPES
 
-        # Load existing index + chunks (creates cache entry)
         index, existing_chunks = self._load(collection)
+        active_route = self._get_route(collection)
         coll_dir = self.index_dir / collection
 
-        # Resolve paths → individual files
         files: list[Path] = []
         for p in paths:
             p = Path(p)
             if p.is_file():
                 files.append(p)
             elif p.is_dir():
-                files.extend(
-                    f for ext in file_types for f in p.glob(f"**/*.{ext}")
-                )
+                files.extend(f for ext in file_types for f in p.glob(f"**/*.{ext}"))
             else:
                 logger.warning("Path not found, skipping: %s", p)
 
@@ -267,43 +560,29 @@ class KnowledgeBase:
             return {"collection": collection, "files": 0, "chunks_added": 0,
                     "total_chunks": len(existing_chunks)}
 
-        logger.info("Appending %d files to collection '%s'", len(files), collection)
-
-        # Chunk new files
-        new_chunks = [
-            chunk for f in files for chunk in self._chunk_file(f, collection)
-        ]
-        logger.info("Created %d new chunks", len(new_chunks))
-
+        new_chunks = [chunk for f in files for chunk in self._chunk_file(f, collection)]
         if not new_chunks:
             return {"collection": collection, "files": len(files),
                     "chunks_added": 0, "total_chunks": len(existing_chunks)}
 
-        # Embed and normalize
-        embeddings = self._client.embed([c["text"] for c in new_chunks])
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        embeddings = embeddings / np.where(norms > 0, norms, 1)
-
-        # Add to existing FAISS index
+        embedder = self._get_embedder(active_route)
+        embeddings = self._normalize(embedder.embed([c["text"] for c in new_chunks]))
         index.add(embeddings)
-        faiss.write_index(index, str(coll_dir / "index.faiss"))
+        index.save(coll_dir)
 
-        # Append to chunks file
         with open(coll_dir / "chunks.jsonl", "a") as f:
             for chunk in new_chunks:
                 f.write(json.dumps(chunk) + "\n")
 
-        # Update cache
         all_chunks = existing_chunks + new_chunks
         self._cache[collection] = (index, all_chunks)
-
         return {
             "collection": collection,
             "files": len(files),
             "chunks_added": len(new_chunks),
             "total_chunks": len(all_chunks),
         }
-    
+
     def search(
         self,
         query: str,
@@ -311,58 +590,100 @@ class KnowledgeBase:
         top_k: int = 5,
         rerank: bool = False,
     ) -> list[dict]:
-        """Search a collection."""
+        """Search *collection* with *query*."""
         index, chunks = self._load(collection)
-        
-        # Embed and normalize query
-        query_emb = self._client.embed([query])[0]
-        query_emb = query_emb / np.linalg.norm(query_emb)
-        
-        # FAISS search
+        active_route = self._get_route(collection)
+        embedder = self._get_embedder(active_route)
+
+        query_emb = self._normalize(embedder.embed([query]))[0]
         search_k = min(top_k * 10 if rerank else top_k, len(chunks))
-        scores, indices = index.search(query_emb.reshape(1, -1), search_k)
-        
+        scores, indices = index.search(query_emb, search_k)
+
         results = [
-            {"chunk": chunks[i], "score": float(scores[0][j])}
-            for j, i in enumerate(indices[0]) if i >= 0
+            {"chunk": chunks[i], "score": float(scores[j])}
+            for j, i in enumerate(indices) if i >= 0
         ]
-        
+
         if rerank and results:
             return self._rerank(query, results, top_k)
         return results[:top_k]
-    
+
+    @staticmethod
+    def _normalize(arr: np.ndarray) -> np.ndarray:
+        norms = np.linalg.norm(arr, axis=-1, keepdims=True)
+        return arr / np.where(norms > 0, norms, 1)
+
+    def _index_init_kwargs(self, route: CollectionRoute, coll_dir: Path) -> dict:
+        """Extra kwargs needed by some index constructors at init time."""
+        if route.vector_db == "chroma":
+            return {"collection_name": coll_dir.name,
+                    "persist_dir": coll_dir, **route.index_kwargs}
+        return dict(route.index_kwargs)
+
+    def _save_route(self, collection: str, route: CollectionRoute) -> None:
+        coll_dir = self.index_dir / collection
+        coll_dir.mkdir(exist_ok=True)
+        (coll_dir / self._ROUTE_FILE).write_text(json.dumps(route.to_dict(), indent=2))
+
+    def _load_route(self, collection: str) -> CollectionRoute | None:
+        route_path = self.index_dir / collection / self._ROUTE_FILE
+        if route_path.exists():
+            return CollectionRoute.from_dict(json.loads(route_path.read_text()))
+        return None
+
+    def _load(self, name: str) -> tuple[BaseVectorIndex, list[dict]]:
+        """Load collection index + chunks (cached in memory)."""
+        if name in self._cache:
+            return self._cache[name]
+
+        coll_dir = self.index_dir / name
+        if not coll_dir.exists():
+            raise ValueError(f"Collection '{name}' not found")
+
+        # Restore persisted route if not already registered
+        if name not in self._routes:
+            persisted = self._load_route(name)
+            if persisted:
+                self._routes[name] = persisted
+
+        active_route = self._get_route(name)
+
+        # Pick correct loader
+        if active_route.vector_db == "chroma":
+            index = ChromaIndex.load(coll_dir)
+        else:
+            index = FAISSIndex.load(coll_dir)
+
+        with open(coll_dir / "chunks.jsonl") as f:
+            chunks = [json.loads(line) for line in f]
+
+        self._cache[name] = (index, chunks)
+        return index, chunks
+
     def _rerank(self, query: str, results: list[dict], top_k: int) -> list[dict]:
-        """Rerank results using cross-encoder."""
         if self._reranker is None:
             from sentence_transformers import CrossEncoder
             self._reranker = CrossEncoder(self.rerank_model, max_length=512)
-        
         pairs = [[query, r["chunk"]["text"]] for r in results]
         scores = self._reranker.predict(pairs, show_progress_bar=False)
-        
         ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
         return [{**r, "rerank_score": float(s)} for r, s in ranked[:top_k]]
-    
+
     def _chunk_file(self, path: Path, collection: str) -> Iterator[dict]:
-        """Chunk file using format-appropriate parser."""
         try:
             docs = SimpleDirectoryReader(input_files=[str(path)]).load_data()
         except Exception as e:
             logger.warning("Could not read %s: %s", path, e)
             return
-        
         if not docs:
             return
-        
         file_type = path.suffix.lower()
         parser = self._get_parser(file_type)
-        
         try:
             nodes = parser.get_nodes_from_documents(docs)
         except Exception as e:
             logger.warning("Could not parse %s: %s", path, e)
             return
-        
         for i, node in enumerate(nodes):
             text = node.get_content().strip()
             if not text:
@@ -377,9 +698,8 @@ class KnowledgeBase:
                     "file_type": file_type,
                 },
             }
-    
+
     def _get_parser(self, file_type: str):
-        """Select parser based on file type."""
         if file_type in CODE_LANGUAGES:
             return CodeSplitter(
                 language=CODE_LANGUAGES[file_type],
@@ -390,29 +710,14 @@ class KnowledgeBase:
         if file_type == ".md":
             return MarkdownNodeParser()
         return SentenceSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
-    
-    def _load(self, name: str):
-        """Load collection (cached)."""
-        if name in self._cache:
-            return self._cache[name]
-        
-        coll_dir = self.index_dir / name
-        if not (coll_dir / "index.faiss").exists():
-            raise ValueError(f"Collection '{name}' not found")
-        
-        import faiss
-        index = faiss.read_index(str(coll_dir / "index.faiss"))
-        with open(coll_dir / "chunks.jsonl") as f:
-            chunks = [json.loads(line) for line in f]
-        
-        self._cache[name] = (index, chunks)
-        return index, chunks
-    
-    def close(self):
-        self._client.close()
-    
+
+    def close(self) -> None:
+        for client in self._embedder_cache.values():
+            client.close()
+        self._embedder_cache.clear()
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, *args):
         self.close()

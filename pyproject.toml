@@ -20,6 +20,7 @@ dependencies = [
     "llama-index-core",
     "sentence-transformers",
     "tree-sitter-language-pack",
+    "chromadb>=1.5.1",
 ]
 
 [project.scripts]
