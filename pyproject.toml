@@ -20,6 +20,8 @@ dependencies = [
     "llama-index-core",
     "sentence-transformers",
     "tree-sitter-language-pack",
+    "h5py>=3.16.0",
+    "pytest>=9.0.2",
 ]
 
 [project.scripts]
