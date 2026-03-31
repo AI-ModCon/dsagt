@@ -79,8 +79,8 @@ __all__ = [
 def repackage_h5(
 	output_path: str | Path,
 	sources: List[str | Path],
-	selection: dict | None = None,
 	variables: List[str] | None = None,
+	selection: dict | None = None,
 	overwrite: bool = False,
 ) -> List[str]:
 	"""Create a new HDF5 file containing a subset of datasets from sources.
@@ -88,22 +88,33 @@ def repackage_h5(
 	Args:
 		output_path: destination HDF5 file to create.
 		sources: list of source HDF5 file paths to read from.
+		variables: optional list of dataset paths to copy from any source.
+			If omitted, all datasets from each source are copied.
 		selection: optional mapping of source-path -> list of dataset paths
 			to copy from that specific source. Keys should be strings or
 			Path-like objects. If provided, it takes precedence for that
-			source.
-		variables: optional list of dataset paths to copy from any source
-			(first match wins). If omitted, all datasets from each source
-			are copied.
+			source. Use this when you need different variables from different
+			files — something ``variables`` cannot express. For example, to
+			take ``temperature`` from ``run1.h5`` and ``pressure`` from
+			``run2.h5``:
+
+				repackage_h5(
+					"out.h5",
+					sources=["run1.h5", "run2.h5"],
+					selection={
+						"run1.h5": ["temperature"],
+						"run2.h5": ["pressure"],
+					},
+				)
 		overwrite: if True, overwrite existing `output_path`.
 
 	Returns:
 		List of dataset paths written into the output file.
 
 	Notes:
-		- If a dataset path already exists in the output file, the dataset
-		  will be written under a prefix named after the source file stem
-		  (e.g. "source1/<dataset_path>").
+		- If multiple source files are being repackaged,
+		  all variables are stored under a group named after the source file stem
+		  (e.g. "file1/var1", "file2/var1").
 		- Large datasets are read into memory when copying.
 	"""
 	outp = Path(output_path)
@@ -119,36 +130,47 @@ def repackage_h5(
 		for k, v in selection.items():
 			norm_sel[str(Path(k))] = list(v)
 
+	# First pass: resolve which variables will be copied from each source
+	source_vars: list[tuple[Path, list[str]]] = []
 	for src in sources:
 		srcp = Path(src)
 		if not srcp.exists():
 			continue
+		if str(srcp) in norm_sel:
+			vars_to_copy = norm_sel[str(srcp)]
+		elif variables is not None:
+			vars_to_copy = list(variables)
+		else:
+			vars_to_copy = list_h5_variables(srcp)
+		source_vars.append((srcp, vars_to_copy))
 
+	# Determine grouping depth based on where the source files live.
+	# - Single source: no grouping, write at top level.
+	# - Multiple sources, same directory: group by filename stem only.
+	# - Multiple sources, different directories, same grandparent: group by directory + stem.
+	# - Multiple sources, different grandparent directories: group by grandparent + directory + stem.
+	use_groups = len(source_vars) > 1
+	use_dir_prefix = use_groups and len({srcp.parent.resolve() for srcp, _ in source_vars}) > 1
+	use_granddir_prefix = use_dir_prefix and len({srcp.parent.parent.resolve() for srcp, _ in source_vars}) > 1
+
+	# Second pass: copy datasets
+	for srcp, vars_to_copy in source_vars:
 		try:
 			with h5py.File(srcp, 'r') as fin:
-				if str(srcp) in norm_sel:
-					vars_to_copy = norm_sel[str(srcp)]
-				elif variables is not None:
-					vars_to_copy = list(variables)
-				else:
-					vars_to_copy = list_h5_variables(srcp)
-
 				with h5py.File(outp, 'a') as fout:
 					for v in vars_to_copy:
 						if v not in fin:
 							continue
 						src_ds = fin[v]
 
-						dest_path = v
-						# If already exists, move under a source-based prefix
-						try:
-							fout[v]
-							exists = True
-						except Exception:
-							exists = False
-						if exists:
-							prefix = srcp.stem
-							dest_path = f"{prefix}/{v.lstrip('/')}"
+						if use_granddir_prefix:
+							dest_path = f"{srcp.parent.parent.name}/{srcp.parent.name}/{srcp.stem}/{v.lstrip('/')}"
+						elif use_dir_prefix:
+							dest_path = f"{srcp.parent.name}/{srcp.stem}/{v.lstrip('/')}"
+						elif use_groups:
+							dest_path = f"{srcp.stem}/{v.lstrip('/')}"
+						else:
+							dest_path = v
 
 						parts = dest_path.strip('/').split('/')
 						grp = fout
@@ -166,13 +188,12 @@ def repackage_h5(
 
 						# Create dataset (reads into memory)
 						data = src_ds[()]
-						# If a dataset with same name exists in this group, replace
 						name = parts[-1]
 						if name in grp:
 							del grp[name]
 						new_ds = grp.create_dataset(name, data=data, **ds_kwargs)
 
-						# copy attributes
+						# Copy attributes
 						for k, val in src_ds.attrs.items():
 							new_ds.attrs[k] = val
 
