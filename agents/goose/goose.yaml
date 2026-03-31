@@ -11,13 +11,6 @@ extensions:
     type: "builtin"
     bundled: true
   
-  pipeline:
-    enabled: true
-    name: dsagt
-    type: stdio
-    cmd: uv run dsagt-pipeline-server
-    timeout: 300
-    
   registry:
     enabled: true
     name: registry

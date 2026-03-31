@@ -1,0 +1,27 @@
+goose session \
+  --with-extension 'uv run dsagt-registry-server' \
+  --with-extension 'uv run dsagt-knowledge-server'
+
+I'd like to create a new collection in the knowledge base: microbial_isolates. 
+The collection will contain 
+1) the code package files for fastp: /Users/tuor472/Documents/dsagt_knowledge_complete/repos/fastp/ 
+2) the code package files for megahit: /Users/tuor472/Documents/dsagt_knowledge_complete/repos/megahit/ and 
+3) a short document describing a processing pipeline: /Users/tuor472/Documents/dsagt_knowledge_complete/DSAGT/demo/genomics.md
+4) A document describing best practices for using fastp and 
+megahit: /Users/tuor472/Documents/dsagt_knowledge_complete/DSAGT/demo/fastp_megahit_best_practices.md
+
+Let's add /Users/tuor472/miniconda3/envs/isolate/bin/fastp to the registry
+Let's add /Users/tuor472/miniconda3/envs/isolate/bin/megahit to the registry
+
+Okay good I have an isolate file located at 
+/Users/tuor472/Documents/dsagt_knowledge_complete/data/microbial_isolate/53162.2.609630.AAAGGCTAGA-GATTCAGTTA.filter-ISO.fastq.gz 
+Information about the dataset is contained in the Readme in that directory. I need to preprocess this file and assemble it.
+fastp and megahit both have data assessment capability so we don't need to create additional tools.
+megahit should be run with kmax=21 and memory=0.3 to avoid OOM on this laptop
+ Tell me your plan before proceeding.
+
+Let's run this same pipeline the rest of the fastq files at 
+/Users/tuor472/Documents/dsagt_knowledge_complete/data/microbial_isolate/
+We can process them one at a time. We don't need to create a script for batch processing
+
+Use the skill located at /Users/tuor472/.config/goose/skills/datacard-generator/ to create a datacard for the processed microbial isolate data

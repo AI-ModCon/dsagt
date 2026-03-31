@@ -22,10 +22,10 @@ dependencies = [
     "tree-sitter-language-pack",
     "h5py>=3.16.0",
     "pytest>=9.0.2",
+    "chromadb>=1.5.1",
 ]
 
 [project.scripts]
-dsagt-pipeline-server = "dsagt.pipeline_server:main"
 dsagt-registry-server = "dsagt.registry_server:main"
 dsagt-knowledge-server = "dsagt.knowledge_server:main"
 
@@ -47,7 +47,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-dsagt = ["py.typed"]
+dsagt = ["py.typed", "skills/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

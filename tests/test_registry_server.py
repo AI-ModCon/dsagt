@@ -1,12 +1,11 @@
 """
 Tests for the registry MCP server.
 
-Tests the tool handlers exposed by create_registry_server:
-save_tool_spec, get_registry, search_registry, read_file, run_command.
+Tests tool handlers: save_tool_spec, get_registry, search_registry,
+read_file, run_command, install_dependencies.
 """
 
 import asyncio
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +15,7 @@ import pytest
 import yaml
 import mcp.types as types
 
+from dsagt.registry import ToolRegistry
 from dsagt.registry_server import create_registry_server
 
 
@@ -54,33 +54,56 @@ def make_spec(name="test_tool", description="A test tool", executable="echo hell
     return spec
 
 
+def _write_skill(skills_dir: Path, spec: dict) -> None:
+    path = skills_dir / f"{spec['name']}.md"
+    fm = yaml.dump(spec, default_flow_style=False, sort_keys=False)
+    path.write_text(f"---\n{fm}---\n\n# {spec['name']}\n")
+
+
+def _make_server(tmp_path, tools=None):
+    """Create (server, registry) with optional pre-populated tools."""
+    source_dir = tmp_path / "source_skills"
+    source_dir.mkdir()
+    for spec in (tools or []):
+        _write_skill(source_dir, spec)
+    reg = ToolRegistry(
+        source_skills_dir=str(source_dir),
+        runtime_dir=str(tmp_path / "runtime"),
+    )
+    return create_registry_server(reg), reg
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def registry_path(tmp_path):
-    """Path for a fresh registry file (does not exist yet)."""
-    return tmp_path / "registry.yaml"
+def server_and_registry(tmp_path):
+    return _make_server(tmp_path)
 
 
 @pytest.fixture
-def server(registry_path):
-    """Registry builder server with an empty (nonexistent) registry."""
-    return create_registry_server(registry_path)
+def server(server_and_registry):
+    return server_and_registry[0]
 
 
 @pytest.fixture
-def populated_server(registry_path):
-    """Registry builder server with two tools already registered."""
-    registry = {
-        "tools": [
-            make_spec("tool_alpha", "Alpha tool", "python alpha.py"),
-            make_spec("tool_beta", "Beta data processor", "python beta.py"),
-        ],
-    }
-    registry_path.write_text(yaml.dump(registry, sort_keys=False))
-    return create_registry_server(registry_path)
+def registry(server_and_registry):
+    return server_and_registry[1]
+
+
+@pytest.fixture
+def populated(tmp_path):
+    server, reg = _make_server(tmp_path, tools=[
+        make_spec("tool_alpha", "Alpha tool", "python alpha.py"),
+        make_spec("tool_beta", "Beta data processor", "python beta.py"),
+    ])
+    return server, reg
+
+
+@pytest.fixture
+def populated_server(populated):
+    return populated[0]
 
 
 # ---------------------------------------------------------------------------
@@ -89,42 +112,32 @@ def populated_server(registry_path):
 
 class TestSaveToolSpec:
 
-    def test_add_new_tool(self, server, registry_path):
-        """Saving a new spec creates the registry and adds the tool."""
+    def test_add_new_tool(self, server, registry):
+        """Saving a new spec creates a skill file and reports added."""
         spec = make_spec("my_tool")
         text = call_tool(server, "save_tool_spec", {"spec": spec})
 
         assert "added" in text
         assert "1 tools" in text
+        assert registry.get_tool("my_tool") is not None
 
-        registry = yaml.safe_load(registry_path.read_text())
-        assert len(registry["tools"]) == 1
-        assert registry["tools"][0]["name"] == "my_tool"
-
-    def test_update_existing_tool(self, server, registry_path):
+    def test_update_existing_tool(self, server, registry):
         """Saving a spec with the same name updates rather than duplicates."""
-        spec_v1 = make_spec("my_tool", description="Version 1")
-        call_tool(server, "save_tool_spec", {"spec": spec_v1})
-
-        spec_v2 = make_spec("my_tool", description="Version 2")
-        text = call_tool(server, "save_tool_spec", {"spec": spec_v2})
+        call_tool(server, "save_tool_spec", {"spec": make_spec("my_tool", description="Version 1")})
+        text = call_tool(server, "save_tool_spec", {"spec": make_spec("my_tool", description="Version 2")})
 
         assert "updated" in text
         assert "1 tools" in text
+        assert registry.get_tool("my_tool")["description"] == "Version 2"
 
-        registry = yaml.safe_load(registry_path.read_text())
-        assert registry["tools"][0]["description"] == "Version 2"
-
-    def test_add_multiple_tools(self, server, registry_path):
-        """Multiple distinct tools accumulate in the registry."""
+    def test_add_multiple_tools(self, server, registry):
+        """Multiple distinct tools accumulate as separate skill files."""
         call_tool(server, "save_tool_spec", {"spec": make_spec("tool_a")})
         text = call_tool(server, "save_tool_spec", {"spec": make_spec("tool_b")})
 
         assert "2 tools" in text
-
-        registry = yaml.safe_load(registry_path.read_text())
-        names = [t["name"] for t in registry["tools"]]
-        assert names == ["tool_a", "tool_b"]
+        assert registry.get_tool("tool_a") is not None
+        assert registry.get_tool("tool_b") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -134,12 +147,12 @@ class TestSaveToolSpec:
 class TestGetRegistry:
 
     def test_empty_registry(self, server):
-        """Getting a nonexistent registry reports empty."""
+        """Getting an empty registry reports empty."""
         text = call_tool(server, "get_registry", {})
         assert "empty" in text.lower()
 
-    def test_populated_registry(self, populated_server):
-        """Getting a populated registry returns YAML with all tools."""
+    def test_populated_registry(self, populated_server, populated):
+        _, reg = populated
         text = call_tool(populated_server, "get_registry", {})
 
         data = yaml.safe_load(text)
@@ -241,7 +254,7 @@ class TestRunCommand:
 class TestSaveToolSpecDependencies:
 
     @patch("dsagt.registry_server.subprocess.run")
-    def test_deps_installed_on_save(self, mock_run, server, registry_path):
+    def test_deps_installed_on_save(self, mock_run, server, registry):
         """When dependencies are provided, uv pip install is called."""
         mock_run.return_value = MagicMock(
             returncode=0, stdout="Successfully installed pandas-2.1.0", stderr=""
@@ -257,8 +270,8 @@ class TestSaveToolSpecDependencies:
                         "pandas>=2.0", "numpy"]
 
     @patch("dsagt.registry_server.subprocess.run")
-    def test_deps_failure_still_saves_spec(self, mock_run, server, registry_path):
-        """Even if uv pip install fails, the spec is saved to the registry."""
+    def test_deps_failure_still_saves_spec(self, mock_run, server, registry):
+        """Even if uv pip install fails, the spec is saved as a skill file."""
         mock_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="No matching distribution for bogus-pkg"
         )
@@ -267,10 +280,9 @@ class TestSaveToolSpecDependencies:
 
         assert "added" in text
         assert "Installation failed" in text
-
-        registry = yaml.safe_load(registry_path.read_text())
-        assert registry["tools"][0]["name"] == "tool_bad_deps"
-        assert registry["tools"][0]["dependencies"] == ["bogus-pkg"]
+        tool = registry.get_tool("tool_bad_deps")
+        assert tool is not None
+        assert tool["dependencies"] == ["bogus-pkg"]
 
     @patch("dsagt.registry_server.subprocess.run")
     def test_deps_timeout(self, mock_run, server):
@@ -282,7 +294,7 @@ class TestSaveToolSpecDependencies:
         assert "added" in text
         assert "timed out" in text
 
-    def test_no_deps_no_install_message(self, server, registry_path):
+    def test_no_deps_no_install_message(self, server, registry):
         """When no dependencies are provided, no install message appears."""
         spec = make_spec("tool_no_deps")
         text = call_tool(server, "save_tool_spec", {"spec": spec})
@@ -291,14 +303,14 @@ class TestSaveToolSpecDependencies:
         assert "Dependency" not in text
 
     @patch("dsagt.registry_server.subprocess.run")
-    def test_deps_persisted_in_yaml(self, mock_run, server, registry_path):
-        """Dependencies are stored in the registry YAML for reproducibility."""
+    def test_deps_persisted_in_skill_file(self, mock_run, server, registry):
+        """Dependencies are stored in the skill file frontmatter."""
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         spec = make_spec("dep_tool", dependencies=["requests>=2.28"])
         call_tool(server, "save_tool_spec", {"spec": spec})
 
-        registry = yaml.safe_load(registry_path.read_text())
-        assert registry["tools"][0]["dependencies"] == ["requests>=2.28"]
+        tool = registry.get_tool("dep_tool")
+        assert tool["dependencies"] == ["requests>=2.28"]
 
     @patch("dsagt.registry_server.subprocess.run")
     def test_uv_not_found(self, mock_run, server):
@@ -318,16 +330,12 @@ class TestSaveToolSpecDependencies:
 class TestInstallDependencies:
 
     @patch("dsagt.registry_server.subprocess.run")
-    def test_install_all(self, mock_run, registry_path):
+    def test_install_all(self, mock_run, tmp_path):
         """install_dependencies with no tool_name installs all unique deps."""
-        registry = {
-            "tools": [
-                make_spec("tool_a", dependencies=["pandas", "numpy"]),
-                make_spec("tool_b", dependencies=["numpy", "scipy"]),
-            ],
-        }
-        registry_path.write_text(yaml.dump(registry, sort_keys=False))
-        server = create_registry_server(registry_path)
+        server, reg = _make_server(tmp_path, tools=[
+            make_spec("tool_a", dependencies=["pandas", "numpy"]),
+            make_spec("tool_b", dependencies=["numpy", "scipy"]),
+        ])
 
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         text = call_tool(server, "install_dependencies", {})
@@ -335,21 +343,16 @@ class TestInstallDependencies:
         assert "tool_a" in text
         assert "tool_b" in text
         cmd = mock_run.call_args[0][0]
-        # numpy should appear only once (deduplication)
         assert cmd == ["uv", "pip", "install", "--python", sys.executable,
                         "pandas", "numpy", "scipy"]
 
     @patch("dsagt.registry_server.subprocess.run")
-    def test_install_single_tool(self, mock_run, registry_path):
+    def test_install_single_tool(self, mock_run, tmp_path):
         """install_dependencies with tool_name targets only that tool."""
-        registry = {
-            "tools": [
-                make_spec("tool_a", dependencies=["pandas"]),
-                make_spec("tool_b", dependencies=["scipy"]),
-            ],
-        }
-        registry_path.write_text(yaml.dump(registry, sort_keys=False))
-        server = create_registry_server(registry_path)
+        server, reg = _make_server(tmp_path, tools=[
+            make_spec("tool_a", dependencies=["pandas"]),
+            make_spec("tool_b", dependencies=["scipy"]),
+        ])
 
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         text = call_tool(server, "install_dependencies", {"tool_name": "tool_b"})
@@ -364,13 +367,9 @@ class TestInstallDependencies:
         text = call_tool(server, "install_dependencies", {})
         assert "empty" in text.lower() or "No tools" in text
 
-    def test_tools_without_deps(self, registry_path):
+    def test_tools_without_deps(self, tmp_path):
         """Tools without dependencies field are skipped gracefully."""
-        registry = {
-            "tools": [make_spec("nodep_tool")],
-        }
-        registry_path.write_text(yaml.dump(registry, sort_keys=False))
-        server = create_registry_server(registry_path)
+        server, reg = _make_server(tmp_path, tools=[make_spec("nodep_tool")])
 
         text = call_tool(server, "install_dependencies", {})
         assert "No dependencies" in text
