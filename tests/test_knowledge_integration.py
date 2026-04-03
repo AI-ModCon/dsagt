@@ -2,10 +2,11 @@
 Integration tests for the knowledge server with a real KnowledgeBase.
 
 These tests require:
+  - tests/test_site_config.yaml (copy from test_site_config.yaml.example)
   - An embedding API key (LLM_API_KEY or OPENAI_API_KEY env var)
   - Network access to the embedding API
 
-Skip condition: tests are skipped if no API key is available.
+Tests skip automatically if the config or API key is missing.
 
 Usage:
     pytest test_knowledge_integration.py -v
@@ -22,10 +23,6 @@ import mcp.types as types
 from dsagt.knowledge import KnowledgeBase
 
 from dsagt.knowledge_server import create_knowledge_server, setup_runtime_kb
-
-# Skip all tests in this module if no API key
-API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
-pytestmark = pytest.mark.skipif(not API_KEY, reason="No embedding API key set")
 
 
 # ---------------------------------------------------------------------------
@@ -82,19 +79,24 @@ def smoke_test_dir():
     return path
 
 
-@pytest.fixture
-def kb_server(tmp_path, smoke_test_dir):
-    """
-    Knowledge server backed by a real KnowledgeBase.
-
-    Ingests the smoke test documents, then provides a server for search tests.
-    """
-
+def _make_kb(tmp_path, embedding_config):
+    """Create a KnowledgeBase configured for the current institution."""
     index_dir = tmp_path / "kb_index"
     index_dir.mkdir()
+    return KnowledgeBase(
+        index_dir=index_dir,
+        default_embedder="api",
+    )
 
-    kb = KnowledgeBase(index_dir=index_dir)
-    # Ingest the smoke test docs
+
+@pytest.fixture
+def kb_server(tmp_path, smoke_test_dir, embedding_config):
+    """Knowledge server backed by a real KnowledgeBase.
+
+    Ingests the smoke test documents, then provides a server for search tests.
+    Uses embedding_config fixture (skips if no site config or API key).
+    """
+    kb = _make_kb(tmp_path, embedding_config)
     result = kb.ingest(smoke_test_dir)
     assert result["chunks"] > 0, "Ingest produced no chunks"
 
@@ -109,10 +111,9 @@ def kb_server(tmp_path, smoke_test_dir):
 
 class TestIngestIntegration:
 
-    def test_ingest_smoke_test_docs(self, tmp_path, smoke_test_dir):
+    def test_ingest_smoke_test_docs(self, tmp_path, smoke_test_dir, embedding_config):
         """Ingest smoke test documents through the MCP handler."""
-
-        kb = KnowledgeBase(index_dir=tmp_path / "kb_index")
+        kb = _make_kb(tmp_path, embedding_config)
         server = create_knowledge_server(kb, use_rerank=False)
 
         async def run():
@@ -146,7 +147,6 @@ class TestSearchIntegration:
 
         assert result["status"] == "ok"
         assert result["result_count"] > 0
-        # Troubleshooting doc should be among the results
         sources = [r["source_file"] for r in result["results"]]
         assert any("troubleshooting" in s for s in sources)
 
@@ -209,42 +209,39 @@ class TestListCollectionsIntegration:
 
 class TestSetupRuntimeKB:
 
-    def test_symlinks_base_collections(self, tmp_path, smoke_test_dir):
+    def test_symlinks_base_collections(self, tmp_path, smoke_test_dir, embedding_config):
         """setup_runtime_kb symlinks base collections into runtime."""
-
-        # Create a base index by ingesting
         base_dir = tmp_path / "base_kb"
         base_dir.mkdir()
-        kb = KnowledgeBase(index_dir=base_dir)
+        kb = _make_kb(tmp_path, embedding_config)
+        # Point KB at base_dir for this test
+        kb.index_dir = base_dir
+        kb.index_dir.mkdir(exist_ok=True)
         kb.ingest(smoke_test_dir)
         kb.close()
 
-        # Now setup runtime from that base
         runtime_dir = tmp_path / "runtime"
         runtime_kb_dir = setup_runtime_kb(base_dir, runtime_dir)
 
-        # Should have a symlink to the knowledge collection
         knowledge_link = runtime_kb_dir / "knowledge"
         assert knowledge_link.exists()
         assert knowledge_link.is_symlink()
         assert (knowledge_link / "index.faiss").exists()
 
-    def test_runtime_search_via_symlink(self, tmp_path, smoke_test_dir):
+    def test_runtime_search_via_symlink(self, tmp_path, smoke_test_dir, embedding_config):
         """A KB pointing at runtime symlinks can search successfully."""
-
-        # Build base index
         base_dir = tmp_path / "base_kb"
         base_dir.mkdir()
-        kb = KnowledgeBase(index_dir=base_dir)
+        kb = _make_kb(tmp_path, embedding_config)
+        kb.index_dir = base_dir
+        kb.index_dir.mkdir(exist_ok=True)
         kb.ingest(smoke_test_dir)
         kb.close()
 
-        # Setup runtime with symlinks
         runtime_dir = tmp_path / "runtime"
         runtime_kb_dir = setup_runtime_kb(base_dir, runtime_dir)
 
-        # Search via runtime KB
-        kb2 = KnowledgeBase(index_dir=runtime_kb_dir)
+        kb2 = KnowledgeBase(index_dir=runtime_kb_dir, default_embedder="api")
         results = kb2.search("large files", "knowledge", top_k=2, rerank=False)
         assert len(results) > 0
         kb2.close()

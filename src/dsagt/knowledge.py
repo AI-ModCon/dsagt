@@ -314,10 +314,14 @@ class CollectionRoute:
 
 
 # default route used when no collection-specific route is registered.
+# If EMBEDDING_MODEL is set, propagate it to the embedder. Otherwise, let
+# APIEmbeddingClient use its own default — avoids hardcoding a model name
+# that may not exist at every institution's endpoint.
+_env_embedding_model = os.getenv("EMBEDDING_MODEL")
 DEFAULT_ROUTE = CollectionRoute(
     embedding_backend=os.getenv("DSAGT_EMBEDDING_BACKEND", "api"),
     vector_db="faiss",
-    embedder_kwargs={"model": os.getenv("EMBEDDING_MODEL", "nomic-embed-text")},
+    embedder_kwargs={"model": _env_embedding_model} if _env_embedding_model else {},
 )
 
 
@@ -394,10 +398,11 @@ class KnowledgeBase:
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
         # Build default route
+        _model = os.getenv("EMBEDDING_MODEL")
         self._default_route = CollectionRoute(
             embedding_backend=default_embedder or os.getenv("DSAGT_EMBEDDING_BACKEND", "api"),
             vector_db=default_index or "faiss",
-            embedder_kwargs={"model": os.getenv("EMBEDDING_MODEL", "nomic-embed-text")},
+            embedder_kwargs={"model": _model} if _model else {},
         )
 
         # Per-collection route registry

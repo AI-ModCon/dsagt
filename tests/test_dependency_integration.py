@@ -98,16 +98,19 @@ def test_register_and_run_tool_with_dependency(tmp_path):
         import cowsay
 
         parser = argparse.ArgumentParser()
-        parser.add_argument("message")
+        parser.add_argument("--message", required=True)
         args = parser.parse_args()
 
         output = cowsay.get_output_string("cow", args.message)
         print(json.dumps({"cow_says": output, "status": "ok"}))
     """))
 
-    # 2. Create a registry server with a fresh registry
-    registry_path = tmp_path / "registry.yaml"
-    server = create_registry_server(registry_path)
+    # 2. Create a registry server with a fresh ToolRegistry
+    registry = ToolRegistry(
+        source_skills_dir=None,
+        runtime_dir=str(tmp_path / "runtime"),
+    )
+    server = create_registry_server(registry)
 
     # 3. Register the tool with dependencies
     spec = {
@@ -129,16 +132,13 @@ def test_register_and_run_tool_with_dependency(tmp_path):
     assert "added" in text
     assert "Successfully installed" in text
 
-    # 4. Verify the spec is in the YAML with dependencies
-    registry = yaml.safe_load(registry_path.read_text())
-    assert registry["tools"][0]["dependencies"] == ["cowsay"]
+    # 4. Verify the spec is in the skill file
+    tool = registry.get_tool("cowsay_tool")
+    assert tool is not None
+    assert tool["dependencies"] == ["cowsay"]
 
     # 5. Execute the tool through ToolRegistry
-    tool_registry = ToolRegistry(
-        source_registry=str(registry_path),
-        runtime_dir=str(tmp_path / "runtime"),
-    )
-    result = tool_registry.call_tool("cowsay_tool", {"message": "hello"})
+    result = registry.call_tool("cowsay_tool", {"message": "hello"})
 
     assert result["success"] is True, f"Tool failed: {result['error']}"
     output = json.loads(result["output"])

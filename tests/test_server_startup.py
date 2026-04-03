@@ -8,7 +8,7 @@ Two categories of tests:
 
 2. **Transport-closed reproduction tests** — exercise the exact agent flow
    (ingest → search) that triggers 'transport closed'. These call the real
-   embedding API and require LLM_API_KEY in the environment.
+   embedding API and require LLM_API_KEY and EMBEDDING_MODEL in the environment.
 
 Usage:
     # Startup tests only (no API key needed):
@@ -41,11 +41,7 @@ def _send_mcp_message(proc, message: dict):
 
 
 def _read_line_timeout(proc, timeout: float) -> str:
-    """Read one line from proc.stdout with a timeout using a daemon thread.
-
-    Returns the line (including newline), or raises TimeoutError/ConnectionError.
-    Using a thread avoids select/buffer mismatch issues with TextIOWrapper.
-    """
+    """Read one line from proc.stdout with a timeout using a daemon thread."""
     import threading
 
     result = [None]
@@ -70,11 +66,7 @@ def _read_line_timeout(proc, timeout: float) -> str:
 
 
 def _read_mcp_message(proc, timeout: float = 10.0, expect_id=None) -> dict:
-    """Read one JSON-RPC message from stdout (newline-delimited JSON).
-
-    If expect_id is set, skips notifications and messages with non-matching
-    ids (e.g. server log messages) until the expected response arrives.
-    """
+    """Read one JSON-RPC message from stdout (newline-delimited JSON)."""
     deadline = time.monotonic() + timeout
     while True:
         remaining = deadline - time.monotonic()
@@ -88,7 +80,6 @@ def _read_mcp_message(proc, timeout: float = 10.0, expect_id=None) -> dict:
             continue
 
         msg = json.loads(line)
-        # If waiting for a specific response id, skip notifications
         if expect_id is not None and msg.get("id") != expect_id:
             continue
         return msg
@@ -108,7 +99,6 @@ def _mcp_initialize(proc) -> dict:
     })
     response = _read_mcp_message(proc, expect_id=1)
 
-    # Send initialized notification
     _send_mcp_message(proc, {
         "jsonrpc": "2.0",
         "method": "notifications/initialized",
@@ -145,7 +135,6 @@ def _mcp_call_tool(proc, tool_name: str, arguments: dict,
 
 def _start_server(cmd: list[str], env: dict = None) -> subprocess.Popen:
     """Start a server subprocess with stdio pipes."""
-    import os
     proc_env = os.environ.copy()
     if env:
         proc_env.update(env)
@@ -228,41 +217,39 @@ class TestKnowledgeServerStartup:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_fails_without_api_key(self, tmp_path):
-        """Knowledge server exits with error when no API key is set.
+    def test_starts_without_api_key(self, tmp_path):
+        """Knowledge server starts even without an API key (lazy embedder init).
 
-        This is the most common cause of 'transport closed' — the server
-        crashes before the MCP handshake.
+        With the route-based architecture, embedders are created lazily when
+        first needed (during ingest or search), not at server startup. The
+        server should start, complete the handshake, and list tools. Embedding
+        operations will fail later with a clear error.
         """
-        # Build env with no API key and force api backend (not local)
         stripped = {"LLM_API_KEY", "OPENAI_API_KEY", "DSAGT_EMBEDDING_BACKEND"}
         clean_env = {k: v for k, v in os.environ.items() if k not in stripped}
 
-        proc = subprocess.Popen(
+        proc = _start_server(
             [
                 sys.executable, "-m", "dsagt.knowledge_server",
                 "--base-index-dir", str(tmp_path / "kb_index"),
                 "--runtime-dir", str(tmp_path / "runtime"),
                 "--embedding-backend", "api",
             ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
             env=clean_env,
         )
         try:
-            # Server should exit quickly with an error
-            rc = proc.wait(timeout=10)
-            assert rc != 0, "Server should have exited with error"
-            stderr = proc.stderr.read()
-            assert "API key" in stderr or "ValueError" in stderr, (
-                f"Expected API key error in stderr, got: {stderr}"
-            )
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            pytest.fail("Server hung instead of exiting on missing API key")
+            resp = _mcp_initialize(proc)
+            assert "result" in resp, f"Init failed: {resp}"
+
+            tools_resp = _mcp_list_tools(proc)
+            assert "result" in tools_resp, f"list_tools failed: {tools_resp}"
+
+            # Server is up and responsive — listing collections should work
+            list_resp = _mcp_call_tool(proc, "kb_list_collections", {}, msg_id=10)
+            assert "result" in list_resp, f"Server crashed: {list_resp}"
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -270,8 +257,7 @@ class TestKnowledgeServerStartup:
 #
 # These exercise the exact agent flow that triggers 'transport closed':
 # start server → ingest documents (embedding API) → search (embedding API).
-# Requires LLM_API_KEY — fails loudly if not set so misconfigured
-# environments don't silently skip critical tests.
+# Requires LLM_API_KEY and EMBEDDING_MODEL — skips if not set.
 #
 # To exclude these when you intentionally don't have an API key:
 #   uv run pytest test_server_startup.py -k 'not Search'
@@ -289,12 +275,18 @@ class TestKnowledgeServerSearch:
     @pytest.fixture
     def kb_server(self, tmp_path):
         """Start knowledge server, complete MCP handshake, yield process."""
-        if not os.environ.get("LLM_API_KEY"):
-            pytest.fail(
-                "LLM_API_KEY not set. These tests call the real embedding API "
-                "to reproduce transport-closed bugs.\n"
-                "  Fix: source ~/.bashrc && uv run pytest\n"
-                "  Or exclude: uv run pytest -k 'not Search'"
+        api_key = os.environ.get("LLM_API_KEY")
+        embedding_model = os.environ.get("EMBEDDING_MODEL")
+
+        if not api_key:
+            pytest.skip(
+                "LLM_API_KEY not set. These tests call the real embedding API. "
+                "Fix: export LLM_API_KEY=... && uv run pytest"
+            )
+        if not embedding_model:
+            pytest.skip(
+                "EMBEDDING_MODEL not set. Set to your institution's model, e.g. "
+                "export EMBEDDING_MODEL=text-embedding-3-small-project"
             )
 
         proc = _start_server([
@@ -337,7 +329,6 @@ class TestKnowledgeServerSearch:
         2. kb_search calls embedding API to embed the query
         If either API call crashes the server, we get transport closed.
         """
-        # Create test documents
         docs = tmp_path / "test_docs"
         docs.mkdir()
         (docs / "test.md").write_text(
@@ -385,19 +376,12 @@ class TestKnowledgeServerSearch:
         assert search_data["result_count"] > 0
 
     def test_server_alive_after_search_error(self, kb_server):
-        """Server stays alive after a failed search (no transport closed).
-
-        A common pattern: agent searches a nonexistent collection, gets error,
-        then tries another call. If the first error killed the server, the
-        second call would fail with transport closed.
-        """
-        # First call — expected error
+        """Server stays alive after a failed search (no transport closed)."""
         _mcp_call_tool(kb_server, "kb_search", {
             "query": "test",
             "collection": "nonexistent",
         }, msg_id=10)
 
-        # Second call — server must still be responsive
         resp = _mcp_call_tool(kb_server, "kb_list_collections", {}, msg_id=11)
         assert "result" in resp, (
             f"Server died after search error (transport closed): {resp}"

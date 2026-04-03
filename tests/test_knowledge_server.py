@@ -263,8 +263,9 @@ class TestIngest:
                     "file_types": ["md", "txt"],
                 }
             )
+            # New server always passes collection_name to kb.ingest
             mock_kb.ingest.assert_called_once_with(
-                folder, file_types=["md", "txt"],
+                folder, collection_name="docs2", file_types=["md", "txt"],
             )
 
         asyncio.run(run())
@@ -310,8 +311,14 @@ class TestIngest:
         folder = tmp_path / "docs"
         folder.mkdir()
 
-        # Simulate "docs" already exists in the index dir
-        (mock_kb.index_dir / "docs").mkdir()
+        # Simulate "docs" already exists with a FAISS index from a different source.
+        # _collection_exists() requires a marker file, and deconflict only triggers
+        # when source.txt records a different folder than the one being ingested.
+        existing = mock_kb.index_dir / "docs"
+        existing.mkdir()
+        (existing / "index.faiss").write_bytes(b"fake")
+        (existing / "source.txt").write_text("/some/other/folder")
+
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
 
         result = call_tool(server, "kb_ingest", {
@@ -320,7 +327,7 @@ class TestIngest:
 
         assert result["status"] == "started"
         assert result["collection"] == "docs1"
-        assert result["warning"] is not None
+        assert "warning" in result
         assert "docs1" in result["warning"]
 
     def test_ingest_deconflicts_symlinked_collection(self, server, mock_kb, tmp_path):
@@ -328,9 +335,12 @@ class TestIngest:
         folder = tmp_path / "docs"
         folder.mkdir()
 
-        # Simulate "docs" is a symlink to a base collection
+        # Simulate "docs" is a symlink to a base collection with index
         base_dir = tmp_path / "base_docs"
         base_dir.mkdir()
+        (base_dir / "index.faiss").write_bytes(b"fake")
+        (base_dir / "source.txt").write_text("/some/other/folder")
+
         (mock_kb.index_dir / "docs").symlink_to(base_dir)
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
 
@@ -339,6 +349,8 @@ class TestIngest:
         })
 
         assert result["status"] == "started"
+        assert result["collection"] == "docs1"
+        assert "warning" in result
         assert "docs1" in result["warning"]
         # Base symlink should still exist untouched
         assert (mock_kb.index_dir / "docs").is_symlink()
@@ -609,7 +621,9 @@ class TestSetupRuntimeKb:
 class TestOpenMPWorkaround:
     """Importing knowledge_server must set KMP_DUPLICATE_LIB_OK to prevent
     a fatal OpenMP crash when FAISS and sentence-transformers (PyTorch)
-    both bundle libomp. Without this, kb_search with rerank=true kills
+    both bundle libomp.
+
+    Without this, kb_search with rerank=true kills
     the server process, producing 'transport closed' in MCP clients."""
 
     def test_kmp_duplicate_lib_ok_is_set(self):

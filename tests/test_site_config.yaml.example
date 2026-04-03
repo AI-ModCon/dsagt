@@ -1,0 +1,12 @@
+# Test site configuration — institution-specific values for integration tests.
+#
+# Copy this file to tests/test_site_config.yaml and fill in your values.
+# Unit tests (mocked) run without this file. Integration tests that hit
+# a real embedding API will skip if this file is missing.
+#
+# DO NOT commit test_site_config.yaml — it contains API endpoints and
+# model names specific to your institution.
+
+embedding:
+  model: text-embedding-3-small-project     # embedding model name at your endpoint
+  base_url: https://ai-incubator-api.pnnl.gov/v1  # OpenAI-compatible embeddings URL
