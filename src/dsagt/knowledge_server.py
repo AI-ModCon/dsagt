@@ -41,6 +41,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.models import InitializationOptions
 
 from dsagt.knowledge import EMBEDDER_REGISTRY, VECTORINDEX_REGISTRY, CollectionRoute, KnowledgeBase
+from dsagt.memory import ExplicitMemory
 
 try:
     from dsagt.mcp_utils import create_server, run_stdio
@@ -153,7 +154,8 @@ def _register_external_collection(
         }
     else:
         raise ValueError(
-            f"Unsupported vector DB '{vector_db}'. Choose from: chroma, lancedb, qdrant"
+            f"Unsupported vector DB '{vector_db}'. "
+            f"Choose from: chroma, lancedb, qdrant"
         )
 
     route = CollectionRoute(
@@ -167,13 +169,21 @@ def _register_external_collection(
     kb._save_route(collection_name, route)
 
 
-def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
+def create_knowledge_server(
+    kb: KnowledgeBase,
+    use_rerank: bool,
+    runtime_dir: str | Path | None = None,
+):
     """Create and configure the MCP server."""
     server = create_server("knowledge")
 
     # Background job tracking: job_id -> {status, result, error}
     jobs: dict[str, dict] = {}
     active_collections: set[str] = set()
+
+    # Explicit memory store (file-backed, not vector-indexed)
+    mem_dir = Path(runtime_dir) if runtime_dir else kb.index_dir.parent
+    memory = ExplicitMemory(runtime_dir=mem_dir)
 
     def _start_job(coro, collection: str | None = None) -> str:
         job_id = uuid.uuid4().hex[:8]
@@ -225,9 +235,9 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
             types.Tool(
                 name="kb_search",
                 description=(
-                    "Search a knowledge base collection using semantic similarity. "
-                    "Returns relevant document chunks with source metadata. "
-                    "Routing to the correct embedding model and vector DB is automatic."
+                    "Search knowledge base collections using semantic similarity. "
+                    "Returns relevant chunks with source metadata. "
+                    "Supports multi-collection search."
                 ),
                 inputSchema={
                     "type": "object",
@@ -238,7 +248,12 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                         },
                         "collection": {
                             "type": "string",
-                            "description": "Name of the collection to search (use kb_list_collections to see options)",
+                            "description": "Name of a single collection to search",
+                        },
+                        "collections": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Search multiple collections and merge results (overrides 'collection')",
                         },
                         "top_k": {
                             "type": "integer",
@@ -251,7 +266,7 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                             "default": use_rerank,
                         },
                     },
-                    "required": ["query", "collection"],
+                    "required": ["query"],
                 },
             ),
             types.Tool(
@@ -381,6 +396,50 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                     "required": ["job_id"],
                 },
             ),
+            types.Tool(
+                name="kb_remember",
+                description=(
+                    "Store a user-confirmed fact as an explicit memory. "
+                    "These are important facts about the project pipeline "
+                    "that persist across sessions. All active memories are "
+                    "available at session start via kb_get_memories. "
+                    "Use 'supersedes' to replace an outdated memory."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "The fact to remember (short declarative statement)",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "Classification tag (e.g. quality_control, configuration, data_stats)",
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Current session identifier",
+                        },
+                        "supersedes": {
+                            "type": "string",
+                            "description": "entry_id of an existing memory this fact replaces",
+                        },
+                    },
+                    "required": ["text"],
+                },
+            ),
+            types.Tool(
+                name="kb_get_memories",
+                description=(
+                    "Get all active explicit memories for this project. "
+                    "Call this at the start of each session to load project "
+                    "context the user has previously confirmed as important."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
         ]
 
 
@@ -397,33 +456,58 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
 
             elif name == "kb_search":
                 query = arguments["query"]
-                collection = arguments["collection"]
                 top_k = arguments.get("top_k", 5)
                 rerank = arguments.get("rerank", use_rerank)
 
-                results = await asyncio.to_thread(
-                    kb.search,
-                    query=query,
-                    collection=collection,
-                    top_k=top_k,
-                    rerank=rerank,
-                )
-                result = {
-                    "status": "ok",
-                    "query": query,
-                    "collection": collection,
-                    "result_count": len(results),
-                    "results": [
-                        {
-                            "text": r["chunk"]["text"],
-                            "score": r["score"],
-                            "rerank_score": r.get("rerank_score"),
-                            "source_file": r["chunk"]["metadata"]["source_file"],
-                            "chunk_index": r["chunk"]["metadata"]["chunk_index"],
-                        }
-                        for r in results
-                    ],
-                }
+                collection_arg = arguments.get("collection")
+                collections_arg = arguments.get("collections")
+
+                if not collection_arg and not collections_arg:
+                    result = {
+                        "status": "error",
+                        "error": "Provide 'collection' or 'collections'",
+                    }
+                else:
+                    target_collections = collections_arg or [collection_arg]
+                    all_results = []
+
+                    for coll_name in target_collections:
+                        try:
+                            coll_results = await asyncio.to_thread(
+                                kb.search,
+                                query=query,
+                                collection=coll_name,
+                                top_k=top_k,
+                                rerank=rerank,
+                            )
+                            all_results.extend(coll_results)
+                        except ValueError as e:
+                            logger.warning("Search failed for '%s': %s", coll_name, e)
+
+                    # Sort merged results by score, truncate
+                    score_key = "rerank_score" if rerank else "score"
+                    all_results.sort(
+                        key=lambda r: r.get(score_key, r["score"]),
+                        reverse=True,
+                    )
+                    all_results = all_results[:top_k]
+
+                    result = {
+                        "status": "ok",
+                        "query": query,
+                        "collection": collection_arg or ",".join(collections_arg),
+                        "result_count": len(all_results),
+                        "results": [
+                            {
+                                "text": r["chunk"]["text"],
+                                "score": r["score"],
+                                "rerank_score": r.get("rerank_score"),
+                                "source_file": r["chunk"]["metadata"].get("source_file", ""),
+                                "chunk_index": r["chunk"]["metadata"].get("chunk_index", 0),
+                            }
+                            for r in all_results
+                        ],
+                    }
 
             elif name == "kb_ingest":
                 folder_path = Path(arguments["folder_path"])
@@ -467,7 +551,6 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                                     or target_name in active_collections
                                 ):
                                     target_name = f"{original_name}{n}"
-                                    # coll_dest = kb.index_dir / target_name # TODO: check why this failed
                                     n += 1
                                 warning = (
                                     f"Collection '{original_name}' already exists from a "
@@ -617,6 +700,41 @@ def create_knowledge_server(kb: KnowledgeBase, use_rerank: bool):
                     if job.get("traceback") and job["status"] == "error":
                         result["traceback"] = job["traceback"]
 
+            elif name == "kb_remember":
+                text = arguments["text"]
+                category = arguments.get("category", "")
+                session_id = arguments.get("session_id", "")
+                supersedes = arguments.get("supersedes")
+
+                store_result = await asyncio.to_thread(
+                    memory.remember,
+                    text=text,
+                    category=category,
+                    session_id=session_id,
+                    supersedes=supersedes,
+                )
+
+                if store_result.get("stored"):
+                    result = {
+                        "status": "ok",
+                        "entry_id": store_result["entry_id"],
+                        "superseded_id": store_result.get("superseded_id"),
+                        "total_memories": await asyncio.to_thread(memory.count),
+                    }
+                else:
+                    result = {
+                        "status": "error",
+                        "error": store_result.get("error", "Failed to store memory"),
+                    }
+
+            elif name == "kb_get_memories":
+                entries = await asyncio.to_thread(memory.get_all)
+                result = {
+                    "status": "ok",
+                    "count": len(entries),
+                    "memories": entries,
+                }
+
             else:
                 result = {"status": "error", "error": f"Unknown tool: {name}"}
 
@@ -640,8 +758,12 @@ async def run_server(
     embedding_backend: str,
     embedding_model: str | None,
     vector_db: str,
+    embedding_api_key: str | None = None,
 ):
     """Run the MCP server with session-isolated indexes."""
+    if embedding_api_key:
+        os.environ["LLM_API_KEY"] = embedding_api_key
+
     base_path = Path(base_index_dir)
     runtime_path = Path(runtime_dir)
 
@@ -657,7 +779,7 @@ async def run_server(
     if embedding_model:
         kb._default_route.embedder_kwargs["model"] = embedding_model
 
-    server = create_knowledge_server(kb, use_rerank)
+    server = create_knowledge_server(kb, use_rerank, runtime_dir=runtime_dir)
     try:
         await run_stdio(server, "knowledge")
     finally:
@@ -711,6 +833,10 @@ def main():
         help="Default embedding model name (default: nomic-embed-text). Applies to whichever backend is selected.",
     )
     parser.add_argument(
+        "--embedding-api-key", default=None,
+        help="API key for the embedding service. Overrides LLM_API_KEY env var.",
+    )
+    parser.add_argument(
         "--vector-db",
         choices=list(VECTORINDEX_REGISTRY.keys()),
         default="faiss",
@@ -726,6 +852,7 @@ def main():
         args.embedding_backend,
         args.embedding_model,
         args.vector_db,
+        args.embedding_api_key,
     ))
 
 
