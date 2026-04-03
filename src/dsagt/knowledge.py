@@ -203,15 +203,23 @@ class ChromaIndex(BaseVectorIndex):
 
     # ChromaDB stores ids internally; we maintain a positional list so that
     # returned integer indices are consistent with the chunk list.
-    def add(self, embeddings: np.ndarray) -> None:
+    def add(self, embeddings: np.ndarray, metadatas: list[dict] | None = None) -> None:
         start = len(self._ids)
         new_ids = [str(start + i) for i in range(len(embeddings))]
         self._ids.extend(new_ids)
-        self._col.add(ids=new_ids, embeddings=embeddings.tolist())
+        kwargs: dict = {"ids": new_ids, "embeddings": embeddings.tolist()}
+        if metadatas is not None:
+            kwargs["metadatas"] = metadatas
+        self._col.add(**kwargs)
 
-    def search(self, query_vec: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+    def search(self, query_vec: np.ndarray, k: int, where: dict | None = None) -> tuple[np.ndarray, np.ndarray]:
         k = min(k, len(self._ids))
-        results = self._col.query(query_embeddings=[query_vec.tolist()], n_results=k)
+        if k == 0:
+            return np.array([], dtype=np.float32), np.array([], dtype=np.int64)
+        query_kwargs: dict = {"query_embeddings": [query_vec.tolist()], "n_results": k}
+        if where is not None:
+            query_kwargs["where"] = where
+        results = self._col.query(**query_kwargs)
         chroma_ids = results["ids"][0]
         distances = results["distances"][0]  # cosine distance (0=identical)
         scores = np.array([1.0 - d for d in distances], dtype=np.float32)
@@ -588,21 +596,131 @@ class KnowledgeBase:
             "total_chunks": len(all_chunks),
         }
 
+    def add_entries(
+        self,
+        texts: list[str],
+        collection: str,
+        metadatas: list[dict] | None = None,
+        route: CollectionRoute | None = None,
+    ) -> dict:
+        """Add pre-formed text entries with optional metadata to a collection.
+
+        Unlike ``ingest``/``append``, this skips document parsing and chunking.
+        Each text is embedded and stored as-is.  Used by episodic memory,
+        tool_executions, and other structured entry types that produce their
+        own text representations rather than ingesting raw documents.
+
+        Parameters
+        ----------
+        texts : list[str]
+            Text content for each entry (will be embedded).
+        collection : str
+            Target collection name (created if it doesn't exist).
+        metadatas : list[dict], optional
+            Per-entry metadata dicts.  On ChromaDB-backed collections these
+            are stored as native metadata for ``where`` filtering.  On all
+            backends they are merged into the chunk metadata in chunks.jsonl.
+        route : CollectionRoute, optional
+            Override routing for this collection (persisted to disk).
+
+        Returns
+        -------
+        dict
+            ``{collection, entries_added, total_entries}``
+        """
+        if not texts:
+            return {"collection": collection, "entries_added": 0, "total_entries": 0}
+
+        coll_dir = self.index_dir / collection
+        coll_dir.mkdir(exist_ok=True)
+
+        if route is not None:
+            self.register_route(collection, route)
+        active_route = self._get_route(collection)
+
+        embedder = self._get_embedder(active_route)
+        embeddings = self._normalize(embedder.embed(texts))
+
+        # Load existing collection or create a fresh index
+        has_data = (
+            collection in self._cache
+            or (coll_dir / "chunks.jsonl").exists()
+        )
+        if has_data:
+            index, existing_chunks = self._load(collection)
+        else:
+            index = _make_index(
+                active_route.vector_db,
+                **self._index_init_kwargs(active_route, coll_dir),
+            )
+            existing_chunks = []
+
+        # Build chunk dicts (consistent with chunks.jsonl format)
+        new_chunks = []
+        for i, text in enumerate(texts):
+            entry_meta = metadatas[i] if metadatas else {}
+            chunk = {
+                "text": text,
+                "metadata": {
+                    "collection": collection,
+                    "source_file": "entry",
+                    "chunk_index": len(existing_chunks) + i,
+                    **entry_meta,
+                },
+            }
+            new_chunks.append(chunk)
+
+        # Store embeddings (with metadata on ChromaDB)
+        if active_route.vector_db == "chroma" and metadatas is not None:
+            index.add(embeddings, metadatas=metadatas)
+        else:
+            index.add(embeddings)
+
+        index.save(coll_dir)
+        self._save_route(collection, active_route)
+
+        # Append to chunks.jsonl
+        with open(coll_dir / "chunks.jsonl", "a") as f:
+            for chunk in new_chunks:
+                f.write(json.dumps(chunk) + "\n")
+
+        all_chunks = existing_chunks + new_chunks
+        self._cache[collection] = (index, all_chunks)
+
+        return {
+            "collection": collection,
+            "entries_added": len(texts),
+            "total_entries": len(all_chunks),
+        }
+
     def search(
         self,
         query: str,
         collection: str,
         top_k: int = 5,
         rerank: bool = False,
+        where: dict | None = None,
     ) -> list[dict]:
-        """Search *collection* with *query*."""
+        """Search *collection* with *query*.
+
+        Parameters
+        ----------
+        where : dict, optional
+            ChromaDB ``where`` filter clause.  Only effective on ChromaDB-backed
+            collections; silently ignored for FAISS collections.
+        """
         index, chunks = self._load(collection)
         active_route = self._get_route(collection)
         embedder = self._get_embedder(active_route)
 
         query_emb = self._normalize(embedder.embed([query]))[0]
         search_k = min(top_k * 10 if rerank else top_k, len(chunks))
-        scores, indices = index.search(query_emb, search_k)
+
+        # Pass where clause only to ChromaDB indexes
+        if where is not None and active_route.vector_db == "chroma":
+            scores, indices = index.search(query_emb, search_k, where=where)
+        else:
+            scores, indices = index.search(query_emb, search_k)
 
         results = [
             {"chunk": chunks[i], "score": float(scores[j])}
