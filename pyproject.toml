@@ -21,6 +21,7 @@ dependencies = [
     "sentence-transformers",
     "tree-sitter-language-pack",
     "chromadb>=1.5.1",
+    "h5py>=3.16.0",
 ]
 
 [project.scripts]
