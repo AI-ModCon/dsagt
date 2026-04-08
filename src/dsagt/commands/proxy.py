@@ -1,19 +1,10 @@
 """
-dsagt-proxy: Start LiteLLM proxy with OTel tracing and DSAGT tool records.
-
-Configures two callback paths:
-  1. OTel (LiteLLM built-in) → spans, metrics, token/cost data → MLflow
-  2. DSAGT callback → tool execution records (intent + report layers)
+dsagt-proxy entry point: Start LiteLLM proxy with OTel tracing and DSAGT tool records.
 
 Usage:
     dsagt-proxy
     dsagt-proxy --port 4000 --records-dir runtime/trace_archive
-    dsagt-proxy --config my_litellm_config.yaml
-    dsagt-proxy --otel-endpoint http://localhost:5000  # MLflow
-
-Agent configuration:
-    Claude Code:  export ANTHROPIC_BASE_URL="http://localhost:4000"
-    Goose:        export OPENAI_HOST="http://localhost:4000"
+    dsagt-proxy --otel-endpoint http://localhost:5000
 """
 
 import argparse
@@ -27,15 +18,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 4000
 DEFAULT_RECORDS_DIR = "runtime/trace_archive"
-DEFAULT_OTEL_ENDPOINT = "http://localhost:5000"
 
 
 def _generate_config(model: str, otel_endpoint: str | None = None) -> str:
-    """Generate a LiteLLM proxy config YAML.
-
-    When an OTel endpoint is provided, enables the built-in OTel callback
-    for standard trace export (to MLflow, Jaeger, etc.).
-    """
+    """Generate a LiteLLM proxy config YAML."""
     callbacks = []
     env_vars = ""
 
@@ -68,13 +54,13 @@ def main(argv: list[str] | None = None):
         prog="dsagt-proxy",
         description="Start LiteLLM proxy with OTel tracing and DSAGT tool records.",
     )
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Listen port (default: {DEFAULT_PORT})")
-    parser.add_argument("--records-dir", default=DEFAULT_RECORDS_DIR, help=f"Tool execution records directory (default: {DEFAULT_RECORDS_DIR})")
-    parser.add_argument("--session", default=None, help="Session ID (default: $DSAGT_SESSION_ID)")
-    parser.add_argument("--config", default=None, help="Path to existing LiteLLM config YAML (skips auto-generation)")
-    parser.add_argument("--model", default="claude-sonnet-4-20250514", help="Model name for auto-generated config")
-    parser.add_argument("--otel-endpoint", default=None, help=f"OTLP endpoint for trace export, e.g. MLflow (default: none, set to enable)")
-    parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--records-dir", default=DEFAULT_RECORDS_DIR)
+    parser.add_argument("--session", default=None)
+    parser.add_argument("--config", default=None, help="Path to existing LiteLLM config YAML")
+    parser.add_argument("--model", default="claude-sonnet-4-20250514")
+    parser.add_argument("--otel-endpoint", default=None)
+    parser.add_argument("--verbose", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -84,12 +70,10 @@ def main(argv: list[str] | None = None):
         datefmt="%H:%M:%S",
     )
 
-    # Check for API key early
     if not os.environ.get("LLM_API_KEY"):
         logger.error("LLM_API_KEY not set. The proxy needs it to forward requests.")
         sys.exit(1)
 
-    # Register our callback before LiteLLM starts
     try:
         import litellm
     except ImportError:
@@ -114,7 +98,6 @@ def main(argv: list[str] | None = None):
     else:
         logger.info("OTel export disabled (use --otel-endpoint to enable)")
 
-    # Determine config path
     if args.config:
         config_path = args.config
     else:
@@ -127,10 +110,7 @@ def main(argv: list[str] | None = None):
         config_path = tmp.name
         logger.info("Generated LiteLLM config at %s", config_path)
 
-    # Start the proxy
     logger.info("Starting LiteLLM proxy on port %d", args.port)
-    logger.info("Claude Code:  export ANTHROPIC_BASE_URL=\"http://localhost:%d\"", args.port)
-    logger.info("Goose:        export OPENAI_HOST=\"http://localhost:%d\"", args.port)
 
     try:
         from litellm.proxy.proxy_cli import run_server
@@ -140,7 +120,6 @@ def main(argv: list[str] | None = None):
             config=config_path,
         )
     except (ImportError, TypeError):
-        # Fallback: run via subprocess if the internal API changed
         import subprocess
         cmd = [
             sys.executable, "-m", "litellm",
@@ -148,8 +127,6 @@ def main(argv: list[str] | None = None):
             "--port", str(args.port),
         ]
         logger.info("Fallback: running %s", " ".join(cmd))
-        # Note: subprocess won't inherit our litellm.callbacks registration,
-        # so this path only works if litellm loads the callback from config.
         logger.warning(
             "Subprocess fallback cannot pass the callback in-process. "
             "Add the callback to your LiteLLM config YAML instead."

@@ -23,8 +23,10 @@ from dsagt.config import (
     VALID_AGENTS,
     default_config_content,
     load_config,
-    project_dir_for,
+    project_dir as resolve_project_dir,
 )
+from dsagt.extraction import delete_session_log, extract_session
+from dsagt.knowledge import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ _AGENTS_DIR = Path(__file__).parent.parent.parent / "agents"
 # Project initialization
 # ---------------------------------------------------------------------------
 
-def init_project(project_name: str, agent: str, runtime_base: str | Path = "runtime") -> Path:
+def init_project(project_name: str, agent: str) -> Path:
     """Create a new project directory with default config and subdirectories.
 
     Returns the project directory path.
@@ -44,7 +46,7 @@ def init_project(project_name: str, agent: str, runtime_base: str | Path = "runt
     if agent not in VALID_AGENTS:
         raise ValueError(f"agent must be one of {VALID_AGENTS}, got '{agent}'")
 
-    project_dir = project_dir_for(project_name, runtime_base)
+    project_dir = resolve_project_dir(project_name)
 
     if (project_dir / "dsagt_config.yaml").exists():
         raise FileExistsError(f"Project already exists: {project_dir}")
@@ -347,7 +349,14 @@ def start_services(config: dict) -> dict[str, int]:
         proxy_cmd,
         stdout=open(proxy_log, "w"),
         stderr=subprocess.STDOUT,
-        env={**os.environ, "DSAGT_PROJECT": config["project"]},
+        env={
+            **os.environ,
+            "DSAGT_PROJECT": config["project"],
+            "DSAGT_PROJECT_DIR": str(project_dir),
+            "DSAGT_EXTRACTION_THRESHOLD": str(
+                config.get("extraction", {}).get("threshold", 0)
+            ),
+        },
         start_new_session=True,
     )
     pids["proxy"] = proxy_proc.pid
@@ -360,10 +369,9 @@ def start_services(config: dict) -> dict[str, int]:
     return pids
 
 
-def stop_services(project_dir: str | Path) -> list[str]:
+def stop_services(project_name: str) -> list[str]:
     """Stop running services for a project. Returns descriptions of what was stopped."""
-    project_dir = Path(project_dir)
-    pid_path = _pid_file(project_dir)
+    pid_path = _pid_file(resolve_project_dir(project_name))
     stopped = []
 
     if not pid_path.exists():
@@ -380,6 +388,53 @@ def stop_services(project_dir: str | Path) -> list[str]:
 
     pid_path.unlink(missing_ok=True)
     return stopped
+
+
+def run_extraction(project_name: str) -> dict:
+    """Run memory extraction for a project and clean up the session log.
+
+    Loads the session log, sends one LLM call to extract facts/summary/insights,
+    stores results in episodic_memory, then deletes the session log.  If extraction
+    fails, the session log is still deleted (transient buffer, MLflow has the truth).
+
+    Returns the extraction result dict, or a status dict on error/empty.
+    """
+    config = load_config(project_name)
+    project_dir = Path(config["project_dir"])
+    trace_dir = project_dir / "trace_archive"
+
+    api_key = config.get("llm", {}).get("api_key", "") or os.environ.get("LLM_API_KEY", "")
+    model = config.get("llm", {}).get("model", "claude-sonnet-4-20250514")
+    session_id = config.get("project", "")
+    categories = config.get("categories", {})
+
+    if not api_key or api_key.startswith("${"):
+        logger.warning("No API key available for extraction, skipping")
+        delete_session_log(trace_dir)
+        return {"status": "skipped", "reason": "no_api_key"}
+
+    kb = KnowledgeBase(index_dir=project_dir / "kb_index")
+    try:
+        return extract_session(
+            trace_dir=trace_dir,
+            kb=kb,
+            api_key=api_key,
+            model=model,
+            session_id=session_id,
+            categories=categories if categories else None,
+            runtime_dir=project_dir,
+            outlier_sensitivity=float(
+                config.get("extraction", {}).get("outlier_sensitivity", 0)
+            ),
+        )
+    finally:
+        kb.close()
+        # Safety net: ensure session log files are gone even if extraction raised.
+        # drain_session_log handles the normal case; this catches edge cases.
+        for suffix in (".jsonl", ".consumed"):
+            leftover = trace_dir / f"session_log{suffix}"
+            if leftover.exists():
+                leftover.unlink()
 
 
 # ---------------------------------------------------------------------------

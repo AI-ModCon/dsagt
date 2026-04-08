@@ -15,12 +15,20 @@ from dsagt.config import (
     _resolve_env_vars,
     default_config_content,
     load_config,
-    project_dir_for,
+    project_dir,
 )
-from dsagt.session import (
+from dsagt.project import (
     generate_agent_configs,
     init_project,
 )
+
+
+@pytest.fixture(autouse=True)
+def _use_tmp_runtime(tmp_path):
+    """Point RUNTIME_DIR at tmp_path for all tests in this module."""
+    with patch("dsagt.config.RUNTIME_DIR", tmp_path):
+        with patch("dsagt.project.project_dir", lambda name: tmp_path / name):
+            yield
 
 
 # ---------------------------------------------------------------------------
@@ -71,75 +79,75 @@ class TestDeepMerge:
 
 class TestLoadConfig:
 
-    def _write_config(self, tmp_path, content: dict):
-        project_dir = tmp_path / "myproject"
-        project_dir.mkdir()
-        (project_dir / "dsagt_config.yaml").write_text(
+    def _write_config(self, tmp_path, name, content: dict):
+        pdir = tmp_path / name
+        pdir.mkdir(exist_ok=True)
+        (pdir / "dsagt_config.yaml").write_text(
             yaml.dump(content, default_flow_style=False)
         )
-        return project_dir
+        return name
 
     def test_loads_minimal_config(self, tmp_path):
-        project_dir = self._write_config(tmp_path, {
-            "project": "test",
+        name = self._write_config(tmp_path, "myproject", {
+            "project": "myproject",
             "agent": "goose",
         })
 
-        config = load_config(project_dir)
+        config = load_config(name)
 
-        assert config["project"] == "test"
+        assert config["project"] == "myproject"
         assert config["agent"] == "goose"
         assert config["proxy"]["port"] == 4000  # default
         assert config["mlflow"]["port"] == 5001  # default
         assert config["llm"]["model"] == "claude-sonnet-4-20250514"
 
     def test_overrides_defaults(self, tmp_path):
-        project_dir = self._write_config(tmp_path, {
-            "project": "test",
+        name = self._write_config(tmp_path, "myproject", {
+            "project": "myproject",
             "agent": "claude-code",
             "proxy": {"port": 9000},
         })
 
-        config = load_config(project_dir)
+        config = load_config(name)
         assert config["proxy"]["port"] == 9000
 
     def test_missing_project_raises(self, tmp_path):
-        project_dir = self._write_config(tmp_path, {"agent": "goose"})
+        name = self._write_config(tmp_path, "myproject", {"agent": "goose"})
         with pytest.raises(ValueError, match="project"):
-            load_config(project_dir)
+            load_config(name)
 
     def test_missing_agent_raises(self, tmp_path):
-        project_dir = self._write_config(tmp_path, {"project": "test"})
+        name = self._write_config(tmp_path, "myproject", {"project": "myproject"})
         with pytest.raises(ValueError, match="agent"):
-            load_config(project_dir)
+            load_config(name)
 
     def test_invalid_agent_raises(self, tmp_path):
-        project_dir = self._write_config(tmp_path, {"project": "t", "agent": "copilot"})
+        name = self._write_config(tmp_path, "myproject", {"project": "myproject", "agent": "copilot"})
         with pytest.raises(ValueError, match="copilot"):
-            load_config(project_dir)
+            load_config(name)
 
-    def test_missing_file_raises(self, tmp_path):
+    def test_missing_file_raises(self):
         with pytest.raises(FileNotFoundError):
-            load_config(tmp_path / "nonexistent")
+            load_config("nonexistent")
 
     def test_project_dir_injected(self, tmp_path):
-        project_dir = self._write_config(tmp_path, {
-            "project": "test",
+        name = self._write_config(tmp_path, "myproject", {
+            "project": "myproject",
             "agent": "goose",
         })
-        config = load_config(project_dir)
-        assert config["project_dir"] == str(project_dir.resolve())
+        config = load_config(name)
+        assert config["project_dir"] == str(tmp_path / "myproject")
 
 
 # ---------------------------------------------------------------------------
 # Config: helpers
 # ---------------------------------------------------------------------------
 
-class TestProjectDirFor:
+class TestProjectDir:
 
-    def test_basic(self):
-        p = project_dir_for("myproj", "/base")
-        assert p == Path("/base/myproj")
+    def test_basic(self, tmp_path):
+        result = project_dir("myproj")
+        assert result == tmp_path / "myproj"
 
 
 class TestDefaultConfigContent:
@@ -152,49 +160,49 @@ class TestDefaultConfigContent:
 
 
 # ---------------------------------------------------------------------------
-# Session: init_project
+# CLI: init_project
 # ---------------------------------------------------------------------------
 
 class TestInitProject:
 
-    def test_creates_directory_structure(self, tmp_path):
-        project_dir = init_project("myproj", "goose", runtime_base=tmp_path)
+    def test_creates_directory_structure(self):
+        pdir = init_project("myproj", "goose")
 
-        assert project_dir.exists()
-        assert (project_dir / "dsagt_config.yaml").exists()
-        assert (project_dir / "trace_archive").is_dir()
-        assert (project_dir / "mlflow").is_dir()
-        assert (project_dir / "skills").is_dir()
-        assert (project_dir / "kb_index").is_dir()
+        assert pdir.exists()
+        assert (pdir / "dsagt_config.yaml").exists()
+        assert (pdir / "trace_archive").is_dir()
+        assert (pdir / "mlflow").is_dir()
+        assert (pdir / "skills").is_dir()
+        assert (pdir / "kb_index").is_dir()
 
-    def test_config_is_valid(self, tmp_path):
-        project_dir = init_project("myproj", "claude-code", runtime_base=tmp_path)
-        config = load_config(project_dir)
+    def test_config_is_valid(self):
+        init_project("myproj", "claude-code")
+        config = load_config("myproj")
         assert config["project"] == "myproj"
         assert config["agent"] == "claude-code"
 
-    def test_duplicate_raises(self, tmp_path):
-        init_project("myproj", "goose", runtime_base=tmp_path)
+    def test_duplicate_raises(self):
+        init_project("myproj", "goose")
         with pytest.raises(FileExistsError):
-            init_project("myproj", "goose", runtime_base=tmp_path)
+            init_project("myproj", "goose")
 
-    def test_invalid_agent_raises(self, tmp_path):
+    def test_invalid_agent_raises(self):
         with pytest.raises(ValueError):
-            init_project("myproj", "invalid-agent", runtime_base=tmp_path)
+            init_project("myproj", "invalid-agent")
 
 
 # ---------------------------------------------------------------------------
-# Session: generate_agent_configs
+# CLI: generate_agent_configs
 # ---------------------------------------------------------------------------
 
 class TestGenerateAgentConfigs:
 
-    def _init_and_load(self, tmp_path, agent):
-        project_dir = init_project("testproj", agent, runtime_base=tmp_path / "runtime")
-        return load_config(project_dir)
+    def _init_and_load(self, agent):
+        init_project("testproj", agent)
+        return load_config("testproj")
 
     def test_claude_code_generates_mcp_json(self, tmp_path):
-        config = self._init_and_load(tmp_path, "claude-code")
+        config = self._init_and_load("claude-code")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -210,7 +218,7 @@ class TestGenerateAgentConfigs:
         assert (working_dir / ".dsagt_env").exists()
 
     def test_goose_generates_goose_yaml(self, tmp_path):
-        config = self._init_and_load(tmp_path, "goose")
+        config = self._init_and_load("goose")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -224,7 +232,7 @@ class TestGenerateAgentConfigs:
         assert goose["GOOSE_PROVIDER"] == "openai"
 
     def test_roo_generates_roo_mcp(self, tmp_path):
-        config = self._init_and_load(tmp_path, "roo")
+        config = self._init_and_load("roo")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -236,7 +244,7 @@ class TestGenerateAgentConfigs:
         assert "dsagt-registry" in mcp["mcpServers"]
 
     def test_cline_generates_mcp_json(self, tmp_path):
-        config = self._init_and_load(tmp_path, "cline")
+        config = self._init_and_load("cline")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -248,7 +256,7 @@ class TestGenerateAgentConfigs:
         assert "alwaysAllow" in mcp["mcpServers"]["dsagt-registry"]
 
     def test_mcp_args_include_project_dir(self, tmp_path):
-        config = self._init_and_load(tmp_path, "claude-code")
+        config = self._init_and_load("claude-code")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -262,7 +270,7 @@ class TestGenerateAgentConfigs:
         assert "--base-index-dir" in kb_args
 
     def test_env_file_has_proxy_url(self, tmp_path):
-        config = self._init_and_load(tmp_path, "claude-code")
+        config = self._init_and_load("claude-code")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -274,7 +282,7 @@ class TestGenerateAgentConfigs:
         assert "DSAGT_PROJECT" in env_content
 
     def test_goose_env_uses_openai_host(self, tmp_path):
-        config = self._init_and_load(tmp_path, "goose")
+        config = self._init_and_load("goose")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -305,7 +313,7 @@ class TestResolveRecordsDirProjectAware:
 
 
 # ---------------------------------------------------------------------------
-# Session: agent_env
+# CLI: agent_env
 # ---------------------------------------------------------------------------
 
 class TestAgentEnv:
@@ -320,24 +328,24 @@ class TestAgentEnv:
         }
 
     def test_claude_code_sets_anthropic_base_url(self):
-        from dsagt.session import agent_env
+        from dsagt.project import agent_env
         env = agent_env(self._make_config("claude-code"))
         assert env["ANTHROPIC_BASE_URL"] == "http://localhost:4000"
         assert env["DSAGT_PROJECT"] == "test"
 
     def test_goose_sets_openai_host(self):
-        from dsagt.session import agent_env
+        from dsagt.project import agent_env
         env = agent_env(self._make_config("goose"))
         assert env["OPENAI_HOST"] == "http://localhost:4000"
         assert "ANTHROPIC_BASE_URL" not in env
 
     def test_embedding_key_set(self):
-        from dsagt.session import agent_env
+        from dsagt.project import agent_env
         env = agent_env(self._make_config("claude-code"))
         assert env["LLM_API_KEY"] == "test-key"
 
     def test_unresolved_env_ref_skipped(self):
-        from dsagt.session import agent_env
+        from dsagt.project import agent_env
         config = self._make_config("claude-code")
         config["embedding"]["api_key"] = "${UNSET_VAR}"
         env = agent_env(config)
@@ -345,23 +353,23 @@ class TestAgentEnv:
 
 
 # ---------------------------------------------------------------------------
-# Session: agent_command
+# CLI: agent_command
 # ---------------------------------------------------------------------------
 
 class TestAgentCommand:
 
     def test_claude_code(self):
-        from dsagt.session import agent_command
+        from dsagt.project import agent_command
         assert agent_command({"agent": "claude-code"}) == ["claude"]
 
     def test_goose(self):
-        from dsagt.session import agent_command
+        from dsagt.project import agent_command
         assert agent_command({"agent": "goose"}) == ["goose", "session"]
 
     def test_roo_returns_none(self):
-        from dsagt.session import agent_command
+        from dsagt.project import agent_command
         assert agent_command({"agent": "roo"}) is None
 
     def test_cline_returns_none(self):
-        from dsagt.session import agent_command
+        from dsagt.project import agent_command
         assert agent_command({"agent": "cline"}) is None

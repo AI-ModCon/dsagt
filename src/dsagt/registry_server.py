@@ -11,8 +11,6 @@ Usage:
     dsagt-registry-server --runtime-dir ./my_session
 """
 
-import argparse
-import asyncio
 import subprocess
 import sys
 
@@ -320,30 +318,3 @@ def create_registry_server(registry: ToolRegistry):
         raise ValueError(f"Unknown tool: {name}")
 
     return server
-
-
-def main():
-    """Entry point for the registry builder server."""
-    parser = argparse.ArgumentParser(description="DSAGT Registry Builder MCP Server")
-    parser.add_argument(
-        "--runtime-dir",
-        default="./runtime",
-        help="Runtime directory (default: ./runtime)",
-    )
-    parser.add_argument(
-        "--source-skills-dir",
-        default=None,
-        help="Source skills directory to seed from (default: bundled skills)",
-    )
-    args = parser.parse_args()
-
-    registry = ToolRegistry(
-        source_skills_dir=args.source_skills_dir,
-        runtime_dir=args.runtime_dir,
-    )
-    server = create_registry_server(registry)
-    asyncio.run(run_stdio(server, "registry"))
-
-
-if __name__ == "__main__":
-    main()

@@ -641,12 +641,8 @@ class KnowledgeBase:
         embedder = self._get_embedder(active_route)
         embeddings = self._normalize(embedder.embed(texts))
 
-        # Load existing collection or create a fresh index
-        has_data = (
-            collection in self._cache
-            or (coll_dir / "chunks.jsonl").exists()
-        )
-        if has_data:
+        # Load existing or create new index
+        if (coll_dir / "chunks.jsonl").exists():
             index, existing_chunks = self._load(collection)
         else:
             index = _make_index(
@@ -692,6 +688,15 @@ class KnowledgeBase:
             "entries_added": len(texts),
             "total_entries": len(all_chunks),
         }
+
+    def embed_texts(self, texts: list[str], collection: str) -> np.ndarray:
+        """Embed texts using the embedder configured for a collection.
+
+        Returns L2-normalized float32 array of shape (n_texts, dim).
+        """
+        route = self._get_route(collection)
+        embedder = self._get_embedder(route)
+        return self._normalize(embedder.embed(texts))
 
     def search(
         self,

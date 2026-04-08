@@ -36,6 +36,20 @@ DEFAULTS = {
         "port": 5001,
         "backend": "sqlite",
     },
+    "categories": {
+    "quality_control": "Assessment or filtering of data quality, QC metrics, thresholds, pass/fail rates",
+    "data_management": "File organization, data movement, format conversion, naming conventions",
+    "transformation": "Data processing steps, parameter choices, pipeline stage configuration",
+    "assembly": "Genome assembly, contig generation, scaffolding, assembly QC metrics",
+    "configuration": "Tool settings, environment setup, resource allocation decisions",
+    "performance": "Runtime, memory usage, throughput, resource consumption observations",
+    "tool_usage": "Tool selection rationale, parameter tuning, tool-specific behaviors or quirks",
+    "results": "Output summaries, key findings, deliverables produced",
+    },
+    "extraction": {
+        "threshold": 0,
+        "outlier_sensitivity": 0.0,
+    },
 }
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
@@ -67,21 +81,21 @@ def _deep_merge(defaults: dict, overrides: dict) -> dict:
     return result
 
 
-def load_config(project_dir: str | Path) -> dict:
-    """Load and validate a project config from its directory.
+def load_config(project_name: str) -> dict:
+    """Load and validate a project config by name.
 
-    Args:
-        project_dir: Path to the project directory containing dsagt_config.yaml.
+    Resolves the project directory from RUNTIME_DIR / project_name.
 
     Returns:
         Fully resolved config dict with defaults applied.
+        Includes 'project_dir' (absolute path string) derived from the name.
 
     Raises:
         FileNotFoundError: If the config file doesn't exist.
         ValueError: If required fields are missing or invalid.
     """
-    project_dir = Path(project_dir)
-    config_path = project_dir / "dsagt_config.yaml"
+    pdir = project_dir(project_name)
+    config_path = pdir / "dsagt_config.yaml"
 
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
@@ -91,8 +105,7 @@ def load_config(project_dir: str | Path) -> dict:
     config = _deep_merge(DEFAULTS, raw)
     config = _resolve_env_vars(config)
 
-    # Inject the project directory path (not stored in YAML, derived from location)
-    config["project_dir"] = str(project_dir.resolve())
+    config["project_dir"] = str(pdir)
 
     _validate(config)
     return config
@@ -114,9 +127,21 @@ def _validate(config: dict) -> None:
         raise ValueError(f"'mlflow.backend' must be one of {VALID_MLFLOW_BACKENDS}, got '{backend}'")
 
 
-def project_dir_for(project_name: str, runtime_base: str | Path = "runtime") -> Path:
+def _repo_root() -> Path:
+    """Find the DSAGT repo root by walking up from this file to pyproject.toml."""
+    current = Path(__file__).resolve().parent
+    for parent in (current, *current.parents):
+        if (parent / "pyproject.toml").exists():
+            return parent
+    raise FileNotFoundError("Cannot find DSAGT repo root (no pyproject.toml found)")
+
+
+RUNTIME_DIR = _repo_root() / "runtime"
+
+
+def project_dir(project_name: str) -> Path:
     """Return the project directory path for a given project name."""
-    return Path(runtime_base).resolve() / project_name
+    return RUNTIME_DIR / project_name
 
 
 def default_config_content(project_name: str, agent: str) -> str:
@@ -135,6 +160,8 @@ def default_config_content(project_name: str, agent: str) -> str:
             },
             "proxy": DEFAULTS["proxy"],
             "mlflow": DEFAULTS["mlflow"],
+            "categories": DEFAULTS["categories"],
+            "extraction": DEFAULTS["extraction"],
         },
         default_flow_style=False,
         sort_keys=False,

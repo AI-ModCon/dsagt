@@ -24,8 +24,12 @@ dependencies = [
 ]
 
 [project.scripts]
-dsagt-registry-server = "dsagt.registry_server:main"
-dsagt-knowledge-server = "dsagt.knowledge_server:main"
+dsagt = "dsagt.commands.cli:main"
+dsagt-proxy = "dsagt.commands.proxy:main"
+dsagt-run = "dsagt.commands.run:main"
+dsagt-registry-server = "dsagt.commands.registry_server:main"
+dsagt-knowledge-server = "dsagt.commands.knowledge_server:main"
+dsagt-setup-kb = "dsagt.commands.setup_core_kb:main"
 
 [dependency-groups]
 dev = [

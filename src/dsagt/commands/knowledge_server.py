@@ -41,7 +41,9 @@ from mcp.server.lowlevel import Server
 from mcp.server.models import InitializationOptions
 
 from dsagt.knowledge import EMBEDDER_REGISTRY, VECTORINDEX_REGISTRY, CollectionRoute, KnowledgeBase
+from dsagt.extraction import EPISODIC_MEMORY_ROUTE
 from dsagt.memory import ExplicitMemory
+from dsagt.outlier import SuggestionQueue
 
 try:
     from dsagt.mcp_utils import create_server, run_stdio
@@ -169,6 +171,31 @@ def _register_external_collection(
     kb._save_route(collection_name, route)
 
 
+def _build_where_clause(arguments: dict) -> dict | None:
+    """Build a ChromaDB ``where`` clause from kb_search filter arguments.
+
+    Only includes filters the agent actually passed. Returns None when no
+    filters were provided (FAISS collections and unfiltered searches).
+    """
+    filters = []
+
+    for key in ("category", "session_id", "source_type", "tool_name"):
+        value = arguments.get(key)
+        if value is not None:
+            filters.append({key: value})
+
+    # Numeric filter: return_code
+    return_code = arguments.get("return_code")
+    if return_code is not None:
+        filters.append({"return_code": int(return_code)})
+
+    if not filters:
+        return None
+    if len(filters) == 1:
+        return filters[0]
+    return {"$and": filters}
+
+
 def create_knowledge_server(
     kb: KnowledgeBase,
     use_rerank: bool,
@@ -184,6 +211,9 @@ def create_knowledge_server(
     # Explicit memory store (file-backed, not vector-indexed)
     mem_dir = Path(runtime_dir) if runtime_dir else kb.index_dir.parent
     memory = ExplicitMemory(runtime_dir=mem_dir)
+
+    # Outlier suggestion queue (file-backed)
+    suggestions = SuggestionQueue(mem_dir / "suggestions.json")
 
     def _start_job(coro, collection: str | None = None) -> str:
         job_id = uuid.uuid4().hex[:8]
@@ -264,6 +294,26 @@ def create_knowledge_server(
                             "type": "boolean",
                             "description": "Use cross-encoder reranking (slower but more accurate). Only available when server started with --rerank.",
                             "default": use_rerank,
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "Filter by category tag (ChromaDB collections only, e.g. episodic_memory, tool_executions)",
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Filter by session ID (ChromaDB collections only)",
+                        },
+                        "tool_name": {
+                            "type": "string",
+                            "description": "Filter by tool name (ChromaDB collections only, e.g. fastp, megahit)",
+                        },
+                        "source_type": {
+                            "type": "string",
+                            "description": "Filter by source type (ChromaDB collections only, e.g. extraction, compression)",
+                        },
+                        "return_code": {
+                            "type": "integer",
+                            "description": "Filter by tool exit code (ChromaDB collections only, e.g. 0 for success)",
                         },
                     },
                     "required": ["query"],
@@ -424,6 +474,10 @@ def create_knowledge_server(
                             "type": "string",
                             "description": "entry_id of an existing memory this fact replaces",
                         },
+                        "promoted_from": {
+                            "type": "string",
+                            "description": "suggestion_id if this memory was promoted from an outlier suggestion",
+                        },
                     },
                     "required": ["text"],
                 },
@@ -433,11 +487,41 @@ def create_knowledge_server(
                 description=(
                     "Get all active explicit memories for this project. "
                     "Call this at the start of each session to load project "
-                    "context the user has previously confirmed as important."
+                    "context the user has previously confirmed as important. "
+                    "Also returns any pending suggestions from the memory system "
+                    "that should be reviewed with the user."
                 ),
                 inputSchema={
                     "type": "object",
                     "properties": {},
+                },
+            ),
+            types.Tool(
+                name="kb_get_suggestions",
+                description=(
+                    "Get pending memory suggestions flagged by the outlier "
+                    "detection system. These are observations that seem unusual "
+                    "or important. Present them to the user and ask if they should "
+                    "be remembered. Use kb_remember with promoted_from to store "
+                    "confirmed suggestions, or kb_dismiss_suggestion to discard."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
+            types.Tool(
+                name="kb_dismiss_suggestion",
+                description="Dismiss a pending memory suggestion the user does not want to remember.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "suggestion_id": {
+                            "type": "string",
+                            "description": "ID of the suggestion to dismiss",
+                        },
+                    },
+                    "required": ["suggestion_id"],
                 },
             ),
         ]
@@ -458,6 +542,7 @@ def create_knowledge_server(
                 query = arguments["query"]
                 top_k = arguments.get("top_k", 5)
                 rerank = arguments.get("rerank", use_rerank)
+                where = _build_where_clause(arguments)
 
                 collection_arg = arguments.get("collection")
                 collections_arg = arguments.get("collections")
@@ -470,44 +555,66 @@ def create_knowledge_server(
                 else:
                     target_collections = collections_arg or [collection_arg]
                     all_results = []
+                    search_errors = []
 
                     for coll_name in target_collections:
                         try:
-                            coll_results = await asyncio.to_thread(
-                                kb.search,
+                            search_kwargs = dict(
                                 query=query,
                                 collection=coll_name,
                                 top_k=top_k,
                                 rerank=rerank,
                             )
+                            if where is not None:
+                                search_kwargs["where"] = where
+                            coll_results = await asyncio.to_thread(
+                                kb.search, **search_kwargs,
+                            )
                             all_results.extend(coll_results)
                         except ValueError as e:
                             logger.warning("Search failed for '%s': %s", coll_name, e)
+                            search_errors.append(str(e))
 
-                    # Sort merged results by score, truncate
-                    score_key = "rerank_score" if rerank else "score"
-                    all_results.sort(
-                        key=lambda r: r.get(score_key, r["score"]),
-                        reverse=True,
-                    )
-                    all_results = all_results[:top_k]
-
-                    result = {
-                        "status": "ok",
-                        "query": query,
-                        "collection": collection_arg or ",".join(collections_arg),
-                        "result_count": len(all_results),
-                        "results": [
-                            {
-                                "text": r["chunk"]["text"],
-                                "score": r["score"],
-                                "rerank_score": r.get("rerank_score"),
-                                "source_file": r["chunk"]["metadata"].get("source_file", ""),
-                                "chunk_index": r["chunk"]["metadata"].get("chunk_index", 0),
+                    # Report error if every collection failed
+                    if search_errors and not all_results:
+                        if len(target_collections) == 1:
+                            result = {"status": "error", "error": search_errors[0]}
+                        else:
+                            result = {
+                                "status": "error",
+                                "error": f"All collections failed: {'; '.join(search_errors)}",
                             }
-                            for r in all_results
-                        ],
-                    }
+                    else:
+                        # Sort merged results by score, truncate
+                        score_key = "rerank_score" if rerank else "score"
+                        all_results.sort(
+                            key=lambda r: r.get(score_key, r["score"]),
+                            reverse=True,
+                        )
+                        all_results = all_results[:top_k]
+
+                        result = {
+                            "status": "ok",
+                            "query": query,
+                            "collection": collection_arg or ",".join(collections_arg),
+                            "result_count": len(all_results),
+                            "results": [
+                                {
+                                    "text": r["chunk"]["text"],
+                                    "score": r["score"],
+                                    "rerank_score": r.get("rerank_score"),
+                                    "source_file": r["chunk"]["metadata"].get("source_file", ""),
+                                    "chunk_index": r["chunk"]["metadata"].get("chunk_index", 0),
+                                    "metadata": {
+                                        k: v for k, v in r["chunk"]["metadata"].items()
+                                        if k not in ("source_file", "chunk_index", "collection", "file_type")
+                                    },
+                                }
+                                for r in all_results
+                            ],
+                        }
+                        if search_errors:
+                            result["warnings"] = search_errors
 
             elif name == "kb_ingest":
                 folder_path = Path(arguments["folder_path"])
@@ -705,6 +812,7 @@ def create_knowledge_server(
                 category = arguments.get("category", "")
                 session_id = arguments.get("session_id", "")
                 supersedes = arguments.get("supersedes")
+                promoted_from = arguments.get("promoted_from")
 
                 store_result = await asyncio.to_thread(
                     memory.remember,
@@ -715,10 +823,28 @@ def create_knowledge_server(
                 )
 
                 if store_result.get("stored"):
+                    # Mirror to ChromaDB for future similarity queries
+                    await asyncio.to_thread(
+                        kb.add_entries,
+                        texts=[text],
+                        collection="episodic_memory",
+                        metadatas=[{
+                            "source_type": "explicit_memory",
+                            "category": category,
+                            "session_id": session_id,
+                        }],
+                        route=EPISODIC_MEMORY_ROUTE,
+                    )
+
+                    # Auto-dismiss the suggestion if promoted
+                    if promoted_from:
+                        suggestions.dismiss(promoted_from)
+
                     result = {
                         "status": "ok",
                         "entry_id": store_result["entry_id"],
                         "superseded_id": store_result.get("superseded_id"),
+                        "promoted_from": promoted_from,
                         "total_memories": await asyncio.to_thread(memory.count),
                     }
                 else:
@@ -729,11 +855,38 @@ def create_knowledge_server(
 
             elif name == "kb_get_memories":
                 entries = await asyncio.to_thread(memory.get_all)
+                pending = suggestions.get_all()
                 result = {
                     "status": "ok",
                     "count": len(entries),
                     "memories": entries,
                 }
+                if pending:
+                    result["suggestions"] = pending
+                    result["suggestion_count"] = len(pending)
+
+            elif name == "kb_get_suggestions":
+                pending = suggestions.get_all()
+                result = {
+                    "status": "ok",
+                    "count": len(pending),
+                    "suggestions": pending,
+                }
+
+            elif name == "kb_dismiss_suggestion":
+                suggestion_id = arguments["suggestion_id"]
+                dismissed = suggestions.dismiss(suggestion_id)
+                if dismissed:
+                    result = {
+                        "status": "ok",
+                        "dismissed": suggestion_id,
+                        "remaining": suggestions.count,
+                    }
+                else:
+                    result = {
+                        "status": "error",
+                        "error": f"Suggestion not found: {suggestion_id}",
+                    }
 
             else:
                 result = {"status": "error", "error": f"Unknown tool: {name}"}

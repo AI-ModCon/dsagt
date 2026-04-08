@@ -1,19 +1,13 @@
 """
-dsagt-run: Tool execution wrapper for provenance capture.
+Tool execution wrapper logic for provenance capture.
 
 Wraps a shell command, captures exact execution data, and writes
 a JSON execution record. The agent sees no difference — stdout, stderr,
 and exit code pass through unchanged.
 
-Usage:
-    dsagt-run --tool fastp -- fastp -q 20 -l 50 --in1 reads.fq.gz
-    dsagt-run --tool megahit --session abc123 -- megahit -1 R1.fq -2 R2.fq -o out
-
 Execution records are written to <records-dir>/<tool>_<timestamp>_<id>.json.
-The records directory defaults to runtime/trace_archive/ or $DSAGT_RECORDS_DIR.
 """
 
-import argparse
 import json
 import os
 import subprocess
@@ -21,63 +15,6 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-
-
-def _parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
-    """Parse dsagt-run args and split off the wrapped command after '--'."""
-    # Split on '--' ourselves since argparse.REMAINDER is fragile
-    args_to_parse = argv if argv is not None else sys.argv[1:]
-
-    try:
-        sep = args_to_parse.index("--")
-    except ValueError:
-        # No '--' found — print help and exit
-        _make_parser().parse_args(["--help"])
-        sys.exit(1)  # unreachable, but explicit
-
-    wrapper_args = args_to_parse[:sep]
-    command_args = args_to_parse[sep + 1:]
-
-    parsed = _make_parser().parse_args(wrapper_args)
-    return parsed, command_args
-
-
-def _make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="dsagt-run",
-        description="Wrap a tool command and capture execution provenance.",
-    )
-    parser.add_argument(
-        "--tool",
-        required=True,
-        help="Name of the tool being executed (must match registry).",
-    )
-    parser.add_argument(
-        "--session",
-        default=None,
-        help="Session ID. Defaults to $DSAGT_SESSION_ID.",
-    )
-    parser.add_argument(
-        "--record-id",
-        default=None,
-        help="Pre-assigned record ID (for proxy correlation). Auto-generated if omitted.",
-    )
-    parser.add_argument(
-        "--records-dir",
-        default=None,
-        help="Directory for execution records. Defaults to $DSAGT_RECORDS_DIR or runtime/trace_archive/.",
-    )
-    parser.add_argument(
-        "--input-files",
-        default=None,
-        help="Comma-separated list of input file paths.",
-    )
-    parser.add_argument(
-        "--output-files",
-        default=None,
-        help="Comma-separated list of output file paths.",
-    )
-    return parser
 
 
 def _resolve_records_dir(explicit: str | None) -> Path:
@@ -175,27 +112,3 @@ def _write_record(record: dict, records_dir: Path) -> Path:
 
     path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
     return path
-
-
-def main(argv: list[str] | None = None) -> int:
-    args, command = _parse_args(argv)
-
-    if not command:
-        print("dsagt-run: no command specified after '--'", file=sys.stderr)
-        return 1
-
-    records_dir = _resolve_records_dir(args.records_dir)
-
-    return run_and_record(
-        tool_name=args.tool,
-        command=command,
-        records_dir=records_dir,
-        session_id=args.session,
-        record_id=args.record_id,
-        input_files=_parse_file_list(args.input_files),
-        output_files=_parse_file_list(args.output_files),
-    )
-
-
-if __name__ == "__main__":
-    sys.exit(main())

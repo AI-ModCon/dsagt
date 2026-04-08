@@ -24,6 +24,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+SESSION_LOG_FILE = "session_log.jsonl"
+
 
 # ---------------------------------------------------------------------------
 # Tool execution record storage
@@ -44,6 +46,19 @@ class ToolRecordStore:
         # Pending tool_use blocks awaiting their tool_result.
         # Keyed by tool_use id (from the LLM response).
         self._pending: dict[str, dict] = {}
+
+        # Tracks how many messages have been logged to avoid duplicating
+        # the full conversation history in every session log entry.
+        self._logged_message_count: int = 0
+
+        # Volume-triggered extraction: extract after this many exchanges.
+        # 0 disables auto-extraction.  Reads from env so start_services can set it.
+        self._extraction_threshold: int = int(
+            os.environ.get("DSAGT_EXTRACTION_THRESHOLD", "0")
+        )
+        self._exchange_count: int = 0
+        self._extracting: bool = False
+        self._last_injected_suggestion_count: int = 0
 
         self.records_dir.mkdir(parents=True, exist_ok=True)
 
@@ -161,6 +176,93 @@ class ToolRecordStore:
     def pending_count(self) -> int:
         return len(self._pending)
 
+    @property
+    def session_log_path(self) -> Path:
+        return self.records_dir / SESSION_LOG_FILE
+
+    def log_exchange(self, kwargs: dict, response_data: dict) -> None:
+        """Append this LLM exchange to the session log.
+
+        Only logs messages that are new since the last call (avoids
+        duplicating the full conversation history every time).  The
+        response content is always logged.
+        """
+        messages = kwargs.get("messages", [])
+        new_messages = messages[self._logged_message_count:]
+        self._logged_message_count = len(messages)
+
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "call_id": kwargs.get("litellm_call_id", ""),
+            "model": kwargs.get("model", ""),
+            "new_messages": new_messages,
+            "response": _extract_response_content(response_data),
+        }
+
+        with open(self.session_log_path, "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        self._exchange_count += 1
+        if (
+            self._extraction_threshold > 0
+            and self._exchange_count >= self._extraction_threshold
+            and not self._extracting
+        ):
+            self._trigger_extraction()
+
+    def _trigger_extraction(self) -> None:
+        """Run extraction in a background thread so the proxy isn't blocked."""
+        import threading
+
+        project_name = os.environ.get("DSAGT_PROJECT")
+        if not project_name:
+            logger.warning("DSAGT_PROJECT not set, skipping volume-triggered extraction")
+            return
+
+        self._extracting = True
+        self._exchange_count = 0
+
+        def _run():
+            try:
+                from dsagt.session import run_extraction
+                result = run_extraction(project_name)
+                logger.info("Volume-triggered extraction: %s", result.get("status"))
+            except Exception as e:
+                logger.warning("Volume-triggered extraction failed: %s", e)
+            finally:
+                self._extracting = False
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+    def pending_injection(self) -> str | None:
+        """Check for pending suggestions and return an injection message, or None.
+
+        Only fires when new suggestions have appeared since the last injection.
+        """
+        suggestions_path = self.records_dir.parent / "suggestions.json"
+        if not suggestions_path.exists():
+            return None
+
+        suggestions = json.loads(suggestions_path.read_text())
+        if not suggestions or len(suggestions) == self._last_injected_suggestion_count:
+            return None
+
+        self._last_injected_suggestion_count = len(suggestions)
+
+        count = len(suggestions)
+        previews = []
+        for s in suggestions[:3]:
+            previews.append(f"  - [{s.get('category', '')}] {s.get('text', '')[:80]}")
+        preview_text = "\n".join(previews)
+        more = f"\n  ... and {count - 3} more" if count > 3 else ""
+
+        return (
+            f"[DSAGT Memory System] {count} new observation(s) were flagged as "
+            f"potentially important during this session:\n{preview_text}{more}\n"
+            f"Call kb_get_suggestions to review them with the user."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -185,6 +287,35 @@ def _extract_tool_result_text(block: dict) -> str:
         texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
         return "\n".join(texts)
     return str(content)
+
+
+def _extract_response_content(response_data: dict) -> list[dict]:
+    """Extract the assistant's message content from a response.
+
+    Returns a list of content blocks (text, tool_use) suitable for
+    the session log.  Handles both OpenAI and Anthropic formats.
+    """
+    # Anthropic format: top-level content array
+    if "content" in response_data and isinstance(response_data["content"], list):
+        return response_data["content"]
+
+    # OpenAI format: choices[0].message
+    for choice in response_data.get("choices", []):
+        msg = choice.get("message") or {}
+        blocks = []
+        if msg.get("content"):
+            blocks.append({"type": "text", "text": msg["content"]})
+        for tc in msg.get("tool_calls") or []:
+            func = tc.get("function", {})
+            blocks.append({
+                "type": "tool_use",
+                "name": func.get("name", ""),
+                "input": _parse_arguments(func.get("arguments", "{}")),
+            })
+        if blocks:
+            return blocks
+
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +356,12 @@ def create_callback(records_dir: str | Path, session_id: str | None = None):
         handled by LiteLLM's OTel callback.
         """
 
+        def log_pre_api_call(self, model, messages, kwargs):
+            injection = store.pending_injection()
+            if injection:
+                messages.insert(0, {"role": "system", "content": injection})
+                logger.info("Injected suggestion prompt (%d chars)", len(injection))
+
         def log_success_event(self, kwargs, response_obj, start_time, end_time):
             _handle_success(store, kwargs, response_obj, start_time, end_time)
 
@@ -244,6 +381,9 @@ def _handle_success(store: ToolRecordStore, kwargs, response_obj, start_time, en
     """Shared logic for sync and async success handlers."""
     messages = kwargs.get("messages", [])
     response_data = _response_to_dict(response_obj)
+
+    # Log the exchange to the session log (for end-of-session extraction)
+    store.log_exchange(kwargs, response_data)
 
     # Match any tool_results from the current request against pending tool_uses
     store.match_tool_results(messages)

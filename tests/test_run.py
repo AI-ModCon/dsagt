@@ -14,12 +14,14 @@ from unittest.mock import patch
 import pytest
 
 from dsagt.run import (
-    _parse_args,
     _parse_file_list,
     _resolve_records_dir,
     _write_record,
-    main,
     run_and_record,
+)
+from dsagt.commands.run import (
+    _parse_args,
+    main,
 )
 
 

@@ -22,9 +22,9 @@ from pathlib import Path
 
 import httpx
 
-# Default index directory (relative to script location)
-SCRIPT_DIR = Path(__file__).parent
-DEFAULT_INDEX_DIR = SCRIPT_DIR.parent / "kb_index"
+from dsagt.config import RUNTIME_DIR
+
+DEFAULT_INDEX_DIR = RUNTIME_DIR.parent / "kb_index"
 
 # Collection definitions
 COLLECTIONS = {
@@ -170,8 +170,6 @@ def setup_collection(name: str, config: dict, index_dir: Path) -> dict:
         # Ingest using KnowledgeBase
         print("  Indexing...")
         
-        # Import here to allow script to show help without dependencies
-        sys.path.insert(0, str(SCRIPT_DIR.parent / "src"))
         from dsagt.knowledge import KnowledgeBase
         
         kb = KnowledgeBase(index_dir=index_dir)
