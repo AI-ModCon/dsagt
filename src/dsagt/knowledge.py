@@ -303,7 +303,7 @@ class CollectionRoute:
     def __init__(
         self,
         embedding_backend: str = "api",
-        vector_db: str = "faiss",
+        vector_db: str = "chroma",
         embedder_kwargs: dict | None = None,
         index_kwargs: dict | None = None,
         description: str = "",
@@ -372,10 +372,12 @@ class KnowledgeBase:
 
     Vector-index backends
     ---------------------
-    ``"faiss"``
-        Flat inner-product index (default).  No extra service needed.
     ``"chroma"``
-        ChromaDB HNSW index.  ``pip install chromadb``.
+        ChromaDB HNSW index (default).  Supports metadata filtering
+        and incremental updates.
+    ``"faiss"``
+        Flat inner-product index.  Faster for small static collections
+        but no metadata filtering.
     """
 
     FILE_TYPES = ["pdf", "md", "txt", "py", "docx", "json", "yaml", "yml"]
@@ -405,7 +407,7 @@ class KnowledgeBase:
         # No env var reads — callers pass config values through.
         self._default_route = CollectionRoute(
             embedding_backend=default_embedder or "api",
-            vector_db=default_index or "faiss",
+            vector_db=default_index or "chroma",
             embedder_kwargs=embedder_kwargs or {},
         )
 

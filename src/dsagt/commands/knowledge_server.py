@@ -999,8 +999,8 @@ def main():
     parser.add_argument(
         "--vector-db",
         choices=list(VECTORINDEX_REGISTRY.keys()),
-        default="faiss",
-        help="Default vector database backend for new collections (default: faiss)",
+        default="chroma",
+        help="Default vector database backend for new collections (default: chroma)",
     )
     args = parser.parse_args()
 

@@ -2,19 +2,52 @@
 
 **D**ata**S**mith **Ag**en**t** — AI-assisted data pipeline builder.
 
-DSAgt connects an MCP-compatible AI agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure. Projects are configured via a single YAML file and managed through the `dsagt` CLI.
+DSAgt connects an MCP-compatible AI agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure.
 
 ## Installation
 
 **Prerequisites:** Python 3.10–3.13, [uv](https://github.com/astral-sh/uv), and one of the supported agent platforms.
 
 ```bash
-git clone <repository-url>
-cd dsagt
+git clone https://github.com/AI-ModCon/BaseData_pipeline_agent.git
+cd BaseData_pipeline_agent
 uv sync --all-groups
 ```
 
-Install your agent platform of choice:
+### First-time knowledge base setup
+
+`dsagt-setup-kb` downloads reference repositories and papers (NeMo Curator,
+AIDRIN) and embeds them into ChromaDB collections that every project shares.
+The embedder needs an OpenAI-compatible API (or a local sentence-transformers
+model). Easiest path is to export environment variables once, then run the
+setup command:
+
+```bash
+export LLM_API_KEY=sk-...                          # your embedding API key
+export OPENAI_BASE_URL=https://api.example.com/v1  # OpenAI-compatible endpoint
+export EMBEDDING_MODEL=text-embedding-3-small      # embedding model name
+
+uv run dsagt-setup-kb   # builds the core AI-ready-data knowledge base
+```
+
+Alternatively, pass everything on the command line:
+
+```bash
+uv run dsagt-setup-kb \
+  --embedding-base-url https://api.example.com \
+  --embedding-api-key sk-... \
+  --embedding-model text-embedding-3-small
+```
+
+**Expect this to take 15–30 minutes** over an API-backed embedder — the core
+KB contains the full NeMo Curator and AIDRIN source trees plus several arXiv
+papers, and embedding is rate-limited by the upstream service. You only
+need to do this once per machine; the resulting index lives under
+`~/.dsagt/kb_index/` and is reused by every project. Pass
+`--collection nemo_curator` or `--collection aidrin` to build only one
+collection at a time.
+
+Install preferred agent platform:
 
 | Agent | Install | Verify |
 |-------|---------|--------|
@@ -22,8 +55,6 @@ Install your agent platform of choice:
 | [Goose](https://github.com/block/goose) | See [Goose docs](https://github.com/block/goose#installation) | `goose --version` |
 | [Roo Code](https://github.com/RooCodeInc/Roo-Code) | `npm i -g @roo-code/cli` | `roo --version` |
 | [Cline](https://github.com/cline/cline) | `npm i -g cline` | `cline --version` |
-
-See the `agents.py` docstring for platform-specific details on generated files and proxy routing.
 
 ## Quick Start
 
@@ -38,11 +69,29 @@ vim ~/dsagt-projects/cheese-metagenome/dsagt_config.yaml
 dsagt start cheese-metagenome
 ```
 
-`dsagt start` generates agent-specific config files into the project directory, starts background services (LLM proxy and MLflow), and launches the agent. When the agent exits, memory extraction runs and services are stopped automatically.
+`dsagt start` generates agent-specific config files into the project directory, starts background services (LLM proxy, MLflow), and launches the agent with MCP servers (Tools/Skills, Knowledge Base). When the agent exits, memory extraction runs and services are stopped automatically.
+
+## Use Case Examples
+
+End-to-end walkthroughs for representative scientific domains live in
+[`use_cases/`](use_cases/). Each one is a self-contained guide covering data
+acquisition, tool registration, pipeline construction, and agent-driven
+execution against a real dataset.
+
+| Use case | Domain | Guide |
+|----------|--------|-------|
+| Microbial isolate processing | Genomics — short-read QC and assembly with `fastp` + `megahit` | [use_cases/microbial_isolates/isolate_demo.md](use_cases/microbial_isolates/isolate_demo.md) |
+| Cryo-EM data curation | Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP | [use_cases/cryoem/cryoem_demo.md](use_cases/cryoem/cryoem_demo.md) |
+| ISAAC / VASP workflows | Materials science — DFT input/output handling with VASP | [use_cases/isaac_vasp/](use_cases/isaac_vasp/) |
+
+These exercises are also the best way to validate a fresh install beyond the
+basic smoke test — they cover knowledge ingestion, paired check/operation
+tool generation, multi-stage pipeline execution, and memory extraction on
+non-trivial domain data.
 
 ## Configuration
 
-Project configuration lives in `<project_dir>/dsagt_config.yaml`. This is the single source of truth — all API keys, endpoints, and settings flow from here to every subprocess and MCP server. No shell profile environment variable exports needed.
+Project configuration with API keys, endpoints, and settings is located at `<project_dir>/dsagt_config.yaml`.  
 
 ```yaml
 project: cheese-metagenome
@@ -65,11 +114,11 @@ mlflow:
   backend: sqlite               # sqlite | flat-file
 ```
 
-Environment variable references (`${VAR_NAME}`) are resolved at startup if you prefer that pattern, but putting keys directly in the config works too. To switch agent platforms, change `agent:` and run `dsagt start` again.
+To switch agent platforms, change `agent:` and run `dsagt start` again.
 
 ## Project Directory
 
-Each project is a self-contained directory. The default location is `~/dsagt-projects/<name>/`, or specify a custom location with `--location`:
+The default location for all project resources, logs, and artifacts is `~/dsagt-projects/<name>/`. A custom location is specified with the `--location` flag:
 
 ```bash
 dsagt init my-project --agent claude-code                        # ~/dsagt-projects/my-project/
@@ -77,8 +126,9 @@ dsagt init my-project --agent claude-code --location /data/runs  # /data/runs/my
 dsagt init my-project --agent claude-code --location .           # ./my-project/
 ```
 
-Projects are registered in `~/.dsagt/projects.yaml` so `dsagt start <name>` works from any directory.
+Projects are registered in `~/.dsagt/projects.yaml` so `dsagt start <name>` works correctly regardless current working directory in the shell.
 
+### Example project directory
 ```
 ~/dsagt-projects/cheese-metagenome/
   dsagt_config.yaml     # project configuration
@@ -93,26 +143,10 @@ Projects are registered in `~/.dsagt/projects.yaml` so `dsagt start <name>` work
   mlflow.log            # MLflow output (when running)
 ```
 
-## How It Works
+## Architecture
 
-### Architecture
+![Sketch of Architecture](latex/architecture.png)
 
-```
-┌──────────┐    ┌─────────────┐    ┌───────────────┐
-│  Agent   │───▶│ LiteLLM     │───▶│ LLM Provider  │
-│ (Claude, │    │ Proxy       │    └───────────────┘
-│  Goose,  │    │  ├ OTel ──────────▶ MLflow
-│  Roo,    │    │  └ DSAgt ─────────▶ Tool Records
-│  Cline)  │    └─────────────┘
-└────┬─────┘
-     │
-     │ MCP
-     ▼
-┌──────────┐    ┌──────────────┐
-│ Registry │    │ Knowledge    │
-│ Server   │    │ Server       │
-└──────────┘    └──────────────┘
-```
 
 All LLM calls route through a local LiteLLM proxy. Two callbacks capture data:
 
@@ -124,17 +158,19 @@ All LLM calls route through a local LiteLLM proxy. Two callbacks capture data:
 
 ### Tools and Skills
 
-**Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. New tools are registered through the registry MCP server via `save_tool_spec`. Executables are automatically wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`, which uses semantic search backed by ChromaDB.
+**Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. New tools are registered through the registry MCP server by the agent via `save_tool_spec`. Executables are automatically wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`, which exposes agent options for direct tool lookup or semantic search backed by ChromaDB.
 
-**Skills** are instruction-based agent workflows in `<project>/skills/`. Each skill is a directory containing a `SKILL.md` with a workflow definition and optional reference docs. DSAgt ships with a bundled `datacard-generator` skill. The agent discovers skills via `search_skills`.
+**Skills** are instruction-based agent workflows in `<project>/skills/`. Each skill is a directory containing a `SKILL.md` with a workflow definition and optional reference docs. DSAgt ships with a bundled `datacard-generator` skill. The agent discovers skills via `search_skills` mitigating concerns with skills context explosion for complicated data processing pipelines.
 
 ### Knowledge Base
 
-Semantic search over indexed document collections (FAISS + optional cross-encoder reranking). Domain documentation, package references, and standards are ingested through the knowledge MCP server. To set up the core knowledge base collections:
-
-```bash
-dsagt-setup-kb
-```
+Semantic search over indexed document collections. Collections default to
+ChromaDB (HNSW with metadata filtering and incremental updates); FAISS and
+other backends are available per-collection via `CollectionRoute` for
+user-supplied pre-built indexes. Cross-encoder reranking is optional.
+Domain documentation, package references, and standards are ingested
+through the knowledge MCP server. The shared core collections are built
+once with `dsagt-setup-kb` (see [First-time knowledge base setup](#first-time-knowledge-base-setup)).
 
 ### Observability
 
@@ -156,14 +192,6 @@ Tool execution records on disk provide the provenance chain for pipeline reconst
 | `dsagt list` | List all registered projects and their locations |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt extract <name>` | Manually extract memories from the session log |
-
-### Standalone Tools
-
-| Command | Description |
-|---------|-------------|
-| `dsagt-run --tool <name> -- <command>` | Wrap a tool for execution provenance |
-| `dsagt-proxy` | Start the LiteLLM proxy standalone |
-| `dsagt-setup-kb` | Build core knowledge base collections |
 
 ## Code Organization
 
@@ -198,7 +226,7 @@ uv run pytest -m integration -v
 uv run pytest
 ```
 
-Integration tests validate real API endpoints (embedding, LLM) and MCP server subprocess behavior. Copy `tests/test_site_config.yaml.example` to `tests/test_site_config.yaml` and fill in your institution's values.
+Integration tests validate API endpoints (embedding, LLM) and MCP server subprocess behavior. Copy `tests/test_site_config.yaml.example` to `tests/test_site_config.yaml` and fill in your institution's values.
 
 ## Smoke Test
 

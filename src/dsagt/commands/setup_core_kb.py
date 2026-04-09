@@ -5,13 +5,21 @@ Downloads and indexes:
 - nemo_curator: NVIDIA NeMo Curator (code, docs, tutorials)
 - aidrin: AI Data Readiness Inspector (code, papers)
 
+The embedding service is configured via CLI flags or environment variables
+(``LLM_API_KEY``, ``OPENAI_BASE_URL``, ``EMBEDDING_MODEL``).  API-backed
+embedding of the full core KB typically takes 15-30 minutes.
+
 Usage:
-    python scripts/setup_core_kb.py
-    python scripts/setup_core_kb.py --index-dir ./my_kb_index
-    python scripts/setup_core_kb.py --collection nemo_curator  # Single collection
+    dsagt-setup-kb
+    dsagt-setup-kb --index-dir ./my_kb_index
+    dsagt-setup-kb --collection nemo_curator
+    dsagt-setup-kb --embedding-base-url https://api.example.com/v1 \\
+                   --embedding-api-key sk-... \\
+                   --embedding-model text-embedding-3-small
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -138,16 +146,23 @@ def download_arxiv(paper_id: str, dest: Path):
         client.close()
 
 
-def setup_collection(name: str, config: dict, index_dir: Path) -> dict:
+def setup_collection(
+    name: str,
+    config: dict,
+    index_dir: Path,
+    embedder_kwargs: dict,
+    embedding_backend: str,
+    vector_db: str,
+) -> dict:
     """Download sources and ingest a collection."""
     print(f"\n{'='*60}")
     print(f"Setting up: {name}")
     print(f"{'='*60}")
-    
+
     with tempfile.TemporaryDirectory() as tmp:
         download_dir = Path(tmp) / name
         download_dir.mkdir()
-        
+
         # Download all sources
         for source in config["sources"]:
             try:
@@ -162,16 +177,21 @@ def setup_collection(name: str, config: dict, index_dir: Path) -> dict:
                     download_arxiv(source["id"], download_dir)
             except Exception as e:
                 print(f"  Warning: {source} failed: {e}")
-        
+
         # Write DESCRIPTION.md
         (download_dir / "DESCRIPTION.md").write_text(config["description"])
-        
+
         # Ingest using KnowledgeBase
-        print("  Indexing...")
-        
+        print("  Indexing (this may take several minutes per collection)...")
+
         from dsagt.knowledge import KnowledgeBase
-        
-        kb = KnowledgeBase(index_dir=index_dir)
+
+        kb = KnowledgeBase(
+            index_dir=index_dir,
+            default_embedder=embedding_backend,
+            default_index=vector_db,
+            embedder_kwargs=embedder_kwargs,
+        )
         try:
             result = kb.ingest(download_dir)
             print(f"  Done: {result['files']} files, {result['chunks']} chunks")
@@ -181,7 +201,17 @@ def setup_collection(name: str, config: dict, index_dir: Path) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Setup DSAGT core knowledge base")
+    parser = argparse.ArgumentParser(
+        description="Setup DSAGT core knowledge base",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Embedding config is taken from CLI flags, then from these env vars:\n"
+            "  LLM_API_KEY / OPENAI_API_KEY   API key for the embedding endpoint\n"
+            "  OPENAI_BASE_URL                OpenAI-compatible base URL\n"
+            "  EMBEDDING_MODEL                Embedding model name\n\n"
+            "Full core KB embedding typically takes 15-30 minutes over an API."
+        ),
+    )
     parser.add_argument(
         "--index-dir",
         type=Path,
@@ -193,25 +223,77 @@ def main():
         choices=list(COLLECTIONS.keys()),
         help="Setup only this collection",
     )
+    parser.add_argument(
+        "--embedding-backend",
+        choices=["api", "local"],
+        default="api",
+        help="Embedding backend (default: api)",
+    )
+    parser.add_argument(
+        "--embedding-model", default=None,
+        help="Embedding model name (falls back to EMBEDDING_MODEL env var)",
+    )
+    parser.add_argument(
+        "--embedding-base-url", default=None,
+        help="Embedding API base URL (falls back to OPENAI_BASE_URL env var)",
+    )
+    parser.add_argument(
+        "--embedding-api-key", default=None,
+        help="Embedding API key (falls back to LLM_API_KEY / OPENAI_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--vector-db",
+        choices=["chroma", "faiss"],
+        default="chroma",
+        help="Vector database backend (default: chroma)",
+    )
     args = parser.parse_args()
-    
+
     # Check git is available
     try:
         subprocess.run(["git", "--version"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Error: git is required")
         sys.exit(1)
-    
+
+    # Resolve embedding config with env-var fallback so the user gets a
+    # clear error up front rather than 5 minutes into the first ingest.
+    embedder_kwargs: dict = {}
+    if args.embedding_backend == "api":
+        api_key = args.embedding_api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+        base_url = args.embedding_base_url or os.getenv("OPENAI_BASE_URL")
+        model = args.embedding_model or os.getenv("EMBEDDING_MODEL")
+        missing = [n for n, v in [("api key", api_key), ("base URL", base_url), ("model", model)] if not v]
+        if missing:
+            print(
+                "Error: API embedding backend requires "
+                + ", ".join(missing)
+                + ".\n       Pass via --embedding-* flags or set LLM_API_KEY, "
+                "OPENAI_BASE_URL, EMBEDDING_MODEL."
+            )
+            sys.exit(2)
+        embedder_kwargs = {"api_key": api_key, "base_url": base_url, "model": model}
+    elif args.embedding_model:
+        embedder_kwargs = {"model": args.embedding_model}
+
     print("DSAGT Core Knowledge Base Setup")
     print(f"Index directory: {args.index_dir}")
-    
+    print(f"Embedding backend: {args.embedding_backend}")
+    print(f"Vector DB: {args.vector_db}")
+    print("Note: API-backed embedding of the full core KB typically takes 15-30 minutes.")
+
     # Setup collections
     collections = {args.collection: COLLECTIONS[args.collection]} if args.collection else COLLECTIONS
-    
+
     results = {}
     for name, config in collections.items():
         try:
-            results[name] = setup_collection(name, config, args.index_dir)
+            results[name] = setup_collection(
+                name, config, args.index_dir,
+                embedder_kwargs=embedder_kwargs,
+                embedding_backend=args.embedding_backend,
+                vector_db=args.vector_db,
+            )
         except Exception as e:
             print(f"  Error: {e}")
             results[name] = {"error": str(e)}
