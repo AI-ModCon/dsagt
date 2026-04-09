@@ -15,7 +15,6 @@ Usage:
     pytest test_dependency_integration.py -v
 """
 
-import asyncio
 import importlib
 import json
 import shutil
@@ -25,10 +24,14 @@ import textwrap
 from pathlib import Path
 
 import pytest
-import yaml
-import mcp.types as types
 
-from dsagt.registry_server import create_registry_server
+pytestmark = pytest.mark.integration
+
+import pytest
+import yaml
+
+
+from dsagt.commands.registry_server import create_registry_server
 from dsagt.registry import ToolRegistry
 
 
@@ -69,19 +72,7 @@ def uninstall_cowsay_after():
     )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def call_tool(server, name: str, arguments: dict) -> str:
-    """Invoke a tool handler on an MCP server and return the response text."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = asyncio.run(handler(req))
-    return result.root.content[0].text
+from mcp_helpers import call_tool_sync as call_tool
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +98,7 @@ def test_register_and_run_tool_with_dependency(tmp_path):
 
     # 2. Create a registry server with a fresh ToolRegistry
     registry = ToolRegistry(
-        source_skills_dir=None,
+        source_tools_dir=None,
         runtime_dir=str(tmp_path / "runtime"),
     )
     server = create_registry_server(registry)
@@ -132,15 +123,19 @@ def test_register_and_run_tool_with_dependency(tmp_path):
     assert "added" in text
     assert "Successfully installed" in text
 
-    # 4. Verify the spec is in the skill file
+    # 4. Verify the spec is in the skill file with dsagt-run wrapping
     tool = registry.get_tool("cowsay_tool")
     assert tool is not None
     assert tool["dependencies"] == ["cowsay"]
+    assert "dsagt-run" in tool["executable"]
 
-    # 5. Execute the tool through ToolRegistry
-    result = registry.call_tool("cowsay_tool", {"message": "hello"})
-
-    assert result["success"] is True, f"Tool failed: {result['error']}"
-    output = json.loads(result["output"])
+    # 5. Execute the tool directly via subprocess (as the agent would)
+    result = subprocess.run(
+        ["python", str(script), "--message", "hello"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"Tool failed: {result.stderr}"
+    output = json.loads(result.stdout)
     assert output["status"] == "ok"
     assert "hello" in output["cow_says"]

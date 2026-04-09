@@ -1,17 +1,26 @@
 """
-DSAGT session management.
+DSAgt project lifecycle: configuration, initialization, services, and extraction.
 
-Handles project initialization, agent-specific config generation,
-and service lifecycle (proxy + MLflow).
+Projects are registered in ~/.dsagt/projects.yaml (name → absolute path).
+Default project location is ~/dsagt-projects/<name>/.
 
-Each agent platform gets its configs generated from the single
-dsagt_config.yaml — MCP server entries, agent instructions, env vars,
-and proxy routing are all derived mechanically.
+Project directory layout::
+
+    <project_dir>/
+        dsagt_config.yaml   # project configuration
+        trace_archive/      # tool execution records
+        mlflow/             # MLflow data
+        tools/              # registered CLI tools
+        tools/code/         # agent-written tool scripts
+        skills/             # instruction-based agent skills
+        kb_index/           # knowledge base collections
 """
 
 import json
 import logging
 import os
+import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -19,292 +28,255 @@ from pathlib import Path
 
 import yaml
 
-from dsagt.config import (
-    VALID_AGENTS,
-    default_config_content,
-    load_config,
-    project_dir as resolve_project_dir,
-)
-from dsagt.extraction import delete_session_log, extract_session
+from dsagt.memory import delete_session_log, extract_session
 from dsagt.knowledge import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
-# Where bundled agent instruction templates live (relative to dsagt package)
-_AGENTS_DIR = Path(__file__).parent.parent.parent / "agents"
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+VALID_AGENTS = ("claude-code", "goose", "roo", "cline")
+VALID_MLFLOW_BACKENDS = ("sqlite", "flat-file")
+
+DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
+REGISTRY_DIR = Path.home() / ".dsagt"
+REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
+
+DEFAULTS = {
+    "llm": {
+        "model": "claude-sonnet-4-20250514",
+    },
+    "embedding": {
+        "model": "nomic-embed-text",
+        "base_url": "",
+    },
+    "proxy": {
+        "port": 4000,
+    },
+    "mlflow": {
+        "port": 5001,
+        "backend": "sqlite",
+    },
+    "categories": {
+        "quality_control": "Assessment or filtering of data quality, QC metrics, thresholds, pass/fail rates",
+        "data_management": "File organization, data movement, format conversion, naming conventions",
+        "transformation": "Data processing steps, parameter choices, pipeline stage configuration",
+        "assembly": "Genome assembly, contig generation, scaffolding, assembly QC metrics",
+        "configuration": "Tool settings, environment setup, resource allocation decisions",
+        "performance": "Runtime, memory usage, throughput, resource consumption observations",
+        "tool_usage": "Tool selection rationale, parameter tuning, tool-specific behaviors or quirks",
+        "results": "Output summaries, key findings, deliverables produced",
+    },
+    "extraction": {
+        "threshold": 0,
+        "outlier_sensitivity": 0.0,
+    },
+}
+
+_ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
+
+
+# ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_env_vars(value):
+    """Replace ${VAR_NAME} references with environment variable values."""
+    if isinstance(value, str):
+        return _ENV_VAR_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
+    if isinstance(value, dict):
+        return {k: _resolve_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_env_vars(v) for v in value]
+    return value
+
+
+def _deep_merge(defaults: dict, overrides: dict) -> dict:
+    """Merge overrides into defaults. Overrides win for leaf values."""
+    result = dict(defaults)
+    for key, value in overrides.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def default_config_content(project_name: str, agent: str) -> str:
+    """Generate default dsagt_config.yaml content for a new project."""
+    return yaml.dump(
+        {
+            "project": project_name,
+            "agent": agent,
+            "llm": {
+                "model": DEFAULTS["llm"]["model"],
+                "api_key": "${LLM_API_KEY}",
+            },
+            "embedding": {
+                "model": DEFAULTS["embedding"]["model"],
+                "base_url": "",
+                "api_key": "${LLM_API_KEY}",
+            },
+            "proxy": DEFAULTS["proxy"],
+            "mlflow": DEFAULTS["mlflow"],
+            "categories": DEFAULTS["categories"],
+            "extraction": DEFAULTS["extraction"],
+        },
+        default_flow_style=False,
+        sort_keys=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Project registry
+# ---------------------------------------------------------------------------
+
+def _load_registry() -> dict[str, str]:
+    """Load the project registry. Returns empty dict if no registry exists."""
+    if not REGISTRY_FILE.exists():
+        return {}
+    return yaml.safe_load(REGISTRY_FILE.read_text()) or {}
+
+
+def _save_registry(registry: dict[str, str]) -> None:
+    """Save the project registry."""
+    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    REGISTRY_FILE.write_text(yaml.dump(registry, default_flow_style=False))
+
+
+def register_project(name: str, path: Path) -> None:
+    """Add or update a project in the registry."""
+    registry = _load_registry()
+    registry[name] = str(path.resolve())
+    _save_registry(registry)
+
+
+def list_projects() -> dict[str, str]:
+    """Return all registered projects as {name: path}."""
+    return _load_registry()
+
+
+def project_dir(name: str) -> Path:
+    """Resolve a project name to its directory via the registry."""
+    registry = _load_registry()
+    if name not in registry:
+        known = ", ".join(registry.keys()) or "(none)"
+        raise FileNotFoundError(
+            f"Project '{name}' not found. "
+            f"Run 'dsagt init {name} --agent <platform>' first.\n"
+            f"Known projects: {known}"
+        )
+    return Path(registry[name])
+
+
+# ---------------------------------------------------------------------------
+# Config loading
+# ---------------------------------------------------------------------------
+
+def load_config(project_name: str) -> dict:
+    """Load and validate a project config by name.
+
+    Resolves the project directory from the registry. Returns a fully
+    resolved config dict with defaults applied and 'project_dir' injected.
+    """
+    pdir = project_dir(project_name)
+    config_path = pdir / "dsagt_config.yaml"
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config not found: {config_path}")
+
+    raw = yaml.safe_load(config_path.read_text()) or {}
+
+    config = _deep_merge(DEFAULTS, raw)
+    config = _resolve_env_vars(config)
+    config["project_dir"] = str(pdir)
+
+    _validate(config)
+    return config
+
+
+def _validate(config: dict) -> None:
+    """Validate required fields and values."""
+    if not config.get("project"):
+        raise ValueError("'project' is required in dsagt_config.yaml")
+
+    agent = config.get("agent")
+    if not agent:
+        raise ValueError("'agent' is required in dsagt_config.yaml")
+    if agent not in VALID_AGENTS:
+        raise ValueError(f"'agent' must be one of {VALID_AGENTS}, got '{agent}'")
+
+    backend = config.get("mlflow", {}).get("backend")
+    if backend and backend not in VALID_MLFLOW_BACKENDS:
+        raise ValueError(f"'mlflow.backend' must be one of {VALID_MLFLOW_BACKENDS}, got '{backend}'")
 
 
 # ---------------------------------------------------------------------------
 # Project initialization
 # ---------------------------------------------------------------------------
 
-def init_project(project_name: str, agent: str) -> Path:
-    """Create a new project directory with default config and subdirectories.
-
-    Returns the project directory path.
-    """
+def init_project(project_name: str, agent: str, location: Path | None = None) -> Path:
+    """Create a new project directory with default config and subdirectories."""
     if agent not in VALID_AGENTS:
         raise ValueError(f"agent must be one of {VALID_AGENTS}, got '{agent}'")
 
-    project_dir = resolve_project_dir(project_name)
+    pdir = (location or DEFAULT_PROJECTS_BASE) / project_name
 
-    if (project_dir / "dsagt_config.yaml").exists():
-        raise FileExistsError(f"Project already exists: {project_dir}")
+    if (pdir / "dsagt_config.yaml").exists():
+        raise FileExistsError(f"Project already exists: {pdir}")
 
-    project_dir.mkdir(parents=True, exist_ok=True)
-    for subdir in ("trace_archive", "mlflow", "skills", "kb_index"):
-        (project_dir / subdir).mkdir(exist_ok=True)
+    pdir.mkdir(parents=True, exist_ok=True)
+    for subdir in ("trace_archive", "mlflow", "tools", "tools/code", "skills", "kb_index"):
+        (pdir / subdir).mkdir(parents=True, exist_ok=True)
 
-    config_content = default_config_content(project_name, agent)
-    (project_dir / "dsagt_config.yaml").write_text(config_content)
+    (pdir / "dsagt_config.yaml").write_text(default_config_content(project_name, agent))
 
-    return project_dir
-
-
-# ---------------------------------------------------------------------------
-# Agent config generation
-# ---------------------------------------------------------------------------
-
-def generate_agent_configs(config: dict, working_dir: str | Path) -> list[str]:
-    """Generate agent-platform-specific config files in the working directory.
-
-    Reads the dsagt_config.yaml values and writes the files each agent
-    platform expects: MCP server configs, agent instructions, env setup.
-
-    Returns a list of descriptions of what was written.
-    """
-    agent = config["agent"]
-    working_dir = Path(working_dir)
-    project_dir = Path(config["project_dir"])
-    proxy_port = config["proxy"]["port"]
-
-    generators = {
-        "claude-code": _generate_claude_code,
-        "goose": _generate_goose,
-        "roo": _generate_roo,
-        "cline": _generate_cline,
-    }
-
-    return generators[agent](config, working_dir, project_dir, proxy_port)
+    register_project(project_name, pdir)
+    return pdir
 
 
-def _mcp_server_args(server: str, project_dir: Path) -> list[str]:
-    """Build the args list for an MCP server entry."""
-    base = ["run", f"dsagt-{server}-server"]
-    if server == "registry":
-        base += ["--runtime-dir", str(project_dir)]
-    elif server == "knowledge":
-        base += [
-            "--base-index-dir", str(project_dir / "kb_index"),
-            "--runtime-dir", str(project_dir),
-        ]
-    return base
+def move_project(project_name: str, new_location: Path) -> Path:
+    """Move a project directory to a new location and update the registry."""
+    old_path = project_dir(project_name)
+    new_path = new_location / project_name
 
+    if new_path.exists():
+        raise FileExistsError(f"Destination already exists: {new_path}")
 
-def _mcp_env_block(config: dict) -> dict:
-    """Build the env block for MCP server entries."""
-    env = {}
-    embedding_key = config.get("embedding", {}).get("api_key", "")
-    if embedding_key and not embedding_key.startswith("${"):
-        env["LLM_API_KEY"] = embedding_key
-    return env
-
-
-def _generate_claude_code(config, working_dir, project_dir, proxy_port) -> list[str]:
-    actions = []
-    env_block = _mcp_env_block(config)
-
-    mcp_config = {"mcpServers": {}}
-    for server in ("registry", "knowledge"):
-        entry = {
-            "command": "uv",
-            "args": _mcp_server_args(server, project_dir),
-        }
-        if env_block:
-            entry["env"] = env_block
-        mcp_config["mcpServers"][f"dsagt-{server}"] = entry
-
-    mcp_path = working_dir / ".mcp.json"
-    mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
-    actions.append(f"Wrote {mcp_path}")
-
-    # Copy agent instructions
-    instructions = _load_instructions("claude-code", "dsagt_instructions.md")
-    if instructions:
-        claude_md = working_dir / "CLAUDE.md"
-        if claude_md.exists():
-            existing = claude_md.read_text()
-            if "DSAGT Pipeline Builder" not in existing:
-                claude_md.write_text(existing + "\n\n" + instructions)
-                actions.append(f"Appended DSAGT instructions to {claude_md}")
-        else:
-            claude_md.write_text(instructions)
-            actions.append(f"Wrote {claude_md}")
-
-    # Write env helper
-    env_path = working_dir / ".dsagt_env"
-    _write_env_file(env_path, {
-        "ANTHROPIC_BASE_URL": f"http://localhost:{proxy_port}",
-        "DSAGT_PROJECT": config["project"],
-        "DSAGT_PROJECT_DIR": str(project_dir),
-    })
-    actions.append(f"Wrote {env_path} (source this or export the variables)")
-
-    return actions
-
-
-def _generate_goose(config, working_dir, project_dir, proxy_port) -> list[str]:
-    actions = []
-    model = config["llm"]["model"]
-
-    goose_config = {
-        "GOOSE_PROVIDER": "openai",
-        "GOOSE_MODEL": model,
-        "extensions": {},
-    }
-
-    for server in ("registry", "knowledge"):
-        args = _mcp_server_args(server, project_dir)
-        goose_config["extensions"][server] = {
-            "enabled": True,
-            "name": server,
-            "type": "stdio",
-            "cmd": "uv " + " ".join(args),
-            "timeout": 300,
-        }
-
-    goose_path = working_dir / "goose.yaml"
-    goose_path.write_text(yaml.dump(goose_config, default_flow_style=False, sort_keys=False))
-    actions.append(f"Wrote {goose_path}")
-
-    # Copy agent instructions
-    instructions = _load_instructions("goose", ".goosehints")
-    if instructions:
-        hints_path = working_dir / ".goosehints"
-        hints_path.write_text(instructions)
-        actions.append(f"Wrote {hints_path}")
-
-    env_path = working_dir / ".dsagt_env"
-    _write_env_file(env_path, {
-        "OPENAI_HOST": f"http://localhost:{proxy_port}",
-        "DSAGT_PROJECT": config["project"],
-        "DSAGT_PROJECT_DIR": str(project_dir),
-    })
-    actions.append(f"Wrote {env_path}")
-
-    return actions
-
-
-def _generate_roo(config, working_dir, project_dir, proxy_port) -> list[str]:
-    actions = []
-    env_block = _mcp_env_block(config)
-
-    mcp_config = {"mcpServers": {}}
-    for server in ("registry", "knowledge"):
-        entry = {
-            "command": "uv",
-            "args": _mcp_server_args(server, project_dir),
-            "disabled": False,
-        }
-        if env_block:
-            entry["env"] = env_block
-        mcp_config["mcpServers"][f"dsagt-{server}"] = entry
-
-    roo_dir = working_dir / ".roo"
-    roo_dir.mkdir(exist_ok=True)
-    mcp_path = roo_dir / "mcp.json"
-    mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
-    actions.append(f"Wrote {mcp_path}")
-
-    # Copy roomodes
-    roomodes = _load_instructions("roo", "roomodes")
-    if roomodes:
-        roomodes_path = working_dir / ".roomodes"
-        roomodes_path.write_text(roomodes)
-        actions.append(f"Wrote {roomodes_path}")
-
-    env_path = working_dir / ".dsagt_env"
-    _write_env_file(env_path, {
-        "DSAGT_PROJECT": config["project"],
-        "DSAGT_PROJECT_DIR": str(project_dir),
-    })
-    actions.append(f"Wrote {env_path}")
-
-    return actions
-
-
-def _generate_cline(config, working_dir, project_dir, proxy_port) -> list[str]:
-    actions = []
-    env_block = _mcp_env_block(config)
-
-    mcp_config = {"mcpServers": {}}
-    for server in ("registry", "knowledge"):
-        entry = {
-            "command": "uv",
-            "args": _mcp_server_args(server, project_dir),
-            "disabled": False,
-            "alwaysAllow": [],
-        }
-        if env_block:
-            entry["env"] = env_block
-        mcp_config["mcpServers"][f"dsagt-{server}"] = entry
-
-    # Write to project dir (user merges into global cline settings)
-    mcp_path = working_dir / "cline_mcp.json"
-    mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
-    actions.append(f"Wrote {mcp_path} (merge into Cline MCP settings)")
-
-    # Copy agent instructions
-    instructions = _load_instructions("cline", "dsagt_instructions.md")
-    if instructions:
-        rules_dir = working_dir / ".clinerules"
-        rules_dir.mkdir(exist_ok=True)
-        instr_path = rules_dir / "dsagt_instructions.md"
-        instr_path.write_text(instructions)
-        actions.append(f"Wrote {instr_path}")
-
-    env_path = working_dir / ".dsagt_env"
-    _write_env_file(env_path, {
-        "DSAGT_PROJECT": config["project"],
-        "DSAGT_PROJECT_DIR": str(project_dir),
-    })
-    actions.append(f"Wrote {env_path}")
-
-    return actions
-
-
-def _load_instructions(agent_dir: str, filename: str) -> str | None:
-    """Load an instruction template from the agents directory."""
-    path = _AGENTS_DIR / agent_dir / filename
-    if path.exists():
-        return path.read_text()
-    logger.warning("Instruction template not found: %s", path)
-    return None
-
-
-def _write_env_file(path: Path, env_vars: dict) -> None:
-    """Write a sourceable env file."""
-    lines = [f'export {k}="{v}"' for k, v in env_vars.items()]
-    path.write_text("\n".join(lines) + "\n")
+    new_location.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(old_path), str(new_path))
+    register_project(project_name, new_path)
+    return new_path
 
 
 # ---------------------------------------------------------------------------
 # Service start / stop
 # ---------------------------------------------------------------------------
 
-def _pid_file(project_dir: Path) -> Path:
-    return project_dir / ".pids"
+def _llm_api_key_env(config: dict) -> dict:
+    """Return {"LLM_API_KEY": key} if the config has a resolved LLM API key."""
+    key = config.get("llm", {}).get("api_key", "")
+    if key and not key.startswith("${"):
+        return {"LLM_API_KEY": key}
+    return {}
+
+
+def _pid_file(pdir: Path) -> Path:
+    return pdir / ".pids"
 
 
 def start_services(config: dict) -> dict[str, int]:
     """Start the proxy and MLflow for a project. Returns {name: pid}."""
-    project_dir = Path(config["project_dir"])
+    pdir = Path(config["project_dir"])
     pids = {}
 
     # Start MLflow
     mlflow_port = config["mlflow"]["port"]
     mlflow_backend = config["mlflow"]["backend"]
-    mlflow_dir = project_dir / "mlflow"
+    mlflow_dir = pdir / "mlflow"
     mlflow_dir.mkdir(exist_ok=True)
 
     if mlflow_backend == "sqlite":
@@ -320,7 +292,7 @@ def start_services(config: dict) -> dict[str, int]:
         "--port", str(mlflow_port),
     ]
 
-    mlflow_log = project_dir / "mlflow.log"
+    mlflow_log = pdir / "mlflow.log"
     mlflow_proc = subprocess.Popen(
         mlflow_cmd,
         stdout=open(mlflow_log, "w"),
@@ -333,10 +305,10 @@ def start_services(config: dict) -> dict[str, int]:
     # Start proxy
     proxy_port = config["proxy"]["port"]
     otel_endpoint = f"http://localhost:{mlflow_port}"
-    trace_dir = str(project_dir / "trace_archive")
+    trace_dir = str(pdir / "trace_archive")
 
     proxy_cmd = [
-        sys.executable, "-m", "dsagt.proxy",
+        sys.executable, "-m", "dsagt.commands.proxy_server",
         "--port", str(proxy_port),
         "--records-dir", trace_dir,
         "--session", config["project"],
@@ -344,7 +316,7 @@ def start_services(config: dict) -> dict[str, int]:
         "--model", config["llm"]["model"],
     ]
 
-    proxy_log = project_dir / "proxy.log"
+    proxy_log = pdir / "proxy.log"
     proxy_proc = subprocess.Popen(
         proxy_cmd,
         stdout=open(proxy_log, "w"),
@@ -352,26 +324,26 @@ def start_services(config: dict) -> dict[str, int]:
         env={
             **os.environ,
             "DSAGT_PROJECT": config["project"],
-            "DSAGT_PROJECT_DIR": str(project_dir),
+            "DSAGT_PROJECT_DIR": str(pdir),
             "DSAGT_EXTRACTION_THRESHOLD": str(
                 config.get("extraction", {}).get("threshold", 0)
             ),
+            **_llm_api_key_env(config),
         },
         start_new_session=True,
     )
     pids["proxy"] = proxy_proc.pid
     logger.info("Proxy started (pid %d) → http://localhost:%d", proxy_proc.pid, proxy_port)
 
-    # Save PIDs
-    pid_path = _pid_file(project_dir)
+    pid_path = _pid_file(pdir)
     pid_path.write_text(json.dumps(pids, indent=2) + "\n")
 
     return pids
 
 
 def stop_services(project_name: str) -> list[str]:
-    """Stop running services for a project. Returns descriptions of what was stopped."""
-    pid_path = _pid_file(resolve_project_dir(project_name))
+    """Stop running services for a project."""
+    pid_path = _pid_file(project_dir(project_name))
     stopped = []
 
     if not pid_path.exists():
@@ -390,20 +362,17 @@ def stop_services(project_name: str) -> list[str]:
     return stopped
 
 
+# ---------------------------------------------------------------------------
+# Memory extraction orchestration
+# ---------------------------------------------------------------------------
+
 def run_extraction(project_name: str) -> dict:
-    """Run memory extraction for a project and clean up the session log.
-
-    Loads the session log, sends one LLM call to extract facts/summary/insights,
-    stores results in episodic_memory, then deletes the session log.  If extraction
-    fails, the session log is still deleted (transient buffer, MLflow has the truth).
-
-    Returns the extraction result dict, or a status dict on error/empty.
-    """
+    """Run memory extraction for a project and clean up the session log."""
     config = load_config(project_name)
-    project_dir = Path(config["project_dir"])
-    trace_dir = project_dir / "trace_archive"
+    pdir = Path(config["project_dir"])
+    trace_dir = pdir / "trace_archive"
 
-    api_key = config.get("llm", {}).get("api_key", "") or os.environ.get("LLM_API_KEY", "")
+    api_key = config.get("llm", {}).get("api_key", "")
     model = config.get("llm", {}).get("model", "claude-sonnet-4-20250514")
     session_id = config.get("project", "")
     categories = config.get("categories", {})
@@ -413,7 +382,7 @@ def run_extraction(project_name: str) -> dict:
         delete_session_log(trace_dir)
         return {"status": "skipped", "reason": "no_api_key"}
 
-    kb = KnowledgeBase(index_dir=project_dir / "kb_index")
+    kb = KnowledgeBase(index_dir=pdir / "kb_index")
     try:
         return extract_session(
             trace_dir=trace_dir,
@@ -422,92 +391,14 @@ def run_extraction(project_name: str) -> dict:
             model=model,
             session_id=session_id,
             categories=categories if categories else None,
-            runtime_dir=project_dir,
+            runtime_dir=pdir,
             outlier_sensitivity=float(
                 config.get("extraction", {}).get("outlier_sensitivity", 0)
             ),
         )
     finally:
         kb.close()
-        # Safety net: ensure session log files are gone even if extraction raised.
-        # drain_session_log handles the normal case; this catches edge cases.
         for suffix in (".jsonl", ".consumed"):
             leftover = trace_dir / f"session_log{suffix}"
             if leftover.exists():
                 leftover.unlink()
-
-
-# ---------------------------------------------------------------------------
-# Agent launch
-# ---------------------------------------------------------------------------
-
-def agent_env(config: dict) -> dict:
-    """Build the environment dict an agent process needs to inherit.
-
-    Merges the current environment with DSAGT-specific variables so the
-    proxy intercept, project identity, and embedding key are all set.
-    """
-    project_dir = config["project_dir"]
-    proxy_port = config["proxy"]["port"]
-    agent = config["agent"]
-
-    env = dict(os.environ)
-    env["DSAGT_PROJECT"] = config["project"]
-    env["DSAGT_PROJECT_DIR"] = project_dir
-
-    # Proxy routing — agent-specific env var
-    if agent in ("claude-code", "roo", "cline"):
-        env["ANTHROPIC_BASE_URL"] = f"http://localhost:{proxy_port}"
-    if agent == "goose":
-        env["OPENAI_HOST"] = f"http://localhost:{proxy_port}"
-
-    # Embedding API key for MCP servers
-    embedding_key = config.get("embedding", {}).get("api_key", "")
-    if embedding_key and not embedding_key.startswith("${"):
-        env["LLM_API_KEY"] = embedding_key
-
-    return env
-
-
-def agent_command(config: dict) -> list[str] | None:
-    """Return the shell command to launch the agent, or None for VS Code agents."""
-    commands = {
-        "claude-code": ["claude"],
-        "goose": ["goose", "session"],
-    }
-    return commands.get(config["agent"])
-
-
-def launch_agent(config: dict, working_dir: str | Path) -> int:
-    """Launch the agent process in the foreground with the correct environment.
-
-    For CLI agents (Claude Code, Goose): runs the agent interactively and
-    returns its exit code.
-
-    For VS Code agents (Roo, Cline): prints instructions and returns 0.
-    """
-    working_dir = Path(working_dir)
-    env = agent_env(config)
-    cmd = agent_command(config)
-
-    if cmd is None:
-        # VS Code agents can't be launched from the CLI
-        agent = config["agent"]
-        print(f"\n  Open VS Code in: {working_dir}")
-        if agent == "roo":
-            print("  Switch to the DSAGT Pipeline Builder mode (Cmd+.)")
-        elif agent == "cline":
-            print("  Open the Cline panel and verify MCP servers are connected")
-        print()
-        return 0
-
-    logger.info("Launching: %s", " ".join(cmd))
-    try:
-        result = subprocess.run(cmd, env=env, cwd=str(working_dir))
-        return result.returncode
-    except FileNotFoundError:
-        logger.error("Command not found: %s", cmd[0])
-        logger.error("Is %s installed?", config["agent"])
-        return 1
-    except KeyboardInterrupt:
-        return 0

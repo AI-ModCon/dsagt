@@ -133,20 +133,19 @@ class TestChromaIndexWhereSearch:
         assert set(indices.tolist()) == {3}
 
     def test_search_where_no_matches(self, indexed):
-        """search() with where that matches nothing returns empty arrays."""
+        """search() with where that matches nothing returns empty or raises."""
         query = np.ones(8, dtype=np.float32)
         query /= np.linalg.norm(query)
-        # ChromaDB raises when where matches nothing and n_results > matched count.
-        # Our implementation should handle this gracefully or pass through the error.
-        # With chromadb >= 0.4, it returns empty results rather than raising.
+        # ChromaDB behavior varies by version: either returns empty results
+        # or raises when where matches nothing. Both are acceptable.
         try:
             scores, indices = indexed.search(
                 query, k=4, where={"tool_name": "nonexistent"},
             )
             assert len(scores) == 0
-        except Exception:
-            # Acceptable — some ChromaDB versions raise on no-match
-            pass
+            assert len(indices) == 0
+        except (ValueError, RuntimeError):
+            pass  # ChromaDB raised on no-match — acceptable
 
     def test_search_empty_index(self):
         """search() on empty index returns empty arrays."""

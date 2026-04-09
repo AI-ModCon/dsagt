@@ -1,5 +1,5 @@
 """
-dsagt-run entry point: Tool execution wrapper for provenance capture.
+dsagt-run: Tool execution wrapper for provenance capture.
 
 Usage:
     dsagt-run --tool fastp -- fastp -q 20 -l 50 --in1 reads.fq.gz
@@ -8,7 +8,7 @@ Usage:
 import argparse
 import sys
 
-from dsagt.run import _resolve_records_dir, _parse_file_list, run_and_record
+from dsagt.provenance import _resolve_records_dir, _parse_file_list, run_and_record
 
 
 def _make_parser() -> argparse.ArgumentParser:

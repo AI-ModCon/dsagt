@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dsagt.pipeline import (
+from dsagt.provenance import (
     build_dependency_graph,
     load_pipeline_records,
     reconstruct_pipeline,

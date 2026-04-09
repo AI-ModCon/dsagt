@@ -1,5 +1,5 @@
 """
-dsagt-proxy entry point: Start LiteLLM proxy with OTel tracing and DSAGT tool records.
+dsagt-proxy: Start LiteLLM proxy with OTel tracing and DSAgt tool records.
 
 Usage:
     dsagt-proxy
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None):
         )
         sys.exit(1)
 
-    from dsagt.proxy_callback import create_callback
+    from dsagt.provenance import create_callback
 
     callback = create_callback(
         records_dir=args.records_dir,

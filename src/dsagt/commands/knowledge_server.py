@@ -1,5 +1,5 @@
 """
-DSAGT Knowledge Base MCP Server
+DSAgt Knowledge Base MCP Server.
 
 Provides semantic search over document collections for MCP-compatible agents.
 
@@ -37,34 +37,31 @@ from pathlib import Path
 
 import mcp.server.stdio
 import mcp.types as types
-from mcp.server.lowlevel import Server
+from mcp.server.lowlevel import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 
 from dsagt.knowledge import EMBEDDER_REGISTRY, VECTORINDEX_REGISTRY, CollectionRoute, KnowledgeBase
-from dsagt.extraction import EPISODIC_MEMORY_ROUTE
+from dsagt.memory import EPISODIC_MEMORY_ROUTE, SuggestionQueue
 from dsagt.memory import ExplicitMemory
-from dsagt.outlier import SuggestionQueue
 
-try:
-    from dsagt.mcp_utils import create_server, run_stdio
-except ImportError:
-    def create_server(name: str) -> Server:
-        return Server(name)
+def create_server(name: str) -> Server:
+    return Server(name)
 
-    async def run_stdio(server: Server, name: str) -> None:
-        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                InitializationOptions(
-                    server_name=name,
-                    server_version="0.1.0",
-                    capabilities=server.get_capabilities(
-                        notification_options=None,
-                        experimental_capabilities={},
-                    ),
+
+async def run_stdio(server: Server, name: str) -> None:
+    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            InitializationOptions(
+                server_name=name,
+                server_version="0.1.0",
+                capabilities=server.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
                 ),
-            )
+            ),
+        )
 
 logger = logging.getLogger(__name__)
 
@@ -912,25 +909,31 @@ async def run_server(
     embedding_model: str | None,
     vector_db: str,
     embedding_api_key: str | None = None,
+    embedding_base_url: str | None = None,
 ):
     """Run the MCP server with session-isolated indexes."""
-    if embedding_api_key:
-        os.environ["LLM_API_KEY"] = embedding_api_key
-
     base_path = Path(base_index_dir)
     runtime_path = Path(runtime_dir)
 
     runtime_kb_dir = setup_runtime_kb(base_path, runtime_path)
+
+    # Build embedder kwargs from CLI args — config flows here via
+    # _mcp_server_args() in session.py, which reads dsagt_config.yaml.
+    embedder_kwargs = {}
+    if embedding_model:
+        embedder_kwargs["model"] = embedding_model
+    if embedding_base_url:
+        embedder_kwargs["base_url"] = embedding_base_url
+    if embedding_api_key:
+        embedder_kwargs["api_key"] = embedding_api_key
 
     kb = KnowledgeBase(
         index_dir=runtime_kb_dir,
         chunk_size=chunk_size,
         default_embedder=embedding_backend,
         default_index=vector_db,
+        embedder_kwargs=embedder_kwargs,
     )
-
-    if embedding_model:
-        kb._default_route.embedder_kwargs["model"] = embedding_model
 
     server = create_knowledge_server(kb, use_rerank, runtime_dir=runtime_dir)
     try:
@@ -953,7 +956,7 @@ def main():
     )
     logger.info("Server starting — log file: %s", log_file.resolve())
 
-    parser = argparse.ArgumentParser(description="DSAGT Knowledge Base MCP Server")
+    parser = argparse.ArgumentParser(description="DSAgt Knowledge Base MCP Server")
     parser.add_argument(
         "--base-index-dir",
         default="./kb_index",
@@ -986,8 +989,12 @@ def main():
         help="Default embedding model name (default: nomic-embed-text). Applies to whichever backend is selected.",
     )
     parser.add_argument(
+        "--embedding-base-url", default=None,
+        help="Base URL for the embedding API (OpenAI-compatible).",
+    )
+    parser.add_argument(
         "--embedding-api-key", default=None,
-        help="API key for the embedding service. Overrides LLM_API_KEY env var.",
+        help="API key for the embedding service.",
     )
     parser.add_argument(
         "--vector-db",
@@ -1006,6 +1013,7 @@ def main():
         args.embedding_model,
         args.vector_db,
         args.embedding_api_key,
+        args.embedding_base_url,
     ))
 
 

@@ -5,7 +5,6 @@ Tests tool handlers: save_tool_spec, get_registry, search_registry,
 read_file, run_command, install_dependencies.
 """
 
-import asyncio
 import subprocess
 import sys
 from pathlib import Path
@@ -13,25 +12,10 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 import yaml
-import mcp.types as types
 
 from dsagt.registry import ToolRegistry
-from dsagt.registry_server import create_registry_server
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def call_tool(server, name: str, arguments: dict) -> str:
-    """Invoke a tool handler on an MCP server and return the response text."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = asyncio.run(handler(req))
-    return result.root.content[0].text
+from dsagt.commands.registry_server import create_registry_server
+from mcp_helpers import call_tool_sync as call_tool
 
 
 def make_spec(name="test_tool", description="A test tool", executable="echo hello",
@@ -54,8 +38,8 @@ def make_spec(name="test_tool", description="A test tool", executable="echo hell
     return spec
 
 
-def _write_skill(skills_dir: Path, spec: dict) -> None:
-    path = skills_dir / f"{spec['name']}.md"
+def _write_tool(tools_dir: Path, spec: dict) -> None:
+    path = tools_dir / f"{spec['name']}.md"
     fm = yaml.dump(spec, default_flow_style=False, sort_keys=False)
     path.write_text(f"---\n{fm}---\n\n# {spec['name']}\n")
 
@@ -65,9 +49,9 @@ def _make_server(tmp_path, tools=None):
     source_dir = tmp_path / "source_skills"
     source_dir.mkdir()
     for spec in (tools or []):
-        _write_skill(source_dir, spec)
+        _write_tool(source_dir, spec)
     reg = ToolRegistry(
-        source_skills_dir=str(source_dir),
+        source_tools_dir=str(source_dir),
         runtime_dir=str(tmp_path / "runtime"),
     )
     return create_registry_server(reg), reg
@@ -253,7 +237,7 @@ class TestRunCommand:
 
 class TestSaveToolSpecDependencies:
 
-    @patch("dsagt.registry_server.subprocess.run")
+    @patch("dsagt.commands.registry_server.subprocess.run")
     def test_deps_installed_on_save(self, mock_run, server, registry):
         """When dependencies are provided, uv pip install is called."""
         mock_run.return_value = MagicMock(
@@ -269,7 +253,7 @@ class TestSaveToolSpecDependencies:
         assert cmd == ["uv", "pip", "install", "--python", sys.executable,
                         "pandas>=2.0", "numpy"]
 
-    @patch("dsagt.registry_server.subprocess.run")
+    @patch("dsagt.commands.registry_server.subprocess.run")
     def test_deps_failure_still_saves_spec(self, mock_run, server, registry):
         """Even if uv pip install fails, the spec is saved as a skill file."""
         mock_run.return_value = MagicMock(
@@ -284,7 +268,7 @@ class TestSaveToolSpecDependencies:
         assert tool is not None
         assert tool["dependencies"] == ["bogus-pkg"]
 
-    @patch("dsagt.registry_server.subprocess.run")
+    @patch("dsagt.commands.registry_server.subprocess.run")
     def test_deps_timeout(self, mock_run, server):
         """Timeout during install is reported, spec is still saved."""
         mock_run.side_effect = subprocess.TimeoutExpired("uv", 120)
@@ -302,7 +286,7 @@ class TestSaveToolSpecDependencies:
         assert "added" in text
         assert "Dependency" not in text
 
-    @patch("dsagt.registry_server.subprocess.run")
+    @patch("dsagt.commands.registry_server.subprocess.run")
     def test_deps_persisted_in_skill_file(self, mock_run, server, registry):
         """Dependencies are stored in the skill file frontmatter."""
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
@@ -312,7 +296,7 @@ class TestSaveToolSpecDependencies:
         tool = registry.get_tool("dep_tool")
         assert tool["dependencies"] == ["requests>=2.28"]
 
-    @patch("dsagt.registry_server.subprocess.run")
+    @patch("dsagt.commands.registry_server.subprocess.run")
     def test_uv_not_found(self, mock_run, server):
         """FileNotFoundError from missing uv is reported gracefully."""
         mock_run.side_effect = FileNotFoundError("uv")
@@ -329,7 +313,7 @@ class TestSaveToolSpecDependencies:
 
 class TestInstallDependencies:
 
-    @patch("dsagt.registry_server.subprocess.run")
+    @patch("dsagt.commands.registry_server.subprocess.run")
     def test_install_all(self, mock_run, tmp_path):
         """install_dependencies with no tool_name installs all unique deps."""
         server, reg = _make_server(tmp_path, tools=[
@@ -346,7 +330,7 @@ class TestInstallDependencies:
         assert cmd == ["uv", "pip", "install", "--python", sys.executable,
                         "pandas", "numpy", "scipy"]
 
-    @patch("dsagt.registry_server.subprocess.run")
+    @patch("dsagt.commands.registry_server.subprocess.run")
     def test_install_single_tool(self, mock_run, tmp_path):
         """install_dependencies with tool_name targets only that tool."""
         server, reg = _make_server(tmp_path, tools=[
@@ -373,3 +357,116 @@ class TestInstallDependencies:
 
         text = call_tool(server, "install_dependencies", {})
         assert "No dependencies" in text
+
+
+# ---------------------------------------------------------------------------
+# KB-backed tool indexing and search
+# ---------------------------------------------------------------------------
+
+def _make_server_with_kb(tmp_path, tools=None):
+    """Create (server, registry, kb) with a real local-embedding KnowledgeBase."""
+    from dsagt.knowledge import KnowledgeBase
+
+    source_dir = tmp_path / "source_skills"
+    source_dir.mkdir()
+    for spec in (tools or []):
+        _write_tool(source_dir, spec)
+
+    kb = KnowledgeBase(
+        index_dir=tmp_path / "kb_index",
+        default_embedder="local",
+        default_index="chroma",
+    )
+    reg = ToolRegistry(
+        source_tools_dir=str(source_dir),
+        runtime_dir=str(tmp_path / "runtime"),
+        kb=kb,
+    )
+    server = create_registry_server(reg, kb)
+    return server, reg, kb
+
+
+class TestToolIndexing:
+    """Tests for KB-backed tool registration and search."""
+
+    def test_save_tool_indexes_into_kb(self, tmp_path):
+        """Saving a tool indexes it into the registered_tools collection."""
+        from dsagt.registry import TOOL_REGISTRY_COLLECTION
+
+        server, reg, kb = _make_server_with_kb(tmp_path)
+
+        call_tool(server, "save_tool_spec", {"spec": make_spec(
+            name="csv_filter",
+            description="Filter CSV rows by column value",
+        )})
+
+        results = kb.search("filter", collection=TOOL_REGISTRY_COLLECTION)
+        assert len(results) > 0
+        assert any("csv_filter" in r["chunk"].get("text", "") for r in results)
+
+    def test_search_registry_by_name(self, tmp_path):
+        """Exact tool_name lookup returns the tool."""
+        server, reg, kb = _make_server_with_kb(tmp_path)
+        call_tool(server, "save_tool_spec", {"spec": make_spec(name="fastp")})
+
+        text = call_tool(server, "search_registry", {"tool_name": "fastp"})
+        assert "fastp" in text
+
+    def test_search_registry_by_name_not_found(self, tmp_path):
+        """Exact lookup for nonexistent tool returns not found."""
+        server, reg, kb = _make_server_with_kb(tmp_path)
+
+        text = call_tool(server, "search_registry", {"tool_name": "nonexistent"})
+        assert "No tool" in text
+
+    def test_search_registry_semantic(self, tmp_path):
+        """Semantic search finds tools by description similarity."""
+        server, reg, kb = _make_server_with_kb(tmp_path)
+        call_tool(server, "save_tool_spec", {"spec": make_spec(
+            name="csv_filter",
+            description="Filter and remove rows from a CSV spreadsheet based on column values",
+        )})
+
+        text = call_tool(server, "search_registry", {"query": "delete rows from tabular data"})
+        assert "csv_filter" in text
+
+    def test_search_registry_by_tag(self, tmp_path):
+        """Tag-based filtering returns only matching tools."""
+        server, reg, kb = _make_server_with_kb(tmp_path)
+
+        spec_genomics = make_spec(name="fastp", description="FASTQ preprocessor")
+        spec_genomics["tags"] = ["genomics", "data_processing"]
+        call_tool(server, "save_tool_spec", {"spec": spec_genomics})
+
+        spec_other = make_spec(name="csvtool", description="CSV processor")
+        spec_other["tags"] = ["data_processing"]
+        call_tool(server, "save_tool_spec", {"spec": spec_other})
+
+        text = call_tool(server, "search_registry", {"query": "tool", "tag": "genomics"})
+        assert "fastp" in text
+
+    def test_reindex_all(self, tmp_path):
+        """reindex_all populates KB from existing skill files."""
+        from dsagt.registry import TOOL_REGISTRY_COLLECTION
+
+        server, reg, kb = _make_server_with_kb(
+            tmp_path,
+            tools=[make_spec(name="preexisting", description="Already registered tool")],
+        )
+
+        # Skills were copied to runtime on init but not indexed (KB was empty)
+        # reindex_all should pick them up
+        count = reg.reindex_all()
+        assert count >= 1
+
+        results = kb.search("registered", collection=TOOL_REGISTRY_COLLECTION)
+        assert len(results) > 0
+
+    def test_no_kb_falls_back_to_string_match(self, tmp_path):
+        """Without KB, search_registry uses string matching."""
+        server, reg = _make_server(tmp_path, tools=[
+            make_spec(name="csv_filter", description="Filter CSV rows"),
+        ])
+
+        text = call_tool(server, "search_registry", {"query": "csv"})
+        assert "csv_filter" in text

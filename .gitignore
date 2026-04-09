@@ -132,6 +132,16 @@ docs/_templates/
 config.local.yaml
 .goosehints.local
 
+# Generated agent artifacts (created by dsagt start)
+.mcp.json
+.dsagt_env
+goose.yaml
+.goosehints
+.roomodes
+.roo/mcp.json
+cline_mcp.json
+.clinerules/
+
 # Temporary files
 *.tmp
 *.bak

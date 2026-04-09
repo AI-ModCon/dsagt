@@ -14,14 +14,14 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dsagt.proxy_callback import (
+from dsagt.provenance import (
     SESSION_LOG_FILE,
     ToolRecordStore,
     _extract_response_content,
     _handle_success,
 )
-from dsagt.memory_extraction import (
-    COLLECTION_NAME,
+from dsagt.memory import (
+    EPISODIC_COLLECTION as COLLECTION_NAME,
     build_extraction_prompt,
     delete_session_log,
     drain_session_log,
@@ -418,7 +418,7 @@ class TestExtractSession:
 
             kb = KnowledgeBase(index_dir=tmp_path / "kb")
 
-            with patch("dsagt.memory_extraction.call_extraction_llm") as mock_llm:
+            with patch("dsagt.memory.call_extraction_llm") as mock_llm:
                 mock_llm.return_value = self._mock_llm_response()
 
                 result = extract_session(
@@ -459,7 +459,7 @@ class TestExtractSession:
 
             kb = KnowledgeBase(index_dir=tmp_path / "kb")
 
-            with patch("dsagt.memory_extraction.call_extraction_llm") as mock_llm:
+            with patch("dsagt.memory.call_extraction_llm") as mock_llm:
                 result = extract_session(
                     trace_dir=trace_dir,
                     kb=kb,
@@ -497,7 +497,7 @@ class TestExtractSession:
 
             kb = KnowledgeBase(index_dir=tmp_path / "kb")
 
-            with patch("dsagt.memory_extraction.call_extraction_llm") as mock_llm:
+            with patch("dsagt.memory.call_extraction_llm") as mock_llm:
                 mock_llm.return_value = self._mock_llm_response()
 
                 extract_session(
@@ -544,7 +544,7 @@ class TestExtractSession:
 
             kb = KnowledgeBase(index_dir=tmp_path / "kb")
 
-            with patch("dsagt.memory_extraction.call_extraction_llm") as mock_llm:
+            with patch("dsagt.memory.call_extraction_llm") as mock_llm:
                 mock_llm.return_value = json.dumps({
                     "facts": [], "summary": "", "insights": [],
                 })
@@ -577,7 +577,7 @@ class TestExtractSession:
 
             kb = KnowledgeBase(index_dir=tmp_path / "kb")
 
-            with patch("dsagt.memory_extraction.call_extraction_llm") as mock_llm:
+            with patch("dsagt.memory.call_extraction_llm") as mock_llm:
                 mock_llm.return_value = self._mock_llm_response()
 
                 extract_session(

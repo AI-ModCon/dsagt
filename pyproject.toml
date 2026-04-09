@@ -1,7 +1,7 @@
 [project]
 name = "dsagt"
 version = "0.1.0"
-description = "Data Smith Agent Toolkit - AI-assisted data pipeline builder"
+description = "DataSmith Agent - AI-assisted data pipeline builder"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 license = {text = "TBD"}
@@ -25,8 +25,8 @@ dependencies = [
 
 [project.scripts]
 dsagt = "dsagt.commands.cli:main"
-dsagt-proxy = "dsagt.commands.proxy:main"
-dsagt-run = "dsagt.commands.run:main"
+dsagt-proxy = "dsagt.commands.proxy_server:main"
+dsagt-run = "dsagt.commands.run_tool:main"
 dsagt-registry-server = "dsagt.commands.registry_server:main"
 dsagt-knowledge-server = "dsagt.commands.knowledge_server:main"
 dsagt-setup-kb = "dsagt.commands.setup_core_kb:main"
@@ -49,7 +49,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-dsagt = ["py.typed", "skills/*.md"]
+dsagt = ["py.typed", "tools/*.md", "tools/*.py", "skills/**/*", "dsagt_instructions.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -60,6 +60,9 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+]
+markers = [
+    "integration: tests that hit real APIs or start real subprocesses (deselect with -m 'not integration')",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:importlib._bootstrap",

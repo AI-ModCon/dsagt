@@ -1,7 +1,7 @@
 """
-DSAGT - Data Smith Agent Toolkit
+DSAgt — DataSmith Agent.
 
-AI-assisted data pipeline builder for Goose and other MCP-compatible agents.
+AI-assisted data pipeline builder for MCP-compatible agents.
 """
 
 __version__ = "0.1.0"

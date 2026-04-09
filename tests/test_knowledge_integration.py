@@ -3,10 +3,10 @@ Integration tests for the knowledge server with a real KnowledgeBase.
 
 These tests require:
   - tests/test_site_config.yaml (copy from test_site_config.yaml.example)
-  - An embedding API key (LLM_API_KEY or OPENAI_API_KEY env var)
+  - A valid embedding API key and base URL in the config
   - Network access to the embedding API
 
-Tests skip automatically if the config or API key is missing.
+Tests FAIL if the config or credentials are missing.
 
 Usage:
     pytest test_knowledge_integration.py -v
@@ -19,36 +19,17 @@ import os
 from pathlib import Path
 
 import pytest
-import mcp.types as types
+
+pytestmark = pytest.mark.integration
+
 from dsagt.knowledge import KnowledgeBase
-
-from dsagt.knowledge_server import create_knowledge_server, setup_runtime_kb
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def call_tool(server, name: str, arguments: dict) -> dict:
-    """Invoke a tool handler and return the parsed JSON response."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = asyncio.run(handler(req))
-    return json.loads(result.root.content[0].text)
+from dsagt.commands.knowledge_server import create_knowledge_server, setup_runtime_kb
+from mcp_helpers import call_tool_json as call_tool, call_tool_async as _call_tool_async_raw
 
 
 async def _call_tool_async(server, name: str, arguments: dict) -> dict:
-    """Invoke a tool handler inside a running event loop."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = await handler(req)
-    return json.loads(result.root.content[0].text)
+    """Async tool call returning parsed JSON."""
+    return json.loads(await _call_tool_async_raw(server, name, arguments))
 
 
 async def call_tool_and_await_job(server, name: str, arguments: dict) -> tuple[dict, dict]:
@@ -80,7 +61,11 @@ def smoke_test_dir():
 
 
 def _make_kb(tmp_path, embedding_config):
-    """Create a KnowledgeBase configured for the current institution."""
+    """Create a KnowledgeBase configured for the current institution.
+
+    Env vars (OPENAI_BASE_URL, LLM_API_KEY, EMBEDDING_MODEL) are set
+    by the embedding_config fixture in conftest.py.
+    """
     index_dir = tmp_path / "kb_index"
     index_dir.mkdir()
     return KnowledgeBase(

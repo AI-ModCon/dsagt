@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 """
-Setup core knowledge base collections for DSAGT.
+dsagt-setup-kb: Build core knowledge base collections.
 
 Downloads and indexes:
 - nemo_curator: NVIDIA NeMo Curator (code, docs, tutorials)
@@ -22,9 +21,9 @@ from pathlib import Path
 
 import httpx
 
-from dsagt.config import RUNTIME_DIR
+from dsagt.session import REGISTRY_DIR
 
-DEFAULT_INDEX_DIR = RUNTIME_DIR.parent / "kb_index"
+DEFAULT_INDEX_DIR = REGISTRY_DIR / "kb_index"
 
 # Collection definitions
 COLLECTIONS = {

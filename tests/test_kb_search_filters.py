@@ -6,27 +6,13 @@ filter arguments through to kb.search(where=...).
 """
 
 import asyncio
-import json
 from unittest.mock import MagicMock
 
 import pytest
 import mcp.types as types
 
-from dsagt.knowledge_server import _build_where_clause, create_knowledge_server
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def call_tool(server, name: str, arguments: dict) -> dict:
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = asyncio.run(handler(req))
-    return json.loads(result.root.content[0].text)
+from dsagt.commands.knowledge_server import _build_where_clause, create_knowledge_server
+from mcp_helpers import call_tool_json as call_tool
 
 
 def make_search_result(text, source_file, chunk_index=0, score=0.9, extra_meta=None):

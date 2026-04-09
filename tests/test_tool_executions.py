@@ -16,8 +16,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dsagt.tool_executions import (
-    COLLECTION_NAME,
+from dsagt.provenance import (
+    TOOL_EXECUTIONS_COLLECTION as COLLECTION_NAME,
     execution_metadata,
     index_execution_record,
     index_trace_archive,

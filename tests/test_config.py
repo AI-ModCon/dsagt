@@ -10,25 +10,47 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from dsagt.config import (
+from dsagt.session import (
     _deep_merge,
     _resolve_env_vars,
     default_config_content,
     load_config,
     project_dir,
 )
-from dsagt.project import (
-    generate_agent_configs,
-    init_project,
-)
+from dsagt.agents import generate_agent_configs
+from dsagt.session import init_project
 
 
 @pytest.fixture(autouse=True)
-def _use_tmp_runtime(tmp_path):
-    """Point RUNTIME_DIR at tmp_path for all tests in this module."""
-    with patch("dsagt.config.RUNTIME_DIR", tmp_path):
-        with patch("dsagt.project.project_dir", lambda name: tmp_path / name):
-            yield
+def _use_tmp_registry(tmp_path):
+    """Redirect project registry and default location to tmp_path for all tests.
+
+    The fake registry auto-discovers any project dir that exists under tmp_path,
+    so tests that create dirs manually (without init_project) still work.
+    """
+    registry = {}
+
+    def fake_load():
+        # Auto-discover: any subdir of tmp_path with dsagt_config.yaml counts
+        discovered = dict(registry)
+        for child in tmp_path.iterdir():
+            if child.is_dir() and (child / "dsagt_config.yaml").exists():
+                discovered.setdefault(child.name, str(child))
+        return discovered
+
+    def fake_save(reg):
+        registry.clear()
+        registry.update(reg)
+
+    def fake_register(name, path):
+        registry[name] = str(Path(path).resolve())
+
+    with patch("dsagt.session._load_registry", fake_load):
+        with patch("dsagt.session._save_registry", fake_save):
+            with patch("dsagt.session.register_project", fake_register):
+                with patch("dsagt.session.DEFAULT_PROJECTS_BASE", tmp_path):
+                    with patch("dsagt.session.DEFAULT_PROJECTS_BASE", tmp_path):
+                        yield
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +167,15 @@ class TestLoadConfig:
 
 class TestProjectDir:
 
-    def test_basic(self, tmp_path):
+    def test_registered_project_resolves(self, tmp_path):
+        from dsagt.session import register_project
+        register_project("myproj", tmp_path / "myproj")
         result = project_dir("myproj")
         assert result == tmp_path / "myproj"
+
+    def test_unregistered_project_raises(self):
+        with pytest.raises(FileNotFoundError, match="not found"):
+            project_dir("nonexistent")
 
 
 class TestDefaultConfigContent:
@@ -172,6 +200,8 @@ class TestInitProject:
         assert (pdir / "dsagt_config.yaml").exists()
         assert (pdir / "trace_archive").is_dir()
         assert (pdir / "mlflow").is_dir()
+        assert (pdir / "tools").is_dir()
+        assert (pdir / "tools" / "code").is_dir()
         assert (pdir / "skills").is_dir()
         assert (pdir / "kb_index").is_dir()
 
@@ -299,14 +329,14 @@ class TestGenerateAgentConfigs:
 class TestResolveRecordsDirProjectAware:
 
     def test_project_dir_env(self):
-        from dsagt.run import _resolve_records_dir
+        from dsagt.provenance import _resolve_records_dir
         with patch.dict(os.environ, {"DSAGT_PROJECT_DIR": "/proj/dir"}, clear=False):
             os.environ.pop("DSAGT_RECORDS_DIR", None)
             result = _resolve_records_dir(None)
             assert result == Path("/proj/dir/trace_archive")
 
     def test_explicit_overrides_project_dir(self):
-        from dsagt.run import _resolve_records_dir
+        from dsagt.provenance import _resolve_records_dir
         with patch.dict(os.environ, {"DSAGT_PROJECT_DIR": "/proj/dir"}):
             result = _resolve_records_dir("/custom")
             assert result == Path("/custom")
@@ -328,24 +358,24 @@ class TestAgentEnv:
         }
 
     def test_claude_code_sets_anthropic_base_url(self):
-        from dsagt.project import agent_env
+        from dsagt.agents import agent_env
         env = agent_env(self._make_config("claude-code"))
         assert env["ANTHROPIC_BASE_URL"] == "http://localhost:4000"
         assert env["DSAGT_PROJECT"] == "test"
 
     def test_goose_sets_openai_host(self):
-        from dsagt.project import agent_env
+        from dsagt.agents import agent_env
         env = agent_env(self._make_config("goose"))
         assert env["OPENAI_HOST"] == "http://localhost:4000"
         assert "ANTHROPIC_BASE_URL" not in env
 
     def test_embedding_key_set(self):
-        from dsagt.project import agent_env
+        from dsagt.agents import agent_env
         env = agent_env(self._make_config("claude-code"))
         assert env["LLM_API_KEY"] == "test-key"
 
     def test_unresolved_env_ref_skipped(self):
-        from dsagt.project import agent_env
+        from dsagt.agents import agent_env
         config = self._make_config("claude-code")
         config["embedding"]["api_key"] = "${UNSET_VAR}"
         env = agent_env(config)
@@ -359,17 +389,92 @@ class TestAgentEnv:
 class TestAgentCommand:
 
     def test_claude_code(self):
-        from dsagt.project import agent_command
+        from dsagt.agents import agent_command
         assert agent_command({"agent": "claude-code"}) == ["claude"]
 
     def test_goose(self):
-        from dsagt.project import agent_command
+        from dsagt.agents import agent_command
         assert agent_command({"agent": "goose"}) == ["goose", "session"]
 
-    def test_roo_returns_none(self):
-        from dsagt.project import agent_command
-        assert agent_command({"agent": "roo"}) is None
+    def test_roo(self):
+        from dsagt.agents import agent_command
+        assert agent_command({"agent": "roo"}) == ["roo"]
 
-    def test_cline_returns_none(self):
-        from dsagt.project import agent_command
-        assert agent_command({"agent": "cline"}) is None
+    def test_cline(self):
+        from dsagt.agents import agent_command
+        assert agent_command({"agent": "cline"}) == ["cline"]
+
+
+# ---------------------------------------------------------------------------
+# Config flow: embedding config propagation
+# ---------------------------------------------------------------------------
+
+class TestConfigFlow:
+
+    def test_default_config_has_embedding_base_url(self):
+        """default_config_content() includes embedding.base_url."""
+        content = default_config_content("test", "claude-code")
+        parsed = yaml.safe_load(content)
+        assert "base_url" in parsed["embedding"]
+
+    def test_mcp_env_block_includes_base_url(self):
+        """_mcp_env_block passes OPENAI_BASE_URL from config."""
+        from dsagt.agents import _mcp_env_block
+        config = {"embedding": {"api_key": "k", "base_url": "https://api.test/v1", "model": "m"}}
+        env = _mcp_env_block(config)
+        assert env["OPENAI_BASE_URL"] == "https://api.test/v1"
+
+    def test_mcp_env_block_includes_model(self):
+        """_mcp_env_block passes EMBEDDING_MODEL from config."""
+        from dsagt.agents import _mcp_env_block
+        config = {"embedding": {"api_key": "k", "base_url": "u", "model": "my-model"}}
+        env = _mcp_env_block(config)
+        assert env["EMBEDDING_MODEL"] == "my-model"
+
+    def test_mcp_env_block_skips_empty_values(self):
+        """_mcp_env_block doesn't set empty string env vars."""
+        from dsagt.agents import _mcp_env_block
+        config = {"embedding": {"api_key": "", "base_url": "", "model": ""}}
+        env = _mcp_env_block(config)
+        assert "LLM_API_KEY" not in env
+        assert "OPENAI_BASE_URL" not in env
+        assert "EMBEDDING_MODEL" not in env
+
+    def test_agent_env_includes_embedding_base_url(self):
+        """agent_env() sets OPENAI_BASE_URL from config."""
+        from dsagt.agents import agent_env
+        config = {
+            "project": "test",
+            "agent": "claude-code",
+            "project_dir": "/proj",
+            "proxy": {"port": 4000},
+            "embedding": {"api_key": "k", "base_url": "https://api.test/v1", "model": "m"},
+        }
+        env = agent_env(config)
+        assert env["OPENAI_BASE_URL"] == "https://api.test/v1"
+        assert env["EMBEDDING_MODEL"] == "m"
+
+    def test_mcp_server_args_include_embedding_flags(self):
+        """Knowledge server args include embedding config from dsagt_config.yaml."""
+        from dsagt.agents import _mcp_server_args
+        config = {
+            "embedding": {
+                "base_url": "https://api.test/v1",
+                "model": "my-model",
+                "api_key": "my-key",
+            }
+        }
+        args = _mcp_server_args("knowledge", Path("/proj"), config)
+        assert "--embedding-base-url" in args
+        assert "https://api.test/v1" in args
+        assert "--embedding-model" in args
+        assert "my-model" in args
+        assert "--embedding-api-key" in args
+        assert "my-key" in args
+
+    def test_mcp_server_args_skip_unresolved_key(self):
+        """Knowledge server args skip ${VAR} style api_key."""
+        from dsagt.agents import _mcp_server_args
+        config = {"embedding": {"api_key": "${LLM_API_KEY}", "base_url": "", "model": ""}}
+        args = _mcp_server_args("knowledge", Path("/proj"), config)
+        assert "--embedding-api-key" not in args

@@ -13,13 +13,13 @@ from unittest.mock import patch
 
 import pytest
 
-from dsagt.run import (
+from dsagt.provenance import (
     _parse_file_list,
     _resolve_records_dir,
     _write_record,
     run_and_record,
 )
-from dsagt.commands.run import (
+from dsagt.commands.run_tool import (
     _parse_args,
     main,
 )
@@ -103,10 +103,12 @@ class TestResolveRecordsDir:
         with patch.dict(os.environ, {"DSAGT_RECORDS_DIR": "/from/env"}):
             assert _resolve_records_dir(None) == Path("/from/env")
 
-    def test_default(self):
+    def test_no_env_raises(self):
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("DSAGT_RECORDS_DIR", None)
-            assert _resolve_records_dir(None) == Path("runtime/trace_archive")
+            os.environ.pop("DSAGT_PROJECT_DIR", None)
+            with pytest.raises(ValueError, match="No records directory"):
+                _resolve_records_dir(None)
 
 
 # ---------------------------------------------------------------------------

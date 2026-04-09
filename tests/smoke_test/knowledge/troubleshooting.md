@@ -1,12 +1,18 @@
-# Troubleshooting
+# csvtool Troubleshooting
 
-## Out of memory errors
+## Encoding errors
 
-If you encounter out of memory errors when loading large files,
-enable lazy loading by passing `lazy=True` to the DataLoader constructor.
-This streams data in chunks rather than loading the entire file at once.
+If csvtool raises a UnicodeDecodeError, the file may not be UTF-8. Use `--encoding latin-1` or detect encoding with `chardet`.
 
-## Permission denied
+## Large file performance
 
-Check that you have read access to the data directory.
-On Linux, run: chmod -R 755 /path/to/data
+For files over 1 GB, csvtool streams rows in chunks. If you still run out of memory, increase the chunk size with `--chunk-size 100000` or filter to specific columns with `--columns col1,col2`.
+
+## Schema validation failures
+
+The validate command checks column types against a JSON schema. Common issues:
+- Mixed types in a column (e.g., "123" and "abc" in an integer column)
+- Missing required columns
+- Null values in non-nullable columns
+
+Fix the data or update the schema to match reality.

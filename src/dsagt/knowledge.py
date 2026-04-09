@@ -1,4 +1,9 @@
-"""Knowledge base for DSAGT agent — with pluggable embedder & vector-DB routing."""
+"""
+Knowledge base: semantic search over document collections.
+
+Pluggable embedding backends (local sentence-transformers or OpenAI-compatible API)
+and vector-DB backends (FAISS or ChromaDB) with per-collection routing.
+"""
 
 from __future__ import annotations
 
@@ -107,6 +112,8 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
         self.batch_size = batch_size
 
+        if not self.base_url:
+            raise ValueError("Embedding API base URL required via argument or OPENAI_BASE_URL env var")
         if not self.api_key:
             raise ValueError("API key required via argument or LLM_API_KEY env var")
 
@@ -321,18 +328,6 @@ class CollectionRoute:
         return cls(**d)
 
 
-# default route used when no collection-specific route is registered.
-# If EMBEDDING_MODEL is set, propagate it to the embedder. Otherwise, let
-# APIEmbeddingClient use its own default — avoids hardcoding a model name
-# that may not exist at every institution's endpoint.
-_env_embedding_model = os.getenv("EMBEDDING_MODEL")
-DEFAULT_ROUTE = CollectionRoute(
-    embedding_backend=os.getenv("DSAGT_EMBEDDING_BACKEND", "api"),
-    vector_db="faiss",
-    embedder_kwargs={"model": _env_embedding_model} if _env_embedding_model else {},
-)
-
-
 class KnowledgeBase:
     """
     Collection-based document retrieval with pluggable embedder & vector-DB routing.
@@ -395,6 +390,7 @@ class KnowledgeBase:
         # Global default route (used when collection has no specific route)
         default_embedder: str | None = None,
         default_index: str | None = None,
+        embedder_kwargs: dict | None = None,
         # Per-collection routing registry
         routes: dict[str, CollectionRoute] | None = None,
     ):
@@ -405,12 +401,12 @@ class KnowledgeBase:
 
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build default route
-        _model = os.getenv("EMBEDDING_MODEL")
+        # Build default route from explicit kwargs (config-driven).
+        # No env var reads — callers pass config values through.
         self._default_route = CollectionRoute(
-            embedding_backend=default_embedder or os.getenv("DSAGT_EMBEDDING_BACKEND", "api"),
+            embedding_backend=default_embedder or "api",
             vector_db=default_index or "faiss",
-            embedder_kwargs={"model": _model} if _model else {},
+            embedder_kwargs=embedder_kwargs or {},
         )
 
         # Per-collection route registry
@@ -800,7 +796,7 @@ class KnowledgeBase:
     def _chunk_file(self, path: Path, collection: str) -> Iterator[dict]:
         try:
             docs = SimpleDirectoryReader(input_files=[str(path)]).load_data()
-        except Exception as e:
+        except (FileNotFoundError, IOError, ValueError) as e:
             logger.warning("Could not read %s: %s", path, e)
             return
         if not docs:
@@ -809,7 +805,7 @@ class KnowledgeBase:
         parser = self._get_parser(file_type)
         try:
             nodes = parser.get_nodes_from_documents(docs)
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             logger.warning("Could not parse %s: %s", path, e)
             return
         for i, node in enumerate(nodes):

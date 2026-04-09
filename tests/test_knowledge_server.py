@@ -19,22 +19,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import mcp.types as types
 
-from dsagt.knowledge_server import create_knowledge_server, setup_runtime_kb
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def call_tool(server, name: str, arguments: dict) -> dict:
-    """Invoke a tool handler and return the parsed JSON response."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = asyncio.run(handler(req))
-    return json.loads(result.root.content[0].text)
+from dsagt.commands.knowledge_server import create_knowledge_server, setup_runtime_kb
+from mcp_helpers import call_tool_json as call_tool
 
 
 async def _call_tool_async(server, name: str, arguments: dict) -> dict:
@@ -629,7 +615,7 @@ class TestOpenMPWorkaround:
     def test_kmp_duplicate_lib_ok_is_set(self):
         """KMP_DUPLICATE_LIB_OK is set after importing the knowledge server."""
         import os
-        import dsagt.knowledge_server  # noqa: F401
+        import dsagt.commands.knowledge_server  # noqa: F401
 
         assert os.environ.get("KMP_DUPLICATE_LIB_OK") == "TRUE"
 

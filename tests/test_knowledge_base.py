@@ -17,10 +17,14 @@ import faiss
 import numpy as np
 import pytest
 
-# Ensure a dummy API key is set before importing
-os.environ.setdefault("LLM_API_KEY", "test-key")
-
 from dsagt.knowledge import APIEmbeddingClient, KnowledgeBase, CODE_LANGUAGES
+
+
+@pytest.fixture(autouse=True)
+def _fake_api_env(monkeypatch):
+    """Set dummy API credentials for unit tests without leaking into other modules."""
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://test")
 
 
 # ---------------------------------------------------------------------------
@@ -87,26 +91,34 @@ def create_test_docs(folder: Path):
 
 class TestAPIEmbeddingClient:
 
+    def test_missing_base_url_raises(self):
+        """Constructor raises ValueError when no base URL is available."""
+        with patch.dict(os.environ, {}, clear=True):
+            env = os.environ.copy()
+            env.pop("OPENAI_BASE_URL", None)
+            with patch.dict(os.environ, env, clear=True):
+                with pytest.raises(ValueError, match="base URL required"):
+                    APIEmbeddingClient(api_key="test-key", base_url=None)
+
     def test_missing_api_key_raises(self):
         """Constructor raises ValueError when no API key is available."""
         with patch.dict(os.environ, {}, clear=True):
-            # Remove all possible key sources
             env = os.environ.copy()
             env.pop("LLM_API_KEY", None)
             env.pop("OPENAI_API_KEY", None)
             with patch.dict(os.environ, env, clear=True):
                 with pytest.raises(ValueError, match="API key required"):
-                    APIEmbeddingClient(api_key=None)
+                    APIEmbeddingClient(api_key=None, base_url="http://test")
 
     def test_explicit_api_key(self):
         """Constructor accepts an explicit API key."""
-        client = APIEmbeddingClient(api_key="explicit-key")
+        client = APIEmbeddingClient(api_key="explicit-key", base_url="http://test")
         assert client.api_key == "explicit-key"
         client.close()
 
     def test_embed_empty_list(self):
         """Embedding an empty list returns an empty array."""
-        client = APIEmbeddingClient(api_key="test-key")
+        client = APIEmbeddingClient(api_key="test-key", base_url="http://test")
         result = client.embed([])
         assert result.shape == (0,)
         assert result.dtype == np.float32
@@ -119,7 +131,7 @@ class TestAPIEmbeddingClient:
         mock_client.post.return_value = make_mock_response(["a", "b"])
         mock_client_cls.return_value = mock_client
 
-        client = APIEmbeddingClient(api_key="test-key", batch_size=10)
+        client = APIEmbeddingClient(api_key="test-key", base_url="http://test", batch_size=10)
         result = client.embed(["a", "b"])
 
         assert result.shape == (2, EMBEDDING_DIM)
@@ -138,7 +150,7 @@ class TestAPIEmbeddingClient:
         mock_client.post.side_effect = dynamic_response
         mock_client_cls.return_value = mock_client
 
-        client = APIEmbeddingClient(api_key="test-key", batch_size=2)
+        client = APIEmbeddingClient(api_key="test-key", base_url="http://test", batch_size=2)
         # 5 texts with batch_size=2 -> 3 API calls (2+2+1)
         result = client.embed(["a", "b", "c", "d", "e"])
 
@@ -189,7 +201,7 @@ class TestAPIEmbeddingClientErrors:
         mock_client.post.return_value = mock_response
         mock_client_cls.return_value = mock_client
 
-        client = APIEmbeddingClient(api_key="bad-key")
+        client = APIEmbeddingClient(api_key="bad-key", base_url="http://test")
         with pytest.raises(httpx.HTTPStatusError):
             client.embed(["test"])
         client.close()
@@ -208,7 +220,7 @@ class TestAPIEmbeddingClientErrors:
         mock_client.post.return_value = mock_response
         mock_client_cls.return_value = mock_client
 
-        client = APIEmbeddingClient(api_key="test-key")
+        client = APIEmbeddingClient(api_key="test-key", base_url="http://test")
         with pytest.raises(httpx.HTTPStatusError):
             client.embed(["test"])
         client.close()
@@ -222,7 +234,7 @@ class TestAPIEmbeddingClientErrors:
         mock_client.post.side_effect = httpx.ConnectError("Connection refused")
         mock_client_cls.return_value = mock_client
 
-        client = APIEmbeddingClient(api_key="test-key")
+        client = APIEmbeddingClient(api_key="test-key", base_url="http://test")
         with pytest.raises(httpx.ConnectError):
             client.embed(["test"])
         client.close()
@@ -236,7 +248,7 @@ class TestAPIEmbeddingClientErrors:
         mock_client.post.side_effect = httpx.ReadTimeout("Read timed out")
         mock_client_cls.return_value = mock_client
 
-        client = APIEmbeddingClient(api_key="test-key")
+        client = APIEmbeddingClient(api_key="test-key", base_url="http://test")
         with pytest.raises(httpx.ReadTimeout):
             client.embed(["test"])
         client.close()

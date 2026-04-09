@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from dsagt.proxy_callback import (
+from dsagt.provenance import (
     ToolRecordStore,
     _extract_tool_result_text,
     _handle_success,

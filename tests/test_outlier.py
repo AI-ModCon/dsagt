@@ -12,8 +12,8 @@ import json
 import numpy as np
 import pytest
 
-from dsagt.memory_extraction import CategoryCentroids, SuggestionQueue, check_and_queue_outliers
-from dsagt.proxy_callback import ToolRecordStore
+from dsagt.memory import CategoryCentroids, SuggestionQueue, check_and_queue_outliers
+from dsagt.provenance import ToolRecordStore
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ class TestProxyInjection:
         msg = store.pending_injection()
 
         assert msg is not None
-        assert "DSAGT Memory System" in msg
+        assert "DSAgt Memory System" in msg
         assert "unusual QC result" in msg
         assert "kb_get_suggestions" in msg
 
