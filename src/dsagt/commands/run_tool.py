@@ -49,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
         print("dsagt-run: no command specified after '--'", file=sys.stderr)
         return 1
 
+    from dsagt.observability import init_tracing
+    init_tracing("dsagt-run", session_id=args.session)
+
     records_dir = _resolve_records_dir(args.records_dir)
 
     return run_and_record(

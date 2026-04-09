@@ -74,14 +74,7 @@ def main(argv: list[str] | None = None):
         logger.error("LLM_API_KEY not set. The proxy needs it to forward requests.")
         sys.exit(1)
 
-    try:
-        import litellm
-    except ImportError:
-        logger.error(
-            "litellm is not installed. Install it with:\n"
-            "  uv pip install 'litellm[proxy]'"
-        )
-        sys.exit(1)
+    import litellm
 
     from dsagt.provenance import create_callback
 

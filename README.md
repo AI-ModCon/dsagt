@@ -11,7 +11,7 @@ DSAgt connects an MCP-compatible AI agent to tool registration, a semantic knowl
 ```bash
 git clone https://github.com/AI-ModCon/BaseData_pipeline_agent.git
 cd BaseData_pipeline_agent
-uv sync --all-groups
+uv sync          # add --group dev if you plan to run the test suite
 ```
 
 ### First-time knowledge base setup
@@ -156,6 +156,11 @@ All LLM calls route through a local LiteLLM proxy. Two callbacks capture data:
    - **Execution** (from `dsagt-run` wrapper) — exact command, stdout/stderr, timing
    - **Report** (from proxy) — what the agent reported back
 
+The same MLflow OTel collector also receives spans from the knowledge
+server, the registry server, and `dsagt-run` itself, so KB searches, tool
+executions, and registry events show up alongside LLM calls in the trace
+view (see [Observability](#observability) below).
+
 ### Tools and Skills
 
 **Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. New tools are registered through the registry MCP server by the agent via `save_tool_spec`. Executables are automatically wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`, which exposes agent options for direct tool lookup or semantic search backed by ChromaDB.
@@ -174,9 +179,29 @@ once with `dsagt-setup-kb` (see [First-time knowledge base setup](#first-time-kn
 
 ### Observability
 
-MLflow is available at `http://localhost:<mlflow_port>` during and after sessions, providing token usage and cost per LLM call, latency and model information, and full request/response traces.
+MLflow is available at `http://localhost:<mlflow_port>` during and after
+sessions and is the single dashboard for everything DSAgt does. Beyond
+LLM token usage, latency, and full request/response traces from the proxy,
+the trace view also shows:
 
-Tool execution records on disk provide the provenance chain for pipeline reconstruction. The agent can call `reconstruct_pipeline` to generate a reproducible bash script or Snakemake workflow from the trace archive.
+- **Knowledge base operations** — every `kb_search`, `kb_ingest`, and
+  embedding call as a span tree (`kb.search` → `kb.embed` → `kb.index_search`
+  → `kb.rerank`), with per-phase timing so it is obvious whether retrieval,
+  embedding, or reranking is the bottleneck.
+- **Tool executions** — every `dsagt-run` invocation as a `tool.execute`
+  span carrying exit code, duration, input/output file counts, the command
+  string, and a truncated stderr summary on failure. The full payload still
+  lives in `trace_archive/<record_id>.json`.
+- **Registry events** — `save_tool_spec`, `install_dependencies`, and
+  `reconstruct_pipeline` as spans with the relevant outcome attributes.
+  Long-running operations like `uv pip install` show up with their own
+  duration so failed installs are easy to spot.
+
+Every span carries the project's `session.id`, so you can filter the entire
+trace view to one run. Tool execution records on disk continue to provide
+the canonical provenance chain for pipeline reconstruction — the agent calls
+`reconstruct_pipeline` to render the trace archive as a reproducible bash
+script or Snakemake workflow.
 
 ## CLI Reference
 
@@ -200,9 +225,10 @@ src/dsagt/
   session.py       # Config, registry, project lifecycle, services, extraction
   agents.py        # Agent config generation, environment, launch
   registry.py      # ToolRegistry + SkillRegistry, KB indexing
-  knowledge.py     # KnowledgeBase, embeddings, vector indexes
+  knowledge.py     # KnowledgeBase, embeddings (via LiteLLM), vector indexes
   memory.py        # Explicit + episodic memory, outlier detection
   provenance.py    # Execution capture, LLM tracking, record indexing, pipeline reconstruction
+  observability.py # OTel tracing helpers — single import surface for all instrumentation
 
   commands/        # CLI entry points (each has a main() function)
     cli.py               # dsagt init/start/stop/status/list/mv/extract

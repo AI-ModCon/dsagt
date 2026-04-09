@@ -30,6 +30,12 @@ from mcp.server.lowlevel import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 
 from dsagt.knowledge import KnowledgeBase
+from dsagt.observability import (
+    obs,
+    registry_install_deps_span,
+    registry_reconstruct_pipeline_span,
+    registry_save_tool_span,
+)
 from dsagt.provenance import reconstruct_pipeline
 
 _os.environ["PYTHONUNBUFFERED"] = "1"
@@ -323,20 +329,33 @@ def create_registry_server(
 
         elif name == "save_tool_spec":
             spec = arguments["spec"]
-            try:
-                action = registry.save_tool(spec)
-                tool_count = len(registry.list_tools_raw())
-                message = (
-                    f"Tool '{spec['name']}' {action} successfully. "
-                    f"Registry now contains {tool_count} tools."
-                )
-                deps = spec.get("dependencies", [])
-                if deps:
-                    dep_result = _install_dependencies(deps)
-                    message += f"\n\nDependency installation:\n{dep_result}"
-                return _text_result(message)
-            except Exception as e:
-                return _text_result(f"Error saving tool spec: {e}")
+            with registry_save_tool_span(spec.get("name")):
+                obs.set("language", spec.get("language"))
+                obs.set("n_dependencies", len(spec.get("dependencies") or []))
+                obs.set("n_tags", len(spec.get("tags") or []))
+                try:
+                    action = registry.save_tool(spec)
+                    tool_count = len(registry.list_tools_raw())
+                    obs.set("action", action)
+                    obs.set("registry_size", tool_count)
+                    message = (
+                        f"Tool '{spec['name']}' {action} successfully. "
+                        f"Registry now contains {tool_count} tools."
+                    )
+                    deps = spec.get("dependencies", [])
+                    if deps:
+                        with registry_install_deps_span(deps):
+                            dep_result = _install_dependencies(deps)
+                            if dep_result.startswith("Successfully installed:"):
+                                obs.set("status", "ok")
+                            else:
+                                obs.set("status", "failed")
+                                obs.event("install_failed", message=dep_result[:256])
+                        message += f"\n\nDependency installation:\n{dep_result}"
+                    return _text_result(message)
+                except Exception as e:
+                    obs.event("save_tool_failed", error=str(e)[:256])
+                    return _text_result(f"Error saving tool spec: {e}")
 
         elif name == "get_registry":
             tools = registry.list_tools_raw()
@@ -485,11 +504,14 @@ def create_registry_server(
         elif name == "reconstruct_pipeline":
             fmt = arguments.get("format", "bash")
             trace_dir = registry.runtime_dir / "trace_archive"
-            try:
-                script = reconstruct_pipeline(trace_dir, fmt=fmt)
-                return _text_result(script)
-            except Exception as e:
-                return _text_result(f"Error reconstructing pipeline: {e}")
+            with registry_reconstruct_pipeline_span(fmt):
+                try:
+                    script = reconstruct_pipeline(trace_dir, fmt=fmt)
+                    obs.set("output_chars", len(script))
+                    return _text_result(script)
+                except Exception as e:
+                    obs.event("reconstruct_failed", error=str(e)[:256])
+                    return _text_result(f"Error reconstructing pipeline: {e}")
 
         elif name == "install_dependencies":
             tool_name = arguments.get("tool_name")
@@ -514,10 +536,22 @@ def create_registry_server(
             seen = set()
             unique_deps = [d for d in all_deps if not (d in seen or seen.add(d))]
 
-            result = _install_dependencies(unique_deps)
-            return _text_result(
-                f"Installing dependencies for: {', '.join(tools_with_deps)}\n\n{result}"
-            )
+            with registry_install_deps_span(unique_deps):
+                obs.set("scope_tool", tool_name)
+                obs.set("n_tools_with_deps", len(tools_with_deps))
+                result = _install_dependencies(unique_deps)
+                # Heuristic: _install_dependencies returns "Successfully installed:"
+                # on success and "Installation failed" / "timed out" / "Error:" on
+                # failure paths.  We surface the status as an attribute so the UI
+                # can filter without parsing the full result string.
+                if result.startswith("Successfully installed:"):
+                    obs.set("status", "ok")
+                else:
+                    obs.set("status", "failed")
+                    obs.event("install_failed", message=result[:256])
+                return _text_result(
+                    f"Installing dependencies for: {', '.join(tools_with_deps)}\n\n{result}"
+                )
 
         raise ValueError(f"Unknown tool: {name}")
 
@@ -536,7 +570,15 @@ def main():
     parser.add_argument("--embedding-model", default=None)
     parser.add_argument("--embedding-base-url", default=None)
     parser.add_argument("--embedding-api-key", default=None)
+    parser.add_argument("--otel-endpoint", default=None,
+        help="OTLP HTTP base URL for tracing (default: $OTEL_EXPORTER_OTLP_ENDPOINT).")
+    parser.add_argument("--session-id", default=None,
+        help="DSAgt session id, attached as session.id on every emitted span.")
     args = parser.parse_args()
+
+    from dsagt.observability import init_tracing, install_litellm_otel_callback
+    init_tracing("dsagt-registry-server", args.otel_endpoint, args.session_id)
+    install_litellm_otel_callback()
 
     runtime_dir = Path(args.runtime_dir)
     log = _logging.getLogger(__name__)

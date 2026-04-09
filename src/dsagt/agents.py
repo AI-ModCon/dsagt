@@ -75,7 +75,20 @@ def _mcp_server_args(server: str, project_dir: Path, config: dict) -> list[str]:
             "--runtime-dir", str(project_dir),
         ]
         base += _embedding_args(config)
+    base += _otel_args(config)
     return base
+
+
+def _otel_args(config: dict) -> list[str]:
+    """Build --otel-endpoint and --session-id args for an MCP server."""
+    args: list[str] = []
+    mlflow_port = config.get("mlflow", {}).get("port")
+    if mlflow_port:
+        args += ["--otel-endpoint", f"http://localhost:{mlflow_port}"]
+    project = config.get("project")
+    if project:
+        args += ["--session-id", project]
+    return args
 
 
 def _mcp_env_block(config: dict) -> dict:
@@ -334,6 +347,12 @@ def agent_env(config: dict) -> dict:
         env["OPENAI_BASE_URL"] = emb["base_url"]
     if emb.get("model"):
         env["EMBEDDING_MODEL"] = emb["model"]
+
+    # OTel endpoint inherited by every subprocess (dsagt-run, etc.).
+    mlflow_port = config.get("mlflow", {}).get("port")
+    if mlflow_port:
+        env["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"http://localhost:{mlflow_port}"
+        env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/protobuf"
 
     return env
 

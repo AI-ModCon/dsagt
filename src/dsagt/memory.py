@@ -612,26 +612,30 @@ def extract_session(
 
     stored = {"facts": 0, "insights": 0, "summary": 0, "suggestions": 0}
     if fact_texts:
-        kb.add_entries(
+        # Ask add_entries to hand back the freshly-computed embeddings so we
+        # don't pay a second embedding round-trip for outlier detection below.
+        # On API embedders this halves the wall time of memory extraction.
+        need_embeddings = outlier_sensitivity > 0
+        add_result = kb.add_entries(
             texts=fact_texts,
             collection=EPISODIC_COLLECTION,
             metadatas=fact_metas,
             route=EPISODIC_MEMORY_ROUTE,
+            return_embeddings=need_embeddings,
         )
         stored["facts"] = len(extracted["facts"])
         stored["insights"] = len(extracted["insights"])
         stored["summary"] = 1 if extracted["summary"] else 0
 
-        if outlier_sensitivity > 0:
+        if need_embeddings:
             project_dir = runtime_dir or trace_dir.parent
             centroids_obj = CategoryCentroids(project_dir / "centroids.json")
             queue = SuggestionQueue(project_dir / "suggestions.json")
-            embeddings = kb.embed_texts(fact_texts, EPISODIC_COLLECTION)
 
             suggestion_ids = check_and_queue_outliers(
                 texts=fact_texts,
                 categories=fact_categories,
-                embeddings=embeddings,
+                embeddings=add_result["embeddings"],
                 centroids=centroids_obj,
                 queue=queue,
                 threshold=outlier_sensitivity,

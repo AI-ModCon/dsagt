@@ -528,7 +528,11 @@ def create_knowledge_server(
     async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         try:
             if name == "kb_list_collections":
-                collections = kb.list_collections()
+                # list_collections() walks the index dir and reads route.json
+                # + DESCRIPTION.md per collection — synchronous file I/O that
+                # should not block the event loop, matching how kb_search and
+                # the rest of this dispatcher already wrap KB calls.
+                collections = await asyncio.to_thread(kb.list_collections)
                 result = {
                     "status": "ok",
                     "collections": collections,
@@ -1002,7 +1006,19 @@ def main():
         default="chroma",
         help="Default vector database backend for new collections (default: chroma)",
     )
+    parser.add_argument(
+        "--otel-endpoint", default=None,
+        help="OTLP HTTP base URL for tracing (default: $OTEL_EXPORTER_OTLP_ENDPOINT).",
+    )
+    parser.add_argument(
+        "--session-id", default=None,
+        help="DSAgt session id, attached as session.id on every emitted span.",
+    )
     args = parser.parse_args()
+
+    from dsagt.observability import init_tracing, install_litellm_otel_callback
+    init_tracing("dsagt-knowledge-server", args.otel_endpoint, args.session_id)
+    install_litellm_otel_callback()
 
     asyncio.run(run_server(
         args.base_index_dir,

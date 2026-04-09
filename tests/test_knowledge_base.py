@@ -1,7 +1,7 @@
 """
 Tests for KnowledgeBase and APIEmbeddingClient.
 
-APIEmbeddingClient tests mock httpx to avoid network calls.
+APIEmbeddingClient tests mock litellm.embedding to avoid network calls.
 KnowledgeBase tests mock _make_embedder with deterministic vectors
 and use real FAISS indexes and llama-index chunking on temp files.
 Reranking is mocked since sentence-transformers is a heavy dependency.
@@ -48,17 +48,21 @@ def fake_embed(texts: list[str]) -> np.ndarray:
     return np.array(embeddings, dtype=np.float32)
 
 
-def make_mock_response(texts: list[str], dim: int = EMBEDDING_DIM):
-    """Create a mock httpx response matching the OpenAI embeddings format."""
+def make_mock_litellm_response(texts: list[str], dim: int = EMBEDDING_DIM):
+    """Create a fake litellm.EmbeddingResponse for the given texts.
+
+    LiteLLM returns a Pydantic model whose ``.data`` field is a list of dicts
+    with ``index`` and ``embedding`` keys (matching the OpenAI API shape).
+    A MagicMock with the same attribute access is sufficient for tests.
+    """
     rng = np.random.RandomState(0)
     data = [
         {"index": i, "embedding": rng.randn(dim).tolist()}
-        for i, _ in enumerate(texts)
+        for i in range(len(texts))
     ]
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"data": data}
-    mock_resp.raise_for_status = MagicMock()
-    return mock_resp
+    resp = MagicMock()
+    resp.data = data
+    return resp
 
 
 def create_test_docs(folder: Path):
@@ -116,6 +120,42 @@ class TestAPIEmbeddingClient:
         assert client.api_key == "explicit-key"
         client.close()
 
+    def test_bare_model_name_gets_openai_like_prefix(self):
+        """Bare model names should be routed via the openai_like/ prefix.
+
+        ``openai_like`` is required (not ``openai``) so LiteLLM does not
+        normalize lab-specific suffixes like ``-project`` away — see the
+        comment in APIEmbeddingClient.__init__ for the full rationale.
+        """
+        client = APIEmbeddingClient(
+            api_key="k", base_url="http://test", model="my-embed",
+        )
+        assert client._litellm_model == "openai_like/my-embed"
+        client.close()
+
+    def test_lab_suffixed_model_name_round_trips_verbatim(self):
+        """Regression: ``text-embedding-3-small-project`` must NOT be
+        normalized to ``text-embedding-3-small`` by the openai_like router.
+
+        Lab LiteLLM proxies route by alias.  If the suffix gets stripped, the
+        request reaches the upstream as a name the proxy's ACL doesn't know
+        about, and we get a 401 ``team_model_access_denied``.
+        """
+        client = APIEmbeddingClient(
+            api_key="k", base_url="http://test",
+            model="text-embedding-3-small-project",
+        )
+        assert client._litellm_model == "openai_like/text-embedding-3-small-project"
+        client.close()
+
+    def test_explicit_provider_prefix_is_preserved(self):
+        """Pre-prefixed model names are passed through unchanged."""
+        client = APIEmbeddingClient(
+            api_key="k", base_url="http://test", model="bedrock/cohere.embed-english-v3",
+        )
+        assert client._litellm_model == "bedrock/cohere.embed-english-v3"
+        client.close()
+
     def test_embed_empty_list(self):
         """Embedding an empty list returns an empty array."""
         client = APIEmbeddingClient(api_key="test-key", base_url="http://test")
@@ -124,132 +164,121 @@ class TestAPIEmbeddingClient:
         assert result.dtype == np.float32
         client.close()
 
-    @patch("httpx.Client")
-    def test_embed_single_batch(self, mock_client_cls):
-        """Texts within batch_size make a single API call."""
-        mock_client = MagicMock()
-        mock_client.post.return_value = make_mock_response(["a", "b"])
-        mock_client_cls.return_value = mock_client
-
-        client = APIEmbeddingClient(api_key="test-key", base_url="http://test", batch_size=10)
-        result = client.embed(["a", "b"])
-
-        assert result.shape == (2, EMBEDDING_DIM)
-        assert mock_client.post.call_count == 1
-        client.close()
-
-    @patch("httpx.Client")
-    def test_embed_multiple_batches(self, mock_client_cls):
-        """Texts exceeding batch_size are split into multiple API calls."""
-        mock_client = MagicMock()
-
-        def dynamic_response(url, **kwargs):
-            texts = kwargs["json"]["input"]
-            return make_mock_response(texts)
-
-        mock_client.post.side_effect = dynamic_response
-        mock_client_cls.return_value = mock_client
-
-        client = APIEmbeddingClient(api_key="test-key", base_url="http://test", batch_size=2)
-        # 5 texts with batch_size=2 -> 3 API calls (2+2+1)
-        result = client.embed(["a", "b", "c", "d", "e"])
-
-        assert result.shape == (5, EMBEDDING_DIM)
-        assert mock_client.post.call_count == 3
-        client.close()
-
-    @patch("httpx.Client")
-    def test_embed_sends_correct_payload(self, mock_client_cls):
-        """API call includes correct model and input texts."""
-        mock_client = MagicMock()
-        mock_client.post.return_value = make_mock_response(["hello"])
-        mock_client_cls.return_value = mock_client
+    @patch("litellm.embedding")
+    def test_embed_calls_litellm_with_correct_args(self, mock_embedding):
+        """litellm.embedding receives the right model, input, api_base, api_key."""
+        mock_embedding.return_value = make_mock_litellm_response(["hello"])
 
         client = APIEmbeddingClient(
             api_key="my-key",
             model="test-model",
             base_url="https://example.com",
         )
-        client.embed(["hello"])
+        result = client.embed(["hello"])
 
-        call_kwargs = mock_client.post.call_args
-        assert call_kwargs[0][0] == "https://example.com/embeddings"
-        assert call_kwargs[1]["json"]["model"] == "test-model"
-        assert call_kwargs[1]["json"]["input"] == ["hello"]
-        assert "Bearer my-key" in call_kwargs[1]["headers"]["Authorization"]
+        assert result.shape == (1, EMBEDDING_DIM)
+        assert mock_embedding.call_count == 1
+        call_kwargs = mock_embedding.call_args.kwargs
+        assert call_kwargs["model"] == "openai_like/test-model"
+        assert call_kwargs["input"] == ["hello"]
+        assert call_kwargs["api_base"] == "https://example.com"
+        assert call_kwargs["api_key"] == "my-key"
+        client.close()
+
+    @patch("litellm.embedding")
+    def test_embed_returns_vectors_in_index_order(self, mock_embedding):
+        """Out-of-order response data is sorted back to input order."""
+        # Construct a response where data is in reverse order to ensure
+        # the client sorts by 'index' field.
+        rng = np.random.RandomState(7)
+        out_of_order = [
+            {"index": 1, "embedding": rng.randn(EMBEDDING_DIM).tolist()},
+            {"index": 0, "embedding": rng.randn(EMBEDDING_DIM).tolist()},
+        ]
+        resp = MagicMock()
+        resp.data = out_of_order
+        mock_embedding.return_value = resp
+
+        client = APIEmbeddingClient(api_key="k", base_url="http://test")
+        result = client.embed(["first", "second"])
+        assert result.shape == (2, EMBEDDING_DIM)
+        # First-row vector matches the data entry with index=0 (the second list element)
+        assert np.allclose(result[0], np.array(out_of_order[1]["embedding"], dtype=np.float32))
+        client.close()
+
+    @patch("litellm.embedding")
+    def test_embed_handles_pydantic_style_data(self, mock_embedding):
+        """LiteLLM may return Pydantic objects with attribute access instead of dicts."""
+
+        class _Item:
+            def __init__(self, idx, vec):
+                self.index = idx
+                self.embedding = vec
+
+        rng = np.random.RandomState(0)
+        items = [_Item(i, rng.randn(EMBEDDING_DIM).tolist()) for i in range(3)]
+        resp = MagicMock()
+        resp.data = items
+        mock_embedding.return_value = resp
+
+        client = APIEmbeddingClient(api_key="k", base_url="http://test")
+        result = client.embed(["a", "b", "c"])
+        assert result.shape == (3, EMBEDDING_DIM)
         client.close()
 
 
 # ---------------------------------------------------------------------------
-# APIEmbeddingClient - error handling
+# APIEmbeddingClient - error propagation
 # ---------------------------------------------------------------------------
 
 class TestAPIEmbeddingClientErrors:
-    """Tests for embedding API failure modes that could cause 'transport closed'."""
+    """Verify that LiteLLM errors propagate up from .embed() unchanged.
 
-    @patch("httpx.Client")
-    def test_http_401_raises(self, mock_client_cls):
-        """Unauthorized (wrong/expired API key) raises HTTPStatusError."""
-        import httpx
+    LiteLLM handles retries on rate limits and transient failures internally
+    via litellm.num_retries; only terminal failures should reach the caller.
+    These tests assert that when litellm.embedding does raise, the exception
+    is not swallowed.
+    """
 
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "401 Unauthorized", request=MagicMock(), response=mock_response,
+    @patch("litellm.embedding")
+    def test_authentication_error_propagates(self, mock_embedding):
+        """A 401 from upstream surfaces as litellm.AuthenticationError."""
+        import litellm
+
+        mock_embedding.side_effect = litellm.exceptions.AuthenticationError(
+            message="Invalid API key", llm_provider="openai", model="test",
         )
-        mock_client.post.return_value = mock_response
-        mock_client_cls.return_value = mock_client
 
         client = APIEmbeddingClient(api_key="bad-key", base_url="http://test")
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(litellm.exceptions.AuthenticationError):
             client.embed(["test"])
         client.close()
 
-    @patch("httpx.Client")
-    def test_http_500_raises(self, mock_client_cls):
-        """Server error (500) raises HTTPStatusError."""
-        import httpx
+    @patch("litellm.embedding")
+    def test_terminal_rate_limit_error_propagates(self, mock_embedding):
+        """When LiteLLM exhausts retries, RateLimitError reaches the caller."""
+        import litellm
 
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "500 Internal Server Error", request=MagicMock(), response=mock_response,
+        mock_embedding.side_effect = litellm.exceptions.RateLimitError(
+            message="429 after retries", llm_provider="openai", model="test",
         )
-        mock_client.post.return_value = mock_response
-        mock_client_cls.return_value = mock_client
 
-        client = APIEmbeddingClient(api_key="test-key", base_url="http://test")
-        with pytest.raises(httpx.HTTPStatusError):
+        client = APIEmbeddingClient(api_key="k", base_url="http://test")
+        with pytest.raises(litellm.exceptions.RateLimitError):
             client.embed(["test"])
         client.close()
 
-    @patch("httpx.Client")
-    def test_connection_error_raises(self, mock_client_cls):
-        """Network unreachable raises ConnectError."""
-        import httpx
+    @patch("litellm.embedding")
+    def test_timeout_propagates(self, mock_embedding):
+        """LiteLLM Timeout surfaces unchanged."""
+        import litellm
 
-        mock_client = MagicMock()
-        mock_client.post.side_effect = httpx.ConnectError("Connection refused")
-        mock_client_cls.return_value = mock_client
+        mock_embedding.side_effect = litellm.exceptions.Timeout(
+            message="Request timed out", llm_provider="openai", model="test",
+        )
 
-        client = APIEmbeddingClient(api_key="test-key", base_url="http://test")
-        with pytest.raises(httpx.ConnectError):
-            client.embed(["test"])
-        client.close()
-
-    @patch("httpx.Client")
-    def test_timeout_raises(self, mock_client_cls):
-        """Embedding API timeout raises ReadTimeout."""
-        import httpx
-
-        mock_client = MagicMock()
-        mock_client.post.side_effect = httpx.ReadTimeout("Read timed out")
-        mock_client_cls.return_value = mock_client
-
-        client = APIEmbeddingClient(api_key="test-key", base_url="http://test")
-        with pytest.raises(httpx.ReadTimeout):
+        client = APIEmbeddingClient(api_key="k", base_url="http://test")
+        with pytest.raises(litellm.exceptions.Timeout):
             client.embed(["test"])
         client.close()
 
@@ -313,15 +342,23 @@ class TestKnowledgeBaseIngest:
         assert collections[0]["name"] == "test_docs"
         assert "unit tests" in collections[0]["description"]
 
-    def test_ingest_creates_faiss_index(self, kb, source_folder):
-        """Ingest produces a valid FAISS index file."""
-        kb.ingest(source_folder)
+    def test_ingest_creates_faiss_index(self, tmp_path, source_folder):
+        """Ingest into an explicitly FAISS-routed KB produces an index.faiss."""
+        index_dir = tmp_path / "index_faiss"
+        mock_client = MagicMock()
+        mock_client.embed = fake_embed
 
-        index_path = kb.index_dir / "test_docs" / "index.faiss"
-        assert index_path.exists()
+        with patch("dsagt.knowledge._make_embedder", return_value=mock_client):
+            kb = KnowledgeBase(index_dir=index_dir, default_index="faiss")
+            try:
+                kb.ingest(source_folder)
+                index_path = kb.index_dir / "test_docs" / "index.faiss"
+                assert index_path.exists()
 
-        index = faiss.read_index(str(index_path))
-        assert index.ntotal > 0
+                index = faiss.read_index(str(index_path))
+                assert index.ntotal > 0
+            finally:
+                kb.close()
 
     def test_ingest_creates_chunks_jsonl(self, kb, source_folder):
         """Ingest produces a chunks.jsonl with valid entries."""

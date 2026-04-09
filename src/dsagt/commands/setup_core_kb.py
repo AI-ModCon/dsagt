@@ -276,6 +276,14 @@ def main():
     elif args.embedding_model:
         embedder_kwargs = {"model": args.embedding_model}
 
+    # Configure LiteLLM retries before any embedding work — this is the path
+    # that historically got killed by 429s on large ingests. install_litellm_otel_callback
+    # also wires OTel spans if init_tracing was set up first; for setup-kb,
+    # we only need the retries (no MLflow endpoint exists yet).
+    from dsagt.observability import init_tracing, install_litellm_otel_callback
+    init_tracing("dsagt-setup-kb")
+    install_litellm_otel_callback()
+
     print("DSAGT Core Knowledge Base Setup")
     print(f"Index directory: {args.index_dir}")
     print(f"Embedding backend: {args.embedding_backend}")

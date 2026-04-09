@@ -346,6 +346,18 @@ Goose, Roo Code, and Cline.
 % Proxy -> stores
 \draw[link] (proxy.south) -- ++(0,-0.3) -| (mlflow.north);
 
+% Registry -> MLflow (direct horizontal hop, same row)
+\draw[link] (registry.east) -- (mlflow.west);
+
+% Knowledge -> MLflow (routed under row 2 to avoid the registry box).
+% Stem x=-1.45 = midway between knowledge->domain arrow (x=-2.0) and the
+% lower-right corner of Knowledge Server (x=-0.9).
+% End-stem x=3.95 = midway between the lower-left corner of MLflow Traces
+% (x=3.5) and the mlflow->episodic arrow (x=4.4).
+% Horizontal run y=-3 = midway between row 2 (y=-2) and row 3 (y=-4).
+\draw[link, rounded corners=3pt]
+  (-1.45,-2.6) -- (-1.45,-3) -- (3.95,-3) -- (3.95,-2.6);
+
 % ===== Row 3: Collections =====
 \node[art] (domain)   at (-2.0,-4) {Domain\\Knowledge};
 \node[art] (skills)   at (0.2,-4)  {Skills};

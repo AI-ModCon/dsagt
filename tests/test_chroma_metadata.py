@@ -280,7 +280,7 @@ class TestKnowledgeBaseSearchWhere:
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
 
-            kb = KnowledgeBase(index_dir=index_dir)
+            kb = KnowledgeBase(index_dir=index_dir, default_index="faiss")
 
             # Use add_entries on a FAISS collection
             kb.add_entries(
@@ -381,6 +381,38 @@ class TestAddEntries:
             "quick fox", collection="test_search", top_k=2, rerank=False,
         )
         assert len(results) > 0
+
+    def test_add_entries_return_embeddings_default_off(self, mock_kb):
+        """By default, the returned dict has no 'embeddings' key."""
+        result = mock_kb.add_entries(texts=["one", "two"], collection="ret_off")
+        assert "embeddings" not in result
+
+    def test_add_entries_return_embeddings_on(self, mock_kb):
+        """With return_embeddings=True, the result includes the L2-normalized
+        embedding matrix used for indexing.  Memory extraction uses this to
+        skip a redundant embedding round-trip.
+        """
+        result = mock_kb.add_entries(
+            texts=["one", "two", "three"],
+            collection="ret_on",
+            return_embeddings=True,
+        )
+        assert "embeddings" in result
+        embeddings = result["embeddings"]
+        assert isinstance(embeddings, np.ndarray)
+        # fake_embed produces 8-dimensional vectors.
+        assert embeddings.shape == (3, 8)
+        # Embeddings should be L2-normalized (unit vectors).
+        norms = np.linalg.norm(embeddings, axis=1)
+        assert np.allclose(norms, 1.0, atol=1e-5)
+
+    def test_add_entries_return_embeddings_empty(self, mock_kb):
+        """Empty input with return_embeddings=True returns an empty array."""
+        result = mock_kb.add_entries(
+            texts=[], collection="ret_empty", return_embeddings=True,
+        )
+        assert "embeddings" in result
+        assert result["embeddings"].shape == (0,)
 
     def test_add_entries_with_route(self, tmp_path):
         """add_entries with explicit ChromaDB route uses ChromaDB."""

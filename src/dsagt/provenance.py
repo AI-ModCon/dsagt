@@ -24,6 +24,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
@@ -80,30 +81,52 @@ def run_and_record(
     output_files: list[str] | None = None,
 ) -> int:
     """Execute a command, write an execution record, return the exit code."""
+    from dsagt.observability import obs, tool_execute_span, truncate
+
     record_id = record_id or uuid.uuid4().hex[:12]
     session_id = session_id or os.environ.get("DSAGT_SESSION_ID")
 
-    timestamp_start = datetime.now(timezone.utc).isoformat()
+    with tool_execute_span(record_id, tool_name):
+        timestamp_start = datetime.now(timezone.utc).isoformat()
+        start_perf = time.perf_counter()
 
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-        )
-        return_code = result.returncode
-        stdout = result.stdout
-        stderr = result.stderr
-    except FileNotFoundError:
-        return_code = 127
-        stdout = ""
-        stderr = f"dsagt-run: command not found: {command[0]}"
-    except (PermissionError, OSError) as e:
-        return_code = 1
-        stdout = ""
-        stderr = f"dsagt-run: execution error: {e}"
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+            )
+            return_code = result.returncode
+            stdout = result.stdout
+            stderr = result.stderr
+        except FileNotFoundError:
+            return_code = 127
+            stdout = ""
+            stderr = f"dsagt-run: command not found: {command[0]}"
+        except (PermissionError, OSError) as e:
+            return_code = 1
+            stdout = ""
+            stderr = f"dsagt-run: execution error: {e}"
 
-    timestamp_end = datetime.now(timezone.utc).isoformat()
+        duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
+        timestamp_end = datetime.now(timezone.utc).isoformat()
+
+        # Attach execution summary to the span. Full payload still goes to
+        # trace_archive/<record_id>.json; the span only carries truncated
+        # summaries that render usefully in the MLflow UI.
+        obs.set_many({
+            "exit_code": return_code,
+            "duration_ms": duration_ms,
+            "n_input_files": len(input_files or []),
+            "n_output_files": len(output_files or []),
+            "command": truncate(" ".join(command), 256),
+            "stdout_len": len(stdout),
+            "stderr_len": len(stderr),
+        })
+        if stderr.strip():
+            obs.set("stderr_truncated", truncate(stderr, 256))
+        if return_code != 0:
+            obs.event("tool_failed", exit_code=return_code)
 
     record = {
         "record_id": record_id,
@@ -486,12 +509,25 @@ class ToolRecordStore:
 
         self._pending: dict[str, dict] = {}
         self._logged_message_count: int = 0
+        # Cursor for match_tool_results — only the suffix of the messages list
+        # past this index needs to be re-scanned on each call.  Without this,
+        # match_tool_results was O(n²) over the session: every callback
+        # iterated the entire growing message history.
+        self._matched_message_count: int = 0
         self._extraction_threshold: int = int(
             os.environ.get("DSAGT_EXTRACTION_THRESHOLD", "0")
         )
         self._exchange_count: int = 0
         self._extracting: bool = False
         self._last_injected_suggestion_count: int = 0
+
+        # Long-lived session log handle.  Opened lazily on the first write so
+        # ToolRecordStore can be constructed in tests / unusual lifecycles
+        # without hitting the disk.  Keeping a single handle open across the
+        # proxy lifetime saves an open() + close() syscall pair on every LLM
+        # exchange — meaningful because log_exchange runs on the proxy
+        # callback hot path.
+        self._session_log_handle = None
 
         self.records_dir.mkdir(parents=True, exist_ok=True)
 
@@ -530,10 +566,17 @@ class ToolRecordStore:
         return tracked
 
     def match_tool_results(self, messages: list[dict]) -> list[Path]:
-        """Find tool_result/tool-role messages and write execution records."""
-        paths = []
+        """Find tool_result/tool-role messages and write execution records.
 
-        for msg in messages:
+        Only iterates the suffix of *messages* past the cursor advanced on
+        the previous call.  Chat history is append-only, so any tool_result
+        not seen yet must live in the new tail.
+        """
+        paths = []
+        new_messages = messages[self._matched_message_count:]
+        self._matched_message_count = len(messages)
+
+        for msg in new_messages:
             if msg.get("role") == "tool":
                 tool_call_id = msg.get("tool_call_id")
                 if tool_call_id and tool_call_id in self._pending:
@@ -609,8 +652,16 @@ class ToolRecordStore:
             "response": _extract_response_content(response_data),
         }
 
-        with open(self.session_log_path, "a") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        # Lazy-open the session log handle on first write.  Line-buffered
+        # so each exchange is durable on disk after the trailing "\n" without
+        # needing an explicit flush.
+        if self._session_log_handle is None:
+            self._session_log_handle = open(
+                self.session_log_path, "a", buffering=1, encoding="utf-8",
+            )
+        self._session_log_handle.write(
+            json.dumps(entry, ensure_ascii=False) + "\n"
+        )
 
         self._exchange_count += 1
         if (
@@ -619,6 +670,20 @@ class ToolRecordStore:
             and not self._extracting
         ):
             self._trigger_extraction()
+
+    def close(self) -> None:
+        """Close the session log handle if it was opened.
+
+        Idempotent and safe to call from atexit hooks or shutdown paths.
+        Line buffering means data is already on disk; this just releases
+        the file descriptor.
+        """
+        if self._session_log_handle is not None:
+            try:
+                self._session_log_handle.close()
+            except Exception as e:
+                logger.debug("ToolRecordStore.close: %s", e)
+            self._session_log_handle = None
 
     def _trigger_extraction(self) -> None:
         """Run extraction in a background thread so the proxy isn't blocked."""
@@ -735,9 +800,13 @@ def create_callback(records_dir: str | Path, session_id: str | None = None):
 
     Imports litellm lazily so the rest of the module is testable without it.
     """
+    import atexit
+
     from litellm.integrations.custom_logger import CustomLogger
 
     store = ToolRecordStore(records_dir, session_id)
+    # Release the session log file descriptor on proxy shutdown.
+    atexit.register(store.close)
 
     class DSAGTCallback(CustomLogger):
         def log_pre_api_call(self, model, messages, kwargs):

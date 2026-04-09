@@ -13,14 +13,25 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
 import numpy as np
 
-from llama_index.core import SimpleDirectoryReader
-from llama_index.core.node_parser import CodeSplitter, MarkdownNodeParser, SentenceSplitter
+# llama_index is intentionally NOT imported at module top.
+# It pulls in ~400 transitive submodules and adds ~8s to cold start, which
+# matters because dsagt-run imports this module on every tool invocation
+# but only ever needs the embedding/search code paths, never the parsers.
+# llama_index is lazy-imported inside _chunk_file() and _get_parser().
+
+from dsagt.observability import (
+    kb_embed_span,
+    kb_index_search_span,
+    kb_rerank_span,
+    obs,
+    traced,
+)
 
 
 CODE_LANGUAGES = {
@@ -95,7 +106,19 @@ class LocalEmbeddingClient(BaseEmbeddingClient):
 
 
 class APIEmbeddingClient(BaseEmbeddingClient):
-    """OpenAI-compatible REST API."""
+    """OpenAI-compatible embedding client backed by LiteLLM.
+
+    LiteLLM normalizes a wide set of providers (OpenAI, Azure, Bedrock, Vertex,
+    Cohere, Voyage, Ollama, Together, etc.) behind a single ``embedding(...)``
+    call and handles retries on rate-limit / transient errors automatically.
+    Concretely, this fixes the historical pain of large ``kb_ingest`` runs
+    being killed by 429s — LiteLLM retries with exponential backoff inside
+    the call, the agent never sees the failure.
+
+    The model string passed to LiteLLM determines provider routing. For
+    OpenAI-compatible custom endpoints, use ``"openai/<model>"`` (which is the
+    default when only a bare model name is supplied).
+    """
 
     def __init__(
         self,
@@ -105,11 +128,10 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         timeout: float = 300.0,
         batch_size: int = 100,
     ):
-        import httpx
-
         self.model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small-project")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
         self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+        self.timeout = timeout
         self.batch_size = batch_size
 
         if not self.base_url:
@@ -117,35 +139,55 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         if not self.api_key:
             raise ValueError("API key required via argument or LLM_API_KEY env var")
 
-        self._client = httpx.Client(timeout=timeout)
-
-    def _embed_batch(self, texts: list[str]) -> np.ndarray:
-        response = self._client.post(
-            f"{self.base_url.rstrip('/')}/embeddings",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"input": texts, "model": self.model},
-        )
-        response.raise_for_status()
-        data = sorted(response.json()["data"], key=lambda x: x["index"])
-        return np.array([d["embedding"] for d in data], dtype=np.float32)
+        # Bare model names need a provider prefix so LiteLLM knows which
+        # client to dispatch to.  We use ``openai_like`` (not ``openai``) on
+        # purpose: ``openai`` matches LiteLLM's canonical OpenAI model
+        # registry and will silently *normalize* names like
+        # ``text-embedding-3-small-project`` down to
+        # ``text-embedding-3-small`` before forwarding the request.  Lab
+        # proxies that route by alias (e.g. PNNL's ``-project`` suffix) end
+        # up rejecting that normalized name.
+        #
+        # ``openai_like`` is LiteLLM's escape hatch for "endpoint speaks the
+        # OpenAI wire protocol but is not OpenAI" — it forwards the model
+        # string verbatim and applies no name munging.
+        if "/" not in self.model:
+            self._litellm_model = f"openai_like/{self.model}"
+        else:
+            self._litellm_model = self.model
 
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:
             return np.array([], dtype=np.float32)
-        if len(texts) <= self.batch_size:
-            return self._embed_batch(texts)
-        batches = []
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i : i + self.batch_size]
-            logger.info("Embedding batch %d/%d (%d texts)",
-                        i // self.batch_size + 1,
-                        (len(texts) + self.batch_size - 1) // self.batch_size,
-                        len(batch))
-            batches.append(self._embed_batch(batch))
-        return np.vstack(batches)
+
+        import litellm
+
+        # LiteLLM batches internally and retries rate-limit failures via the
+        # module-level num_retries / request_timeout knobs configured by
+        # observability.install_litellm_otel_callback().
+        response = litellm.embedding(
+            model=self._litellm_model,
+            input=texts,
+            api_base=self.base_url,
+            api_key=self.api_key,
+            timeout=self.timeout,
+        )
+
+        # Response shape mirrors OpenAI: response.data is a list of objects
+        # with .embedding (or ['embedding'] for dict access).
+        sorted_data = sorted(
+            response.data,
+            key=lambda d: d["index"] if isinstance(d, dict) else d.index,
+        )
+        vectors = [
+            d["embedding"] if isinstance(d, dict) else d.embedding
+            for d in sorted_data
+        ]
+        return np.array(vectors, dtype=np.float32)
 
     def close(self) -> None:
-        self._client.close()
+        # No client object to close anymore — LiteLLM owns its own pool.
+        pass
 
 class FAISSIndex(BaseVectorIndex):
     """Inner-product FAISS flat index (cosine similarity on L2-normed vecs)."""
@@ -421,6 +463,12 @@ class KnowledgeBase:
         # Collection runtime cache: name → (BaseVectorIndex, list[dict])
         self._cache: dict[str, tuple[BaseVectorIndex, list[dict]]] = {}
 
+        # Per-file-type parser cache. Constructing a CodeSplitter loads the
+        # tree-sitter language definition (~25ms each), so a 300-file ingest
+        # without this cache pays 7-8 seconds in parser construction alone.
+        # Parsers are stateless once built; safe to share across files.
+        self._parsers: dict[str, Any] = {}
+
         self._reranker = None
 
     # route management
@@ -475,6 +523,14 @@ class KnowledgeBase:
             })
         return result
 
+    @traced(
+        "kb.ingest",
+        capture=["collection_name"],
+        extract_return={
+            "n_files": lambda r: r.get("files"),
+            "n_chunks": lambda r: r.get("chunks"),
+        },
+    )
     def ingest(
         self,
         folder: str | Path,
@@ -526,7 +582,9 @@ class KnowledgeBase:
             return {"collection": collection, "files": 0, "chunks": 0}
 
         embedder = self._get_embedder(active_route)
-        embeddings = self._normalize(embedder.embed([c["text"] for c in chunks]))
+        with kb_embed_span(active_route.embedding_backend,
+                           active_route.embedder_kwargs.get("model"), len(chunks)):
+            embeddings = self._normalize(embedder.embed([c["text"] for c in chunks]))
 
         index = _make_index(active_route.vector_db,
                             **self._index_init_kwargs(active_route, coll_dir))
@@ -544,6 +602,14 @@ class KnowledgeBase:
         self._cache[collection] = (index, chunks)
         return {"collection": collection, "files": len(files), "chunks": len(chunks)}
 
+    @traced(
+        "kb.append",
+        capture=["collection"],
+        extract_return={
+            "n_files": lambda r: r.get("files"),
+            "n_chunks": lambda r: r.get("chunks_added"),
+        },
+    )
     def append(
         self,
         collection: str,
@@ -577,7 +643,9 @@ class KnowledgeBase:
                     "chunks_added": 0, "total_chunks": len(existing_chunks)}
 
         embedder = self._get_embedder(active_route)
-        embeddings = self._normalize(embedder.embed([c["text"] for c in new_chunks]))
+        with kb_embed_span(active_route.embedding_backend,
+                           active_route.embedder_kwargs.get("model"), len(new_chunks)):
+            embeddings = self._normalize(embedder.embed([c["text"] for c in new_chunks]))
         index.add(embeddings)
         index.save(coll_dir)
 
@@ -594,12 +662,18 @@ class KnowledgeBase:
             "total_chunks": len(all_chunks),
         }
 
+    @traced(
+        "kb.add_entries",
+        capture=["collection"],
+        extract_return={"n_entries": lambda r: r.get("entries_added")},
+    )
     def add_entries(
         self,
         texts: list[str],
         collection: str,
         metadatas: list[dict] | None = None,
         route: CollectionRoute | None = None,
+        return_embeddings: bool = False,
     ) -> dict:
         """Add pre-formed text entries with optional metadata to a collection.
 
@@ -620,14 +694,24 @@ class KnowledgeBase:
             backends they are merged into the chunk metadata in chunks.jsonl.
         route : CollectionRoute, optional
             Override routing for this collection (persisted to disk).
+        return_embeddings : bool, optional
+            If True, include the freshly-computed embeddings in the result
+            dict under the ``"embeddings"`` key.  Callers that need the
+            embeddings for downstream work (e.g. centroid-based outlier
+            detection in memory extraction) should set this so they can
+            avoid a second round-trip to the embedding API.
 
         Returns
         -------
         dict
-            ``{collection, entries_added, total_entries}``
+            ``{collection, entries_added, total_entries}`` plus
+            ``"embeddings"`` (numpy ndarray) if ``return_embeddings=True``.
         """
         if not texts:
-            return {"collection": collection, "entries_added": 0, "total_entries": 0}
+            result = {"collection": collection, "entries_added": 0, "total_entries": 0}
+            if return_embeddings:
+                result["embeddings"] = np.array([], dtype=np.float32)
+            return result
 
         coll_dir = self.index_dir / collection
         coll_dir.mkdir(exist_ok=True)
@@ -637,7 +721,9 @@ class KnowledgeBase:
         active_route = self._get_route(collection)
 
         embedder = self._get_embedder(active_route)
-        embeddings = self._normalize(embedder.embed(texts))
+        with kb_embed_span(active_route.embedding_backend,
+                           active_route.embedder_kwargs.get("model"), len(texts)):
+            embeddings = self._normalize(embedder.embed(texts))
 
         # Load existing or create new index
         if (coll_dir / "chunks.jsonl").exists():
@@ -681,11 +767,14 @@ class KnowledgeBase:
         all_chunks = existing_chunks + new_chunks
         self._cache[collection] = (index, all_chunks)
 
-        return {
+        result = {
             "collection": collection,
             "entries_added": len(texts),
             "total_entries": len(all_chunks),
         }
+        if return_embeddings:
+            result["embeddings"] = embeddings
+        return result
 
     def embed_texts(self, texts: list[str], collection: str) -> np.ndarray:
         """Embed texts using the embedder configured for a collection.
@@ -696,6 +785,7 @@ class KnowledgeBase:
         embedder = self._get_embedder(route)
         return self._normalize(embedder.embed(texts))
 
+    @traced("kb.search", capture=["collection", "top_k", "rerank"])
     def search(
         self,
         query: str,
@@ -716,14 +806,17 @@ class KnowledgeBase:
         active_route = self._get_route(collection)
         embedder = self._get_embedder(active_route)
 
-        query_emb = self._normalize(embedder.embed([query]))[0]
-        search_k = min(top_k * 10 if rerank else top_k, len(chunks))
+        with kb_embed_span(active_route.embedding_backend,
+                           active_route.embedder_kwargs.get("model"), 1):
+            query_emb = self._normalize(embedder.embed([query]))[0]
 
-        # Pass where clause only to ChromaDB indexes
-        if where is not None and active_route.vector_db == "chroma":
-            scores, indices = index.search(query_emb, search_k, where=where)
-        else:
-            scores, indices = index.search(query_emb, search_k)
+        search_k = min(top_k * 10 if rerank else top_k, len(chunks))
+        filtered = where is not None and active_route.vector_db == "chroma"
+        with kb_index_search_span(active_route.vector_db, search_k, filtered):
+            if filtered:
+                scores, indices = index.search(query_emb, search_k, where=where)
+            else:
+                scores, indices = index.search(query_emb, search_k)
 
         results = [
             {"chunk": chunks[i], "score": float(scores[j])}
@@ -731,8 +824,14 @@ class KnowledgeBase:
         ]
 
         if rerank and results:
-            return self._rerank(query, results, top_k)
-        return results[:top_k]
+            with kb_rerank_span(self.rerank_model, len(results)):
+                final = self._rerank(query, results, top_k)
+            obs.set("hits", len(final))
+            return final
+
+        final = results[:top_k]
+        obs.set("hits", len(final))
+        return final
 
     @staticmethod
     def _normalize(arr: np.ndarray) -> np.ndarray:
@@ -796,6 +895,9 @@ class KnowledgeBase:
         return [{**r, "rerank_score": float(s)} for r, s in ranked[:top_k]]
 
     def _chunk_file(self, path: Path, collection: str) -> Iterator[dict]:
+        # Lazy import — see the module-top comment about cold-start cost.
+        from llama_index.core import SimpleDirectoryReader
+
         try:
             docs = SimpleDirectoryReader(input_files=[str(path)]).load_data()
         except (FileNotFoundError, IOError, ValueError) as e:
@@ -826,21 +928,47 @@ class KnowledgeBase:
             }
 
     def _get_parser(self, file_type: str):
+        """Return a cached parser for *file_type*, building it on first use.
+
+        Parsers are stateless after construction.  ``CodeSplitter`` in
+        particular loads a tree-sitter language definition on every
+        construction (~25ms), so a large ingest used to pay this cost per
+        file; now it pays once per file type.
+        """
+        cached = self._parsers.get(file_type)
+        if cached is not None:
+            return cached
+
+        # Lazy import — see the module-top comment about cold-start cost.
+        from llama_index.core.node_parser import (
+            CodeSplitter,
+            MarkdownNodeParser,
+            SentenceSplitter,
+        )
+
         if file_type in CODE_LANGUAGES:
-            return CodeSplitter(
+            parser = CodeSplitter(
                 language=CODE_LANGUAGES[file_type],
                 chunk_lines=40,
                 chunk_lines_overlap=10,
                 max_chars=self.chunk_size * 4,
             )
-        if file_type == ".md":
-            return MarkdownNodeParser()
-        return SentenceSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        elif file_type == ".md":
+            parser = MarkdownNodeParser()
+        else:
+            parser = SentenceSplitter(
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
+            )
+
+        self._parsers[file_type] = parser
+        return parser
 
     def close(self) -> None:
         for client in self._embedder_cache.values():
             client.close()
         self._embedder_cache.clear()
+        self._parsers.clear()
 
     def __enter__(self):
         return self
