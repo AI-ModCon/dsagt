@@ -198,7 +198,13 @@ class ToolRegistry:
         return action
 
     def _index_tool(self, spec: dict, tool_path: Path) -> None:
-        """Index a tool file into the registered_tools KB collection."""
+        """Index a tool file into the registered_tools KB collection.
+
+        Errors propagate to the caller — a tool that lives on disk but
+        isn't searchable in the KB is a half-broken state that the agent
+        cannot recover from (it would write a duplicate next time it
+        searched).  Atomic registration: in the index or not registered.
+        """
         text = tool_path.read_text()
         metadata = {
             "tool_name": spec["name"],
@@ -206,14 +212,11 @@ class ToolRegistry:
             "executable": spec["executable"],
             "has_dependencies": str(bool(spec.get("dependencies"))),
         }
-        try:
-            self._kb.add_entries(
-                texts=[text],
-                collection=TOOL_REGISTRY_COLLECTION,
-                metadatas=[metadata],
-            )
-        except (ValueError, RuntimeError, OSError) as e:
-            logger.warning("Failed to index tool '%s' into KB: %s", spec["name"], e)
+        self._kb.add_entries(
+            texts=[text],
+            collection=TOOL_REGISTRY_COLLECTION,
+            metadatas=[metadata],
+        )
 
     def reindex_all(self) -> int:
         """Reindex all tool files into the KB. Returns count indexed."""
@@ -303,20 +306,20 @@ class SkillRegistry:
         return None
 
     def _index_skill(self, spec: dict, skill_md: Path) -> None:
-        """Index a skill into the registered_skills KB collection."""
+        """Index a skill into the registered_skills KB collection.
+
+        Errors propagate to the caller — see _index_tool for the rationale.
+        """
         text = skill_md.read_text()
         metadata = {
             "skill_name": spec["name"],
             "tags": ",".join(spec.get("tags", [])),
         }
-        try:
-            self._kb.add_entries(
-                texts=[text],
-                collection=SKILL_REGISTRY_COLLECTION,
-                metadatas=[metadata],
-            )
-        except (ValueError, RuntimeError, OSError) as e:
-            logger.warning("Failed to index skill '%s' into KB: %s", spec["name"], e)
+        self._kb.add_entries(
+            texts=[text],
+            collection=SKILL_REGISTRY_COLLECTION,
+            metadatas=[metadata],
+        )
 
     def reindex_all(self) -> int:
         """Reindex all skills into the KB. Returns count indexed."""

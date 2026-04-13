@@ -702,8 +702,6 @@ class ToolRecordStore:
                 from dsagt.session import run_extraction
                 result = run_extraction(project_name)
                 logger.info("Volume-triggered extraction: %s", result.get("status"))
-            except (ImportError, FileNotFoundError, RuntimeError, ValueError) as e:
-                logger.warning("Volume-triggered extraction failed: %s", e)
             finally:
                 self._extracting = False
 

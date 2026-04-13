@@ -11,13 +11,13 @@ This walkthrough validates all core DSAgt functionality after installation. You 
 
 ```bash
 cd DSAGT
-dsagt init smoke-test --agent claude-code
+uv run dsagt init smoke-test --agent claude-code
 ```
 
 Edit `runtime/smoke-test/dsagt_config.yaml` — set your API keys and embedding endpoint.
 
 ```bash
-dsagt start smoke-test
+uv run dsagt start smoke-test
 ```
 
 The agent should launch. You're now inside the agent session.

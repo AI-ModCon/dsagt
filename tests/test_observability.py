@@ -181,6 +181,162 @@ def test_init_tracing_double_call_only_updates_session(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Safety nets for the remaining defensive catches in observability.py.
+#
+# After the fallback-purge pass, three "soft" catches remain in the
+# observability layer.  Two of them now live inline inside traced()'s
+# wrapper (previously _attach_captured_args and _attach_return_attrs):
+#
+#   1. _shutdown wraps tracer_provider.shutdown() in try/except so that
+#      a shutdown failure during process exit can't escape into the
+#      atexit chain and corrupt the parent process exit.
+#   2. traced() wraps sig.bind_partial in except TypeError so that a
+#      function whose signature was mangled by another decorator doesn't
+#      crash on every traced call.
+#   3. traced() wraps each user-supplied extractor lambda in except
+#      Exception so a buggy lambda doesn't crash the instrumented
+#      function.
+#
+# These tests pin the HAPPY PATH so that if those catches ever fire in
+# normal use the test suite fails immediately.  Without them, the
+# silent-degradation behavior of the catches would hide real bugs.
+# ---------------------------------------------------------------------------
+
+
+def test_shutdown_runs_cleanly_against_real_provider(monkeypatch):
+    """The _shutdown helper must successfully flush and shut down a real
+    BatchSpanProcessor-backed provider on the happy path.
+
+    If the catch in _shutdown ever fires during dsagt-setup-kb's atexit
+    pass, the user loses any spans still buffered in the BatchSpanProcessor.
+    This test catches "shutdown raised an exception we silently swallowed"
+    by exercising the real shutdown path against a real (in-memory) provider.
+    """
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(resource=Resource.create({"service.name": "shutdown-test"}))
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+    # Plug it into the module so _shutdown reaches the real object.
+    monkeypatch.setattr(obs_module, "_tracer_provider", provider)
+
+    # Emit a span first so there's actually something to flush.
+    tracer = provider.get_tracer("test")
+    with tracer.start_as_current_span("pre-shutdown"):
+        pass
+
+    # Run shutdown — must not raise, and must clear the module-level handle.
+    obs_module._shutdown()
+    assert obs_module._tracer_provider is None
+
+    # The exporter should still hold the span we emitted before shutdown.
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].name == "pre-shutdown"
+
+    # Calling shutdown again is a no-op (idempotent atexit safety).
+    obs_module._shutdown()
+
+
+def test_extract_return_failure_logs_at_debug_and_does_not_crash(_reset_tracing, caplog):
+    """A buggy extract_return lambda must NOT crash the instrumented function,
+    must NOT crash the span emission, and must produce a DEBUG log line so
+    the developer can spot the silently-missing attribute when running with
+    --verbose.
+    """
+    import logging as _logging
+
+    @traced(
+        "test.extractor_bug",
+        extract_return={
+            "good": lambda r: len(r),
+            "bad": lambda r: r["nonexistent_key"],  # KeyError on every call
+            "another_good": lambda r: r[0] if r else None,
+        },
+    )
+    def f():
+        return ["a", "b", "c"]
+
+    with caplog.at_level(_logging.DEBUG, logger="dsagt.observability"):
+        result = f()
+
+    # Function still returned its value normally.
+    assert result == ["a", "b", "c"]
+
+    # Span was emitted with the good attributes set, bad one missing.
+    spans = _reset_tracing.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.attributes["good"] == 3
+    assert span.attributes["another_good"] == "a"
+    assert "bad" not in span.attributes
+
+    # The failure was logged at DEBUG with the attribute name.  This is
+    # what makes the silent skip visible to a developer running with
+    # --verbose / DEBUG logging.
+    debug_messages = [r.message for r in caplog.records if r.levelno == _logging.DEBUG]
+    assert any("extract_return['bad']" in m or "'bad'" in m for m in debug_messages), (
+        f"Expected a DEBUG log mentioning the broken 'bad' extractor, "
+        f"got: {debug_messages}"
+    )
+
+
+def test_attach_captured_args_happy_path_protects_bind_partial_catch(_reset_tracing):
+    """Pin the happy path for _attach_captured_args so the silent
+    'except TypeError: return' catch can't hide a regression where args
+    stop being captured due to a signature-introspection bug.
+
+    If sig.bind_partial silently failed for any reason, this test would
+    fail because the captured 'a' and 'b' attributes would be missing
+    from the emitted span.
+    """
+    @traced("test.signature_capture", capture=["a", "b", "c"])
+    def f(a, b, c=42, *, d=None):
+        return None
+
+    f(1, b=2, d="ignored")
+    span = _reset_tracing.get_finished_spans()[0]
+    assert span.attributes["a"] == 1
+    assert span.attributes["b"] == 2
+    assert span.attributes["c"] == 42  # default value still captured
+    assert "d" not in span.attributes
+
+
+def test_litellm_imports_at_observability_init_no_fallback():
+    """Regression test for the deletion of `except ImportError: return` in
+    configure_litellm_retries.
+
+    litellm is a hard dependency in pyproject.toml.  If anyone re-introduces
+    a try/except around the import (turning litellm "optional" again), the
+    function would silently no-op and the rate-limit retry/backoff knobs
+    would never be configured — exactly the silent-degradation pattern
+    we're trying to eliminate.
+
+    This test asserts the import succeeds AND the side-effects of
+    configure_litellm_retries actually happened.
+    """
+    import litellm
+    from dsagt.observability import configure_litellm_retries
+
+    # Mutate litellm state to known-bad values, then call configure and
+    # verify it stomped them.  If configure ever silently no-ops on a
+    # caught ImportError, the asserts below would fail.
+    litellm.num_retries = -999
+    litellm.request_timeout = -999.0
+
+    configure_litellm_retries(num_retries=7, request_timeout=42.0)
+
+    assert litellm.num_retries == 7
+    assert litellm.request_timeout == 42.0
+
+
+# ---------------------------------------------------------------------------
 # Stage 1: KnowledgeBase instrumentation
 # ---------------------------------------------------------------------------
 

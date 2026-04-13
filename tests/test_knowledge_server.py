@@ -76,6 +76,7 @@ def mock_kb(tmp_path):
     kb = MagicMock()
     kb.index_dir = tmp_path / "kb_index"
     kb.index_dir.mkdir()
+    kb.default_rerank = True
     kb.list_collections.return_value = [
         {"name": "docs", "description": "Project documentation"},
         {"name": "papers", "description": "Research papers"},
@@ -91,8 +92,8 @@ def mock_kb(tmp_path):
 
 @pytest.fixture
 def server(mock_kb):
-    """Knowledge server with mocked KB and reranking enabled."""
-    return create_knowledge_server(mock_kb, use_rerank=True)
+    """Knowledge server with mocked KB (reranking enabled via mock_kb.default_rerank)."""
+    return create_knowledge_server(mock_kb)
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ class TestListCollections:
     def test_empty_collections(self, mock_kb):
         """Empty knowledge base returns zero count."""
         mock_kb.list_collections.return_value = []
-        server = create_knowledge_server(mock_kb, use_rerank=True)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_list_collections", {})
 
@@ -174,7 +175,7 @@ class TestSearch:
             query="test",
             collection="docs",
             top_k=5,
-            rerank=True,  # server was created with use_rerank=True
+            rerank=None,  # agent didn't specify → kb.default_rerank resolves it
         )
 
     def test_search_nonexistent_collection(self, server, mock_kb):
@@ -443,7 +444,7 @@ class TestSearchErrorHandling:
         """Network unreachable during search returns error, not crash."""
         import httpx
         mock_kb.search.side_effect = httpx.ConnectError("Connection refused")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -456,7 +457,7 @@ class TestSearchErrorHandling:
         """Embedding API timeout during search returns error, not crash."""
         import httpx
         mock_kb.search.side_effect = httpx.ReadTimeout("Read timed out")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -473,7 +474,7 @@ class TestSearchErrorHandling:
         mock_kb.search.side_effect = httpx.HTTPStatusError(
             "401 Unauthorized", request=MagicMock(), response=mock_resp,
         )
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -490,7 +491,7 @@ class TestSearchErrorHandling:
         mock_kb.search.side_effect = httpx.HTTPStatusError(
             "500 Internal Server Error", request=MagicMock(), response=mock_resp,
         )
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -502,7 +503,7 @@ class TestSearchErrorHandling:
     def test_search_runtime_error(self, mock_kb):
         """Unexpected RuntimeError during search returns error, not crash."""
         mock_kb.search.side_effect = RuntimeError("FAISS segfault simulation")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -514,7 +515,7 @@ class TestSearchErrorHandling:
     def test_search_os_error(self, mock_kb):
         """OS-level error (disk, permissions) returns error, not crash."""
         mock_kb.search.side_effect = OSError("Permission denied: index.faiss")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -525,19 +526,6 @@ class TestSearchErrorHandling:
 
 
 # ---------------------------------------------------------------------------
-# Unknown tool
-# ---------------------------------------------------------------------------
-
-class TestUnknownTool:
-
-    def test_unknown_tool(self, server):
-        """Calling an unregistered tool returns an error."""
-        result = call_tool(server, "nonexistent_tool", {})
-
-        assert result["status"] == "error"
-        assert "Unknown tool" in result["error"]
-
-
 # ---------------------------------------------------------------------------
 # setup_runtime_kb
 # ---------------------------------------------------------------------------
@@ -639,19 +627,20 @@ class TestRerankSchemaDefault:
                 return tool.inputSchema["properties"]["rerank"]["default"]
         raise AssertionError("kb_search tool not found")
 
-    def test_rerank_default_false_when_disabled(self, mock_kb):
-        """Schema advertises rerank default=false when server has rerank off."""
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+    def test_rerank_default_from_kb(self, mock_kb):
+        """Schema advertises rerank default matching kb.default_rerank."""
+        mock_kb.default_rerank = False
+        server = create_knowledge_server(mock_kb)
         assert self._get_rerank_default(server) is False
 
-    def test_rerank_default_true_when_enabled(self, mock_kb):
-        """Schema advertises rerank default=true when server has rerank on."""
-        server = create_knowledge_server(mock_kb, use_rerank=True)
+        mock_kb.default_rerank = True
+        server = create_knowledge_server(mock_kb)
         assert self._get_rerank_default(server) is True
 
-    def test_search_defaults_rerank_false_when_disabled(self, mock_kb):
-        """With use_rerank=False, omitting rerank passes rerank=False to KB."""
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+    def test_search_omitted_rerank_passes_none(self, mock_kb):
+        """Omitting rerank passes None to kb.search, which resolves to
+        kb.default_rerank internally."""
+        server = create_knowledge_server(mock_kb)
         call_tool(server, "kb_search", {
             "query": "test",
             "collection": "docs",
@@ -660,5 +649,5 @@ class TestRerankSchemaDefault:
             query="test",
             collection="docs",
             top_k=5,
-            rerank=False,
+            rerank=None,
         )

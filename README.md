@@ -16,38 +16,35 @@ uv sync          # add --group dev if you plan to run the test suite
 
 ### First-time knowledge base setup
 
-`dsagt-setup-kb` downloads reference repositories and papers (NeMo Curator,
+`dsagt setup-kb` downloads reference repositories and papers (NeMo Curator,
 AIDRIN) and embeds them into ChromaDB collections that every project shares.
 The embedder needs an OpenAI-compatible API (or a local sentence-transformers
-model). Easiest path is to export environment variables once, then run the
-setup command:
+model). Export environment variables once, then run the setup command:
 
 ```bash
 export LLM_API_KEY=sk-...                          # your embedding API key
 export OPENAI_BASE_URL=https://api.example.com/v1  # OpenAI-compatible endpoint
 export EMBEDDING_MODEL=text-embedding-3-small      # embedding model name
 
-uv run dsagt-setup-kb   # builds the core AI-ready-data knowledge base
+dsagt setup-kb
 ```
 
 Alternatively, pass everything on the command line:
 
 ```bash
-uv run dsagt-setup-kb \
+dsagt setup-kb \
   --embedding-base-url https://api.example.com \
   --embedding-api-key sk-... \
   --embedding-model text-embedding-3-small
 ```
 
-**Expect this to take 15–30 minutes** over an API-backed embedder — the core
-KB contains the full NeMo Curator and AIDRIN source trees plus several arXiv
-papers, and embedding is rate-limited by the upstream service. You only
-need to do this once per machine; the resulting index lives under
-`~/.dsagt/kb_index/` and is reused by every project. Pass
-`--collection nemo_curator` or `--collection aidrin` to build only one
-collection at a time.
+**Expect this to take 10–20 minutes** if the upstream embedding API is
+rate-limited (common on Azure-backed endpoints). You only need to do this
+once per machine; the resulting index lives under `~/.dsagt/kb_index/`
+and is reused by every project. Pass `--collection nemo_curator` or
+`--collection aidrin` to build only one collection at a time.
 
-Install preferred agent platform:
+### Install an agent platform
 
 | Agent | Install | Verify |
 |-------|---------|--------|
@@ -69,29 +66,26 @@ vim ~/dsagt-projects/cheese-metagenome/dsagt_config.yaml
 dsagt start cheese-metagenome
 ```
 
-`dsagt start` generates agent-specific config files into the project directory, starts background services (LLM proxy, MLflow), and launches the agent with MCP servers (Tools/Skills, Knowledge Base). When the agent exits, memory extraction runs and services are stopped automatically.
+`dsagt start` generates agent-specific config files, starts background services (LLM proxy, MLflow), and launches the agent with MCP servers (Tools/Skills, Knowledge Base). When the agent exits, memory extraction runs and services are stopped automatically.
 
 ## Use Case Examples
 
 End-to-end walkthroughs for representative scientific domains live in
-[`use_cases/`](use_cases/). Each one is a self-contained guide covering data
-acquisition, tool registration, pipeline construction, and agent-driven
-execution against a real dataset.
+[`use_cases/`](use_cases/). Each one covers data acquisition, tool
+registration, pipeline construction, and agent-driven execution against
+a real dataset.
 
 | Use case | Domain | Guide |
 |----------|--------|-------|
-| Microbial isolate processing | Genomics — short-read QC and assembly with `fastp` + `megahit` | [use_cases/microbial_isolates/isolate_demo.md](use_cases/microbial_isolates/isolate_demo.md) |
-| Cryo-EM data curation | Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP | [use_cases/cryoem/cryoem_demo.md](use_cases/cryoem/cryoem_demo.md) |
+| Microbial isolate processing | Genomics — short-read QC and assembly with `fastp` + `megahit` | [isolate_demo.md](use_cases/microbial_isolates/isolate_demo.md) |
+| Cryo-EM data curation | Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP | [cryoem_demo.md](use_cases/cryoem/cryoem_demo.md) |
 | ISAAC / VASP workflows | Materials science — DFT input/output handling with VASP | [use_cases/isaac_vasp/](use_cases/isaac_vasp/) |
-
-These exercises are also the best way to validate a fresh install beyond the
-basic smoke test — they cover knowledge ingestion, paired check/operation
-tool generation, multi-stage pipeline execution, and memory extraction on
-non-trivial domain data.
 
 ## Configuration
 
-Project configuration with API keys, endpoints, and settings is located at `<project_dir>/dsagt_config.yaml`.  
+Project configuration lives at `<project_dir>/dsagt_config.yaml`. `dsagt init`
+generates sensible defaults; edit to fill in your API credentials and
+endpoint:
 
 ```yaml
 project: cheese-metagenome
@@ -99,12 +93,13 @@ agent: claude-code              # claude-code | goose | roo | cline
 
 llm:
   model: claude-sonnet-4-20250514
-  api_key: your-llm-api-key     # or ${LLM_API_KEY} to read from env
+  base_url: https://api.example.com    # LLM endpoint (used for memory extraction)
+  api_key: ${LLM_API_KEY}              # resolved from env var, or paste a literal key
 
 embedding:
   model: text-embedding-3-small
   base_url: https://api.example.com/v1   # OpenAI-compatible embedding endpoint
-  api_key: your-embedding-api-key
+  api_key: ${LLM_API_KEY}
 
 proxy:
   port: 4000
@@ -112,13 +107,18 @@ proxy:
 mlflow:
   port: 5001
   backend: sqlite               # sqlite | flat-file
+
+knowledge:
+  chunk_size: 1024              # characters per text chunk during ingestion
+  vector_db: chroma             # default vector store for new collections
+  rerank: false                 # enable cross-encoder reranking (slower, more accurate)
 ```
 
 To switch agent platforms, change `agent:` and run `dsagt start` again.
 
 ## Project Directory
 
-The default location for all project resources, logs, and artifacts is `~/dsagt-projects/<name>/`. A custom location is specified with the `--location` flag:
+Default location: `~/dsagt-projects/<name>/`. Override with `--location`:
 
 ```bash
 dsagt init my-project --agent claude-code                        # ~/dsagt-projects/my-project/
@@ -126,27 +126,35 @@ dsagt init my-project --agent claude-code --location /data/runs  # /data/runs/my
 dsagt init my-project --agent claude-code --location .           # ./my-project/
 ```
 
-Projects are registered in `~/.dsagt/projects.yaml` so `dsagt start <name>` works correctly regardless current working directory in the shell.
+Projects are registered in `~/.dsagt/projects.yaml` so `dsagt start <name>` works from any directory.
 
-### Example project directory
+### Project directory layout
 ```
 ~/dsagt-projects/cheese-metagenome/
-  dsagt_config.yaml     # project configuration
-  tools/                # registered CLI tool specs
-  tools/code/           # agent-written tool scripts
-  skills/               # instruction-based agent skills (SKILL.md + reference docs)
-  trace_archive/        # tool execution records (from proxy + dsagt-run)
-  mlflow/               # MLflow data (traces, metrics)
-  kb_index/             # knowledge base collections
-  .mcp.json             # generated agent MCP config
-  proxy.log             # proxy output (when running)
-  mlflow.log            # MLflow output (when running)
+  dsagt_config.yaml               # project configuration
+  tools/                          # registered CLI tool specs (markdown + YAML frontmatter)
+  tools/code/                     # agent-written tool scripts
+  skills/                         # instruction-based agent skills (SKILL.md + reference docs)
+  trace_archive/                  # tool execution records (JSON, from proxy + dsagt-run)
+  mlflow/                         # MLflow traces, metrics, and artifacts
+  kb_index/                       # knowledge base vector collections (ChromaDB/FAISS)
+
+  # Agent-platform config (generated by dsagt start)
+  # Claude Code:  CLAUDE.md, .mcp.json
+  # Goose:        goose.yaml, .goosehints, .dsagt_env
+  # Roo Code:     .roo/mcp.json, .roomodes, .dsagt_env
+  # Cline:        cline_mcp.json, .clinerules/dsagt_instructions.md, .dsagt_env
+
+  # Service logs (written while dsagt start is running)
+  proxy.log                       # LiteLLM proxy — LLM request/response forwarding
+  mlflow.log                      # MLflow server — trace collection and UI
+  dsagt_knowledge_server.log      # Knowledge MCP server — search, ingest, memory
+  dsagt_registry_server.log       # Registry MCP server — tool/skill registration
 ```
 
 ## Architecture
 
 ![Sketch of Architecture](latex/architecture.png)
-
 
 All LLM calls route through a local LiteLLM proxy. Two callbacks capture data:
 
@@ -157,86 +165,68 @@ All LLM calls route through a local LiteLLM proxy. Two callbacks capture data:
    - **Report** (from proxy) — what the agent reported back
 
 The same MLflow OTel collector also receives spans from the knowledge
-server, the registry server, and `dsagt-run` itself, so KB searches, tool
+server, the registry server, and `dsagt-run`, so KB searches, tool
 executions, and registry events show up alongside LLM calls in the trace
-view (see [Observability](#observability) below).
+view.
 
 ### Tools and Skills
 
-**Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. New tools are registered through the registry MCP server by the agent via `save_tool_spec`. Executables are automatically wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`, which exposes agent options for direct tool lookup or semantic search backed by ChromaDB.
+**Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. New tools are registered through the registry MCP server by the agent via `save_tool_spec`. Executables are automatically wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`.
 
-**Skills** are instruction-based agent workflows in `<project>/skills/`. Each skill is a directory containing a `SKILL.md` with a workflow definition and optional reference docs. DSAgt ships with a bundled `datacard-generator` skill. The agent discovers skills via `search_skills` mitigating concerns with skills context explosion for complicated data processing pipelines.
+**Skills** are instruction-based agent workflows in `<project>/skills/`. Each skill is a directory containing a `SKILL.md` with a workflow definition and optional reference docs. DSAgt ships with a bundled `datacard-generator` skill. The agent discovers skills via `search_skills`.
 
 ### Knowledge Base
 
 Semantic search over indexed document collections. Collections default to
-ChromaDB (HNSW with metadata filtering and incremental updates); FAISS and
-other backends are available per-collection via `CollectionRoute` for
-user-supplied pre-built indexes. Cross-encoder reranking is optional.
-Domain documentation, package references, and standards are ingested
-through the knowledge MCP server. The shared core collections are built
-once with `dsagt-setup-kb` (see [First-time knowledge base setup](#first-time-knowledge-base-setup)).
+ChromaDB with metadata filtering and incremental updates; FAISS and other
+backends are available per-collection for pre-built indexes. Cross-encoder
+reranking is optional (`knowledge.rerank: true` in config). The shared
+core collections are built once with `dsagt setup-kb`.
 
 ### Observability
 
 MLflow is available at `http://localhost:<mlflow_port>` during and after
-sessions and is the single dashboard for everything DSAgt does. Beyond
-LLM token usage, latency, and full request/response traces from the proxy,
-the trace view also shows:
+sessions. The trace view shows:
 
-- **Knowledge base operations** — every `kb_search`, `kb_ingest`, and
-  embedding call as a span tree (`kb.search` → `kb.embed` → `kb.index_search`
-  → `kb.rerank`), with per-phase timing so it is obvious whether retrieval,
-  embedding, or reranking is the bottleneck.
-- **Tool executions** — every `dsagt-run` invocation as a `tool.execute`
-  span carrying exit code, duration, input/output file counts, the command
-  string, and a truncated stderr summary on failure. The full payload still
-  lives in `trace_archive/<record_id>.json`.
-- **Registry events** — `save_tool_spec`, `install_dependencies`, and
-  `reconstruct_pipeline` as spans with the relevant outcome attributes.
-  Long-running operations like `uv pip install` show up with their own
-  duration so failed installs are easy to spot.
+- **Knowledge base operations** — `kb.search` → `kb.embed` → `kb.index_search` → `kb.rerank` span trees with per-phase timing.
+- **Tool executions** — `tool.execute` spans with exit code, duration, file counts, and truncated stderr. Full payload in `trace_archive/<record_id>.json`.
+- **Registry events** — `save_tool_spec`, `install_dependencies`, and `reconstruct_pipeline` spans.
 
-Every span carries the project's `session.id`, so you can filter the entire
-trace view to one run. Tool execution records on disk continue to provide
-the canonical provenance chain for pipeline reconstruction — the agent calls
+Every span carries the project's `session.id` for filtering. Tool execution
+records on disk provide the canonical provenance chain — the agent calls
 `reconstruct_pipeline` to render the trace archive as a reproducible bash
 script or Snakemake workflow.
 
 ## CLI Reference
 
-### Project Management
-
 | Command | Description |
 |---------|-------------|
-| `dsagt init <name> --agent <platform>` | Create a new project at `~/dsagt-projects/<name>/` |
-| `dsagt init <name> --agent <platform> --location <path>` | Create at `<path>/<name>/` |
-| `dsagt start <name>` | Generate configs, start services, launch agent, clean up on exit |
-| `dsagt stop <name>` | Stop orphaned services (after a crash) |
-| `dsagt status <name>` | Show project status and running services |
-| `dsagt list` | List all registered projects and their locations |
+| `dsagt init <name> --agent <platform>` | Create a new project |
+| `dsagt init <name> --agent <platform> --location <path>` | Create at a custom location |
+| `dsagt start <name>` | Start services, launch agent, clean up on exit |
+| `dsagt setup-kb [--collection <name>]` | Build the core knowledge base |
+| `dsagt list` | List all projects with agent, status, and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
-| `dsagt extract <name>` | Manually extract memories from the session log |
 
 ## Code Organization
 
 ```
 src/dsagt/
-  session.py       # Config, registry, project lifecycle, services, extraction
+  session.py       # Config, project lifecycle, services, extraction
   agents.py        # Agent config generation, environment, launch
   registry.py      # ToolRegistry + SkillRegistry, KB indexing
   knowledge.py     # KnowledgeBase, embeddings (via LiteLLM), vector indexes
   memory.py        # Explicit + episodic memory, outlier detection
   provenance.py    # Execution capture, LLM tracking, record indexing, pipeline reconstruction
-  observability.py # OTel tracing helpers — single import surface for all instrumentation
+  observability.py # OTel tracing helpers
 
-  commands/        # CLI entry points (each has a main() function)
-    cli.py               # dsagt init/start/stop/status/list/mv/extract
-    proxy_server.py      # dsagt-proxy
-    run_tool.py          # dsagt-run
-    registry_server.py   # dsagt-registry-server (MCP)
-    knowledge_server.py  # dsagt-knowledge-server (MCP)
-    setup_core_kb.py     # dsagt-setup-kb
+  commands/
+    cli.py               # User-facing CLI (dsagt init/start/setup-kb/list/mv)
+    setup_core_kb.py     # Core KB build logic (called via dsagt setup-kb)
+    proxy_server.py      # LiteLLM proxy (internal, launched by dsagt start)
+    run_tool.py          # Tool execution wrapper (internal, launched per tool call)
+    registry_server.py   # Registry MCP server (internal, launched by dsagt start)
+    knowledge_server.py  # Knowledge MCP server (internal, launched by dsagt start)
 ```
 
 ## Tests
@@ -262,7 +252,7 @@ A guided walkthrough that validates all core functionality is available at [`tes
 
 ### Agent command not found
 
-If `dsagt start` reports "Command not found", the agent CLI isn't installed. Check the install table above or the `agents.py` docstring for platform-specific instructions.
+If `dsagt start` reports "Command not found", the agent CLI isn't installed. Check the install table above.
 
 ### MCP servers not connecting
 
@@ -277,18 +267,18 @@ If not found, reinstall: `uv sync --reinstall`
 
 ### Proxy not intercepting LLM calls
 
-Verify the proxy is running and the agent has the right base URL:
+Verify the proxy is running:
 
 ```bash
-dsagt status <project>
+dsagt list
 curl http://localhost:4000/v1/messages
 ```
 
 ### MLflow UI empty
 
-Verify that MLflow is running:
+Verify MLflow is running:
 
 ```bash
-dsagt status <project>
+dsagt list
 curl http://localhost:5001
 ```

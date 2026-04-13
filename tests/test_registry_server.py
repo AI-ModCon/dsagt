@@ -150,33 +150,38 @@ class TestGetRegistry:
 # search_registry
 # ---------------------------------------------------------------------------
 
-class TestSearchRegistry:
+class TestSearchRegistryNoKB:
+    """search_registry with no KB configured.
 
-    def test_empty_registry(self, server):
-        """Searching an empty registry reports empty."""
-        text = call_tool(server, "search_registry", {"query": "anything"})
-        assert "empty" in text.lower()
+    The previous behavior was to silently fall back to substring matching,
+    which produced dramatically worse results than semantic search and hid
+    real KB failures.  The new contract: exact-name lookup still works
+    without a KB (it doesn't need one), but query-based semantic search
+    returns a helpful error message asking the user to configure embedding
+    credentials.
+    """
 
-    def test_match_by_name(self, populated_server):
-        """Query matching a tool name returns that tool."""
-        text = call_tool(populated_server, "search_registry", {"query": "alpha"})
+    def test_exact_name_lookup_works_without_kb(self, populated_server):
+        """tool_name lookup is KB-free and must keep working."""
+        text = call_tool(populated_server, "search_registry", {"tool_name": "tool_alpha"})
         assert "tool_alpha" in text
-        assert "1 tool(s)" in text
 
-    def test_match_by_description(self, populated_server):
-        """Query matching a description returns that tool."""
-        text = call_tool(populated_server, "search_registry", {"query": "data processor"})
-        assert "tool_beta" in text
+    def test_exact_name_miss_without_kb(self, populated_server):
+        """tool_name with a non-existent name returns a clean 'no tool' message."""
+        text = call_tool(populated_server, "search_registry", {"tool_name": "nonexistent"})
+        assert "No tool named 'nonexistent'" in text
 
-    def test_no_match(self, populated_server):
-        """Query with no matches reports none found."""
-        text = call_tool(populated_server, "search_registry", {"query": "zzzzz"})
-        assert "No tools found" in text
+    def test_query_search_without_kb_returns_helpful_error(self, populated_server):
+        """A semantic search request when no KB is configured must surface
+        the missing-KB condition clearly, not silently degrade."""
+        text = call_tool(populated_server, "search_registry", {"query": "alpha"})
+        assert "knowledge base" in text.lower()
+        assert "embedding" in text.lower()
 
-    def test_empty_query_returns_all(self, populated_server):
-        """An empty query returns all tools."""
+    def test_empty_query_without_kb_returns_helpful_error(self, populated_server):
+        """Empty query with no KB also surfaces the same error."""
         text = call_tool(populated_server, "search_registry", {})
-        assert "2 tool(s)" in text
+        assert "knowledge base" in text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -462,11 +467,20 @@ class TestToolIndexing:
         results = kb.search("registered", collection=TOOL_REGISTRY_COLLECTION)
         assert len(results) > 0
 
-    def test_no_kb_falls_back_to_string_match(self, tmp_path):
-        """Without KB, search_registry uses string matching."""
+    def test_no_kb_query_search_returns_explicit_error(self, tmp_path):
+        """Without a configured KB, query-based search MUST NOT silently
+        fall back to substring matching.  It must return an explicit
+        error so the user knows the KB is missing.
+
+        Regression test for the deletion of the string-matching fallback
+        in search_registry.  The old fallback hid embedding/KB failures
+        and produced dramatically worse search results without telling
+        anyone.
+        """
         server, reg = _make_server(tmp_path, tools=[
             make_spec(name="csv_filter", description="Filter CSV rows"),
         ])
 
         text = call_tool(server, "search_registry", {"query": "csv"})
-        assert "csv_filter" in text
+        assert "csv_filter" not in text  # the substring match must NOT happen
+        assert "knowledge base" in text.lower()

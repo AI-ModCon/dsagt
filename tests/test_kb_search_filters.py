@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 import mcp.types as types
 
-from dsagt.commands.knowledge_server import _build_where_clause, create_knowledge_server
+from dsagt.commands.knowledge_server import create_knowledge_server
 from mcp_helpers import call_tool_json as call_tool
 
 
@@ -40,76 +40,7 @@ def mock_kb(tmp_path):
 
 @pytest.fixture
 def server(mock_kb):
-    return create_knowledge_server(mock_kb, use_rerank=False)
-
-
-# ---------------------------------------------------------------------------
-# _build_where_clause
-# ---------------------------------------------------------------------------
-
-class TestBuildWhereClause:
-
-    def test_no_filters_returns_none(self):
-        """No filter arguments produces None."""
-        assert _build_where_clause({"query": "test", "collection": "docs"}) is None
-
-    def test_single_string_filter(self):
-        """One string filter produces a simple dict."""
-        result = _build_where_clause({"tool_name": "fastp"})
-        assert result == {"tool_name": "fastp"}
-
-    def test_single_session_filter(self):
-        result = _build_where_clause({"session_id": "s3"})
-        assert result == {"session_id": "s3"}
-
-    def test_single_category_filter(self):
-        result = _build_where_clause({"category": "quality_control"})
-        assert result == {"category": "quality_control"}
-
-    def test_single_source_type_filter(self):
-        result = _build_where_clause({"source_type": "extraction"})
-        assert result == {"source_type": "extraction"}
-
-    def test_return_code_filter(self):
-        """return_code is cast to int."""
-        result = _build_where_clause({"return_code": 0})
-        assert result == {"return_code": 0}
-
-    def test_return_code_string_cast(self):
-        """return_code passed as string is cast to int."""
-        result = _build_where_clause({"return_code": "1"})
-        assert result == {"return_code": 1}
-
-    def test_two_filters_uses_and(self):
-        """Two filters produce a $and clause."""
-        result = _build_where_clause({"tool_name": "fastp", "session_id": "s1"})
-        assert "$and" in result
-        clauses = result["$and"]
-        assert len(clauses) == 2
-        flat = {}
-        for c in clauses:
-            flat.update(c)
-        assert flat == {"tool_name": "fastp", "session_id": "s1"}
-
-    def test_three_filters(self):
-        """Three filters all appear in $and."""
-        result = _build_where_clause({
-            "tool_name": "fastp",
-            "session_id": "s1",
-            "category": "qc",
-        })
-        assert len(result["$and"]) == 3
-
-    def test_ignores_non_filter_arguments(self):
-        """Non-filter arguments (query, top_k, etc.) are ignored."""
-        result = _build_where_clause({
-            "query": "test",
-            "collection": "docs",
-            "top_k": 10,
-            "rerank": False,
-            "tool_name": "fastp",
-        })
-        assert result == {"tool_name": "fastp"}
+    return create_knowledge_server(mock_kb)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +60,7 @@ class TestSearchFilterThreading:
             query="test",
             collection="docs",
             top_k=5,
-            rerank=False,
+            rerank=None,
         )
 
     def test_tool_name_filter_passed(self, server, mock_kb):
@@ -144,7 +75,7 @@ class TestSearchFilterThreading:
             query="quality filtering",
             collection="tool_executions",
             top_k=5,
-            rerank=False,
+            rerank=None,
             where={"tool_name": "fastp"},
         )
 
@@ -160,7 +91,7 @@ class TestSearchFilterThreading:
             query="pipeline",
             collection="tool_executions",
             top_k=5,
-            rerank=False,
+            rerank=None,
             where={"session_id": "s3"},
         )
 
@@ -190,7 +121,7 @@ class TestSearchFilterThreading:
             query="failures",
             collection="tool_executions",
             top_k=5,
-            rerank=False,
+            rerank=None,
             where={"return_code": 1},
         )
 
@@ -225,7 +156,7 @@ class TestSearchResultMetadata:
                 extra_meta={"tool_name": "fastp", "session_id": "s1", "return_code": 0},
             ),
         ]
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test",
@@ -243,7 +174,7 @@ class TestSearchResultMetadata:
         mock_kb.search.return_value = [
             make_search_result("text", "/file.md"),
         ]
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test",
@@ -261,7 +192,7 @@ class TestSearchResultMetadata:
         mock_kb.search.return_value = [
             make_search_result("text", "/file.md"),
         ]
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test",
@@ -308,7 +239,7 @@ class TestSearchCollectionErrors:
     def test_single_missing_collection_returns_error(self, mock_kb):
         """Searching a single nonexistent collection returns error."""
         mock_kb.search.side_effect = ValueError("Collection 'missing' not found")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test",
@@ -321,7 +252,7 @@ class TestSearchCollectionErrors:
     def test_all_multi_collections_missing_returns_error(self, mock_kb):
         """When every collection in a multi-search fails, return error."""
         mock_kb.search.side_effect = ValueError("not found")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test",
@@ -339,7 +270,7 @@ class TestSearchCollectionErrors:
             return [make_search_result("found it", "/file.md")]
 
         mock_kb.search.side_effect = search_with_partial_error
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test",
@@ -353,7 +284,7 @@ class TestSearchCollectionErrors:
 
     def test_successful_search_has_no_warnings(self, mock_kb):
         """Successful search doesn't include a warnings field."""
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test",

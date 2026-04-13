@@ -285,7 +285,9 @@ class TestGenerateAgentConfigs:
         mcp = json.loads(mcp_path.read_text())
         assert "alwaysAllow" in mcp["mcpServers"]["dsagt-registry"]
 
-    def test_mcp_args_include_project_dir(self, tmp_path):
+    def test_mcp_config_has_project_dir_in_env(self, tmp_path):
+        """MCP server entries should have DSAGT_PROJECT_DIR in their env
+        block so the servers know where to find their config and data."""
         config = self._init_and_load("claude-code")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
@@ -293,11 +295,11 @@ class TestGenerateAgentConfigs:
         generate_agent_configs(config, working_dir)
 
         mcp = json.loads((working_dir / ".mcp.json").read_text())
-        reg_args = mcp["mcpServers"]["dsagt-registry"]["args"]
-        assert "--runtime-dir" in reg_args
+        reg_env = mcp["mcpServers"]["dsagt-registry"].get("env", {})
+        assert "DSAGT_PROJECT_DIR" in reg_env
 
-        kb_args = mcp["mcpServers"]["dsagt-knowledge"]["args"]
-        assert "--base-index-dir" in kb_args
+        kb_env = mcp["mcpServers"]["dsagt-knowledge"].get("env", {})
+        assert "DSAGT_PROJECT_DIR" in kb_env
 
     def test_env_file_has_proxy_url(self, tmp_path):
         config = self._init_and_load("claude-code")
@@ -420,25 +422,26 @@ class TestConfigFlow:
     def test_mcp_env_block_includes_base_url(self):
         """_mcp_env_block passes OPENAI_BASE_URL from config."""
         from dsagt.agents import _mcp_env_block
-        config = {"embedding": {"api_key": "k", "base_url": "https://api.test/v1", "model": "m"}}
+        config = {"project_dir": "/p", "embedding": {"api_key": "k", "base_url": "https://api.test/v1", "model": "m"}}
         env = _mcp_env_block(config)
         assert env["OPENAI_BASE_URL"] == "https://api.test/v1"
 
     def test_mcp_env_block_includes_model(self):
         """_mcp_env_block passes EMBEDDING_MODEL from config."""
         from dsagt.agents import _mcp_env_block
-        config = {"embedding": {"api_key": "k", "base_url": "u", "model": "my-model"}}
+        config = {"project_dir": "/p", "embedding": {"api_key": "k", "base_url": "u", "model": "my-model"}}
         env = _mcp_env_block(config)
         assert env["EMBEDDING_MODEL"] == "my-model"
 
     def test_mcp_env_block_skips_empty_values(self):
-        """_mcp_env_block doesn't set empty string env vars."""
+        """_mcp_env_block doesn't set empty string env vars (except DSAGT_PROJECT_DIR)."""
         from dsagt.agents import _mcp_env_block
-        config = {"embedding": {"api_key": "", "base_url": "", "model": ""}}
+        config = {"project_dir": "/p", "embedding": {"api_key": "", "base_url": "", "model": ""}}
         env = _mcp_env_block(config)
         assert "LLM_API_KEY" not in env
         assert "OPENAI_BASE_URL" not in env
         assert "EMBEDDING_MODEL" not in env
+        assert env["DSAGT_PROJECT_DIR"] == "/p"
 
     def test_agent_env_includes_embedding_base_url(self):
         """agent_env() sets OPENAI_BASE_URL from config."""
@@ -454,27 +457,27 @@ class TestConfigFlow:
         assert env["OPENAI_BASE_URL"] == "https://api.test/v1"
         assert env["EMBEDDING_MODEL"] == "m"
 
-    def test_mcp_server_args_include_embedding_flags(self):
-        """Knowledge server args include embedding config from dsagt_config.yaml."""
-        from dsagt.agents import _mcp_server_args
-        config = {
-            "embedding": {
-                "base_url": "https://api.test/v1",
-                "model": "my-model",
-                "api_key": "my-key",
-            }
-        }
-        args = _mcp_server_args("knowledge", Path("/proj"), config)
-        assert "--embedding-base-url" in args
-        assert "https://api.test/v1" in args
-        assert "--embedding-model" in args
-        assert "my-model" in args
-        assert "--embedding-api-key" in args
-        assert "my-key" in args
+    def test_mcp_server_args_are_just_command(self):
+        """MCP server args are just ["run", "dsagt-<name>-server"].
 
-    def test_mcp_server_args_skip_unresolved_key(self):
-        """Knowledge server args skip ${VAR} style api_key."""
+        All configuration flows through env vars (DSAGT_PROJECT_DIR,
+        LLM_API_KEY, OPENAI_BASE_URL, EMBEDDING_MODEL) and
+        dsagt_config.yaml.  No CLI flags needed.
+        """
         from dsagt.agents import _mcp_server_args
-        config = {"embedding": {"api_key": "${LLM_API_KEY}", "base_url": "", "model": ""}}
-        args = _mcp_server_args("knowledge", Path("/proj"), config)
-        assert "--embedding-api-key" not in args
+        assert _mcp_server_args("knowledge") == ["run", "dsagt-knowledge-server"]
+        assert _mcp_server_args("registry") == ["run", "dsagt-registry-server"]
+
+    def test_mcp_env_block_includes_project_dir(self):
+        """_mcp_env_block must include DSAGT_PROJECT_DIR so MCP servers
+        know where to find their project directory and config."""
+        from dsagt.agents import _mcp_env_block
+        config = {
+            "project_dir": "/home/user/dsagt-projects/test",
+            "embedding": {"model": "m", "base_url": "u", "api_key": "k"},
+        }
+        env = _mcp_env_block(config)
+        assert env["DSAGT_PROJECT_DIR"] == "/home/user/dsagt-projects/test"
+        assert env["EMBEDDING_MODEL"] == "m"
+        assert env["OPENAI_BASE_URL"] == "u"
+        assert env["LLM_API_KEY"] == "k"

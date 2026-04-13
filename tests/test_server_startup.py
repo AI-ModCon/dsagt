@@ -44,6 +44,28 @@ _uv_available = shutil.which("uv") is not None
 pytestmark = pytest.mark.skipif(not _uv_available, reason="uv not available")
 
 
+def _write_minimal_config(project_dir: Path, project_name: str = "test") -> None:
+    """Write the minimum dsagt_config.yaml the servers need to start."""
+    import yaml
+    config = {
+        "project": project_name,
+        "agent": "claude-code",
+        "embedding": {
+            "model": "test-model",
+            "base_url": "http://localhost:9999",
+            "api_key": "test-fake-key",
+        },
+        "knowledge": {
+            "chunk_size": 1024,
+            "vector_db": "chroma",
+            "rerank": False,
+        },
+    }
+    (project_dir / "dsagt_config.yaml").write_text(
+        yaml.dump(config, default_flow_style=False)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Startup tests (no API key needed)
 # ---------------------------------------------------------------------------
@@ -51,11 +73,23 @@ pytestmark = pytest.mark.skipif(not _uv_available, reason="uv not available")
 class TestRegistryServerStartup:
 
     def test_starts_and_lists_tools(self, tmp_path):
-        """Registry server starts, completes MCP handshake, and lists tools."""
-        proc = start_server([
-            sys.executable, "-m", "dsagt.commands.registry_server",
-            "--runtime-dir", str(tmp_path / "runtime"),
-        ])
+        """Registry server starts without embedding credentials (kb=None)
+        and completes the MCP handshake."""
+        import yaml as _yaml
+        project = tmp_path / "runtime"
+        project.mkdir()
+        # Minimal config with placeholder credentials so the server
+        # starts with kb=None (fast, no ChromaDB init).
+        (project / "dsagt_config.yaml").write_text(_yaml.dump({
+            "project": "test",
+            "agent": "claude-code",
+            "embedding": {"model": "", "base_url": "", "api_key": ""},
+            "knowledge": {"chunk_size": 1024, "vector_db": "chroma", "rerank": False},
+        }))
+        proc = start_server(
+            [sys.executable, "-m", "dsagt.commands.registry_server"],
+            env={"DSAGT_PROJECT_DIR": str(project)},
+        )
         try:
             resp = mcp_initialize(proc)
             assert "result" in resp, f"Init failed: {resp}"
@@ -80,13 +114,15 @@ class TestKnowledgeServerStartup:
         validates the key is non-empty. Actual API calls would fail, but we
         don't make any here.
         """
+        project = tmp_path / "runtime"
+        project.mkdir()
+        _write_minimal_config(project)
         proc = start_server(
-            [
-                sys.executable, "-m", "dsagt.commands.knowledge_server",
-                "--base-index-dir", str(tmp_path / "kb_index"),
-                "--runtime-dir", str(tmp_path / "runtime"),
-            ],
-            env={"LLM_API_KEY": "test-fake-key-for-startup"},
+            [sys.executable, "-m", "dsagt.commands.knowledge_server"],
+            env={
+                "DSAGT_PROJECT_DIR": str(project),
+                "LLM_API_KEY": "test-fake-key-for-startup",
+            },
         )
         try:
             resp = mcp_initialize(proc)
@@ -103,32 +139,39 @@ class TestKnowledgeServerStartup:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_starts_without_api_key(self, tmp_path):
-        """Knowledge server starts even without an API key (lazy embedder init)."""
-        stripped = {"LLM_API_KEY", "OPENAI_API_KEY", "DSAGT_EMBEDDING_BACKEND"}
+    def test_fails_fast_without_api_key(self, tmp_path):
+        """Knowledge server must fail at startup if embedding credentials
+        are missing — not silently start with a broken embedder.
+        """
+        import yaml
+        project = tmp_path / "runtime"
+        project.mkdir()
+        # Write config with placeholder credentials that should be rejected.
+        config = {
+            "project": "test",
+            "agent": "claude-code",
+            "embedding": {
+                "model": "test-model",
+                "base_url": "http://localhost:9999",
+                "api_key": "${LLM_API_KEY}",  # unresolved placeholder
+            },
+            "knowledge": {"chunk_size": 1024, "vector_db": "chroma", "rerank": False},
+        }
+        (project / "dsagt_config.yaml").write_text(
+            yaml.dump(config, default_flow_style=False)
+        )
+
+        stripped = {"LLM_API_KEY", "OPENAI_API_KEY"}
         clean_env = {k: v for k, v in os.environ.items() if k not in stripped}
+        clean_env["DSAGT_PROJECT_DIR"] = str(project)
 
         proc = start_server(
-            [
-                sys.executable, "-m", "dsagt.commands.knowledge_server",
-                "--base-index-dir", str(tmp_path / "kb_index"),
-                "--runtime-dir", str(tmp_path / "runtime"),
-                "--embedding-backend", "api",
-            ],
+            [sys.executable, "-m", "dsagt.commands.knowledge_server"],
             env=clean_env,
         )
-        try:
-            resp = mcp_initialize(proc)
-            assert "result" in resp, f"Init failed: {resp}"
-
-            tools_resp = mcp_list_tools(proc)
-            assert "result" in tools_resp, f"list_tools failed: {tools_resp}"
-
-            list_resp = mcp_call_tool(proc, "kb_list_collections", {}, msg_id=10)
-            assert "result" in list_resp, f"Server crashed: {list_resp}"
-        finally:
-            proc.terminate()
-            proc.wait(timeout=5)
+        # Server should exit quickly with a non-zero code.
+        rc = proc.wait(timeout=10)
+        assert rc != 0, "Server should have failed with unresolved API key"
 
 
 # ---------------------------------------------------------------------------
@@ -147,13 +190,13 @@ class TestKnowledgeServerSearch:
     @pytest.fixture
     def kb_server(self, tmp_path, embedding_config):
         """Start knowledge server, complete MCP handshake, yield process."""
+        project = tmp_path / "runtime"
+        project.mkdir()
+        _write_minimal_config(project)
         proc = start_server(
-            [
-                sys.executable, "-m", "dsagt.commands.knowledge_server",
-                "--base-index-dir", str(tmp_path / "kb_index"),
-                "--runtime-dir", str(tmp_path / "runtime"),
-            ],
+            [sys.executable, "-m", "dsagt.commands.knowledge_server"],
             env={
+                "DSAGT_PROJECT_DIR": str(project),
                 "LLM_API_KEY": embedding_config["api_key"],
                 "OPENAI_BASE_URL": embedding_config["base_url"],
                 "EMBEDDING_MODEL": embedding_config["model"],

@@ -24,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -48,6 +49,7 @@ REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
 DEFAULTS = {
     "llm": {
         "model": "claude-sonnet-4-20250514",
+        "base_url": "",
     },
     "embedding": {
         "model": "nomic-embed-text",
@@ -73,6 +75,11 @@ DEFAULTS = {
     "extraction": {
         "threshold": 0,
         "outlier_sensitivity": 0.0,
+    },
+    "knowledge": {
+        "chunk_size": 1024,
+        "vector_db": "chroma",
+        "rerank": False,
     },
 }
 
@@ -112,16 +119,18 @@ def default_config_content(project_name: str, agent: str) -> str:
             "project": project_name,
             "agent": agent,
             "llm": {
-                "model": DEFAULTS["llm"]["model"],
-                "api_key": "${LLM_API_KEY}",
+                "model": "FILL_IN_YOUR_MODEL",
+                "base_url": "FILL_IN_YOUR_LLM_ENDPOINT",
+                "api_key": "FILL_IN_YOUR_API_KEY",
             },
             "embedding": {
-                "model": DEFAULTS["embedding"]["model"],
-                "base_url": "",
-                "api_key": "${LLM_API_KEY}",
+                "model": "FILL_IN_YOUR_EMBEDDING_MODEL",
+                "base_url": "FILL_IN_YOUR_EMBEDDING_ENDPOINT",
+                "api_key": "FILL_IN_YOUR_API_KEY",
             },
             "proxy": DEFAULTS["proxy"],
             "mlflow": DEFAULTS["mlflow"],
+            "knowledge": DEFAULTS["knowledge"],
             "categories": DEFAULTS["categories"],
             "extraction": DEFAULTS["extraction"],
         },
@@ -338,7 +347,64 @@ def start_services(config: dict) -> dict[str, int]:
     pid_path = _pid_file(pdir)
     pid_path.write_text(json.dumps(pids, indent=2) + "\n")
 
+    # Wait for the proxy to actually accept connections.  Without this
+    # we hand a half-broken environment to the agent: dsagt start reports
+    # success, the agent launches, then the agent's first LLM call fails
+    # with ECONNREFUSED because the proxy died during startup (e.g. bad
+    # config, port conflict, missing dependency).  Probing here makes
+    # those failures fail loudly at the right place — dsagt start —
+    # instead of at first agent message.
+    if not _wait_for_proxy(proxy_port, proxy_proc, proxy_log, timeout=15.0):
+        raise RuntimeError(
+            f"LiteLLM proxy failed to start on port {proxy_port}. "
+            f"See {proxy_log} for details. "
+            f"Common causes: port already in use, missing LLM_API_KEY, "
+            f"or upstream API unreachable."
+        )
+
     return pids
+
+
+def _wait_for_proxy(
+    port: int,
+    proc: subprocess.Popen,
+    log_path: Path,
+    timeout: float = 15.0,
+) -> bool:
+    """Poll the proxy until it accepts connections or the process dies.
+
+    Returns True if the proxy is reachable on ``port`` within ``timeout``,
+    False if it never came up or the process exited.
+    """
+    import socket
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        # Did the subprocess die?  Fail fast — no point waiting longer.
+        if proc.poll() is not None:
+            logger.error(
+                "Proxy process exited with code %d before becoming ready. "
+                "Tail of %s:", proc.returncode, log_path,
+            )
+            try:
+                tail = log_path.read_text().splitlines()[-20:]
+                for line in tail:
+                    logger.error("  %s", line)
+            except OSError:
+                pass
+            return False
+
+        # Try a TCP connect — cheap, doesn't require an HTTP client and
+        # doesn't depend on which path the proxy actually serves.
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return True
+        except (ConnectionRefusedError, OSError):
+            time.sleep(0.25)
+
+    logger.error(
+        "Proxy did not accept connections on port %d within %.1fs", port, timeout,
+    )
+    return False
 
 
 def stop_services(project_name: str) -> list[str]:
@@ -372,8 +438,10 @@ def run_extraction(project_name: str) -> dict:
     pdir = Path(config["project_dir"])
     trace_dir = pdir / "trace_archive"
 
-    api_key = config.get("llm", {}).get("api_key", "")
-    model = config.get("llm", {}).get("model", "claude-sonnet-4-20250514")
+    llm_config = config.get("llm", {})
+    api_key = llm_config.get("api_key", "")
+    model = llm_config.get("model", "claude-sonnet-4-20250514")
+    base_url = llm_config.get("base_url", "")
     session_id = config.get("project", "")
     categories = config.get("categories", {})
 
@@ -389,6 +457,7 @@ def run_extraction(project_name: str) -> dict:
             kb=kb,
             api_key=api_key,
             model=model,
+            base_url=base_url or None,
             session_id=session_id,
             categories=categories if categories else None,
             runtime_dir=pdir,

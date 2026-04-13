@@ -50,6 +50,23 @@ logger = logging.getLogger(__name__)
 
 # Module-level state. _initialized guards against double-init in test runs
 # and in subprocesses where init_tracing might be called more than once.
+#
+# NOTE on _default_session_id:
+#   This is intentionally a process-global rather than threaded through
+#   every span helper.  DSAgt runs one process per project, so the session
+#   id is a process-wide constant set at startup by init_tracing(), and
+#   propagating it implicitly via this module-level value lets business
+#   code in knowledge.py / provenance.py / registry_server.py emit spans
+#   without ever knowing about session ids.  The cost is that tests have
+#   to monkeypatch the global to isolate (see _reset_tracing fixture in
+#   test_observability.py).
+#
+#   If DSAgt ever grows a multi-tenant mode (one server process serving
+#   many projects), the right replacement is OTel baggage:
+#       from opentelemetry import baggage
+#       sid = baggage.get_baggage("session.id")
+#   which gives per-request context propagation that works correctly
+#   across concurrent requests.  Until then, the global is simpler.
 _initialized = False
 _tracer_provider = None
 _default_session_id: str | None = None
@@ -94,20 +111,16 @@ def init_tracing(
         logger.debug("init_tracing: no endpoint configured, tracing disabled")
         return
 
-    try:
-        from opentelemetry import trace
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-            OTLPSpanExporter,
-        )
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    except ImportError as e:
-        logger.warning(
-            "init_tracing: opentelemetry packages missing (%s); tracing disabled", e
-        )
-        _initialized = True
-        return
+    # OpenTelemetry is a hard dependency in pyproject.toml.  If these
+    # imports fail, the install is broken and we want a real ImportError
+    # immediately, not a silently-disabled tracing layer.
+    from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+        OTLPSpanExporter,
+    )
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(resource=resource)
@@ -150,24 +163,44 @@ def configure_litellm_retries(
     num_retries: int = 5,
     request_timeout: float = 300.0,
 ) -> None:
-    """Configure LiteLLM module-level retry / timeout knobs.
+    """Configure LiteLLM module-level retry / timeout knobs and quiet its
+    stdout chatter.
 
     These are independent of tracing — even ``dsagt-setup-kb`` running before
     any project exists (and therefore with no MLflow endpoint) gets the
     rate-limit-resilient embedding path.
 
     LiteLLM's ``num_retries`` retries on transient failures including 429s
-    with exponential backoff. This is the fix for hand-rolled agent backoff
-    against embedding rate limits during large ``kb_ingest`` runs.
+    with exponential backoff.  We also retry inside APIEmbeddingClient with
+    finer control, but the litellm-level setting acts as a backstop for
+    other code paths (e.g. the proxy).
+
+    LiteLLM is also chatty by default: every error prints a "Give Feedback /
+    Get Help" footer to stdout, and every successful call duplicates a log
+    line through the ``LiteLLM`` logger.  Both make ``dsagt-setup-kb`` output
+    nearly unreadable during long ingests with retries.  We suppress them
+    here so DSAgt's own progress logs are visible.
     """
-    try:
-        import litellm
-    except ImportError as e:
-        logger.warning("configure_litellm_retries: litellm import failed: %s", e)
-        return
+    # litellm[proxy] is a hard dependency in pyproject.toml — failing this
+    # import means a broken install, not "tracing optional".
+    import litellm
 
     litellm.num_retries = num_retries
     litellm.request_timeout = request_timeout
+
+    # Kill the "Give Feedback / Get Help" + "Provider List" stdout footers
+    # that LiteLLM prints on every exception.  These are aimed at first-time
+    # users; for a long-running embed job they make the output unreadable.
+    litellm.suppress_debug_info = True
+
+    # Stop the duplicate INFO log lines.  LiteLLM emits its own
+    # "Wrapper: Completed Call" line on every embedding call, and propagation
+    # to the root logger doubles each one (once via LiteLLM's namespace, once
+    # via root).  Mute the namespace and stop propagation.
+    _llm_log = logging.getLogger("LiteLLM")
+    _llm_log.setLevel(logging.WARNING)
+    _llm_log.propagate = False
+
     logger.info(
         "configure_litellm_retries: num_retries=%d timeout=%.0fs",
         num_retries, request_timeout,
@@ -198,15 +231,12 @@ def install_litellm_otel_callback(
         logger.debug("install_litellm_otel_callback: tracing not initialized")
         return
 
-    try:
-        import litellm
-        from litellm.integrations.opentelemetry import (
-            OpenTelemetry,
-            OpenTelemetryConfig,
-        )
-    except ImportError as e:
-        logger.warning("install_litellm_otel_callback: litellm import failed: %s", e)
-        return
+    # litellm[proxy] is a hard dependency — broken install if these fail.
+    import litellm
+    from litellm.integrations.opentelemetry import (
+        OpenTelemetry,
+        OpenTelemetryConfig,
+    )
 
     # Hand LiteLLM our existing provider so its spans share the same OTLP
     # exporter and the same trace context as everything else DSAgt emits.
@@ -312,7 +342,25 @@ def traced(
             tracer = get_tracer(fn.__module__)
             with tracer.start_as_current_span(span_name) as span:
                 _attach_session_id(span)
-                _attach_captured_args(span, sig, capture, args, kwargs)
+
+                # Capture configured arguments as span attributes.  Looked up
+                # by name against the function signature so positional and
+                # keyword args both work.  TypeError on bind_partial means a
+                # decorator higher in the stack mangled the signature; in
+                # that rare case we just skip arg capture rather than crash.
+                if capture:
+                    try:
+                        bound = sig.bind_partial(*args, **kwargs)
+                    except TypeError:
+                        bound = None
+                    if bound is not None:
+                        bound.apply_defaults()
+                        for name in capture:
+                            if name in bound.arguments:
+                                value = bound.arguments[name]
+                                if value is not None:
+                                    span.set_attribute(name, _coerce_attr(value))
+
                 start = time.perf_counter()
                 try:
                     result = fn(*args, **kwargs)
@@ -324,7 +372,25 @@ def traced(
                     span.set_attribute(
                         "duration_ms", round((time.perf_counter() - start) * 1000, 3)
                     )
-                _attach_return_attrs(span, extract_return, result)
+
+                # Extract return-value-derived attributes.  A buggy extractor
+                # lambda must NOT crash the instrumented function, but should
+                # be visible at DEBUG so a developer running with --verbose
+                # can spot a silently-missing span attribute caused by a
+                # broken extract_return mapping.
+                for attr_name, extractor in extract_return.items():
+                    try:
+                        value = extractor(result)
+                    except Exception as e:
+                        logger.debug(
+                            "extract_return[%r] failed (%s: %s); "
+                            "attribute will be missing from span",
+                            attr_name, type(e).__name__, e,
+                        )
+                        continue
+                    if value is not None:
+                        span.set_attribute(attr_name, _coerce_attr(value))
+
                 return result
 
         return wrapper
@@ -337,35 +403,6 @@ def _attach_session_id(span) -> None:
         span.set_attribute("session.id", _default_session_id)
 
 
-def _attach_captured_args(span, sig, capture, args, kwargs) -> None:
-    if not capture:
-        return
-    try:
-        bound = sig.bind_partial(*args, **kwargs)
-    except TypeError:
-        return
-    bound.apply_defaults()
-    for name in capture:
-        if name in bound.arguments:
-            value = bound.arguments[name]
-            if value is not None:
-                # OTel attribute values must be primitives or sequences of
-                # primitives. Coerce anything else to a string for safety.
-                span.set_attribute(name, _coerce_attr(value))
-
-
-def _attach_return_attrs(span, extract_return, result) -> None:
-    if not extract_return:
-        return
-    for attr_name, extractor in extract_return.items():
-        try:
-            value = extractor(result)
-        except Exception:
-            continue
-        if value is not None:
-            span.set_attribute(attr_name, _coerce_attr(value))
-
-
 def _coerce_attr(value: Any) -> Any:
     if isinstance(value, (str, bool, int, float)):
         return value
@@ -375,11 +412,12 @@ def _coerce_attr(value: Any) -> Any:
 
 
 def _set_error_status(span, message: str) -> None:
-    try:
-        from opentelemetry.trace import Status, StatusCode
-        span.set_status(Status(StatusCode.ERROR, message))
-    except Exception:
-        pass
+    # OTel is mandatory; if Status/StatusCode disappears or moves, we want
+    # the resulting ImportError to surface immediately so the dep upgrade
+    # gets caught at the test level rather than silently disabling error
+    # status on every traced exception path.
+    from opentelemetry.trace import Status, StatusCode
+    span.set_status(Status(StatusCode.ERROR, message))
 
 
 # ---------------------------------------------------------------------------

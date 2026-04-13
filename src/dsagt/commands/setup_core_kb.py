@@ -33,7 +33,48 @@ from dsagt.session import REGISTRY_DIR
 
 DEFAULT_INDEX_DIR = REGISTRY_DIR / "kb_index"
 
-# Collection definitions
+# Default exclusion patterns applied to every core-KB ingest unless a
+# collection overrides them.  Goal: skip content that has low retrieval
+# value for an agent learning to *use* a library, while keeping docs,
+# tutorials, examples (concrete usage patterns), the main library source
+# (call signatures + docstrings + type hints), and packaging metadata
+# the agent needs to install dependencies correctly.
+#
+# What's excluded and why:
+# - tests/, test/, conftest.py, test_*.py, *_test.py
+#       Test internals teach how the library is *tested*, not how it's used.
+# - __pycache__/, .git/, *.egg-info/, .pytest_cache/, .mypy_cache/
+#       Build/cache artifacts.  Pure noise.
+# - _*.py
+#       Python convention for private modules — implementation detail, not API.
+# - CHANGELOG*, HISTORY*
+#       Historical, not how-to-use.
+#
+# Notably NOT excluded:
+# - pyproject.toml, setup.py, setup.cfg
+#       Packaging metadata.  The agent uses these to determine which
+#       version of a library to install when registering a tool that
+#       depends on it ("uv pip install nemo_curator>=X.Y").  Without
+#       pyproject.toml in the index, the agent has to guess.
+DEFAULT_EXCLUDE_PATTERNS = [
+    "tests",
+    "test",
+    "conftest.py",
+    "test_*.py",
+    "*_test.py",
+    "__pycache__",
+    ".git",
+    "*.egg-info",
+    ".pytest_cache",
+    ".mypy_cache",
+    "_*.py",
+    "CHANGELOG*",
+    "HISTORY*",
+]
+
+# Collection definitions.  Each may set "exclude_patterns" to override
+# DEFAULT_EXCLUDE_PATTERNS for that collection (e.g. if a library's tests
+# happen to be the canonical usage examples).
 COLLECTIONS = {
     "nemo_curator": {
         "description": """# NeMo Curator
@@ -56,6 +97,9 @@ quality assessment strategies.
                 "type": "github",
                 "url": "https://github.com/NVIDIA/NeMo-Curator",
                 "branch": "main",
+                # Top-level subdirs to clone.  examples + tutorials are
+                # kept on purpose: agents writing pipelines benefit from
+                # concrete usage patterns more than from prose docs alone.
                 "include": ["docs", "nemo_curator", "tutorials", "examples"],
             },
         ],
@@ -92,9 +136,16 @@ readiness evaluation for ML pipelines.
 
 
 def clone_github(url: str, dest: Path, branch: str = "main", include: list[str] | None = None):
-    """Clone a GitHub repo, optionally keeping only specific directories."""
+    """Clone a GitHub repo, optionally keeping only specific directories.
+
+    When *include* is set, the named subdirectories are copied AND any
+    top-level files at the repo root (README, pyproject.toml, setup.py,
+    LICENSE, etc.).  Top-level files are usually small and contain
+    critical packaging metadata the agent needs to install dependencies
+    correctly when it registers tools against the library.
+    """
     print(f"  Cloning {url} (branch: {branch})...")
-    
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp) / "repo"
         result = subprocess.run(
@@ -104,13 +155,19 @@ def clone_github(url: str, dest: Path, branch: str = "main", include: list[str] 
         )
         if result.returncode != 0:
             raise RuntimeError(f"Git clone failed: {result.stderr}")
-        
+
         if include:
-            # Copy only specified directories
+            # Copy the requested subdirectories.
             for subdir in include:
                 src = tmp_path / subdir
                 if src.exists():
                     shutil.copytree(src, dest / subdir, dirs_exist_ok=True)
+            # Plus any top-level files at the repo root (pyproject.toml,
+            # setup.py, README, LICENSE, ...).  These are tiny and the
+            # agent uses them to resolve install commands.
+            for f in tmp_path.iterdir():
+                if f.is_file():
+                    shutil.copy2(f, dest / f.name)
         else:
             # Copy everything except .git
             shutil.copytree(tmp_path, dest, dirs_exist_ok=True)
@@ -163,20 +220,22 @@ def setup_collection(
         download_dir = Path(tmp) / name
         download_dir.mkdir()
 
-        # Download all sources
+        # Download all sources.  If any source fails, raise immediately —
+        # silently skipping a 404 arxiv URL or a broken git clone produces
+        # a half-built collection the user can't see is incomplete.  Better
+        # to fail loudly and have the user re-run after fixing the issue.
         for source in config["sources"]:
-            try:
-                if source["type"] == "github":
-                    clone_github(
-                        source["url"],
-                        download_dir,
-                        branch=source.get("branch", "main"),
-                        include=source.get("include"),
-                    )
-                elif source["type"] == "arxiv":
-                    download_arxiv(source["id"], download_dir)
-            except Exception as e:
-                print(f"  Warning: {source} failed: {e}")
+            if source["type"] == "github":
+                clone_github(
+                    source["url"],
+                    download_dir,
+                    branch=source.get("branch", "main"),
+                    include=source.get("include"),
+                )
+            elif source["type"] == "arxiv":
+                download_arxiv(source["id"], download_dir)
+            else:
+                raise ValueError(f"Unknown source type: {source['type']!r}")
 
         # Write DESCRIPTION.md
         (download_dir / "DESCRIPTION.md").write_text(config["description"])
@@ -193,25 +252,27 @@ def setup_collection(
             embedder_kwargs=embedder_kwargs,
         )
         try:
-            result = kb.ingest(download_dir)
-            print(f"  Done: {result['files']} files, {result['chunks']} chunks")
+            result = kb.ingest(
+                download_dir,
+                exclude_patterns=config.get("exclude_patterns") or DEFAULT_EXCLUDE_PATTERNS,
+            )
+            skipped = result.get("skipped_files", 0)
+            skip_msg = f", skipped {skipped} unreadable" if skipped else ""
+            print(
+                f"  Done: {result['files']} files, {result['chunks']} chunks"
+                f"{skip_msg}"
+            )
             return result
         finally:
             kb.close()
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Setup DSAGT core knowledge base",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Embedding config is taken from CLI flags, then from these env vars:\n"
-            "  LLM_API_KEY / OPENAI_API_KEY   API key for the embedding endpoint\n"
-            "  OPENAI_BASE_URL                OpenAI-compatible base URL\n"
-            "  EMBEDDING_MODEL                Embedding model name\n\n"
-            "Full core KB embedding typically takes 15-30 minutes over an API."
-        ),
-    )
+def add_setup_kb_args(parser):
+    """Add setup-kb arguments to a parser or subparser.
+
+    Called from both the standalone ``dsagt-setup-kb`` entry point and the
+    ``dsagt setup-kb`` subcommand so the argument set is defined once.
+    """
     parser.add_argument(
         "--index-dir",
         type=Path,
@@ -247,14 +308,28 @@ def main():
         default="chroma",
         help="Vector database backend (default: chroma)",
     )
-    args = parser.parse_args()
 
-    # Check git is available
+
+def run_setup_kb(args):
+    """Run the core knowledge base setup.
+
+    Accepts a parsed argparse.Namespace with the fields added by
+    ``add_setup_kb_args``.  Called from both the ``dsagt setup-kb``
+    subcommand and the standalone ``dsagt-setup-kb`` entry point.
+    """
+    # Surface batch progress and rate-limit retry warnings.
+    import logging as _logging
+    _logging.basicConfig(
+        level=_logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    # Check git is available.
     try:
         subprocess.run(["git", "--version"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Error: git is required")
-        sys.exit(1)
+        raise RuntimeError("git is required but not found on PATH")
 
     # Resolve embedding config with env-var fallback so the user gets a
     # clear error up front rather than 5 minutes into the first ingest.
@@ -265,21 +340,17 @@ def main():
         model = args.embedding_model or os.getenv("EMBEDDING_MODEL")
         missing = [n for n, v in [("api key", api_key), ("base URL", base_url), ("model", model)] if not v]
         if missing:
-            print(
-                "Error: API embedding backend requires "
+            raise ValueError(
+                "API embedding backend requires "
                 + ", ".join(missing)
-                + ".\n       Pass via --embedding-* flags or set LLM_API_KEY, "
+                + ". Pass via --embedding-* flags or set LLM_API_KEY, "
                 "OPENAI_BASE_URL, EMBEDDING_MODEL."
             )
-            sys.exit(2)
         embedder_kwargs = {"api_key": api_key, "base_url": base_url, "model": model}
     elif args.embedding_model:
         embedder_kwargs = {"model": args.embedding_model}
 
-    # Configure LiteLLM retries before any embedding work — this is the path
-    # that historically got killed by 429s on large ingests. install_litellm_otel_callback
-    # also wires OTel spans if init_tracing was set up first; for setup-kb,
-    # we only need the retries (no MLflow endpoint exists yet).
+    # Configure LiteLLM retries before any embedding work.
     from dsagt.observability import init_tracing, install_litellm_otel_callback
     init_tracing("dsagt-setup-kb")
     install_litellm_otel_callback()
@@ -290,33 +361,42 @@ def main():
     print(f"Vector DB: {args.vector_db}")
     print("Note: API-backed embedding of the full core KB typically takes 15-30 minutes.")
 
-    # Setup collections
     collections = {args.collection: COLLECTIONS[args.collection]} if args.collection else COLLECTIONS
 
     results = {}
     for name, config in collections.items():
-        try:
-            results[name] = setup_collection(
-                name, config, args.index_dir,
-                embedder_kwargs=embedder_kwargs,
-                embedding_backend=args.embedding_backend,
-                vector_db=args.vector_db,
-            )
-        except Exception as e:
-            print(f"  Error: {e}")
-            results[name] = {"error": str(e)}
-    
-    # Summary
+        results[name] = setup_collection(
+            name, config, args.index_dir,
+            embedder_kwargs=embedder_kwargs,
+            embedding_backend=args.embedding_backend,
+            vector_db=args.vector_db,
+        )
+
     print(f"\n{'='*60}")
     print("Summary")
     print(f"{'='*60}")
     for name, result in results.items():
-        if "error" in result:
-            print(f"  {name}: FAILED - {result['error']}")
-        else:
-            print(f"  {name}: {result.get('chunks', 0)} chunks")
-    
+        print(f"  {name}: {result.get('chunks', 0)} chunks")
+
     print("\nDone!")
+
+
+def main():
+    """Standalone entry point (``dsagt-setup-kb``)."""
+    parser = argparse.ArgumentParser(
+        description="Setup DSAGT core knowledge base",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Embedding config is taken from CLI flags, then from these env vars:\n"
+            "  LLM_API_KEY / OPENAI_API_KEY   API key for the embedding endpoint\n"
+            "  OPENAI_BASE_URL                OpenAI-compatible base URL\n"
+            "  EMBEDDING_MODEL                Embedding model name\n\n"
+            "Full core KB embedding typically takes 15-30 minutes over an API.\n\n"
+            "This command can also be run as: dsagt setup-kb"
+        ),
+    )
+    add_setup_kb_args(parser)
+    run_setup_kb(parser.parse_args())
 
 
 if __name__ == "__main__":

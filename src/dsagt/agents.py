@@ -49,51 +49,23 @@ _AGENT_COMMANDS = {
 # Config generation helpers
 # ---------------------------------------------------------------------------
 
-def _embedding_args(config: dict) -> list[str]:
-    """Build embedding CLI flags from config. Shared by registry and knowledge servers."""
-    args = []
-    emb = config.get("embedding", {})
-    if emb.get("base_url"):
-        args += ["--embedding-base-url", emb["base_url"]]
-    if emb.get("model"):
-        args += ["--embedding-model", emb["model"]]
-    api_key = emb.get("api_key", "")
-    if api_key and not api_key.startswith("${"):
-        args += ["--embedding-api-key", api_key]
-    return args
+def _mcp_server_args(server: str) -> list[str]:
+    """Build the args list for an MCP server entry.
 
-
-def _mcp_server_args(server: str, project_dir: Path, config: dict) -> list[str]:
-    """Build the args list for an MCP server entry."""
-    base = ["run", f"dsagt-{server}-server"]
-    if server == "registry":
-        base += ["--runtime-dir", str(project_dir)]
-        base += _embedding_args(config)
-    elif server == "knowledge":
-        base += [
-            "--base-index-dir", str(project_dir / "kb_index"),
-            "--runtime-dir", str(project_dir),
-        ]
-        base += _embedding_args(config)
-    base += _otel_args(config)
-    return base
-
-
-def _otel_args(config: dict) -> list[str]:
-    """Build --otel-endpoint and --session-id args for an MCP server."""
-    args: list[str] = []
-    mlflow_port = config.get("mlflow", {}).get("port")
-    if mlflow_port:
-        args += ["--otel-endpoint", f"http://localhost:{mlflow_port}"]
-    project = config.get("project")
-    if project:
-        args += ["--session-id", project]
-    return args
+    Both servers read all configuration from DSAGT_PROJECT_DIR (env var)
+    and dsagt_config.yaml.  No CLI args needed.
+    """
+    return ["run", f"dsagt-{server}-server"]
 
 
 def _mcp_env_block(config: dict) -> dict:
-    """Build the env block for MCP server entries."""
-    env = {}
+    """Build the env block for MCP server entries.
+
+    Servers read all configuration from env vars and dsagt_config.yaml.
+    DSAGT_PROJECT_DIR tells them where to find the project directory.
+    Embedding credentials flow as env vars rather than CLI flags.
+    """
+    env = {"DSAGT_PROJECT_DIR": config["project_dir"]}
     emb = config.get("embedding", {})
     api_key = emb.get("api_key", "")
     if api_key and not api_key.startswith("${"):
@@ -171,7 +143,7 @@ def _generate_claude_code(config, working_dir, pdir, proxy_port) -> list[str]:
     for server in ("registry", "knowledge"):
         entry = {
             "command": "uv",
-            "args": _mcp_server_args(server, pdir, config),
+            "args": _mcp_server_args(server),
         }
         if env_block:
             entry["env"] = env_block
@@ -215,7 +187,7 @@ def _generate_goose(config, working_dir, pdir, proxy_port) -> list[str]:
     }
 
     for server in ("registry", "knowledge"):
-        args = _mcp_server_args(server, pdir, config)
+        args = _mcp_server_args(server)
         goose_config["extensions"][server] = {
             "enabled": True,
             "name": server,
@@ -253,7 +225,7 @@ def _generate_roo(config, working_dir, pdir, proxy_port) -> list[str]:
     for server in ("registry", "knowledge"):
         entry = {
             "command": "uv",
-            "args": _mcp_server_args(server, pdir, config),
+            "args": _mcp_server_args(server),
             "disabled": False,
         }
         if env_block:
@@ -290,7 +262,7 @@ def _generate_cline(config, working_dir, pdir, proxy_port) -> list[str]:
     for server in ("registry", "knowledge"):
         entry = {
             "command": "uv",
-            "args": _mcp_server_args(server, pdir, config),
+            "args": _mcp_server_args(server),
             "disabled": False,
             "alwaysAllow": [],
         }
@@ -338,6 +310,23 @@ def agent_env(config: dict) -> dict:
         env["ANTHROPIC_BASE_URL"] = f"http://localhost:{proxy_port}"
     if agent == "goose":
         env["OPENAI_HOST"] = f"http://localhost:{proxy_port}"
+
+    # Plant the LLM API key into the agent's environment under the
+    # provider-specific name.  This is critical for Claude Code in
+    # particular: without ANTHROPIC_API_KEY set, Claude Code falls back
+    # to OAuth subscription auth and silently *ignores* ANTHROPIC_BASE_URL,
+    # which means the proxy is bypassed entirely and the user's lab
+    # routing never happens.
+    #
+    # The proxy doesn't validate this key against upstream — it uses its
+    # own LLM_API_KEY for forwarding — but the agent still needs *some*
+    # value here to take the API path instead of OAuth.
+    llm_key = config.get("llm", {}).get("api_key", "")
+    if llm_key and not llm_key.startswith("${"):
+        if agent in ("claude-code", "roo", "cline"):
+            env["ANTHROPIC_API_KEY"] = llm_key
+        if agent == "goose":
+            env["OPENAI_API_KEY"] = llm_key
 
     emb = config.get("embedding", {})
     embedding_key = emb.get("api_key", "")

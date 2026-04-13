@@ -105,26 +105,35 @@ def main(argv: list[str] | None = None):
 
     logger.info("Starting LiteLLM proxy on port %d", args.port)
 
+    # Invoke litellm's run_server in-process so the DSAgt callback we
+    # registered via litellm.callbacks above is actually attached when
+    # requests come in.  There is no subprocess fallback: if this fails,
+    # the DSAgt tool-record + observability path is broken and the user
+    # needs to know.  start_services() probes the port and will surface
+    # the failure to dsagt start with a clean error message.
+    #
+    # run_server is a Click command, so we invoke it via
+    # .main(args=..., standalone_mode=False) — calling it positionally
+    # would either error (40+ params) or, in older versions, raise
+    # TypeError because Click commands aren't callable with kwargs the
+    # same way functions are.  standalone_mode=False makes Click raise
+    # on errors instead of calling sys.exit().
+    from litellm.proxy.proxy_cli import run_server
     try:
-        from litellm.proxy.proxy_cli import run_server
-        run_server(
-            host="0.0.0.0",
-            port=args.port,
-            config=config_path,
+        run_server.main(
+            args=[
+                "--host", "0.0.0.0",
+                "--port", str(args.port),
+                "--config", config_path,
+            ],
+            standalone_mode=False,
         )
-    except (ImportError, TypeError):
-        import subprocess
-        cmd = [
-            sys.executable, "-m", "litellm",
-            "--config", config_path,
-            "--port", str(args.port),
-        ]
-        logger.info("Fallback: running %s", " ".join(cmd))
-        logger.warning(
-            "Subprocess fallback cannot pass the callback in-process. "
-            "Add the callback to your LiteLLM config YAML instead."
-        )
-        subprocess.run(cmd)
+    except SystemExit:
+        # Click in standalone_mode=False can still raise SystemExit when
+        # the underlying server exits cleanly.  Treat that as success;
+        # any other exception propagates and crashes dsagt-proxy, which
+        # is what start_services()'s readiness probe expects.
+        pass
 
 
 if __name__ == "__main__":

@@ -228,21 +228,29 @@ class TestAPIEmbeddingClient:
 
 
 # ---------------------------------------------------------------------------
-# APIEmbeddingClient - error propagation
+# APIEmbeddingClient - retry and error propagation
 # ---------------------------------------------------------------------------
 
 class TestAPIEmbeddingClientErrors:
-    """Verify that LiteLLM errors propagate up from .embed() unchanged.
+    """Verify the explicit rate-limit retry layer in APIEmbeddingClient.
 
-    LiteLLM handles retries on rate limits and transient failures internally
-    via litellm.num_retries; only terminal failures should reach the caller.
-    These tests assert that when litellm.embedding does raise, the exception
-    is not swallowed.
+    The retry layer exists because lab LiteLLM proxies wrap upstream 429s
+    in a way that defeats litellm's built-in retry classification, and
+    litellm's default backoff is too short for Azure-style 60s quota
+    windows.  These tests pin the contract:
+
+    * Authentication / bad-request errors are NOT retried (fail fast on
+      misconfiguration).
+    * Rate-limit and transient errors ARE retried up to max_attempts.
+    * The upstream "retry after N seconds" hint is honored.
     """
 
+    @patch("dsagt.knowledge.time.sleep")
     @patch("litellm.embedding")
-    def test_authentication_error_propagates(self, mock_embedding):
-        """A 401 from upstream surfaces as litellm.AuthenticationError."""
+    def test_authentication_error_propagates_immediately(
+        self, mock_embedding, mock_sleep,
+    ):
+        """A 401 must NOT be retried — this is a misconfiguration, not transient."""
         import litellm
 
         mock_embedding.side_effect = litellm.exceptions.AuthenticationError(
@@ -252,25 +260,121 @@ class TestAPIEmbeddingClientErrors:
         client = APIEmbeddingClient(api_key="bad-key", base_url="http://test")
         with pytest.raises(litellm.exceptions.AuthenticationError):
             client.embed(["test"])
+        # No retries: one call, no sleeps.
+        assert mock_embedding.call_count == 1
+        assert mock_sleep.call_count == 0
         client.close()
 
+    @patch("dsagt.knowledge.time.sleep")
     @patch("litellm.embedding")
-    def test_terminal_rate_limit_error_propagates(self, mock_embedding):
-        """When LiteLLM exhausts retries, RateLimitError reaches the caller."""
+    def test_rate_limit_retries_then_propagates(self, mock_embedding, mock_sleep):
+        """A persistent rate limit retries up to max_attempts then raises."""
         import litellm
 
         mock_embedding.side_effect = litellm.exceptions.RateLimitError(
-            message="429 after retries", llm_provider="openai", model="test",
+            message="429 Please retry after 60 seconds",
+            llm_provider="openai", model="test",
         )
 
         client = APIEmbeddingClient(api_key="k", base_url="http://test")
         with pytest.raises(litellm.exceptions.RateLimitError):
             client.embed(["test"])
+
+        # max_attempts is 6 — that's 6 calls and 5 sleeps between them.
+        assert mock_embedding.call_count == 6
+        assert mock_sleep.call_count == 5
+        # Each sleep should respect the upstream-suggested 60s wait.
+        for call in mock_sleep.call_args_list:
+            assert call.args[0] == 60.0
         client.close()
 
+    @patch("dsagt.knowledge.time.sleep")
     @patch("litellm.embedding")
-    def test_timeout_propagates(self, mock_embedding):
-        """LiteLLM Timeout surfaces unchanged."""
+    def test_rate_limit_retries_then_succeeds(self, mock_embedding, mock_sleep):
+        """If the rate limit clears on a retry, embed() returns successfully."""
+        import litellm
+
+        rng = np.random.RandomState(42)
+        success_resp = MagicMock()
+        success_resp.data = [
+            {"index": 0, "embedding": rng.randn(EMBEDDING_DIM).tolist()},
+        ]
+
+        # Two rate-limit failures, then success.
+        mock_embedding.side_effect = [
+            litellm.exceptions.RateLimitError(
+                message="429 Please retry after 60 seconds",
+                llm_provider="openai", model="test",
+            ),
+            litellm.exceptions.RateLimitError(
+                message="429 Please retry after 60 seconds",
+                llm_provider="openai", model="test",
+            ),
+            success_resp,
+        ]
+
+        client = APIEmbeddingClient(api_key="k", base_url="http://test")
+        result = client.embed(["one"])
+
+        assert result.shape == (1, EMBEDDING_DIM)
+        assert mock_embedding.call_count == 3
+        assert mock_sleep.call_count == 2
+        client.close()
+
+    @patch("dsagt.knowledge.time.sleep")
+    @patch("litellm.embedding")
+    def test_transient_connection_error_retries(self, mock_embedding, mock_sleep):
+        """APIConnectionError is retryable (covers the lab-proxy 429 wrapping case)."""
+        import litellm
+
+        mock_embedding.side_effect = litellm.exceptions.APIConnectionError(
+            message="connection reset",
+            llm_provider="openai_like", model="test",
+        )
+
+        client = APIEmbeddingClient(api_key="k", base_url="http://test")
+        with pytest.raises(litellm.exceptions.APIConnectionError):
+            client.embed(["test"])
+        assert mock_embedding.call_count == 6
+        client.close()
+
+    @patch("dsagt.knowledge.time.sleep")
+    @patch("litellm.embedding")
+    def test_lab_proxy_wrapped_429_retries(self, mock_embedding, mock_sleep):
+        """Real-world failure mode: openai_like wraps an upstream 429 as
+        APIConnectionError with the rate-limit body in the message.  Our
+        retry layer must detect this via string matching, not just by
+        exception class, and must use the upstream-suggested wait time.
+        """
+        import litellm
+
+        # This is a lightly-paraphrased version of the actual lab error.
+        wrapped_429 = litellm.exceptions.APIConnectionError(
+            message=(
+                "Openai_likeException - "
+                '{"error":{"message":"litellm.RateLimitError: AzureException '
+                "RateLimitError - rate limit exceeded. "
+                "Please retry after 90 seconds. "
+                'To increase your default rate limit, visit ..."}}'
+            ),
+            llm_provider="openai_like", model="text-embedding-3-small-project",
+        )
+        mock_embedding.side_effect = wrapped_429
+
+        client = APIEmbeddingClient(api_key="k", base_url="http://test")
+        with pytest.raises(litellm.exceptions.APIConnectionError):
+            client.embed(["test"])
+
+        assert mock_embedding.call_count == 6
+        # The 90s hint from the upstream message must be honored, not the 60s default.
+        for call in mock_sleep.call_args_list:
+            assert call.args[0] == 90.0
+        client.close()
+
+    @patch("dsagt.knowledge.time.sleep")
+    @patch("litellm.embedding")
+    def test_timeout_retries(self, mock_embedding, mock_sleep):
+        """Timeouts are transient and should be retried with exponential backoff."""
         import litellm
 
         mock_embedding.side_effect = litellm.exceptions.Timeout(
@@ -280,7 +384,343 @@ class TestAPIEmbeddingClientErrors:
         client = APIEmbeddingClient(api_key="k", base_url="http://test")
         with pytest.raises(litellm.exceptions.Timeout):
             client.embed(["test"])
+        assert mock_embedding.call_count == 6
+        # Exponential backoff capped at 30s: 2^1, 2^2, 2^3, 2^4, min(2^5, 30).
+        sleeps = [c.args[0] for c in mock_sleep.call_args_list]
+        assert sleeps == [2.0, 4.0, 8.0, 16.0, 30.0]
         client.close()
+
+
+class TestAPIEmbeddingClientBatching:
+    """Long inputs are split into batch_size chunks for the embedding API."""
+
+    @patch("litellm.embedding")
+    def test_batches_when_over_batch_size(self, mock_embedding):
+        """A 250-text input with batch_size=100 produces 3 API calls."""
+        rng = np.random.RandomState(0)
+
+        def make_response(input_texts, **_):
+            resp = MagicMock()
+            resp.data = [
+                {"index": i, "embedding": rng.randn(EMBEDDING_DIM).tolist()}
+                for i in range(len(input_texts))
+            ]
+            return resp
+
+        mock_embedding.side_effect = lambda **kwargs: make_response(kwargs["input"])
+
+        client = APIEmbeddingClient(
+            api_key="k", base_url="http://test", batch_size=100,
+        )
+        texts = [f"chunk {i}" for i in range(250)]
+        result = client.embed(texts)
+
+        assert result.shape == (250, EMBEDDING_DIM)
+        assert mock_embedding.call_count == 3
+        # Verify the batch sizes were 100, 100, 50.
+        batch_sizes = [
+            len(call.kwargs["input"]) for call in mock_embedding.call_args_list
+        ]
+        assert batch_sizes == [100, 100, 50]
+        client.close()
+
+    @patch("litellm.embedding")
+    def test_single_call_when_under_batch_size(self, mock_embedding):
+        """Inputs within batch_size make a single call (no batching loop)."""
+        rng = np.random.RandomState(0)
+        resp = MagicMock()
+        resp.data = [
+            {"index": i, "embedding": rng.randn(EMBEDDING_DIM).tolist()}
+            for i in range(5)
+        ]
+        mock_embedding.return_value = resp
+
+        client = APIEmbeddingClient(
+            api_key="k", base_url="http://test", batch_size=100,
+        )
+        result = client.embed(["a", "b", "c", "d", "e"])
+
+        assert result.shape == (5, EMBEDDING_DIM)
+        assert mock_embedding.call_count == 1
+        client.close()
+
+
+class TestRetryAfterParsing:
+    """Standalone tests for the retry-after parser used by the retry layer."""
+
+    def test_extracts_seconds_from_message(self):
+        from dsagt.knowledge import _extract_retry_after_seconds
+        msg = "Please retry after 60 seconds"
+        assert _extract_retry_after_seconds(msg) == 60.0
+
+    def test_extracts_seconds_with_decimal(self):
+        from dsagt.knowledge import _extract_retry_after_seconds
+        assert _extract_retry_after_seconds("retry after 12.5 seconds") == 12.5
+
+    def test_case_insensitive(self):
+        from dsagt.knowledge import _extract_retry_after_seconds
+        assert _extract_retry_after_seconds("RETRY AFTER 30 SECONDS") == 30.0
+
+    def test_returns_default_when_no_hint(self):
+        from dsagt.knowledge import _extract_retry_after_seconds
+        assert _extract_retry_after_seconds("rate limit", default=42.0) == 42.0
+
+    def test_finds_hint_in_long_message(self):
+        from dsagt.knowledge import _extract_retry_after_seconds
+        # The real lab error nests the hint deep inside a JSON body.
+        msg = (
+            'Openai_likeException - {"error":{"message":'
+            '"AzureException RateLimitError - exceeded quota. '
+            'Please retry after 75 seconds. To increase ..."}}'
+        )
+        assert _extract_retry_after_seconds(msg) == 75.0
+
+
+# ---------------------------------------------------------------------------
+# KnowledgeBase.ingest exclude_patterns
+# ---------------------------------------------------------------------------
+
+class TestIngestExcludePatterns:
+    """The exclude_patterns parameter on ingest() filters out files whose
+    relative path matches any of the supplied glob patterns.  Used by
+    dsagt-setup-kb to skip tests, build artifacts, and private modules
+    when embedding upstream library source for the core knowledge base.
+    """
+
+    @pytest.fixture
+    def kb(self, tmp_path):
+        index_dir = tmp_path / "index"
+        mock_client = MagicMock()
+        mock_client.embed = fake_embed
+        with patch("dsagt.knowledge._make_embedder", return_value=mock_client):
+            kb = KnowledgeBase(index_dir=index_dir)
+            yield kb
+            kb.close()
+
+    @pytest.fixture
+    def repo_layout(self, tmp_path):
+        """Mini repo with a realistic mix of source, tests, examples, and
+        build artifacts."""
+        root = tmp_path / "mylib_repo"
+        root.mkdir()
+
+        # Public source
+        (root / "mylib").mkdir()
+        (root / "mylib" / "__init__.py").write_text('"""Mylib package."""\n')
+        (root / "mylib" / "core.py").write_text('def public_fn():\n    return 1\n')
+        (root / "mylib" / "_internal.py").write_text('def _hidden():\n    return 2\n')
+
+        # Tests in a subdirectory
+        (root / "mylib" / "tests").mkdir()
+        (root / "mylib" / "tests" / "__init__.py").write_text("")
+        (root / "mylib" / "tests" / "test_core.py").write_text(
+            'def test_public_fn():\n    assert True\n'
+        )
+
+        # Top-level tests dir as well
+        (root / "tests").mkdir()
+        (root / "tests" / "test_integration.py").write_text(
+            'def test_smoke():\n    assert True\n'
+        )
+        (root / "tests" / "conftest.py").write_text("import pytest\n")
+
+        # Examples (kept on purpose for the agent)
+        (root / "examples").mkdir()
+        (root / "examples" / "quickstart.py").write_text(
+            'from mylib import public_fn\nprint(public_fn())\n'
+        )
+
+        # Docs
+        (root / "docs").mkdir()
+        (root / "docs" / "guide.md").write_text("# Guide\n\nUse mylib.\n")
+
+        # Build cruft
+        (root / "mylib" / "__pycache__").mkdir()
+        (root / "mylib" / "__pycache__" / "core.cpython-312.pyc").write_text("")
+
+        return root
+
+    def test_no_exclude_keeps_everything(self, kb, repo_layout):
+        result = kb.ingest(
+            repo_layout, collection_name="full",
+            file_types=["py", "md"],
+        )
+        # All py + md files except the .pyc which isn't in file_types.
+        # 8 .py files (mylib/__init__.py, mylib/core.py, mylib/_internal.py,
+        # mylib/tests/__init__.py, mylib/tests/test_core.py,
+        # tests/test_integration.py, tests/conftest.py, examples/quickstart.py)
+        # + 1 .md file = 9 total.
+        assert result["files"] == 9
+
+    def test_exclude_tests_directory(self, kb, repo_layout):
+        """Pattern 'tests' should match the tests segment in any path."""
+        result = kb.ingest(
+            repo_layout, collection_name="no_tests",
+            file_types=["py", "md"],
+            exclude_patterns=["tests"],
+        )
+        # Excludes: mylib/tests/__init__.py, mylib/tests/test_core.py,
+        # tests/test_integration.py, tests/conftest.py = 4 files
+        # Keeps: mylib/__init__.py, mylib/core.py, mylib/_internal.py,
+        # examples/quickstart.py, docs/guide.md = 5 files
+        assert result["files"] == 5
+
+    def test_exclude_test_files_by_basename(self, kb, repo_layout):
+        """Pattern 'test_*.py' matches the basename anywhere in the tree."""
+        result = kb.ingest(
+            repo_layout, collection_name="no_test_files",
+            file_types=["py", "md"],
+            exclude_patterns=["test_*.py"],
+        )
+        # Excludes: mylib/tests/test_core.py, tests/test_integration.py
+        # (the conftest and __init__ in tests/ are kept by this pattern alone)
+        # 9 - 2 = 7 files
+        assert result["files"] == 7
+
+    def test_exclude_private_modules(self, kb, repo_layout):
+        """Pattern '_*.py' excludes private modules.
+
+        Note: _*.py also matches __init__.py because the basename starts
+        with underscore.  This is the documented behavior — callers who
+        want to keep __init__.py should use a more specific pattern.
+        """
+        result = kb.ingest(
+            repo_layout, collection_name="no_private",
+            file_types=["py", "md"],
+            exclude_patterns=["_*.py"],
+        )
+        # Excludes: mylib/_internal.py, mylib/__init__.py,
+        # mylib/tests/__init__.py = 3 files
+        # 9 - 3 = 6 files
+        assert result["files"] == 6
+
+    def test_exclude_pycache_dir(self, kb, repo_layout):
+        """__pycache__ should be excluded by directory-segment match."""
+        # Pre-populate the cache with a parseable .py file so it actually
+        # shows up in the file list when we DON'T filter.
+        (repo_layout / "mylib" / "__pycache__" / "fake.py").write_text("x = 1\n")
+
+        result_unfiltered = kb.ingest(
+            repo_layout, collection_name="with_cache",
+            file_types=["py"],
+        )
+        result_filtered = kb.ingest(
+            repo_layout, collection_name="no_cache",
+            file_types=["py"],
+            exclude_patterns=["__pycache__"],
+        )
+        assert result_filtered["files"] == result_unfiltered["files"] - 1
+
+    def test_combined_default_patterns(self, kb, repo_layout):
+        """The setup_core_kb default set: tests + private + cache."""
+        from dsagt.commands.setup_core_kb import DEFAULT_EXCLUDE_PATTERNS
+
+        result = kb.ingest(
+            repo_layout, collection_name="defaults",
+            file_types=["py", "md"],
+            exclude_patterns=DEFAULT_EXCLUDE_PATTERNS,
+        )
+        # Should keep: mylib/core.py, examples/quickstart.py, docs/guide.md
+        # Should exclude: tests dirs, conftest, test_*.py, _*.py, __init__.py
+        assert result["files"] == 3
+
+    def test_default_patterns_keep_packaging_metadata(self, kb, tmp_path):
+        """pyproject.toml / setup.py / setup.cfg must NOT be excluded by
+        the default set — the agent uses them to install dependencies
+        when registering tools that depend on the library.
+        """
+        from dsagt.commands.setup_core_kb import DEFAULT_EXCLUDE_PATTERNS
+
+        root = tmp_path / "pkg_repo"
+        root.mkdir()
+        (root / "pyproject.toml").write_text(
+            '[project]\nname = "mylib"\nversion = "1.2.3"\n'
+        )
+        (root / "setup.py").write_text(
+            'from setuptools import setup\nsetup(name="mylib")\n'
+        )
+        (root / "setup.cfg").write_text("[metadata]\nname = mylib\n")
+        (root / "mylib").mkdir()
+        (root / "mylib" / "core.py").write_text("def f():\n    return 1\n")
+
+        result = kb.ingest(
+            root, collection_name="pkg_meta",
+            file_types=["py", "toml", "cfg"],
+            exclude_patterns=DEFAULT_EXCLUDE_PATTERNS,
+        )
+        # core.py + pyproject.toml + setup.py + setup.cfg = 4 files
+        # (mylib has no __init__.py in this fixture)
+        assert result["files"] == 4
+
+
+class TestCollectFilesDirectly:
+    """Unit tests for KnowledgeBase._collect_files extracted from ingest().
+
+    The whole point of pulling this helper out of ingest() was to make
+    file-discovery and exclude-pattern logic testable WITHOUT spinning up
+    an embedder, an index, or a chunker.  These tests exercise the helper
+    directly: no mocked _make_embedder context, no add_entries call, no
+    cleanup of cached collections.  If a regression in the file-walk or
+    fnmatch logic ever lands, these tests fail in milliseconds and point
+    at the exact problem instead of being buried under ingest() setup.
+    """
+
+    @pytest.fixture
+    def kb(self, tmp_path):
+        # Build a minimal KB.  We don't call any method that would touch
+        # the embedder, so the embedder kwargs don't matter.
+        return KnowledgeBase(
+            index_dir=tmp_path / "index",
+            default_embedder="local",
+            embedder_kwargs={"model": "unused"},
+        )
+
+    @pytest.fixture
+    def repo(self, tmp_path):
+        """Tiny repo with public source, tests, examples, and a __pycache__."""
+        root = tmp_path / "minirepo"
+        root.mkdir()
+        (root / "core.py").write_text("def f(): return 1\n")
+        (root / "_priv.py").write_text("def _g(): return 2\n")
+        (root / "tests").mkdir()
+        (root / "tests" / "test_core.py").write_text("def test_f(): assert True\n")
+        (root / "examples").mkdir()
+        (root / "examples" / "demo.py").write_text("from minirepo import f\n")
+        (root / "__pycache__").mkdir()
+        (root / "__pycache__" / "core.cpython-312.pyc").write_text("binary")
+        (root / "README.md").write_text("# Mini\n")
+        return root
+
+    def test_no_exclude_returns_all_matching_extensions(self, kb, repo):
+        files = kb._collect_files(repo, ["py", "md"], exclude_patterns=None)
+        names = sorted(f.name for f in files)
+        # 4 .py + 1 .md (the .pyc is not in file_types)
+        assert names == ["README.md", "_priv.py", "core.py", "demo.py", "test_core.py"]
+
+    def test_exclude_directory_segment(self, kb, repo):
+        """Pattern 'tests' must match the tests/ directory anywhere."""
+        files = kb._collect_files(repo, ["py"], exclude_patterns=["tests"])
+        names = sorted(f.name for f in files)
+        assert "test_core.py" not in names
+        assert "core.py" in names
+
+    def test_exclude_basename_glob(self, kb, repo):
+        """Pattern '_*.py' must match private modules by basename."""
+        files = kb._collect_files(repo, ["py"], exclude_patterns=["_*.py"])
+        names = sorted(f.name for f in files)
+        assert "_priv.py" not in names
+        assert "core.py" in names
+
+    def test_empty_pattern_list_is_noop(self, kb, repo):
+        """An empty exclude list returns the same files as None."""
+        files_none = kb._collect_files(repo, ["py"], exclude_patterns=None)
+        files_empty = kb._collect_files(repo, ["py"], exclude_patterns=[])
+        assert sorted(files_none) == sorted(files_empty)
+
+    def test_returns_paths_not_strings(self, kb, repo):
+        """Result is list[Path], not list[str] — _chunk_file expects Path."""
+        files = kb._collect_files(repo, ["py"], exclude_patterns=None)
+        assert all(isinstance(f, Path) for f in files)
 
 
 # ---------------------------------------------------------------------------

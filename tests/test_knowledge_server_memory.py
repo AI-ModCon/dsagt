@@ -57,7 +57,7 @@ def mock_kb(tmp_path):
 
 @pytest.fixture
 def server(mock_kb, tmp_path):
-    return create_knowledge_server(mock_kb, use_rerank=False, runtime_dir=tmp_path)
+    return create_knowledge_server(mock_kb, runtime_dir=tmp_path)
 
 
 @pytest.fixture
