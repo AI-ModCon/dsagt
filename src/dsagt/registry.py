@@ -80,7 +80,98 @@ def _parse_frontmatter(path: Path) -> dict:
     parts = text.split("---", 2)
     if len(parts) < 3:
         return {}
-    return yaml.safe_load(parts[1]) or {}
+    try:
+        return yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML frontmatter in {path}: {e}") from e
+
+
+# ---------------------------------------------------------------------------
+# CLI rendering
+# ---------------------------------------------------------------------------
+#
+# Each parameter in a tool spec may declare a `cli` field that pins how its
+# value should be placed on the command line.  Supported forms:
+#
+#   positional         — first positional slot
+#   positional:N       — Nth positional slot (0-based)
+#   --name             — `--name <value>` (spaced long flag)
+#   -n                 — `-n <value>`    (spaced short flag)
+#   --name=            — `--name=<value>` (glued long flag)
+#   -n=                — `-n=<value>`    (glued short flag)
+#   key=               — `key=<value>`   (dd-style, no dashes)
+#
+# A missing `cli` field defaults to `--<param_name>` (the convention the
+# agent was guessing before this field existed; avoids breaking old specs).
+# Parameters with `type: boolean` render as a bare flag when truthy and emit
+# nothing when falsy; positional booleans are not supported.
+
+def _parse_cli(cli: str, param_name: str) -> dict:
+    """Classify a cli string into a rendering descriptor. Fails fast on invalid input."""
+    if cli == "positional":
+        return {"kind": "positional", "position": 0}
+    if cli.startswith("positional:"):
+        try:
+            return {"kind": "positional", "position": int(cli.split(":", 1)[1])}
+        except ValueError:
+            raise ValueError(
+                f"Parameter {param_name!r}: cli position must be an integer, got {cli!r}"
+            )
+    glued = cli.endswith("=")
+    body = cli[:-1] if glued else cli
+    if body.startswith("-"):
+        return {"kind": "flag", "flag": body, "glued": glued}
+    if glued:
+        # No dashes + trailing `=` → dd-style key=value
+        return {"kind": "keyvalue", "prefix": cli}
+    raise ValueError(
+        f"Parameter {param_name!r}: invalid cli value {cli!r}. "
+        f"Expected 'positional[:N]', '--name[=]', '-n[=]', or 'key='."
+    )
+
+
+def render_arguments(parameters: dict, values: dict) -> list[str]:
+    """Render argv elements for *values* per each parameter's ``cli`` spec.
+
+    Returns only the parameter portion — caller prepends the executable.
+    Positional args are emitted in declared position order, followed by all
+    named/keyvalue args in declaration order.
+    """
+    positionals: list[tuple[int, str]] = []
+    named: list[str] = []
+
+    for name, param in parameters.items():
+        cli = param.get("cli", f"--{name}")
+        descriptor = _parse_cli(cli, name)
+
+        value = values.get(name, param.get("default"))
+        if value is None:
+            if param.get("required"):
+                raise ValueError(f"Missing required parameter: {name!r}")
+            continue
+
+        is_bool = param.get("type") == "boolean"
+        if is_bool:
+            if descriptor["kind"] != "flag":
+                raise ValueError(
+                    f"Parameter {name!r}: boolean parameters must use a flag cli spec"
+                )
+            if value:
+                named.append(descriptor["flag"])
+            continue
+
+        if descriptor["kind"] == "positional":
+            positionals.append((descriptor["position"], str(value)))
+        elif descriptor["kind"] == "flag":
+            if descriptor["glued"]:
+                named.append(f"{descriptor['flag']}={value}")
+            else:
+                named.extend([descriptor["flag"], str(value)])
+        else:  # keyvalue
+            named.append(f"{descriptor['prefix']}{value}")
+
+    positionals.sort(key=lambda item: item[0])
+    return [v for _, v in positionals] + named
 
 
 # ---------------------------------------------------------------------------

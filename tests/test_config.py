@@ -12,7 +12,7 @@ import yaml
 
 from dsagt.session import (
     _deep_merge,
-    _resolve_env_vars,
+    resolve_env_vars,
     default_config_content,
     load_config,
     project_dir,
@@ -61,20 +61,20 @@ class TestResolveEnvVars:
 
     def test_resolves_set_var(self):
         with patch.dict(os.environ, {"MY_KEY": "secret"}):
-            assert _resolve_env_vars("${MY_KEY}") == "secret"
+            assert resolve_env_vars("${MY_KEY}") == "secret"
 
     def test_unset_var_left_as_is(self):
         os.environ.pop("NOPE", None)
-        assert _resolve_env_vars("${NOPE}") == "${NOPE}"
+        assert resolve_env_vars("${NOPE}") == "${NOPE}"
 
     def test_nested_dicts(self):
         with patch.dict(os.environ, {"K": "v"}):
-            result = _resolve_env_vars({"a": {"b": "${K}"}})
+            result = resolve_env_vars({"a": {"b": "${K}"}})
             assert result == {"a": {"b": "v"}}
 
     def test_non_string_passthrough(self):
-        assert _resolve_env_vars(42) == 42
-        assert _resolve_env_vars(True) is True
+        assert resolve_env_vars(42) == 42
+        assert resolve_env_vars(True) is True
 
 
 # ---------------------------------------------------------------------------
@@ -200,10 +200,11 @@ class TestInitProject:
         assert (pdir / "dsagt_config.yaml").exists()
         assert (pdir / "trace_archive").is_dir()
         assert (pdir / "mlflow").is_dir()
-        assert (pdir / "tools").is_dir()
-        assert (pdir / "tools" / "code").is_dir()
         assert (pdir / "skills").is_dir()
         assert (pdir / "kb_index").is_dir()
+        # `tools/` is intentionally NOT created by init_project — ToolRegistry
+        # creates it on first server startup so bundled tools get copied in.
+        assert not (pdir / "tools").exists()
 
     def test_config_is_valid(self):
         init_project("myproj", "claude-code")
@@ -356,6 +357,7 @@ class TestAgentEnv:
             "agent": agent,
             "project_dir": project_dir,
             "proxy": {"port": 4000},
+            "llm": {"model": "test-model"},
             "embedding": {"api_key": "test-key"},
         }
 
@@ -396,7 +398,11 @@ class TestAgentCommand:
 
     def test_goose(self):
         from dsagt.agents import agent_command
-        assert agent_command({"agent": "goose"}) == ["goose", "session"]
+        assert agent_command({"agent": "goose"}) == [
+            "goose", "session",
+            "--with-extension", "uv run dsagt-registry-server",
+            "--with-extension", "uv run dsagt-knowledge-server",
+        ]
 
     def test_roo(self):
         from dsagt.agents import agent_command
@@ -451,6 +457,7 @@ class TestConfigFlow:
             "agent": "claude-code",
             "project_dir": "/proj",
             "proxy": {"port": 4000},
+            "llm": {"model": "test-model"},
             "embedding": {"api_key": "k", "base_url": "https://api.test/v1", "model": "m"},
         }
         env = agent_env(config)

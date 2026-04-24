@@ -1,10 +1,10 @@
 """
-dsagt-proxy: Start LiteLLM proxy with OTel tracing and DSAgt tool records.
+dsagt-proxy: Start LiteLLM proxy with MLflow tracing and DSAgt tool records.
 
 Usage:
     dsagt-proxy
     dsagt-proxy --port 4000 --records-dir runtime/trace_archive
-    dsagt-proxy --otel-endpoint http://localhost:5000
+    dsagt-proxy --mlflow-url http://localhost:5001
 """
 
 import argparse
@@ -20,46 +20,54 @@ DEFAULT_PORT = 4000
 DEFAULT_RECORDS_DIR = "runtime/trace_archive"
 
 
-def _generate_config(model: str, otel_endpoint: str | None = None) -> str:
-    """Generate a LiteLLM proxy config YAML."""
-    callbacks = []
-    env_vars = ""
+def _generate_config(model: str, base_url: str) -> str:
+    """Generate a LiteLLM proxy config YAML.
 
-    if otel_endpoint:
-        callbacks.append("otel")
-        env_vars = f"""
-environment_variables:
-  OTEL_EXPORTER_OTLP_ENDPOINT: "{otel_endpoint}"
-  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
-  OTEL_SERVICE_NAME: "dsagt-proxy"
-"""
+    Routes the configured model through LiteLLM's openai-compatible provider
+    pointed at *base_url*.  This lets the proxy forward to OpenAI-compatible
+    gateways (e.g. PNNL's ai-incubator-api) that serve Anthropic-named
+    models.  LiteLLM normalizes incoming Anthropic- and OpenAI-format
+    requests, so both Claude Code and Goose work against the same config.
 
-    callbacks_line = f"  callbacks: {callbacks}" if callbacks else ""
+    Callbacks (DSAGTCallback for provenance, MlflowLogger for LLM traces)
+    are registered in Python *before* ``run_server`` rather than via YAML
+    because ``run_server``'s CLI path only calls ``ProxyConfig.get_config``
+    (which just parses the YAML) — not ``load_config`` (which would apply
+    ``litellm_settings.success_callback``).  Direct registration sidesteps
+    that gap and works regardless of LiteLLM's config-loading internals.
+
+    The wildcard fallback that catches agent sidechannel calls comes from
+    ``dsagt.sidechannel`` — see that module for why and how.
+    """
+    from dsagt.sidechannel import WILDCARD_ROUTE_YAML
 
     return f"""\
 model_list:
   - model_name: {model}
     litellm_params:
-      model: anthropic/{model}
+      model: openai/{model}
+      api_base: {base_url}
       api_key: os.environ/LLM_API_KEY
-
+{WILDCARD_ROUTE_YAML}\
 litellm_settings:
   drop_params: true
-{callbacks_line}
-{env_vars}"""
+"""
 
 
 def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(
         prog="dsagt-proxy",
-        description="Start LiteLLM proxy with OTel tracing and DSAGT tool records.",
+        description="Start LiteLLM proxy with MLflow tracing and DSAGT tool records.",
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--records-dir", default=DEFAULT_RECORDS_DIR)
     parser.add_argument("--session", default=None)
     parser.add_argument("--config", default=None, help="Path to existing LiteLLM config YAML")
     parser.add_argument("--model", default="claude-sonnet-4-20250514")
-    parser.add_argument("--otel-endpoint", default=None)
+    parser.add_argument("--base-url", required=True,
+        help="Upstream OpenAI-compatible endpoint (from dsagt_config.yaml llm.base_url)")
+    parser.add_argument("--mlflow-url", default=None,
+        help="MLflow tracking URL (enables LiteLLM → MLflow trace autologging)")
     parser.add_argument("--verbose", action="store_true")
 
     args = parser.parse_args(argv)
@@ -76,6 +84,15 @@ def main(argv: list[str] | None = None):
 
     import litellm
 
+    # Claude Code sends native Anthropic-format requests (POST /v1/messages).
+    # By default LiteLLM translates those to the OpenAI Responses API
+    # (/responses) for openai-compatible upstreams, but most project
+    # gateways (e.g. PNNL's ai-incubator-api) only expose /chat/completions.
+    # This flag opts out of the Responses-API path so Anthropic requests get
+    # translated to /chat/completions, which every openai-compatible gateway
+    # supports.  Harmless for goose (which already talks /chat/completions).
+    litellm.use_chat_completions_url_for_anthropic_messages = True
+
     from dsagt.provenance import create_callback
 
     callback = create_callback(
@@ -86,15 +103,43 @@ def main(argv: list[str] | None = None):
 
     records_path = Path(args.records_dir).resolve()
     logger.info("DSAGT callback registered → tool records at %s", records_path)
-    if args.otel_endpoint:
-        logger.info("OTel export enabled → %s", args.otel_endpoint)
+
+    if args.mlflow_url:
+        import mlflow
+        from dsagt.provenance import install_mlflow_logger_with_session_tag
+
+        mlflow.set_tracking_uri(args.mlflow_url)
+        # Project name is already the store boundary (each project has its own
+        # mlflow/mlflow.db); the experiment is just a container inside that
+        # store, so a single stable name keeps all sessions comparable.
+        mlflow.set_experiment(os.environ.get("DSAGT_PROJECT", "dsagt"))
+
+        # Pre-seed LiteLLM's logger cache with our MlflowLogger subclass so
+        # the string "mlflow" in success_callback resolves to it (subclass
+        # passes the isinstance check LiteLLM uses to dedupe loggers).  This
+        # is what gets `mlflow.trace.session` stamped onto LLM-completion
+        # traces — see install_mlflow_logger_with_session_tag's docstring.
+        install_mlflow_logger_with_session_tag()
+
+        # Register the built-in "mlflow" callback by NAME, not instance.
+        # LiteLLM's async dispatch (what the proxy uses) resolves string names
+        # to logger classes via an internal registry at each call; passing an
+        # MlflowLogger *instance* skips that resolution step and the callback
+        # gets missed on the async path.
+        if "mlflow" not in (litellm.success_callback or []):
+            litellm.success_callback = (litellm.success_callback or []) + ["mlflow"]
+        if "mlflow" not in (litellm.failure_callback or []):
+            litellm.failure_callback = (litellm.failure_callback or []) + ["mlflow"]
+
+        logger.info("MLflow tracing enabled → %s (experiment=%s)",
+                    args.mlflow_url, os.environ.get("DSAGT_PROJECT", "dsagt"))
     else:
-        logger.info("OTel export disabled (use --otel-endpoint to enable)")
+        logger.info("MLflow tracing disabled (use --mlflow-url to enable)")
 
     if args.config:
         config_path = args.config
     else:
-        config_content = _generate_config(args.model, args.otel_endpoint)
+        config_content = _generate_config(args.model, args.base_url)
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".yaml", prefix="dsagt_litellm_", delete=False,
         )

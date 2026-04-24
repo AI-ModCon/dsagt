@@ -23,7 +23,13 @@ from dsagt.observability import child_span, init_tracing, obs, traced
 
 @pytest.fixture(autouse=True)
 def _reset_tracing(monkeypatch):
-    """Reset module state and install an in-memory exporter for each test."""
+    """Reset module state and install an in-memory exporter for each test.
+
+    We bypass ``init_tracing`` (no MLflow / OTLP endpoint to talk to in tests)
+    and install our own TracerProvider with an InMemorySpanExporter directly.
+    The session-stamp strategy is bound to the OTel one so ``_attach_session_id``
+    behaves the way production OTel callers would.
+    """
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -31,20 +37,15 @@ def _reset_tracing(monkeypatch):
         InMemorySpanExporter,
     )
 
-    # Reset module-level state.
     monkeypatch.setattr(obs_module, "_initialized", False)
     monkeypatch.setattr(obs_module, "_tracer_provider", None)
     monkeypatch.setattr(obs_module, "_default_session_id", None)
+    monkeypatch.setattr(obs_module, "_metadata_stamper", obs_module._stamp_metadata_otel)
+    monkeypatch.setattr(obs_module, "_llm_context_factory", obs_module._noop_llm_context)
 
-    # Install a fresh provider with an in-memory exporter so tests can read
-    # the spans this process emits. We bypass init_tracing here because we
-    # don't want a real OTLP exporter; we still want init_tracing to *think*
-    # it ran so that obs.set / decorator wiring behaves identically to prod.
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    # OTel guards set_tracer_provider with a one-shot Once flag. Reset both
-    # the flag and the cached provider so each test gets a fresh state.
     from opentelemetry.util._once import Once
     trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
     trace._TRACER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
@@ -56,13 +57,46 @@ def _reset_tracing(monkeypatch):
     exporter.clear()
 
 
-def test_init_tracing_no_endpoint_is_noop(monkeypatch):
-    """Without an endpoint, init_tracing must not crash and must not export."""
+@pytest.mark.parametrize("span_name,expected", [
+    ("tool.execute", "tool"),
+    ("kb.search", "knowledge"),
+    ("kb.embed", "knowledge"),
+    ("registry.save_tool_spec", "registry"),
+    ("litellm-acompletion", None),  # LLM traces use _DSAGTMlflowLogger, not this
+    ("", None),
+    (None, None),
+])
+def test_derive_source_from_span_name(span_name, expected):
+    assert obs_module._derive_source(span_name) == expected
+
+
+def test_traced_stamps_source_derived_from_span_name(_reset_tracing):
+    """Every traced function should emit a span tagged with dsagt.source
+    derived from its name prefix — so dsagt info can bucket them without
+    a decorator at every call site."""
+    exporter = _reset_tracing
+
+    @traced("tool.execute")
+    def fake_tool():
+        return None
+    fake_tool()
+
+    [span] = exporter.get_finished_spans()
+    assert span.attributes.get("dsagt.source") == "tool"
+
+
+def test_init_tracing_no_endpoint_raises(monkeypatch):
+    """init_tracing must fail loudly when no backend is configured — silent
+    no-op behavior would let a misconfigured subprocess run with tracing
+    silently dropped, which is exactly the kind of silent-fallback bug
+    DSAGT's design principles prohibit."""
     monkeypatch.setattr(obs_module, "_initialized", False)
+    monkeypatch.setattr(obs_module, "_metadata_stamper", None)
+    monkeypatch.setattr(obs_module, "_llm_context_factory", None)
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
-    init_tracing("test-service")
-    assert obs_module._initialized is True
-    assert obs_module._tracer_provider is None
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    with pytest.raises(RuntimeError, match="no observability backend"):
+        init_tracing("test-service")
 
 
 def test_traced_emits_span_with_args(_reset_tracing):
@@ -169,7 +203,9 @@ def test_session_id_attached(_reset_tracing, monkeypatch):
 
     f()
     span = exporter.get_finished_spans()[0]
-    assert span.attributes["session.id"] == "proj-xyz"
+    # The metadata stamper writes the MLflow-reserved key on both backends
+    # (MLflow: trace_metadata; OTel: span attribute with the same name).
+    assert span.attributes["mlflow.trace.session"] == "proj-xyz"
 
 
 def test_init_tracing_double_call_only_updates_session(monkeypatch):
@@ -487,9 +523,7 @@ def test_configure_litellm_retries_sets_module_globals(monkeypatch):
     assert litellm.request_timeout == 42.0
 
 
-def test_install_litellm_otel_callback_sets_retries_even_without_tracing(
-    monkeypatch,
-):
+def test_configure_litellm_retries_works_without_tracing(monkeypatch):
     """The retry knobs must be applied even when tracing is not initialized.
 
     This is the dsagt-setup-kb path: the long-running embed job that has to
@@ -497,13 +531,13 @@ def test_install_litellm_otel_callback_sets_retries_even_without_tracing(
     """
     import litellm
 
-    from dsagt.observability import install_litellm_otel_callback
+    from dsagt.observability import configure_litellm_retries
 
     monkeypatch.setattr(obs_module, "_initialized", False)
     monkeypatch.setattr(obs_module, "_tracer_provider", None)
     monkeypatch.setattr(litellm, "num_retries", None, raising=False)
 
-    install_litellm_otel_callback(num_retries=3, request_timeout=120.0)
+    configure_litellm_retries(num_retries=3, request_timeout=120.0)
 
     assert litellm.num_retries == 3
     assert litellm.request_timeout == 120.0

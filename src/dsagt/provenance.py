@@ -128,6 +128,22 @@ def run_and_record(
         if return_code != 0:
             obs.event("tool_failed", exit_code=return_code)
 
+        # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
+        # ~4KB per side so big tool results don't bloat the trace store
+        # (the full payload is on disk in trace_archive/<record_id>.json).
+        obs.set_inputs({
+            "tool": tool_name,
+            "command": list(command),
+            "input_files": input_files or [],
+        })
+        obs.set_outputs({
+            "exit_code": return_code,
+            "duration_ms": duration_ms,
+            "stdout": truncate(stdout, 4096),
+            "stderr": truncate(stderr, 4096) if stderr else "",
+            "output_files": output_files or [],
+        })
+
     record = {
         "record_id": record_id,
         "tool_name": tool_name,
@@ -812,12 +828,15 @@ def create_callback(records_dir: str | Path, session_id: str | None = None):
             if injection:
                 messages.insert(0, {"role": "system", "content": injection})
                 logger.info("Injected suggestion prompt (%d chars)", len(injection))
+            _inject_cache_breakpoints(messages, kwargs)
 
         def log_success_event(self, kwargs, response_obj, start_time, end_time):
             _handle_success(store, kwargs, response_obj, start_time, end_time)
+            _tag_mlflow_session(session_id)
 
         async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
             _handle_success(store, kwargs, response_obj, start_time, end_time)
+            _tag_mlflow_session(session_id)
 
         def log_failure_event(self, kwargs, response_obj, start_time, end_time):
             logger.warning("LLM call failed: model=%s", kwargs.get("model"))
@@ -828,9 +847,167 @@ def create_callback(records_dir: str | Path, session_id: str | None = None):
     return DSAGTCallback()
 
 
+# Marker LiteLLM forwards through to Anthropic-family providers (Anthropic
+# direct, Bedrock-Claude) as their `cache_control` field on a content block
+# or tool definition.  Providers without prompt caching (current OpenAI
+# automatic caching ignores explicit markers, Cohere/Mistral/etc just drop
+# them) treat the field as a no-op, so this is safe to set unconditionally.
+_CACHE_MARKER = {"type": "ephemeral"}
+
+
+def _inject_cache_breakpoints(messages: list, kwargs: dict) -> None:
+    """Mark the largest stable request prefix as cacheable.
+
+    Anthropic prompt caching keys on the prefix UP TO each marked block, so
+    one marker at the end of the tools array caches "system + tools", and a
+    second on the system message itself ensures the system block is cached
+    even on requests with no tools.  Subsequent turns within the 5-minute
+    TTL pay 10% on the cached prefix instead of 100%.
+
+    Mutates ``messages`` and ``kwargs`` in place — the proxy reads the same
+    objects on its way to the upstream call.
+    """
+    # 1) Tools: stamp the last tool definition.  In LiteLLM's OpenAI-shape
+    #    the tool dict carries cache_control as a top-level key and the
+    #    Anthropic translator picks it up.
+    tools = kwargs.get("tools") or []
+    if tools and isinstance(tools[-1], dict):
+        tools[-1]["cache_control"] = _CACHE_MARKER
+
+    # 2) System message: stamp the last text block.  For string content we
+    #    promote to block format because cache_control lives on the block,
+    #    not the message itself.
+    for msg in messages:
+        if msg.get("role") != "system":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = [{
+                "type": "text",
+                "text": content,
+                "cache_control": _CACHE_MARKER,
+            }]
+        elif isinstance(content, list) and content:
+            last_block = content[-1]
+            if isinstance(last_block, dict):
+                last_block["cache_control"] = _CACHE_MARKER
+        break
+
+
+def install_mlflow_logger_with_session_tag() -> None:
+    """Inject a MlflowLogger subclass that stamps ``mlflow.trace.session``.
+
+    Why a subclass instead of post-hoc tagging from another callback:
+    LiteLLM's MlflowLogger does the entire trace lifecycle (start_trace →
+    set_attributes → end_trace) inside one ``_handle_success`` call.  By
+    the time any sibling success-callback fires, the trace is already
+    exported and ``mlflow.update_current_trace`` has nothing to update.
+    Subclassing lets us slot the metadata write between trace creation and
+    trace export, where the in-memory trace still exists and is mutable.
+
+    Why register via LiteLLM's ``_in_memory_loggers`` cache: when the
+    proxy resolves the string ``"mlflow"`` from ``success_callback``, it
+    iterates ``_in_memory_loggers`` looking for any ``isinstance(_,
+    MlflowLogger)`` and returns it instead of constructing a fresh one
+    (litellm_logging.py ~line 4111).  A subclass passes the isinstance
+    check, so pre-seeding our subclass means the existing string-based
+    registration in ``success_callback``/``failure_callback`` automatically
+    routes through us — no sync-vs-async dispatch quirks to worry about.
+
+    Idempotent: safe to call more than once.
+    """
+    from litellm.integrations.mlflow import MlflowLogger
+    from litellm.litellm_core_utils import litellm_logging as _ll
+
+    from dsagt.observability import _stamp_metadata_on_trace
+
+    class _DSAGTMlflowLogger(MlflowLogger):
+        def _start_span_or_trace(self, kwargs, start_time):
+            span = super()._start_span_or_trace(kwargs, start_time)
+            # span.request_id is MLflow's trace_id; the trace lives in
+            # InMemoryTraceManager until the parent _handle_success calls
+            # _end_span_or_trace, so we have a window here to mutate
+            # trace_metadata before export.
+            #
+            # Agent-turn LLM calls land here (proxy path).  Stamp:
+            #   mlflow.trace.session — session grouping in the UI
+            #   dsagt.source=agent   — distinguishes from extraction/embedding
+            #   dsagt.agent          — which platform (goose, claude-code, ...)
+            # Non-agent LLM calls (memory extraction, embeddings) go through
+            # llm_source(...) decorators and never touch this subclass, so
+            # hard-coding source="agent" here is safe.
+            if span is None:
+                return span
+            metadata: dict[str, str] = {"dsagt.source": "agent"}
+            if session_id := os.environ.get("DSAGT_SESSION_ID"):
+                metadata["mlflow.trace.session"] = session_id
+            if agent := os.environ.get("DSAGT_AGENT"):
+                metadata["dsagt.agent"] = agent
+            _stamp_metadata_on_trace(span.request_id, metadata)
+            return span
+
+    # Already installed? Leave it.
+    for cb in _ll._in_memory_loggers:
+        if type(cb).__name__ == "_DSAGTMlflowLogger":
+            return
+    # Drop any vanilla MlflowLogger that beat us to the cache.
+    _ll._in_memory_loggers[:] = [
+        cb for cb in _ll._in_memory_loggers
+        if not (isinstance(cb, MlflowLogger) and type(cb).__name__ != "_DSAGTMlflowLogger")
+    ]
+    _ll._in_memory_loggers.append(_DSAGTMlflowLogger())
+
+
+def _tag_mlflow_session(session_id: str | None) -> None:
+    """Stamp the current MLflow trace with the reserved session key.
+
+    Runs per-LLM-call because ``mlflow.litellm.autolog`` creates one trace per
+    invocation; ``update_current_trace`` only applies to the active trace, so
+    tagging has to happen while that trace is still open (i.e. from the
+    LiteLLM success callback, before the autolog span closes).
+
+    Silently no-ops if MLflow isn't installed or no trace is active — the
+    proxy still works without MLflow.
+    """
+    if not session_id:
+        return
+    try:
+        import mlflow
+        mlflow.update_current_trace(
+            metadata={"mlflow.trace.session": session_id},
+        )
+    except Exception as e:
+        logger.debug("mlflow.trace.session tag failed: %s", e)
+
+
 def _handle_success(store: ToolRecordStore, kwargs, response_obj, start_time, end_time):
+    from dsagt.sidechannel import record as _record_sidechannel
+
     messages = kwargs.get("messages", [])
     response_data = _response_to_dict(response_obj)
     store.log_exchange(kwargs, response_data)
     store.match_tool_results(messages)
     store.track_tool_uses(response_data)
+    _log_cache_usage(response_data)
+    _record_sidechannel(store.records_dir, kwargs)
+
+
+def _log_cache_usage(response_data: dict) -> None:
+    """Emit a one-line summary of prompt-cache hits/misses per completion.
+
+    Anthropic-family responses carry ``cache_creation_input_tokens`` and
+    ``cache_read_input_tokens`` under ``usage``; providers without caching
+    omit both fields (log line prints zeros and the user knows the marker
+    was dropped).  Cheap to leave on — one logger.info per LLM call.
+    """
+    usage = response_data.get("usage") or {}
+    if not usage:
+        return
+    prompt = usage.get("prompt_tokens", 0)
+    completion = usage.get("completion_tokens", 0)
+    cache_read = usage.get("cache_read_input_tokens", 0) or 0
+    cache_write = usage.get("cache_creation_input_tokens", 0) or 0
+    logger.info(
+        "tokens: prompt=%d completion=%d  cache: read=%d write=%d",
+        prompt, completion, cache_read, cache_write,
+    )

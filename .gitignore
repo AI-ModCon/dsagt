@@ -147,4 +147,3 @@ cline_mcp.json
 *.bak
 *.swp
 .*.swp
-tests/test_site_config.yaml

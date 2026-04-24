@@ -436,6 +436,16 @@ def create_registry_server(
                                             "required": {"type": "boolean"},
                                             "description": {"type": "string"},
                                             "default": {"description": "Default value"},
+                                            "cli": {
+                                                "type": "string",
+                                                "description": (
+                                                    "How to render this parameter on the command line: "
+                                                    "'positional[:N]' for positional args, '--name' or '-n' "
+                                                    "for spaced flags, '--name=' or '-n=' for glued flags, "
+                                                    "'key=' for dd-style key=value. Defaults to '--<param_name>' "
+                                                    "if omitted."
+                                                ),
+                                            },
                                         },
                                         "required": ["type", "description"],
                                     },
@@ -554,13 +564,14 @@ def main():
     log.info("Server starting — log file: %s", log_file)
 
     config_path = project_dir / "dsagt_config.yaml"
-    config = yaml.safe_load(config_path.read_text())
+    from dsagt.session import resolve_env_vars
+    config = resolve_env_vars(yaml.safe_load(config_path.read_text()))
 
     emb_config = config["embedding"]
 
-    from dsagt.observability import init_tracing, install_litellm_otel_callback
-    init_tracing("dsagt-registry-server", session_id=config["project"])
-    install_litellm_otel_callback()
+    from dsagt.observability import init_tracing, configure_litellm_retries
+    init_tracing("dsagt-registry-server")  # session_id picked up from DSAGT_SESSION_ID env
+    configure_litellm_retries()
 
     # The KB is optional for the registry server — most tools (save_tool_spec,
     # get_registry, read_file, run_command, etc.) work without it.  Only

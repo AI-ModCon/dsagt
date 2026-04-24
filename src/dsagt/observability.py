@@ -1,42 +1,37 @@
 """
-DSAgt observability — OpenTelemetry tracing wired to MLflow.
+DSAgt observability — span emission to MLflow or any OTel-compatible backend.
 
-This module is the *only* place in DSAgt that imports OpenTelemetry. Business
-modules (knowledge.py, provenance.py, registry_server.py, run_tool.py) import
-the small public surface defined here and remain otel-agnostic.
+Business modules (knowledge.py, provenance.py, registry_server.py, run_tool.py)
+import the small public surface defined here and remain backend-agnostic.
+``open_span()`` dispatches to either ``mlflow.start_span`` or
+``opentelemetry.trace.get_tracer().start_as_current_span`` based on which
+endpoint ``init_tracing`` was given.  Both return span objects with the same
+OTel-compatible interface (``set_attribute``, ``add_event``, ``record_exception``,
+``set_status``), so the rest of the module is one code path.
 
 Public surface
 --------------
-init_tracing(service_name, otel_endpoint=None, session_id=None)
-    Configure the SDK once per process. No-op if no endpoint is set, so unit
-    tests and offline use are unaffected.
+init_tracing(service_name, *, mlflow_url=None, otel_endpoint=None, session_id=None)
+    Configure the backend once per process.  MLflow is preferred when both
+    endpoints are available.  No-op if neither is configured.
 
 traced(span_name, *, capture=(), extract_return=None)
     Decorator. Opens a span around a function call, captures named arguments
     and (optionally) return-value-derived attributes, records exceptions, and
     sets duration_ms.
 
+child_span(name, **attrs)
+    Context manager for nested spans inside a ``@traced`` method.
+
 obs
-    Process-wide proxy for the *current* span. ``obs.set("hits", 5)`` is a
+    Process-wide proxy for the *current* span.  ``obs.set("hits", 5)`` is a
     no-op when no span is active, so business code can annotate without
     branching on whether tracing is on.
-
-The typed span helpers (kb_search_span, kb_embed_span, etc.) live in this
-module too — they will be added in Stage 1 alongside the call sites that use
-them.
-
-Design notes
-------------
-* The OTLP endpoint is the same one MLflow's tracing server exposes for the
-  LiteLLM proxy. We don't run a separate collector.
-* OTel exporters are registered with an ``atexit`` shutdown hook so that
-  short-lived commands (e.g. ``dsagt-setup-kb``) flush spans before exit.
-* If init_tracing has never been called, ``get_tracer`` returns the OTel
-  no-op tracer and every helper short-circuits cleanly.
 """
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import functools
 import inspect
@@ -70,50 +65,120 @@ logger = logging.getLogger(__name__)
 _initialized = False
 _tracer_provider = None
 _default_session_id: str | None = None
+# Strategy pointers bound at init_tracing time.  Both exist to keep
+# backend-specific behavior out of call sites:
+#
+# _metadata_stamper(dict)
+#   Write key/value metadata to the currently-active trace.  MLflow: goes
+#   to trace_metadata via InMemoryTraceManager (queryable in the UI).
+#   OTel: goes to active span attributes (queryable in Jaeger/Tempo).
+#
+# _llm_context_factory(dict) → context manager
+#   Tag every trace created inside the returned context.  MLflow uses
+#   mlflow.tracing.context which stamps at trace-creation time.  OTel
+#   has no direct analog and no-ops — OTel backend would need baggage
+#   propagation wired in if source tagging becomes concrete there.
+_metadata_stamper: "Callable[[dict], None] | None" = None
+_llm_context_factory: "Callable[[dict], Any] | None" = None
 
 
 def init_tracing(
     service_name: str,
+    mlflow_url: str | None = None,
     otel_endpoint: str | None = None,
     session_id: str | None = None,
 ) -> None:
-    """Configure the OTel SDK for this process.
+    """Install a tracer provider and bind the session-stamping strategy.
 
-    Parameters
-    ----------
-    service_name
-        Name reported in span ``service.name``. Pick something meaningful per
-        process: ``dsagt-knowledge-server``, ``dsagt-run``, etc.
-    otel_endpoint
-        OTLP HTTP base URL (e.g. ``http://localhost:5001``). Spans are POSTed
-        to ``<endpoint>/v1/traces``. Falls back to ``OTEL_EXPORTER_OTLP_ENDPOINT``
-        if not provided. If neither is set, tracing is silently disabled.
-    session_id
-        Optional DSAgt session id. Attached as the ``session.id`` attribute to
-        every span emitted from this process so siblings across MCP servers
-        can be correlated even without true hierarchical traces.
+    Picks one of two provider flavors:
+
+    * **MLflow** — ``mlflow_url`` arg or ``MLFLOW_TRACKING_URI`` env var.
+      MLflow's own ``TracerProvider`` is installed as the OTel global, so
+      every ``trace.get_tracer(...)`` call routes spans into MLflow's store.
+      Session id is stamped as the reserved ``mlflow.trace.session`` trace
+      metadata key (powers the UI's native session filter).
+    * **OTel** — ``otel_endpoint`` arg or ``OTEL_EXPORTER_OTLP_ENDPOINT``.
+      A fresh ``TracerProvider`` with an OTLP exporter is installed.  Spans
+      go to any OTLP-compatible collector (Jaeger, Tempo, Honeycomb).
+      Session id is attached as a ``session.id`` span attribute.
+
+    Neither configured → ``RuntimeError``.  Processes that legitimately run
+    without observability (one-shot setup tools, tests) should not call this
+    function; tests install a test provider directly.
     """
     global _initialized, _tracer_provider, _default_session_id
+    global _metadata_stamper, _llm_context_factory
 
     if _initialized:
-        # Allow updating session id without re-initializing the SDK.
         if session_id:
             _default_session_id = session_id
         return
 
-    endpoint = otel_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-    _default_session_id = session_id
+    _default_session_id = session_id or os.environ.get("DSAGT_SESSION_ID")
+    mlflow_url = mlflow_url or os.environ.get("MLFLOW_TRACKING_URI")
+    otel_endpoint = otel_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
 
-    if not endpoint:
-        # No endpoint, no tracing. The OTel API still works (no-op tracer),
-        # so business code never has to branch on this.
+    if mlflow_url:
+        _install_mlflow_provider(mlflow_url)
+        _metadata_stamper = _stamp_metadata_mlflow
+        _llm_context_factory = _mlflow_llm_context
         _initialized = True
-        logger.debug("init_tracing: no endpoint configured, tracing disabled")
+        logger.info(
+            "init_tracing: service=%s backend=mlflow url=%s session=%s",
+            service_name, mlflow_url, _default_session_id or "<none>",
+        )
         return
 
-    # OpenTelemetry is a hard dependency in pyproject.toml.  If these
-    # imports fail, the install is broken and we want a real ImportError
-    # immediately, not a silently-disabled tracing layer.
+    if otel_endpoint:
+        _install_otlp_provider(service_name, otel_endpoint)
+        _metadata_stamper = _stamp_metadata_otel
+        _llm_context_factory = _noop_llm_context
+        _initialized = True
+        atexit.register(_shutdown)
+        logger.info(
+            "init_tracing: service=%s backend=otel endpoint=%s session=%s",
+            service_name, otel_endpoint, _default_session_id or "<none>",
+        )
+        return
+
+    raise RuntimeError(
+        f"{service_name}: no observability backend configured. "
+        f"Expected MLFLOW_TRACKING_URI or OTEL_EXPORTER_OTLP_ENDPOINT in the "
+        f"environment. Processes that legitimately run without tracing "
+        f"(e.g. one-shot setup tools) should not call init_tracing at all."
+    )
+
+
+def _install_mlflow_provider(mlflow_url: str) -> None:
+    """Wire MLflow's tracer provider in as the OTel global."""
+    import mlflow
+    from mlflow.tracing import provider as mp
+    from opentelemetry import trace
+    from opentelemetry.util._once import Once
+
+    mlflow.set_tracking_uri(mlflow_url)
+    mlflow.set_experiment(os.environ.get("DSAGT_PROJECT", "dsagt"))
+
+    # Force MLflow's lazy provider to initialize via its private init hook
+    # so we can hand the resulting TracerProvider to OTel below.  Earlier
+    # versions of this code used ``with mlflow.start_span(name="_bootstrap")``
+    # for the same purpose — but that emitted a clutter ``_bootstrap`` trace
+    # in the MLflow UI from every dsagt-run / MCP-server subprocess.  The
+    # underscore on the init function is MLflow-internal — pinning the
+    # mlflow version range in pyproject.toml keeps that boundary stable.
+    mp._initialize_tracer_provider()
+
+    # OTel guards set_tracer_provider with a one-shot Once flag.  We reset
+    # it so installing MLflow's provider actually takes effect (necessary in
+    # long-running processes that may have touched the no-op global first).
+    trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
+    trace._TRACER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
+    trace.set_tracer_provider(mp.provider.get())
+
+
+def _install_otlp_provider(service_name: str, otel_endpoint: str) -> None:
+    """Stand up a fresh TracerProvider with an OTLP exporter."""
+    global _tracer_provider
     from opentelemetry import trace
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
         OTLPSpanExporter,
@@ -124,21 +189,119 @@ def init_tracing(
 
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces")
+    exporter = OTLPSpanExporter(endpoint=f"{otel_endpoint.rstrip('/')}/v1/traces")
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
-
     _tracer_provider = provider
-    _initialized = True
 
-    # Flush spans on process exit. Short-lived commands like dsagt-setup-kb
-    # otherwise lose their final batch.
-    atexit.register(_shutdown)
 
-    logger.info(
-        "init_tracing: service=%s endpoint=%s session=%s",
-        service_name, endpoint, session_id or "<none>",
-    )
+def stamp_metadata(metadata: dict) -> None:
+    """Stamp arbitrary key/value metadata on the currently-active trace.
+
+    No-op when no backend is configured (tests, standalone tools).  See the
+    ``_metadata_stamper`` comment up top for backend-specific behavior.
+    """
+    if _metadata_stamper is not None and metadata:
+        _metadata_stamper(metadata)
+
+
+def _stamp_metadata_on_trace(request_id: str, metadata: dict) -> None:
+    """Write metadata to a specific MLflow trace by id.
+
+    Used when the caller has the trace_id in hand (e.g. inside LiteLLM's
+    MlflowLogger subclass right after ``start_trace``).  ``stamp_metadata``
+    is the higher-level version that looks up the current trace via the
+    active OTel span.
+    """
+    try:
+        from mlflow.tracing.trace_manager import InMemoryTraceManager
+        with InMemoryTraceManager.get_instance().get_trace(request_id) as t:
+            if t is not None:
+                t.info.trace_metadata.update(
+                    {k: str(v) for k, v in metadata.items()}
+                )
+    except Exception as e:
+        logger.debug("metadata stamp failed for %s: %s", request_id, e)
+
+
+def _stamp_metadata_mlflow(metadata: dict) -> None:
+    """MLflow backend: write to trace_metadata via the trace manager."""
+    from opentelemetry import trace
+    span = trace.get_current_span()
+    ctx = span.get_span_context()
+    if not ctx.is_valid:
+        return
+    _stamp_metadata_on_trace(f"tr-{ctx.trace_id:032x}", metadata)
+
+
+def _stamp_metadata_otel(metadata: dict) -> None:
+    """OTel backend: write to active span attributes."""
+    from opentelemetry import trace
+    span = trace.get_current_span()
+    if not span.get_span_context().is_valid:
+        return
+    for k, v in metadata.items():
+        span.set_attribute(k, str(v))
+
+
+def _mlflow_llm_context(metadata: dict):
+    """MLflow: native tracing.context stamps at trace-creation time."""
+    import mlflow
+    return mlflow.tracing.context(metadata=metadata)
+
+
+@contextmanager
+def _noop_llm_context(metadata: dict):
+    """OTel backend or no backend: nothing to do.
+
+    A real OTel implementation would use baggage propagation so traces
+    created inside inherit the keys, but DSAGT's OTel path is preserved
+    for flexibility rather than actively exercised — extend here when it
+    becomes concrete.
+    """
+    yield
+
+
+@contextmanager
+def llm_call_context(source: str):
+    """Stamp ``dsagt.source`` (+ ``dsagt.agent`` when set) on traces created
+    inside this block.
+
+    MLflow backend: metadata is attached at trace-creation time via MLflow's
+    native tracing.context API, so the UI can filter by it.  OTel backend
+    currently no-ops — see ``_noop_llm_context``.
+    """
+    metadata = {"dsagt.source": source}
+    if agent := os.environ.get("DSAGT_AGENT"):
+        metadata["dsagt.agent"] = agent
+    if _llm_context_factory is not None:
+        with _llm_context_factory(metadata):
+            yield
+    else:
+        yield
+
+
+def llm_source(source: str):
+    """Decorator form of ``llm_call_context`` for tidy call sites.
+
+    Handles both sync and async.  Every LLM call made inside the decorated
+    function lands in MLflow with ``dsagt.source = <source>`` metadata,
+    letting the UI distinguish extraction / embedding / agent-turn origins
+    at a glance.
+    """
+    def dec(fn):
+        if asyncio.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def aw(*a, **kw):
+                with llm_call_context(source):
+                    return await fn(*a, **kw)
+            return aw
+        @functools.wraps(fn)
+        def sw(*a, **kw):
+            with llm_call_context(source):
+                return fn(*a, **kw)
+        return sw
+    return dec
 
 
 def _shutdown() -> None:
@@ -154,9 +317,26 @@ def _shutdown() -> None:
 
 
 def get_tracer(name: str):
-    """Return an OTel tracer. No-op tracer if init_tracing was not called."""
+    """Return an OTel tracer. Routes through whichever provider init_tracing
+    installed (MLflow's or an OTLP one)."""
     from opentelemetry import trace
     return trace.get_tracer(name)
+
+
+@contextmanager
+def open_span(name: str):
+    """Open a span on the installed tracer provider.
+
+    Single OTel code path — provider selection happens once at
+    ``init_tracing`` time.  Yields ``None`` if tracing was never initialized
+    (test paths that skip init_tracing monkeypatch module state directly).
+    """
+    if not _initialized:
+        yield None
+        return
+    tracer = get_tracer("dsagt.observability")
+    with tracer.start_as_current_span(name) as span:
+        yield span
 
 
 def configure_litellm_retries(
@@ -207,51 +387,6 @@ def configure_litellm_retries(
     )
 
 
-def install_litellm_otel_callback(
-    num_retries: int = 5,
-    request_timeout: float = 300.0,
-) -> None:
-    """Configure LiteLLM to emit OTel spans into our tracer provider.
-
-    Spans created by ``litellm.embedding(...)`` (and ``litellm.completion(...)``)
-    will nest under whatever span is active when the call is made — so the
-    LiteLLM span automatically becomes a child of any ``kb.embed`` span the
-    knowledge base opens around the call.
-
-    Also calls :func:`configure_litellm_retries` so the rate-limit-resilient
-    embedding path is set up regardless of whether tracing is enabled.
-
-    The OTel-callback registration is a no-op if ``init_tracing`` has not
-    installed a real provider, but the retry knobs are still applied.
-    """
-    # Always set retries — they don't depend on tracing being on.
-    configure_litellm_retries(num_retries=num_retries, request_timeout=request_timeout)
-
-    if not _initialized or _tracer_provider is None:
-        logger.debug("install_litellm_otel_callback: tracing not initialized")
-        return
-
-    # litellm[proxy] is a hard dependency — broken install if these fail.
-    import litellm
-    from litellm.integrations.opentelemetry import (
-        OpenTelemetry,
-        OpenTelemetryConfig,
-    )
-
-    # Hand LiteLLM our existing provider so its spans share the same OTLP
-    # exporter and the same trace context as everything else DSAgt emits.
-    # exporter="otlp_http" is required by OpenTelemetryConfig but the tracer
-    # provider override means the exporter setting itself is unused — the
-    # provider already has its own configured exporter.
-    config = OpenTelemetryConfig(exporter="otlp_http")
-    callback = OpenTelemetry(config=config, tracer_provider=_tracer_provider)
-
-    if callback not in litellm.callbacks:
-        litellm.callbacks = (litellm.callbacks or []) + [callback]
-
-    logger.info("install_litellm_otel_callback: registered with tracer provider")
-
-
 # ---------------------------------------------------------------------------
 # obs — process-wide proxy for the current span
 # ---------------------------------------------------------------------------
@@ -282,13 +417,35 @@ class _Obs:
         span = self._current()
         if span is None:
             return
-        span.add_event(name, attributes={k: v for k, v in attrs.items() if v is not None})
+        clean_attrs = {k: v for k, v in attrs.items() if v is not None}
+        span.add_event(name, attributes=clean_attrs)
+
+    def set_inputs(self, inputs: Any) -> None:
+        """Populate the trace's ``request`` field for the MLflow trace UI.
+
+        Stamps ``mlflow.spanInputs`` as a JSON-serialized OTel attribute —
+        this is the same key MLflow's ``LiveSpan.set_inputs`` writes, so it
+        flows through to MLflow's ``request`` column in ``search_traces``.
+        For non-MLflow OTel backends (Jaeger, Tempo) it just shows up as a
+        regular span attribute, harmlessly.
+        """
+        span = self._current()
+        if span is None or inputs is None:
+            return
+        span.set_attribute("mlflow.spanInputs", _to_json(inputs))
+
+    def set_outputs(self, outputs: Any) -> None:
+        """Populate the trace's ``response`` field for the MLflow trace UI."""
+        span = self._current()
+        if span is None or outputs is None:
+            return
+        span.set_attribute("mlflow.spanOutputs", _to_json(outputs))
 
     @staticmethod
     def _current():
+        """Return the currently-active OTel span, or ``None`` if none."""
         from opentelemetry import trace
         span = trace.get_current_span()
-        # The no-op tracer returns INVALID_SPAN; treat that as "no active span".
         if span is None or not span.get_span_context().is_valid:
             return None
         return span
@@ -339,9 +496,10 @@ def traced(
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            tracer = get_tracer(fn.__module__)
-            with tracer.start_as_current_span(span_name) as span:
-                _attach_session_id(span)
+            with open_span(span_name) as span:
+                if span is None:
+                    return fn(*args, **kwargs)
+                _attach_trace_metadata(span_name)
 
                 # Capture configured arguments as span attributes.  Looked up
                 # by name against the function signature so positional and
@@ -398,9 +556,64 @@ def traced(
     return decorator
 
 
-def _attach_session_id(span) -> None:
+_SOURCE_BY_PREFIX = (
+    ("tool.", "tool"),
+    ("kb.", "knowledge"),
+    ("registry.", "registry"),
+)
+
+
+def _derive_source(span_name: str | None) -> str | None:
+    """Map a span name to a ``dsagt.source`` value.
+
+    Prefix-based dispatch so every span we open (now or later) lands with
+    a source tag without touching the call site.  LLM traces get their
+    source from ``_DSAGTMlflowLogger`` (agent) or ``@llm_source``
+    (extraction, embedding) instead — this helper covers the non-LLM
+    spans our own instrumentation emits.
+    """
+    if not span_name:
+        return None
+    for prefix, source in _SOURCE_BY_PREFIX:
+        if span_name.startswith(prefix):
+            return source
+    return None
+
+
+def _attach_trace_metadata(span_name: str | None) -> None:
+    """Stamp session + source on the currently-active trace.
+
+    - ``mlflow.trace.session``: process-wide session id (reserved MLflow key;
+      powers the UI's native session filter).
+    - ``dsagt.source``: derived from the span name prefix — so every span we
+      open lands in ``dsagt info``'s "by source" bucket without extra work
+      at the call site.
+
+    No-op when no backend is configured or no span is active; the metadata
+    stamper handles both cases.
+    """
+    md: dict[str, str] = {}
     if _default_session_id:
-        span.set_attribute("session.id", _default_session_id)
+        md["mlflow.trace.session"] = _default_session_id
+    src = _derive_source(span_name)
+    if src:
+        md["dsagt.source"] = src
+    if md:
+        stamp_metadata(md)
+
+
+def _to_json(value: Any) -> str:
+    """Serialize *value* to JSON for an OTel attribute.
+
+    OTel attributes only accept primitives + sequences of primitives;
+    MLflow's ``mlflow.spanInputs`` / ``mlflow.spanOutputs`` keys expect
+    a JSON-encoded payload that the trace UI deserializes for display.
+    """
+    import json
+    try:
+        return json.dumps(value, default=str)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _coerce_attr(value: Any) -> Any:
@@ -437,9 +650,11 @@ def child_span(name: str, **attrs: Any):
     into sub-phases (e.g. embed / index_search / rerank inside kb.search).
     Prefer the typed helpers below when one exists for your operation.
     """
-    tracer = get_tracer("dsagt.observability")
-    with tracer.start_as_current_span(name) as span:
-        _attach_session_id(span)
+    with open_span(name) as span:
+        if span is None:
+            yield None
+            return
+        _attach_trace_metadata(name)
         for k, v in attrs.items():
             if v is not None:
                 span.set_attribute(k, _coerce_attr(v))
@@ -534,13 +749,13 @@ def tool_execute_span(record_id: str, tool_name: str):
     them.  Cross-reference via ``record_id`` for full intent → execution
     linkage when needed.
     """
-    tracer = get_tracer("dsagt.observability")
-    cm = tracer.start_as_current_span("tool.execute")
-
     @contextmanager
     def _wrapper():
-        with cm as span:
-            _attach_session_id(span)
+        with open_span("tool.execute") as span:
+            if span is None:
+                yield None
+                return
+            _attach_trace_metadata("tool.execute")
             span.set_attribute("record_id", record_id)
             span.set_attribute("tool_name", tool_name)
             yield span

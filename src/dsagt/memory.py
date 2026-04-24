@@ -27,8 +27,9 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 import numpy as np
+
+from dsagt.observability import llm_source
 import yaml
 
 from dsagt.knowledge import CollectionRoute, KnowledgeBase
@@ -369,37 +370,39 @@ def parse_extraction_response(response_text: str) -> dict:
 # LLM call
 # ---------------------------------------------------------------------------
 
+@llm_source("extraction")
 def call_extraction_llm(
     prompt: str,
     api_key: str,
     model: str = "claude-sonnet-4-20250514",
     base_url: str | None = None,
 ) -> str:
-    """Call the LLM with the extraction prompt. Returns raw response text."""
-    base_url = base_url or "https://api.anthropic.com/v1"
+    """Call the LLM with the extraction prompt. Returns raw response text.
 
-    with httpx.Client(timeout=120.0) as client:
-        response = client.post(
-            f"{base_url.rstrip('/')}/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": model,
-                "max_tokens": 4096,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
+    Uses LiteLLM so the call works against any OpenAI- or Anthropic-format
+    upstream the user's ``llm.base_url`` points at.  Hand-rolling an
+    Anthropic-format request would 404 against an OpenAI-compatible gateway
+    (e.g. PNNL's ai-incubator-api), and vice versa.
+    """
+    import litellm
 
-    for block in data.get("content", []):
-        if block.get("type") == "text":
-            return block["text"]
+    # Route through the openai/ provider when a custom base_url is given —
+    # mirrors what the proxy does for agent calls.  Without an explicit
+    # base_url, leave the model untouched and let LiteLLM pick the provider.
+    if base_url:
+        completion_model = f"openai/{model}"
+    else:
+        completion_model = model
 
-    return ""
+    response = litellm.completion(
+        model=completion_model,
+        api_base=base_url,
+        api_key=api_key,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=4096,
+        timeout=120.0,
+    )
+    return response.choices[0].message.content or ""
 
 
 # ---------------------------------------------------------------------------

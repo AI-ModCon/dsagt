@@ -11,8 +11,11 @@ DSAgt connects an MCP-compatible AI agent to tool registration, a semantic knowl
 ```bash
 git clone https://github.com/AI-ModCon/BaseData_pipeline_agent.git
 cd BaseData_pipeline_agent
-uv sync          # add --group dev if you plan to run the test suite
+uv sync                      # add --group dev if you plan to run the test suite
+source .venv/bin/activate    # activate the venv so `dsagt` is on PATH
 ```
+
+All examples below assume the venv is activated. Re-run `source .venv/bin/activate` in each new shell.
 
 ### First-time knowledge base setup
 
@@ -207,6 +210,7 @@ script or Snakemake workflow.
 | `dsagt setup-kb [--collection <name>]` | Build the core knowledge base |
 | `dsagt list` | List all projects with agent, status, and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
+| `dsagt rm <name> [-y] [--keep-files]` | Unregister a project and delete its directory |
 
 ## Code Organization
 
@@ -282,3 +286,31 @@ Verify MLflow is running:
 dsagt list
 curl http://localhost:5001
 ```
+
+## Sidechannel model calls
+
+At the end of a `dsagt start` session you may see a yellow warning like:
+
+```
+  ⚠ Sidechannel model calls intercepted:
+      claude-haiku-4-5-20251001  (2 calls)
+    Two possible causes:
+      (1) agent sidechannel (e.g. title generator) — safe to ignore
+      (2) typo in dsagt_config.yaml llm.model — these replies are canned, not real
+```
+
+**What happened.** The agent you ran sent requests for a model that isn't the one configured in `dsagt_config.yaml`. The proxy has a wildcard route that catches any unrecognized model name and returns a canned mock reply ("session") instead of forwarding upstream. No tokens spent, no error in MLflow.
+
+**Why agents do this.** Every major agent platform hardcodes a small/fast model for internal features that aren't part of the main conversation:
+
+| Agent | Sidechannel model | Used for |
+|---|---|---|
+| goose | `gpt-4o-mini` | Session-name generation (the label you see in the session list) |
+| claude-code | `claude-haiku-4-5-20251001` | Conversation title generation |
+| others | varies | — |
+
+These names are baked into the agent and ignore `GOOSE_MODEL` / `ANTHROPIC_MODEL`. If your upstream gateway doesn't carry the exact bare name (most lab gateways alias with suffixes like `-v1-project`), the request would 400 without the wildcard mock — the warning is just telling you the mock fired.
+
+**When to worry.** If the model name in the warning matches what you *thought* you'd configured as your primary model, you have a typo in `dsagt_config.yaml` — your agent is getting canned replies, not real completions. Fix the `llm.model` field and rerun.
+
+**Why a single wildcard instead of per-agent mocks.** Agent vendors rename sidechannel models every release. Maintaining an explicit list would accumulate dead code as those names drift. The wildcard catches today's names and tomorrow's without intervention — LiteLLM prefers exact matches over wildcards, so your configured primary model always routes normally.

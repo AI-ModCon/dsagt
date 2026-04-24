@@ -32,6 +32,7 @@ from dsagt.observability import (
     kb_embed_span,
     kb_index_search_span,
     kb_rerank_span,
+    llm_source,
     obs,
     traced,
 )
@@ -242,6 +243,7 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         else:
             self._litellm_model = self.model
 
+    @llm_source("embedding")
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:
             return np.array([], dtype=np.float32)
@@ -385,10 +387,21 @@ class ChromaIndex(BaseVectorIndex):
         start = len(self._ids)
         new_ids = [str(start + i) for i in range(len(embeddings))]
         self._ids.extend(new_ids)
-        kwargs: dict = {"ids": new_ids, "embeddings": embeddings.tolist()}
-        if metadatas is not None:
-            kwargs["metadatas"] = metadatas
-        self._col.add(**kwargs)
+        embeddings_list = embeddings.tolist()
+
+        # ChromaDB caps a single add() at a sqlite-configuration-dependent
+        # batch size (typically ~5461).  Ingesting a large collection in one
+        # shot throws InternalError, so chunk the call ourselves.  Stay well
+        # under the cap for portability across chroma versions.
+        batch_size = 5000
+        for i in range(0, len(new_ids), batch_size):
+            kwargs: dict = {
+                "ids": new_ids[i:i + batch_size],
+                "embeddings": embeddings_list[i:i + batch_size],
+            }
+            if metadatas is not None:
+                kwargs["metadatas"] = metadatas[i:i + batch_size]
+            self._col.add(**kwargs)
 
     def search(self, query_vec: np.ndarray, k: int, where: dict | None = None) -> tuple[np.ndarray, np.ndarray]:
         k = min(k, len(self._ids))
@@ -706,6 +719,12 @@ class KnowledgeBase:
         collection = collection_name or folder.name
         file_types = file_types or self.FILE_TYPES
 
+        obs.set_inputs({
+            "folder": str(folder),
+            "collection": collection,
+            "file_types": file_types,
+        })
+
         # Set route in memory so _get_embedder resolves during the build.
         # Persisted to disk via register_route after the index is built.
         if route is not None:
@@ -786,6 +805,12 @@ class KnowledgeBase:
     ) -> dict:
         """Append documents to an existing collection."""
         file_types = file_types or self.FILE_TYPES
+
+        obs.set_inputs({
+            "collection": collection,
+            "n_paths": len(paths),
+            "paths_preview": [str(p) for p in paths[:5]],
+        })
 
         index, existing_chunks = self._load(collection)
         active_route = self._get_route(collection)
@@ -880,6 +905,12 @@ class KnowledgeBase:
             ``{collection, entries_added, total_entries}`` plus
             ``"embeddings"`` (numpy ndarray) if ``return_embeddings=True``.
         """
+        obs.set_inputs({
+            "collection": collection,
+            "n_entries": len(texts),
+            "texts_preview": [t[:200] for t in texts[:3]],
+        })
+
         if not texts:
             result = {"collection": collection, "entries_added": 0, "total_entries": 0}
             if return_embeddings:
@@ -981,6 +1012,8 @@ class KnowledgeBase:
         if rerank is None:
             rerank = self.default_rerank
 
+        obs.set_inputs({"query": query, "collection": collection, "top_k": top_k})
+
         index, chunks = self._load(collection)
         active_route = self._get_route(collection)
         embedder = self._get_embedder(active_route)
@@ -1006,10 +1039,12 @@ class KnowledgeBase:
             with kb_rerank_span(self.rerank_model, len(results)):
                 final = self._rerank(query, results, top_k)
             obs.set("hits", len(final))
+            obs.set_outputs({"hits": len(final), "top_texts": [r["chunk"].get("text", "")[:200] for r in final[:3]]})
             return final
 
         final = results[:top_k]
         obs.set("hits", len(final))
+        obs.set_outputs({"hits": len(final), "top_texts": [r["chunk"].get("text", "")[:200] for r in final[:3]]})
         return final
 
     @staticmethod

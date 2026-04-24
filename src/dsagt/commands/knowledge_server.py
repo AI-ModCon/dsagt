@@ -41,6 +41,7 @@ from mcp.server.models import InitializationOptions
 from dsagt.knowledge import EMBEDDER_REGISTRY, VECTORINDEX_REGISTRY, CollectionRoute, KnowledgeBase
 from dsagt.memory import EPISODIC_MEMORY_ROUTE, SuggestionQueue
 from dsagt.memory import ExplicitMemory
+from dsagt.session import REGISTRY_DIR, _collection_exists, setup_runtime_kb  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -67,35 +68,7 @@ async def _run_stdio(server: Server, name: str) -> None:
 
 
 
-# ---------------------------------------------------------------------------
-# Filesystem helpers
-# ---------------------------------------------------------------------------
-
-def _collection_exists(path: Path) -> bool:
-    """Return True if *path* looks like a persisted collection directory."""
-    return (
-        path.is_dir()
-        and (
-            (path / "index.faiss").exists()
-            or (path / "chroma_ids.json").exists()
-            or (path / "route.json").exists()
-        )
-    )
-
-
-def setup_runtime_kb(base_index_dir: Path, runtime_dir: Path) -> Path:
-    """Symlink base indexes into a session-specific runtime directory."""
-    runtime_kb_dir = runtime_dir / "kb_index"
-    runtime_kb_dir.mkdir(parents=True, exist_ok=True)
-
-    if base_index_dir.exists():
-        for collection_dir in base_index_dir.iterdir():
-            if _collection_exists(collection_dir):
-                dest = runtime_kb_dir / collection_dir.name
-                if not dest.exists():
-                    dest.symlink_to(collection_dir.resolve())
-
-    return runtime_kb_dir
+# _collection_exists and setup_runtime_kb live in dsagt.session (imported above).
 
 
 def _register_external_collection(
@@ -848,7 +821,8 @@ def main():
     # filled.  dsagt init generates complete defaults; if anything is missing,
     # the config is broken and the server fails fast.
     config_path = project_dir / "dsagt_config.yaml"
-    config = yaml.safe_load(config_path.read_text())
+    from dsagt.session import resolve_env_vars
+    config = resolve_env_vars(yaml.safe_load(config_path.read_text()))
 
     kb_config = config["knowledge"]
     emb_config = config["embedding"]
@@ -870,11 +844,11 @@ def main():
             "Set it to your embedding API key, or export LLM_API_KEY."
         )
 
-    from dsagt.observability import init_tracing, install_litellm_otel_callback
-    init_tracing("dsagt-knowledge-server", session_id=config["project"])
-    install_litellm_otel_callback()
+    from dsagt.observability import init_tracing, configure_litellm_retries
+    init_tracing("dsagt-knowledge-server")  # session_id picked up from DSAGT_SESSION_ID env
+    configure_litellm_retries()
 
-    runtime_kb_dir = setup_runtime_kb(project_dir / "kb_index", project_dir)
+    runtime_kb_dir = setup_runtime_kb(REGISTRY_DIR / "kb_index", project_dir)
 
     kb = KnowledgeBase(
         index_dir=runtime_kb_dir,

@@ -4,20 +4,26 @@ This walkthrough validates all core DSAgt functionality after installation. You 
 
 **Prerequisites:**
 - DSAgt installed (`uv sync --all-groups`)
-- `tests/test_site_config.yaml` configured with valid API keys and endpoints
+- `.env` at the DSAGT repo root with `LLM_*` and `EMBEDDING_*` values (copy from `.env.example`)
 - An agent platform installed (e.g., `claude` for Claude Code)
 
 ## Setup
 
 ```bash
 cd DSAGT
-uv run dsagt init smoke-test --agent claude-code
+source .venv/bin/activate
+dsagt init smoke-test --agent claude-code
+dsagt mv smoke-test ./
 ```
 
-Edit `runtime/smoke-test/dsagt_config.yaml` — set your API keys and embedding endpoint.
+`dsagt init` scaffolds under `~/dsagt-projects/` by default; moving the
+project into `DSAGT/` is what makes the `../tests/smoke_test/...` paths
+below resolve from the agent's working directory.
+
+Edit `smoke-test/dsagt_config.yaml` — set your API keys and embedding endpoint.
 
 ```bash
-uv run dsagt start smoke-test
+dsagt start smoke-test
 ```
 
 The agent should launch. You're now inside the agent session.
@@ -30,7 +36,7 @@ The agent should launch. You're now inside the agent session.
 
 Tell the agent:
 
-> Ingest the documentation at tests/smoke_test/knowledge/ into the knowledge base.
+> Ingest the documentation at ../tests/smoke_test/knowledge/ into the knowledge base.
 
 Wait for the ingest job to complete. Then:
 
@@ -49,7 +55,7 @@ Wait for the ingest job to complete. Then:
 
 Tell the agent:
 
-> I have a CSV processing tool called csvtool. Read the documentation at tests/smoke_test/knowledge/api_reference.md and register the `csvtool filter` command as a tool.
+> I have a CSV processing tool called csvtool. Read the documentation at ../tests/smoke_test/knowledge/api_reference.md and register the `csvtool filter` command as a tool.
 
 **Verify:**
 - Agent reads the doc via the registry server's `read_file` tool
@@ -65,11 +71,11 @@ Tell the agent:
 
 Tell the agent:
 
-> Use the scan_directory tool to scan the tests/smoke_test/data/ directory.
+> Use the scan_directory tool from the registry to scan the ../tests/smoke_test/data/ directory.
 
 **Verify:**
 - The agent calls `scan_directory` (bundled tool)
-- A JSON execution record appears in `runtime/smoke-test/trace_archive/`
+- A JSON execution record appears in `smoke-test/trace_archive/`
 - The record contains the exact command, stdout, timing, and return code
 
 ---
@@ -80,7 +86,7 @@ Tell the agent:
 
 Tell the agent:
 
-> Look at the sample data in tests/smoke_test/data/samples.csv. Summarize what's in it — columns, row count, any quality issues.
+> Look at the sample data in ../tests/smoke_test/data/samples.csv. Summarize what's in it — columns, row count, any quality issues.
 
 **Verify:**
 - Agent reads or scans the file
@@ -89,9 +95,9 @@ Tell the agent:
 
 ---
 
-## 5. Memory — Explicit
+## 5. Memory — Explicit (save)
 
-**What this tests:** Explicit memory store (user-confirmed facts).
+**What this tests:** Explicit memory write to the user-confirmed fact store.
 
 Tell the agent:
 
@@ -99,8 +105,7 @@ Tell the agent:
 
 **Verify:**
 - Agent calls `kb_remember` to store the fact
-- Confirm with: "What do you remember about the samples dataset?"
-- Agent retrieves the stored fact
+- Agent confirms the fact was saved
 
 ---
 
@@ -115,15 +120,36 @@ Exit the agent (Ctrl+C or type `/exit`).
 
 ---
 
-## 7. Observability — MLflow
+## 7. Memory — Explicit (recall across sessions)
 
-**What this tests:** OTel trace export, MLflow UI.
+**What this tests:** Explicit memory persists across session restarts.
+
+Restart the agent:
+
+```bash
+dsagt start smoke-test
+```
+
+Tell the agent:
+
+> What do you remember about the samples dataset?
+
+**Verify:**
+- Agent retrieves the fact stored in step 5 (null values in `status` and `timestamp`)
+- The fact is sourced from explicit memory, not reconstructed from the current session's context
+
+Exit the agent again before continuing (so MLflow's port is free for the next step).
+
+---
+
+## 8. Observability — MLflow
+
+**What this tests:** MLflow LiteLLM autologging, trace UI.
 
 Restart just MLflow to inspect traces:
 
 ```bash
-cd runtime/smoke-test
-python -m mlflow server --backend-store-uri sqlite:///mlflow/mlflow.db --default-artifact-root mlflow/artifacts --port 5001
+dsagt mlflow smoke-test
 ```
 
 Open http://localhost:5001 in a browser.
@@ -137,13 +163,13 @@ Stop MLflow when done (Ctrl+C).
 
 ---
 
-## 8. Provenance — Execution Records
+## 9. Provenance — Execution Records
 
 Inspect the trace archive directly:
 
 ```bash
-ls runtime/smoke-test/trace_archive/
-cat runtime/smoke-test/trace_archive/*.json | python -m json.tool | head -50
+ls smoke-test/trace_archive/
+cat smoke-test/trace_archive/*.json | python -m json.tool | head -50
 ```
 
 **Verify:**
@@ -157,7 +183,7 @@ cat runtime/smoke-test/trace_archive/*.json | python -m json.tool | head -50
 ## Cleanup
 
 ```bash
-rm -rf runtime/smoke-test
+rm -rf smoke-test
 ```
 
 ## Summary
@@ -168,7 +194,8 @@ rm -rf runtime/smoke-test
 | 2 | Tool registration | Skill file created with correct spec |
 | 3 | Tool execution + provenance | Execution record in trace_archive |
 | 4 | Data exploration | Agent identifies columns and nulls |
-| 5 | Explicit memory | Fact stored and retrieved |
+| 5 | Explicit memory — save | Fact stored via `kb_remember` |
 | 6 | Automatic cleanup | Services stopped on agent exit |
-| 7 | MLflow observability | Traces visible in MLflow UI |
-| 8 | Execution records | Records have expected structure |
+| 7 | Explicit memory — cross-session recall | Fact retrieved after restart |
+| 8 | MLflow observability | Traces visible in MLflow UI |
+| 9 | Execution records | Records have expected structure |

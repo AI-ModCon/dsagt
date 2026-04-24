@@ -1,6 +1,6 @@
 ---
 name: generating-datacards
-description: Generates MODCON Datacard v1 documentation for scientific datasets by introspecting a directory and filling a structured template. Use when the user asks to create a datacard, dataset card, dataset documentation, dataset metadata, document a dataset, or prepare a dataset for sharing. Supports three readiness levels: Level 1 (Discoverable), Level 2 (Interoperable & Reusable), Level 3 (Understandable & Trustworthy).
+description: "Generates MODCON Datacard v1 documentation for scientific datasets by introspecting a directory and filling a structured template. Use when the user asks to create a datacard, dataset card, dataset documentation, dataset metadata, document a dataset, or prepare a dataset for sharing. Supports three readiness levels: Level 1 (Discoverable), Level 2 (Interoperable & Reusable), Level 3 (Understandable & Trustworthy)."
 ---
 
 # Generating Datacards

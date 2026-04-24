@@ -8,7 +8,10 @@ dsagt-run wrapping, runtime isolation, and skill discovery.
 import pytest
 import yaml
 
-from dsagt.registry import ToolRegistry, SkillRegistry, _wrap_executable, _uv_run_prefix, _parse_frontmatter
+from dsagt.registry import (
+    ToolRegistry, SkillRegistry, _wrap_executable, _uv_run_prefix, _parse_frontmatter,
+    render_arguments,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -23,13 +26,13 @@ TOOL_WITH_MIXED_PARAMS = {
         "input_file": {
             "type": "string",
             "required": True,
-            "positional": True,
+            "cli": "positional:0",
             "description": "Path to input file",
         },
         "output_file": {
             "type": "string",
             "required": True,
-            "positional": True,
+            "cli": "positional:1",
             "description": "Path to output file",
         },
         "threshold": {
@@ -301,3 +304,90 @@ class TestDefaultTools:
         assert len(tools) > 0
         names = [t["name"] for t in tools]
         assert "scan_directory" in names
+
+
+# ---------------------------------------------------------------------------
+# render_arguments
+# ---------------------------------------------------------------------------
+
+class TestRenderArguments:
+
+    def test_default_cli_is_double_dash_name(self):
+        params = {"foo": {"type": "string"}}
+        assert render_arguments(params, {"foo": "bar"}) == ["--foo", "bar"]
+
+    def test_spaced_long_flag(self):
+        params = {"foo": {"type": "string", "cli": "--foo"}}
+        assert render_arguments(params, {"foo": "bar"}) == ["--foo", "bar"]
+
+    def test_spaced_short_flag(self):
+        params = {"x": {"type": "string", "cli": "-x"}}
+        assert render_arguments(params, {"x": "val"}) == ["-x", "val"]
+
+    def test_glued_long_flag(self):
+        params = {"foo": {"type": "string", "cli": "--foo="}}
+        assert render_arguments(params, {"foo": "bar"}) == ["--foo=bar"]
+
+    def test_glued_short_flag(self):
+        params = {"x": {"type": "string", "cli": "-x="}}
+        assert render_arguments(params, {"x": "val"}) == ["-x=val"]
+
+    def test_keyvalue_style(self):
+        params = {"if_": {"type": "string", "cli": "if="}}
+        assert render_arguments(params, {"if_": "input.dat"}) == ["if=input.dat"]
+
+    def test_single_positional(self):
+        params = {"target": {"type": "string", "cli": "positional"}}
+        assert render_arguments(params, {"target": "/tmp/x"}) == ["/tmp/x"]
+
+    def test_multiple_positionals_respect_order(self):
+        params = {
+            "dest": {"type": "string", "cli": "positional:1"},
+            "src": {"type": "string", "cli": "positional:0"},
+        }
+        assert render_arguments(params, {"src": "a", "dest": "b"}) == ["a", "b"]
+
+    def test_positionals_before_named(self):
+        params = {
+            "verbose": {"type": "boolean", "cli": "--verbose"},
+            "path": {"type": "string", "cli": "positional:0"},
+        }
+        assert render_arguments(params, {"path": "/x", "verbose": True}) == [
+            "/x", "--verbose",
+        ]
+
+    def test_boolean_true_emits_flag(self):
+        params = {"verbose": {"type": "boolean", "cli": "--verbose"}}
+        assert render_arguments(params, {"verbose": True}) == ["--verbose"]
+
+    def test_boolean_false_emits_nothing(self):
+        params = {"verbose": {"type": "boolean", "cli": "--verbose"}}
+        assert render_arguments(params, {"verbose": False}) == []
+
+    def test_boolean_positional_rejected(self):
+        params = {"flag": {"type": "boolean", "cli": "positional"}}
+        with pytest.raises(ValueError, match="boolean"):
+            render_arguments(params, {"flag": True})
+
+    def test_default_applied_when_value_missing(self):
+        params = {"max_depth": {"type": "integer", "cli": "--max-depth", "default": 5}}
+        assert render_arguments(params, {}) == ["--max-depth", "5"]
+
+    def test_optional_missing_skipped(self):
+        params = {"max_depth": {"type": "integer", "cli": "--max-depth"}}
+        assert render_arguments(params, {}) == []
+
+    def test_required_missing_raises(self):
+        params = {"directory": {"type": "string", "cli": "positional", "required": True}}
+        with pytest.raises(ValueError, match="directory"):
+            render_arguments(params, {})
+
+    def test_invalid_cli_value_raises(self):
+        params = {"weird": {"type": "string", "cli": "!!!invalid"}}
+        with pytest.raises(ValueError, match="invalid cli value"):
+            render_arguments(params, {"weird": "x"})
+
+    def test_invalid_position_raises(self):
+        params = {"x": {"type": "string", "cli": "positional:abc"}}
+        with pytest.raises(ValueError, match="integer"):
+            render_arguments(params, {"x": "val"})

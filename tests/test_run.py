@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from dsagt.provenance import (
+    _inject_cache_breakpoints,
     _parse_file_list,
     _resolve_records_dir,
     _write_record,
@@ -298,6 +299,16 @@ class TestRunAndRecord:
 
 class TestMain:
 
+    @pytest.fixture(autouse=True)
+    def _mlflow_file_store(self, tmp_path, monkeypatch):
+        """Point MLflow tracing at a scratch file-store so init_tracing has a
+        real backend.  dsagt-run is only ever invoked inside a `dsagt start`
+        context in production, where MLFLOW_TRACKING_URI is always set; the
+        tests need to mirror that so init_tracing doesn't (correctly) refuse
+        to silently no-op."""
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", f"file://{tmp_path}/mlruns")
+        monkeypatch.setenv("DSAGT_PROJECT", "test")
+
     def test_basic_invocation(self, tmp_path):
         """main() runs a command and returns its exit code."""
         exit_code = main([
@@ -327,3 +338,74 @@ class TestMain:
             "--", "bash", "-c", "exit 7",
         ])
         assert exit_code == 7
+
+
+# ---------------------------------------------------------------------------
+# Prompt cache breakpoint injection
+# ---------------------------------------------------------------------------
+
+class TestInjectCacheBreakpoints:
+    """Cache markers must land on the LAST tool and on the system message."""
+
+    _MARK = {"type": "ephemeral"}
+
+    def test_string_system_promoted_to_blocks_with_marker(self):
+        messages = [{"role": "system", "content": "you are an agent"}]
+        kwargs = {}
+        _inject_cache_breakpoints(messages, kwargs)
+        assert messages[0]["content"] == [{
+            "type": "text",
+            "text": "you are an agent",
+            "cache_control": self._MARK,
+        }]
+
+    def test_block_system_marker_on_last_block(self):
+        messages = [{
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "first"},
+                {"type": "text", "text": "last"},
+            ],
+        }]
+        _inject_cache_breakpoints(messages, {})
+        assert "cache_control" not in messages[0]["content"][0]
+        assert messages[0]["content"][1]["cache_control"] == self._MARK
+
+    def test_marker_on_last_tool_only(self):
+        kwargs = {
+            "tools": [
+                {"type": "function", "function": {"name": "a"}},
+                {"type": "function", "function": {"name": "b"}},
+                {"type": "function", "function": {"name": "c"}},
+            ],
+        }
+        _inject_cache_breakpoints([], kwargs)
+        assert "cache_control" not in kwargs["tools"][0]
+        assert "cache_control" not in kwargs["tools"][1]
+        assert kwargs["tools"][2]["cache_control"] == self._MARK
+
+    def test_no_tools_no_crash(self):
+        messages = [{"role": "system", "content": "x"}, {"role": "user", "content": "hi"}]
+        _inject_cache_breakpoints(messages, {})  # no tools key
+        # System still got marked
+        assert messages[0]["content"][0]["cache_control"] == self._MARK
+
+    def test_no_system_no_crash(self):
+        messages = [{"role": "user", "content": "hi"}]
+        kwargs = {"tools": [{"type": "function", "function": {"name": "a"}}]}
+        _inject_cache_breakpoints(messages, kwargs)
+        assert kwargs["tools"][0]["cache_control"] == self._MARK
+        # User message untouched
+        assert messages[0] == {"role": "user", "content": "hi"}
+
+    def test_only_first_system_message_marked(self):
+        messages = [
+            {"role": "system", "content": "primary"},
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": "injected later"},
+        ]
+        _inject_cache_breakpoints(messages, {})
+        # First system promoted with marker
+        assert messages[0]["content"][0]["cache_control"] == self._MARK
+        # Second one untouched (no cache_control)
+        assert messages[2]["content"] == "injected later"

@@ -29,7 +29,7 @@ from pathlib import Path
 
 import httpx
 
-from dsagt.session import REGISTRY_DIR
+from dsagt.session import REGISTRY_DIR, _collection_exists
 
 DEFAULT_INDEX_DIR = REGISTRY_DIR / "kb_index"
 
@@ -308,6 +308,12 @@ def add_setup_kb_args(parser):
         default="chroma",
         help="Vector database backend (default: chroma)",
     )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Re-ingest collections that already exist in the index directory "
+        "(default: skip existing).",
+    )
 
 
 def run_setup_kb(args):
@@ -350,10 +356,12 @@ def run_setup_kb(args):
     elif args.embedding_model:
         embedder_kwargs = {"model": args.embedding_model}
 
-    # Configure LiteLLM retries before any embedding work.
-    from dsagt.observability import init_tracing, install_litellm_otel_callback
-    init_tracing("dsagt-setup-kb")
-    install_litellm_otel_callback()
+    # Configure LiteLLM retries before any embedding work.  setup-kb is a
+    # one-shot bootstrap tool — no project exists yet, no MLflow to trace
+    # to, so we skip init_tracing entirely.  @traced decorators inside
+    # KnowledgeBase see no backend and short-circuit cleanly.
+    from dsagt.observability import configure_litellm_retries
+    configure_litellm_retries()
 
     print("DSAGT Core Knowledge Base Setup")
     print(f"Index directory: {args.index_dir}")
@@ -365,6 +373,17 @@ def run_setup_kb(args):
 
     results = {}
     for name, config in collections.items():
+        target_dir = args.index_dir / name
+        if _collection_exists(target_dir):
+            if not args.rebuild:
+                print(f"\nSkipping {name}: already indexed at {target_dir}. "
+                      "Pass --rebuild to force re-ingest.")
+                results[name] = {"chunks": 0, "skipped": True}
+                continue
+            # --rebuild: wipe the existing collection so chroma sqlite state
+            # and any orphan files from a prior schema don't bleed through.
+            print(f"\nRebuilding {name}: removing existing {target_dir}")
+            shutil.rmtree(target_dir)
         results[name] = setup_collection(
             name, config, args.index_dir,
             embedder_kwargs=embedder_kwargs,
@@ -376,7 +395,10 @@ def run_setup_kb(args):
     print("Summary")
     print(f"{'='*60}")
     for name, result in results.items():
-        print(f"  {name}: {result.get('chunks', 0)} chunks")
+        if result.get("skipped"):
+            print(f"  {name}: skipped (already indexed)")
+        else:
+            print(f"  {name}: {result.get('chunks', 0)} chunks")
 
     print("\nDone!")
 

@@ -1,16 +1,18 @@
 """
 Shared test fixtures for DSAGT.
 
-Loads institution-specific test configuration from tests/test_site_config.yaml.
-Integration tests that need real APIs use the `embedding_config`, `llm_config`,
-and `integration_config` fixtures. Tests FAIL if the config file is missing or
-incomplete — copy from test_site_config.yaml.example and fill in your values.
+Integration-test credentials come from the project-root ``.env`` file — the
+same file smoke_test/run.sh sources.  One source of truth beats two.
+
+Tests that need real APIs use the ``embedding_config``, ``llm_config``, or
+``integration_config`` fixtures.  They FAIL loudly when ``.env`` is missing a
+required variable, since an integration test with empty creds is worse than
+a skipped one (silent false positive).
 """
 
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -18,44 +20,45 @@ import yaml
 # Ensure tests/ is on sys.path so mcp_helpers can be imported
 sys.path.insert(0, str(Path(__file__).parent))
 
-_SITE_CONFIG_PATH = Path(__file__).parent / "test_site_config.yaml"
+_ENV_PATH = Path(__file__).parent.parent / ".env"
 
 
-def _load_site_config() -> dict:
-    """Load test_site_config.yaml. Fails if missing."""
-    if not _SITE_CONFIG_PATH.exists():
-        pytest.fail(
-            f"Missing {_SITE_CONFIG_PATH.name} — copy from test_site_config.yaml.example "
-            f"and fill in your institution's values"
-        )
-    return yaml.safe_load(_SITE_CONFIG_PATH.read_text()) or {}
+def _load_env() -> dict:
+    """Parse .env as KEY=VALUE lines.  Fails if the file is missing.
 
-
-@pytest.fixture
-def site_config():
-    """Institution-specific test config. Fails if missing."""
-    return _load_site_config()
-
-
-@pytest.fixture
-def embedding_config(site_config, monkeypatch):
-    """Embedding config from site config. Sets env vars for APIEmbeddingClient.
-
-    Fails if base_url or api_key are missing.
+    Deliberately does not shell-out to dotenv — .env syntax we emit is
+    plain KEY=value with no quoting or substitution, so a 10-line parser
+    is clearer than pulling in a dependency.
     """
-    emb = site_config.get("embedding", {})
-
-    base_url = emb.get("base_url")
-    api_key = emb.get("api_key") or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
-    model = emb.get("model", "text-embedding-3-small")
-
-    if not base_url:
-        pytest.fail("embedding.base_url missing in test_site_config.yaml")
-    if not api_key:
+    if not _ENV_PATH.exists():
         pytest.fail(
-            "No embedding API key: set embedding.api_key in test_site_config.yaml "
-            "or export LLM_API_KEY"
+            f"Missing {_ENV_PATH} — copy .env.example to .env and fill in your "
+            f"LLM_API_KEY / LLM_BASE_URL / LLM_MODEL / EMBEDDING_* values"
         )
+    result: dict[str, str] = {}
+    for line in _ENV_PATH.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        result[k.strip()] = v.strip()
+    return result
+
+
+def _require(env: dict, key: str) -> str:
+    value = env.get(key, "")
+    if not value:
+        pytest.fail(f"{key} missing or empty in .env")
+    return value
+
+
+@pytest.fixture
+def embedding_config(monkeypatch):
+    """Embedding endpoint from .env.  Sets env vars for APIEmbeddingClient."""
+    env = _load_env()
+    base_url = _require(env, "EMBEDDING_BASE_URL")
+    api_key = _require(env, "EMBEDDING_API_KEY")
+    model = _require(env, "EMBEDDING_MODEL")
 
     monkeypatch.setenv("OPENAI_BASE_URL", base_url)
     monkeypatch.setenv("LLM_API_KEY", api_key)
@@ -65,57 +68,44 @@ def embedding_config(site_config, monkeypatch):
 
 
 @pytest.fixture
-def llm_config(site_config):
-    """LLM endpoint config from site config.
-
-    Fails if llm.base_url or api_key are missing.
-    Returns: {"model": ..., "base_url": ..., "api_key": ...}
-    """
-    llm = site_config.get("llm", {})
-
-    base_url = llm.get("base_url")
-    api_key = llm.get("api_key") or os.getenv("LLM_API_KEY")
-    model = llm.get("model", "claude-sonnet-4-20250514")
-
-    if not base_url:
-        pytest.fail("llm.base_url missing in test_site_config.yaml")
-    if not api_key:
-        pytest.fail(
-            "No LLM API key: set llm.api_key in test_site_config.yaml "
-            "or export LLM_API_KEY"
-        )
-
-    return {"model": model, "base_url": base_url, "api_key": api_key}
+def llm_config():
+    """LLM endpoint from .env."""
+    env = _load_env()
+    return {
+        "model": _require(env, "LLM_MODEL"),
+        "base_url": _require(env, "LLM_BASE_URL"),
+        "api_key": _require(env, "LLM_API_KEY"),
+    }
 
 
 @pytest.fixture
-def integration_config(site_config, tmp_path, monkeypatch):
-    """Full DSAGT config as load_config() would return.
+def integration_config(tmp_path, monkeypatch):
+    """Full DSAGT config as ``load_config()`` would return it.
 
-    Creates a temporary project dir with dsagt_config.yaml derived from
-    test_site_config.yaml, patches the registry, and returns the loaded config.
+    Builds a dsagt_config.yaml in a temp project dir from .env values, then
+    patches the registry so ``load_config(project_name)`` resolves to it.
     """
     from dsagt.session import load_config
 
-    project_name = site_config.get("project", "test-integration")
-
-    # Build a dsagt_config.yaml from the site config
+    env = _load_env()
+    project_name = "test-integration"
     config_data = {
         "project": project_name,
-        "agent": site_config.get("agent", "claude-code"),
+        "agent": "claude-code",
         "llm": {
-            "model": site_config.get("llm", {}).get("model", "claude-sonnet-4-20250514"),
-            "api_key": site_config.get("llm", {}).get("api_key", ""),
+            "model": _require(env, "LLM_MODEL"),
+            "base_url": _require(env, "LLM_BASE_URL"),
+            "api_key": _require(env, "LLM_API_KEY"),
         },
         "embedding": {
-            "model": site_config.get("embedding", {}).get("model", "text-embedding-3-small"),
-            "api_key": site_config.get("embedding", {}).get("api_key", ""),
+            "model": _require(env, "EMBEDDING_MODEL"),
+            "base_url": _require(env, "EMBEDDING_BASE_URL"),
+            "api_key": _require(env, "EMBEDDING_API_KEY"),
         },
-        "proxy": site_config.get("proxy", {"port": 14000}),
-        "mlflow": site_config.get("mlflow", {"port": 15001, "backend": "sqlite"}),
+        "proxy": {"port": 14000},
+        "mlflow": {"port": 15001, "backend": "sqlite"},
     }
 
-    # Write to a temp project dir
     project_dir = tmp_path / project_name
     project_dir.mkdir(parents=True)
     for subdir in ("trace_archive", "mlflow", "tools", "tools/code", "skills", "kb_index"):
@@ -124,7 +114,6 @@ def integration_config(site_config, tmp_path, monkeypatch):
         yaml.dump(config_data, default_flow_style=False, sort_keys=False)
     )
 
-    # Patch registry so load_config resolves this project to our temp dir
     monkeypatch.setattr(
         "dsagt.session._load_registry",
         lambda: {project_name: str(project_dir)},

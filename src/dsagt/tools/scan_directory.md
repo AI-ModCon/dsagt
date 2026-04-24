@@ -2,21 +2,24 @@
 name: scan_directory
 description: Scan a data directory and produce structured report with file counts,
   sizes, and directory tree
-executable: python tools/scan_directory.py
+executable: dsagt-run --tool scan_directory -- python tools/scan_directory.py
 parameters:
   directory:
     type: string
     required: true
+    cli: positional
     description: Path to directory to scan
   max_depth:
     type: integer
     required: false
     default: 5
+    cli: "--max-depth"
     description: Maximum directory depth to traverse
   top_n:
     type: integer
     required: false
     default: 20
+    cli: "--top-n"
     description: Number of largest files to list
 ---
 

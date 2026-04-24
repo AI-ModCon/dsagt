@@ -305,28 +305,49 @@ def agent_env(config: dict) -> dict:
     env = dict(os.environ)
     env["DSAGT_PROJECT"] = config["project"]
     env["DSAGT_PROJECT_DIR"] = pdir
+    # Proxy's MlflowLogger subclass reads this to stamp dsagt.agent on
+    # every agent-turn trace — lets the MLflow UI tell goose/claude-code/
+    # roo/cline sessions apart without inspecting the request shape.
+    env["DSAGT_AGENT"] = agent
 
     if agent in ("claude-code", "roo", "cline"):
         env["ANTHROPIC_BASE_URL"] = f"http://localhost:{proxy_port}"
+        # Pin the model.  Without this Claude Code falls back to its built-in
+        # default (currently claude-sonnet-4-6) which won't exist on project
+        # gateways like PNNL's ai-incubator-api and the proxy will 400 every
+        # request.
+        env["ANTHROPIC_MODEL"] = config["llm"]["model"]
     if agent == "goose":
         env["OPENAI_HOST"] = f"http://localhost:{proxy_port}"
+        # Override any global ~/.config/goose/config.yaml so the project's
+        # configured model is what actually runs.  Without these, a user's
+        # global GOOSE_MODEL (e.g. a model their upstream doesn't offer)
+        # silently wins over dsagt_config.yaml.
+        env["GOOSE_PROVIDER"] = "openai"
+        env["GOOSE_MODEL"] = config["llm"]["model"]
 
-    # Plant the LLM API key into the agent's environment under the
-    # provider-specific name.  This is critical for Claude Code in
-    # particular: without ANTHROPIC_API_KEY set, Claude Code falls back
-    # to OAuth subscription auth and silently *ignores* ANTHROPIC_BASE_URL,
-    # which means the proxy is bypassed entirely and the user's lab
-    # routing never happens.
+    # Plant a sentinel key (not the real one) into the agent's environment
+    # under the provider-specific name.  Two things are true simultaneously:
     #
-    # The proxy doesn't validate this key against upstream — it uses its
-    # own LLM_API_KEY for forwarding — but the agent still needs *some*
-    # value here to take the API path instead of OAuth.
-    llm_key = config.get("llm", {}).get("api_key", "")
-    if llm_key and not llm_key.startswith("${"):
-        if agent in ("claude-code", "roo", "cline"):
-            env["ANTHROPIC_API_KEY"] = llm_key
-        if agent == "goose":
-            env["OPENAI_API_KEY"] = llm_key
+    #   (a) Claude Code / goose silently ignore ANTHROPIC_BASE_URL /
+    #       OPENAI_HOST and fall back to OAuth or default endpoints when the
+    #       *_API_KEY var is empty, so we have to set *something*.
+    #   (b) Setting the real upstream key means that if the proxy is
+    #       unreachable (orphan on the port, proxy crashed, misconfigured
+    #       base URL), the agent happily falls back to calling the real
+    #       upstream directly — silently bypassing our provenance + tracing
+    #       pipeline.
+    #
+    # A sentinel value satisfies (a) without enabling (b): the proxy accepts
+    # any bearer token at ingress and forwards with its own LLM_API_KEY, but
+    # a direct call to api.anthropic.com / api.openai.com with the sentinel
+    # returns 401 — failing loudly at the real boundary instead of silently
+    # bypassing us.
+    sentinel_key = "dsagt-proxy-forwarded-disable-direct-calls"
+    if agent in ("claude-code", "roo", "cline"):
+        env["ANTHROPIC_API_KEY"] = sentinel_key
+    if agent == "goose":
+        env["OPENAI_API_KEY"] = sentinel_key
 
     emb = config.get("embedding", {})
     embedding_key = emb.get("api_key", "")
@@ -337,29 +358,73 @@ def agent_env(config: dict) -> dict:
     if emb.get("model"):
         env["EMBEDDING_MODEL"] = emb["model"]
 
-    # OTel endpoint inherited by every subprocess (dsagt-run, etc.).
+    # MLflow tracking URI inherited by every subprocess (dsagt-run, MCP
+    # servers) so their mlflow.start_span() calls land in the project's
+    # store alongside the proxy's LiteLLM-autologged traces.
     mlflow_port = config.get("mlflow", {}).get("port")
     if mlflow_port:
-        env["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"http://localhost:{mlflow_port}"
-        env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/protobuf"
+        env["MLFLOW_TRACKING_URI"] = f"http://localhost:{mlflow_port}"
+
+    # Session id inherited by every subprocess so tool.execute / kb.*
+    # spans share the same session tag as the proxy's LLM traces.
+    if config.get("session_id"):
+        env["DSAGT_SESSION_ID"] = config["session_id"]
 
     return env
 
 
 def agent_command(config: dict) -> list[str]:
-    """Return the shell command to launch the agent."""
-    return _AGENT_COMMANDS[config["agent"]]
+    """Return the shell command to launch the agent interactively.
+
+    Goose only reads ``~/.config/goose/config.yaml`` for extensions, not a
+    project-local file — so the MCP servers are passed via ``--with-extension``
+    flags on the session command to guarantee they attach for this project.
+
+    For non-interactive batch (``--script``) mode, see ``launch_agent`` —
+    each agent has its own per-prompt invocation pattern that doesn't fit a
+    single argv.
+    """
+    agent = config["agent"]
+    cmd = list(_AGENT_COMMANDS[agent])
+    if agent == "goose":
+        for server in ("registry", "knowledge"):
+            cmd.extend(["--with-extension", f"uv run dsagt-{server}-server"])
+    return cmd
 
 
-def launch_agent(config: dict, working_dir: str | Path) -> int:
-    """Launch the agent process in the foreground with the correct environment.
+def launch_agent(
+    config: dict,
+    working_dir: str | Path,
+    script_path: str | Path | None = None,
+    max_turns: int = 30,
+) -> int:
+    """Launch the agent in the foreground with the correct environment.
 
-    Blocks until the agent exits. Returns the agent's exit code.
+    Blocks until the agent exits.  Returns the agent's exit code.
+
+    When ``script_path`` is set, the agent runs in non-interactive batch
+    mode and we dispatch to a per-agent runner — each agent has a different
+    shape for "run these prompts in sequence":
+
+      goose:        single ``goose run --instructions FILE`` call
+      claude-code:  loop ``claude -p PROMPT`` then ``claude --continue -p ...``
+
+    Other agents raise — add a runner here when adding agent support.
     """
     working_dir = Path(working_dir)
     env = agent_env(config)
-    cmd = agent_command(config)
 
+    if script_path is not None:
+        agent = config["agent"]
+        runner = _SCRIPT_RUNNERS.get(agent)
+        if runner is None:
+            raise ValueError(
+                f"--script is not supported for agent {agent!r}. "
+                f"Supported: {sorted(_SCRIPT_RUNNERS)}."
+            )
+        return runner(config, env, working_dir, Path(script_path), max_turns)
+
+    cmd = agent_command(config)
     logger.info("Launching: %s", " ".join(cmd))
     try:
         result = subprocess.run(cmd, env=env, cwd=str(working_dir))
@@ -371,3 +436,83 @@ def launch_agent(config: dict, working_dir: str | Path) -> int:
         return 1
     except KeyboardInterrupt:
         return 0
+
+
+# ---------------------------------------------------------------------------
+# Per-agent script runners (non-interactive --script mode)
+# ---------------------------------------------------------------------------
+
+def _run_goose_script(
+    config: dict, env: dict, working_dir: Path, script_path: Path, max_turns: int,
+) -> int:
+    """Single ``goose run`` call — goose's instructions file IS multi-turn."""
+    env["GOOSE_MODE"] = "auto"
+    cmd = ["goose", "run", "--instructions", str(script_path),
+           "--max-turns", str(max_turns)]
+    for server in ("registry", "knowledge"):
+        cmd.extend(["--with-extension", f"uv run dsagt-{server}-server"])
+    logger.info("Launching: %s", " ".join(cmd))
+    try:
+        return subprocess.run(cmd, env=env, cwd=str(working_dir)).returncode
+    except FileNotFoundError:
+        logger.error("Command not found: goose. Install first.")
+        return 1
+    except KeyboardInterrupt:
+        return 0
+
+
+def _run_claude_script(
+    config: dict, env: dict, working_dir: Path, script_path: Path, max_turns: int,
+) -> int:
+    """Loop prompts: ``claude -p`` for the first, ``claude --continue -p`` after.
+
+    Claude Code has no native multi-turn batch shape — ``-p`` is one-shot,
+    ``--continue`` resumes the most recent session in the same cwd.  Looping
+    sends prompts as discrete turns sharing one logical session.
+
+    ``max_turns`` here caps the number of *prompts* we send (one per loop
+    iteration), not Claude's internal tool-call loop within a prompt — Claude
+    Code doesn't expose the latter.  Wall-clock cap in the smoke wrapper is
+    the safety net.
+    """
+    prompts = _read_script_prompts(script_path)
+    if not prompts:
+        logger.error("No prompts found in %s", script_path)
+        return 1
+    if len(prompts) > max_turns:
+        logger.warning(
+            "Script has %d prompts but max_turns=%d; truncating",
+            len(prompts), max_turns,
+        )
+        prompts = prompts[:max_turns]
+
+    base = ["claude", "--dangerously-skip-permissions"]
+    for i, prompt in enumerate(prompts):
+        cmd = base + (["--continue"] if i > 0 else []) + ["-p", prompt]
+        logger.info("Launching prompt %d/%d", i + 1, len(prompts))
+        try:
+            result = subprocess.run(cmd, env=env, cwd=str(working_dir))
+        except FileNotFoundError:
+            logger.error("Command not found: claude. Install Claude Code first.")
+            return 1
+        except KeyboardInterrupt:
+            return 0
+        if result.returncode != 0:
+            logger.warning(
+                "claude prompt %d/%d exited %d; stopping script",
+                i + 1, len(prompts), result.returncode,
+            )
+            return result.returncode
+    return 0
+
+
+def _read_script_prompts(path: Path) -> list[str]:
+    """Split a script file into one prompt per blank-line-separated paragraph."""
+    text = path.read_text()
+    return [chunk.strip() for chunk in text.split("\n\n") if chunk.strip()]
+
+
+_SCRIPT_RUNNERS = {
+    "goose": _run_goose_script,
+    "claude-code": _run_claude_script,
+}

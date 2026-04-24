@@ -1,22 +1,25 @@
 """
-Consolidated integration tests for DSAGT.
+Integration tests that hit real endpoints or validate config generation.
 
-Validates that real endpoints are reachable and that the config chain
-produces working configurations. Requires test_site_config.yaml with
-valid credentials — tests FAIL if missing or incomplete.
+Credentials come from the project-root ``.env`` (see conftest.py).  The
+full end-to-end agent flow lives in ``tests/smoke_test/run.sh``; what's
+here is the narrower layer smoke_test can't cleanly isolate:
 
-Usage:
-    uv run pytest tests/test_integration.py -v
-    uv run pytest tests/test_integration.py -v -k TestLLMEndpoint
-    uv run pytest -m integration          # all integration tests across files
+- **TestEmbeddingEndpoint** — the raw embedding API returns valid vectors.
+  Useful when debugging embedding failures, because the smoke test can't
+  tell you whether a failure came from the network or the KB pipeline.
+- **TestLLMEndpoint** — the raw LLM API returns a completion.  Same
+  reasoning: bisects "is the upstream reachable" from "is the proxy wired
+  correctly".
+- **TestConfigChain** — dsagt init → generate_agent_configs → agent_env
+  without touching the network, since config bugs can masquerade as
+  runtime errors that are painful to diagnose via smoke.
+
+Run:
+    uv run pytest tests/test_integration.py
+    uv run pytest -m integration          # all integration tests
     uv run pytest -m "not integration"    # unit tests only
 """
-
-import json
-import shutil
-import sys
-from pathlib import Path
-from unittest.mock import patch
 
 import httpx
 import numpy as np
@@ -45,27 +48,13 @@ class TestEmbeddingEndpoint:
             result = client.embed(["test sentence"])
             assert isinstance(result, np.ndarray)
             assert result.ndim == 2
-            assert result.shape[0] == 1
-            assert result.shape[1] > 0
-        finally:
-            client.close()
-
-    def test_embedding_dimension_consistent(self, embedding_config):
-        """Two different texts produce vectors of the same dimension."""
-        client = APIEmbeddingClient(
-            model=embedding_config["model"],
-            base_url=embedding_config["base_url"],
-            api_key=embedding_config["api_key"],
-        )
-        try:
-            result = client.embed(["hello world", "genome assembly pipeline"])
-            assert result.shape[0] == 2
+            assert result.shape == (1, result.shape[1])
             assert result.shape[1] > 0
         finally:
             client.close()
 
     def test_embedding_batch(self, embedding_config):
-        """Five texts produce correct batch shape."""
+        """Multiple texts produce correct batch shape with consistent dim."""
         client = APIEmbeddingClient(
             model=embedding_config["model"],
             base_url=embedding_config["base_url"],
@@ -75,12 +64,11 @@ class TestEmbeddingEndpoint:
             "data quality assessment",
             "genome assembly metrics",
             "tool registration workflow",
-            "semantic search retrieval",
-            "pipeline provenance tracking",
         ]
         try:
             result = client.embed(texts)
-            assert result.shape[0] == 5
+            assert result.shape[0] == len(texts)
+            assert result.shape[1] > 0
         finally:
             client.close()
 
@@ -90,16 +78,22 @@ class TestEmbeddingEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestLLMEndpoint:
-    """Validates the LLM API is reachable and returns valid responses."""
+    """Validates the LLM API is reachable and returns valid responses.
+
+    Posts to ``/chat/completions`` (OpenAI-shape) because .env's LLM_BASE_URL
+    is an OpenAI-compatible gateway — Anthropic-format ``/v1/messages`` would
+    404 on it.  The proxy (commands/proxy_server.py) sets
+    ``use_chat_completions_url_for_anthropic_messages = True`` for the same
+    reason.
+    """
 
     def test_llm_returns_response(self, llm_config):
         """Minimal LLM request returns 200 with non-empty content."""
         with httpx.Client(timeout=30.0) as client:
             response = client.post(
-                f"{llm_config['base_url'].rstrip('/')}/v1/messages",
+                f"{llm_config['base_url'].rstrip('/')}/v1/chat/completions",
                 headers={
-                    "x-api-key": llm_config["api_key"],
-                    "anthropic-version": "2023-06-01",
+                    "Authorization": f"Bearer {llm_config['api_key']}",
                     "content-type": "application/json",
                 },
                 json={
@@ -111,96 +105,14 @@ class TestLLMEndpoint:
             response.raise_for_status()
             data = response.json()
 
-        # Anthropic format: content[0].text
-        texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
-        assert len(texts) > 0, f"No text content in response: {data}"
-        assert len(texts[0]) > 0
-
-    def test_llm_model_matches_config(self, llm_config):
-        """Response model field matches the requested model."""
-        with httpx.Client(timeout=30.0) as client:
-            response = client.post(
-                f"{llm_config['base_url'].rstrip('/')}/v1/messages",
-                headers={
-                    "x-api-key": llm_config["api_key"],
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": llm_config["model"],
-                    "max_tokens": 10,
-                    "messages": [{"role": "user", "content": "Say hello."}],
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        assert data.get("model") == llm_config["model"], (
-            f"Expected model {llm_config['model']}, got {data.get('model')}"
-        )
+        choices = data.get("choices") or []
+        assert choices, f"No choices in response: {data}"
+        content = choices[0].get("message", {}).get("content", "")
+        assert content, f"Empty content: {data}"
 
 
 # ---------------------------------------------------------------------------
-# MCP server handshake
-# ---------------------------------------------------------------------------
-
-_uv_available = shutil.which("uv") is not None
-
-
-@pytest.mark.skipif(not _uv_available, reason="uv not available")
-class TestMCPServerHandshake:
-    """Validates MCP servers start and respond to handshakes with real config."""
-
-    def test_registry_server_handshake(self, tmp_path):
-        """Registry server starts and completes MCP handshake."""
-        from mcp_helpers import mcp_initialize, mcp_list_tools, start_server
-
-        proc = start_server([
-            sys.executable, "-m", "dsagt.commands.registry_server",
-            "--runtime-dir", str(tmp_path / "runtime"),
-        ])
-        try:
-            resp = mcp_initialize(proc)
-            assert "result" in resp
-
-            tools_resp = mcp_list_tools(proc)
-            tool_names = [t["name"] for t in tools_resp["result"]["tools"]]
-            assert "save_tool_spec" in tool_names
-        finally:
-            proc.terminate()
-            proc.wait(timeout=5)
-
-    def test_knowledge_server_handshake(self, tmp_path, embedding_config):
-        """Knowledge server starts with real credentials and lists tools."""
-        from mcp_helpers import mcp_initialize, mcp_list_tools, start_server
-
-        proc = start_server(
-            [
-                sys.executable, "-m", "dsagt.commands.knowledge_server",
-                "--base-index-dir", str(tmp_path / "kb_index"),
-                "--runtime-dir", str(tmp_path / "runtime"),
-            ],
-            env={
-                "LLM_API_KEY": embedding_config["api_key"],
-                "OPENAI_BASE_URL": embedding_config["base_url"],
-                "EMBEDDING_MODEL": embedding_config["model"],
-            },
-        )
-        try:
-            resp = mcp_initialize(proc)
-            assert "result" in resp
-
-            tools_resp = mcp_list_tools(proc)
-            tool_names = [t["name"] for t in tools_resp["result"]["tools"]]
-            assert "kb_search" in tool_names
-            assert "kb_ingest" in tool_names
-        finally:
-            proc.terminate()
-            proc.wait(timeout=5)
-
-
-# ---------------------------------------------------------------------------
-# Config chain
+# Config chain (no network)
 # ---------------------------------------------------------------------------
 
 class TestConfigChain:
@@ -212,8 +124,6 @@ class TestConfigChain:
         from dsagt.session import init_project
 
         monkeypatch.setattr("dsagt.session.DEFAULT_PROJECTS_BASE", tmp_path)
-        monkeypatch.setattr("dsagt.session.DEFAULT_PROJECTS_BASE", tmp_path)
-        # Patch registry to store in memory
         reg = {}
         monkeypatch.setattr("dsagt.session._load_registry", lambda: dict(reg))
         monkeypatch.setattr("dsagt.session._save_registry", lambda r: reg.update(r))
@@ -248,15 +158,52 @@ class TestConfigChain:
 
         env = agent_env(integration_config)
 
-        assert "DSAGT_PROJECT" in env
-        assert "DSAGT_PROJECT_DIR" in env
         assert env["DSAGT_PROJECT"] == integration_config["project"]
+        assert env["DSAGT_AGENT"] == integration_config["agent"]
+        assert "DSAGT_PROJECT_DIR" in env
 
-        # Claude Code should get ANTHROPIC_BASE_URL
+        # Claude Code should get ANTHROPIC_BASE_URL pointing at the proxy
         if integration_config["agent"] == "claude-code":
-            assert "ANTHROPIC_BASE_URL" in env
             proxy_port = integration_config["proxy"]["port"]
             assert str(proxy_port) in env["ANTHROPIC_BASE_URL"]
+
+    @pytest.mark.parametrize("agent", ["goose", "claude-code", "roo", "cline"])
+    def test_agent_env_matrix(self, integration_config, agent):
+        """Every supported agent gets the right env vars pointing at the proxy.
+
+        Per-agent correctness here is what prevents a silent "agent talks to
+        the real upstream instead of the proxy" regression — we've hit that
+        bug twice in this codebase, once for claude-code's default model and
+        once for goose's ~/.config override.
+        """
+        from dsagt.agents import agent_env
+
+        config = dict(integration_config)
+        config["agent"] = agent
+        proxy_port = config["proxy"]["port"]
+        model = config["llm"]["model"]
+        sentinel = "dsagt-proxy-forwarded-disable-direct-calls"
+
+        env = agent_env(config)
+
+        assert env["DSAGT_AGENT"] == agent
+
+        if agent in ("claude-code", "roo", "cline"):
+            # Anthropic-native agents: point at proxy, pin model, sentinel key.
+            assert env["ANTHROPIC_BASE_URL"] == f"http://localhost:{proxy_port}"
+            assert env["ANTHROPIC_MODEL"] == model
+            assert env["ANTHROPIC_API_KEY"] == sentinel
+            # Goose-only vars must not leak into other agents' envs.
+            assert "OPENAI_HOST" not in env
+            assert "GOOSE_MODEL" not in env
+        elif agent == "goose":
+            # OpenAI-native: different env var names, same destination.
+            assert env["OPENAI_HOST"] == f"http://localhost:{proxy_port}"
+            assert env["GOOSE_PROVIDER"] == "openai"
+            assert env["GOOSE_MODEL"] == model
+            assert env["OPENAI_API_KEY"] == sentinel
+            assert "ANTHROPIC_BASE_URL" not in env
+            assert "ANTHROPIC_MODEL" not in env
 
     def test_mcp_env_block_passes_api_key(self, integration_config):
         """Resolved API key appears in the MCP server env block."""
@@ -267,72 +214,3 @@ class TestConfigChain:
         api_key = integration_config.get("embedding", {}).get("api_key", "")
         if api_key and not api_key.startswith("${"):
             assert env_block.get("LLM_API_KEY") == api_key
-
-
-# ---------------------------------------------------------------------------
-# Full stack: ingest and search with real embedding
-# ---------------------------------------------------------------------------
-
-@pytest.mark.skipif(not _uv_available, reason="uv not available")
-class TestFullStack:
-    """End-to-end: knowledge server subprocess with real embedding API."""
-
-    def test_ingest_and_search(self, tmp_path, embedding_config):
-        """Ingest docs via MCP, search, assert results."""
-        from mcp_helpers import mcp_call_tool, mcp_initialize, start_server
-        import time
-
-        docs = tmp_path / "test_docs"
-        docs.mkdir()
-        (docs / "test.md").write_text(
-            "# Integration Test\n\n"
-            "This document validates the full DSAGT knowledge pipeline.\n"
-        )
-
-        proc = start_server(
-            [
-                sys.executable, "-m", "dsagt.commands.knowledge_server",
-                "--base-index-dir", str(tmp_path / "kb_index"),
-                "--runtime-dir", str(tmp_path / "runtime"),
-            ],
-            env={
-                "LLM_API_KEY": embedding_config["api_key"],
-                "OPENAI_BASE_URL": embedding_config["base_url"],
-                "EMBEDDING_MODEL": embedding_config["model"],
-            },
-        )
-        try:
-            resp = mcp_initialize(proc)
-            assert "result" in resp
-
-            # Ingest
-            ingest_resp = mcp_call_tool(proc, "kb_ingest", {
-                "folder_path": str(docs),
-            }, msg_id=10, timeout=60.0)
-            ingest_data = json.loads(ingest_resp["result"]["content"][0]["text"])
-            assert ingest_data["status"] == "started"
-            job_id = ingest_data["job_id"]
-
-            # Poll
-            for i in range(60):
-                status_resp = mcp_call_tool(
-                    proc, "kb_job_status", {"job_id": job_id}, msg_id=20 + i,
-                )
-                status_data = json.loads(status_resp["result"]["content"][0]["text"])
-                if status_data["status"] != "running":
-                    break
-                time.sleep(1)
-
-            assert status_data["status"] == "complete", f"Ingest failed: {status_data}"
-
-            # Search
-            search_resp = mcp_call_tool(proc, "kb_search", {
-                "query": "knowledge pipeline",
-                "collection": "test_docs",
-            }, msg_id=100, timeout=30.0)
-            search_data = json.loads(search_resp["result"]["content"][0]["text"])
-            assert search_data["status"] == "ok"
-            assert search_data["result_count"] > 0
-        finally:
-            proc.terminate()
-            proc.wait(timeout=5)
