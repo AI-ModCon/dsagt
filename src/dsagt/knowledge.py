@@ -226,22 +226,21 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         if not self.api_key:
             raise ValueError("API key required via argument or LLM_API_KEY env var")
 
-        # Bare model names need a provider prefix so LiteLLM knows which
-        # client to dispatch to.  We use ``openai_like`` (not ``openai``) on
-        # purpose: ``openai`` matches LiteLLM's canonical OpenAI model
-        # registry and will silently *normalize* names like
-        # ``text-embedding-3-small-project`` down to
-        # ``text-embedding-3-small`` before forwarding the request.  Lab
-        # proxies that route by alias (e.g. PNNL's ``-project`` suffix) end
-        # up rejecting that normalized name.
+        # Always prefix with ``openai_like`` so LiteLLM dispatches to the
+        # OpenAI-wire-protocol client pointed at our ``base_url`` — the rest
+        # of DSAGT already assumes the embedding endpoint is OpenAI-compat,
+        # so there's no valid case for a different provider here.
         #
-        # ``openai_like`` is LiteLLM's escape hatch for "endpoint speaks the
-        # OpenAI wire protocol but is not OpenAI" — it forwards the model
-        # string verbatim and applies no name munging.
-        if "/" not in self.model:
-            self._litellm_model = f"openai_like/{self.model}"
-        else:
-            self._litellm_model = self.model
+        # ``openai_like`` (not ``openai``) is deliberate on two counts: (a)
+        # ``openai`` matches LiteLLM's canonical model registry and silently
+        # normalizes aliases like ``text-embedding-3-small-project`` down to
+        # ``text-embedding-3-small``, which lab proxies then reject; (b)
+        # ``openai_like`` is the documented escape hatch for "endpoint
+        # speaks OpenAI but is not OpenAI" — it forwards the model string
+        # verbatim, preserving HuggingFace-style names (``lbl/nomic-embed-text``,
+        # ``nomic-ai/nomic-embed-text-v1``) whose slashes are part of the
+        # model identifier, not a provider prefix.
+        self._litellm_model = f"openai_like/{self.model}"
 
     @llm_source("embedding")
     def embed(self, texts: list[str]) -> np.ndarray:

@@ -148,12 +148,18 @@ class TestAPIEmbeddingClient:
         assert client._litellm_model == "openai_like/text-embedding-3-small-project"
         client.close()
 
-    def test_explicit_provider_prefix_is_preserved(self):
-        """Pre-prefixed model names are passed through unchanged."""
+    def test_slash_in_model_name_still_gets_openai_like_prefix(self):
+        """HuggingFace-style names (``lbl/nomic-embed-text``) are model
+        identifiers, not LiteLLM provider prefixes — the whole thing needs
+        ``openai_like/`` in front so LiteLLM dispatches to the OpenAI-wire
+        client pointed at our base_url.  The rest of DSAGT assumes an
+        OpenAI-compat endpoint, so there's no valid case for the user's
+        string to carry a LiteLLM provider prefix of its own.
+        """
         client = APIEmbeddingClient(
-            api_key="k", base_url="http://test", model="bedrock/cohere.embed-english-v3",
+            api_key="k", base_url="http://test", model="lbl/nomic-embed-text",
         )
-        assert client._litellm_model == "bedrock/cohere.embed-english-v3"
+        assert client._litellm_model == "openai_like/lbl/nomic-embed-text"
         client.close()
 
     def test_embed_empty_list(self):
