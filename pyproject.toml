@@ -76,3 +76,9 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning:importlib._bootstrap",
 ]
+
+[tool.uv]
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'"
+]
