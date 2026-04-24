@@ -30,6 +30,7 @@ dependencies = [
     "chromadb>=1.5.1",
     "faiss-cpu>=1.8",
     "sentence-transformers>=3.0",
+    "llama-index-readers-file>=0.1",
 ]
 
 [project.scripts]
