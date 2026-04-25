@@ -89,9 +89,13 @@ class TestLLMEndpoint:
 
     def test_llm_returns_response(self, llm_config):
         """Minimal LLM request returns 200 with non-empty content."""
+        # Some gateways expect /v1 already in base_url (RC Chat / Ollama
+        # OpenAI-compat), others don't (ai-incubator-api).  Don't double it.
+        base = llm_config["base_url"].rstrip("/")
+        url = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
         with httpx.Client(timeout=30.0) as client:
             response = client.post(
-                f"{llm_config['base_url'].rstrip('/')}/v1/chat/completions",
+                url,
                 headers={
                     "Authorization": f"Bearer {llm_config['api_key']}",
                     "content-type": "application/json",

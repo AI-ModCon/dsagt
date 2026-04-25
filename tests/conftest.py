@@ -33,7 +33,7 @@ def _load_env() -> dict:
     if not _ENV_PATH.exists():
         pytest.fail(
             f"Missing {_ENV_PATH} — copy .env.example to .env and fill in your "
-            f"LLM_API_KEY / LLM_BASE_URL / LLM_MODEL / EMBEDDING_* values"
+            f"LLM_PROVIDER / LLM_API_KEY / LLM_BASE_URL / LLM_MODEL / EMBEDDING_* values"
         )
     result: dict[str, str] = {}
     for line in _ENV_PATH.read_text().splitlines():
@@ -72,6 +72,7 @@ def llm_config():
     """LLM endpoint from .env."""
     env = _load_env()
     return {
+        "provider": _require(env, "LLM_PROVIDER"),
         "model": _require(env, "LLM_MODEL"),
         "base_url": _require(env, "LLM_BASE_URL"),
         "api_key": _require(env, "LLM_API_KEY"),
@@ -93,6 +94,7 @@ def integration_config(tmp_path, monkeypatch):
         "project": project_name,
         "agent": "claude-code",
         "llm": {
+            "provider": _require(env, "LLM_PROVIDER"),
             "model": _require(env, "LLM_MODEL"),
             "base_url": _require(env, "LLM_BASE_URL"),
             "api_key": _require(env, "LLM_API_KEY"),

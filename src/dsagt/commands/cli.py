@@ -96,7 +96,7 @@ def _cmd_start(args):
         for r in stop_services(args.project):
             print(f"  {r}")
 
-        from dsagt.sidechannel import print_warning as _sidechannel_warning
+        from dsagt.observability import print_sidechannel_warning as _sidechannel_warning
         _sidechannel_warning(pdir, config.get("session_id"))
 
 

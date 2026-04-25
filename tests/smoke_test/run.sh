@@ -44,7 +44,7 @@ set -a
 source .env
 set +a
 
-for var in LLM_API_KEY LLM_BASE_URL LLM_MODEL EMBEDDING_API_KEY EMBEDDING_BASE_URL EMBEDDING_MODEL; do
+for var in LLM_PROVIDER LLM_API_KEY LLM_BASE_URL LLM_MODEL EMBEDDING_API_KEY EMBEDDING_BASE_URL EMBEDDING_MODEL; do
     if [[ -z "${!var:-}" ]]; then
         echo "ERROR: ${var} is empty in .env" >&2
         exit 2

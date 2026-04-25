@@ -99,7 +99,7 @@ def proxy(tmp_path_factory):
     # a hand-rolled YAML that could drift.  Override the primary route's
     # mock_response so the primary path is testable without a real upstream.
     from dsagt.commands.proxy_server import _generate_config
-    config_body = _generate_config(MODEL_NAME, "http://localhost:19999")
+    config_body = _generate_config(MODEL_NAME, "http://localhost:19999", "openai")
     # Inject mock_response into the primary entry.  The wildcard mock is
     # already present; primary needs the inline mock to stay network-free.
     primary_marker = f"      api_key: os.environ/LLM_API_KEY\n"
@@ -126,6 +126,7 @@ def proxy(tmp_path_factory):
             "--port", str(port),
             "--model", MODEL_NAME,
             "--base-url", "http://localhost:19999",
+            "--provider", "openai",
             "--config", str(config_path),
             "--mlflow-url", f"sqlite:///{mlflow_db}",
             "--session", SESSION_ID,

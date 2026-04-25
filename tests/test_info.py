@@ -12,7 +12,15 @@ import json
 import pandas as pd
 import pytest
 
-from dsagt.commands.info import _report, _tokens, _fmt_count, _is_error
+from dsagt.commands.info import (
+    _config_sources,
+    _fmt_count,
+    _is_error,
+    _mask_secret,
+    _read_env_file,
+    _report,
+    _tokens,
+)
 
 
 def _metadata(*, session: str, source: str | None, agent: str | None,
@@ -183,3 +191,108 @@ def test_report_missing_source_falls_back_to_unknown(config):
     r = _report("proj", config, df)
     assert r["by_source"][0]["source"] == "unknown"
     assert r["by_session"][0]["agent"] == "-"
+
+
+# ---------------------------------------------------------------------------
+# Config source tracking (.env / environment / literal)
+# ---------------------------------------------------------------------------
+
+def test_read_env_file_skips_comments_and_blanks(tmp_path):
+    p = tmp_path / ".env"
+    p.write_text("# header\n\nA=1\n  B = 2 \n# C=ignored\n")
+    assert _read_env_file(p) == {"A": "1", "B": "2"}
+
+
+def test_read_env_file_missing_returns_empty(tmp_path):
+    assert _read_env_file(tmp_path / "missing.env") == {}
+
+
+def test_mask_secret_short_value():
+    assert _mask_secret("short") == "***"
+    assert _mask_secret("exactlytwelv") == "***"
+
+
+def test_mask_secret_long_value():
+    assert _mask_secret("sk-abcdefghijklmnop") == "sk-a...mnop"
+
+
+def _write_project(tmp_path, monkeypatch, raw_yaml: str):
+    """Register a temp project with the given dsagt_config.yaml content."""
+    import yaml as _yaml
+    from dsagt.session import register_project
+
+    pdir = tmp_path / "proj"
+    pdir.mkdir()
+    (pdir / "dsagt_config.yaml").write_text(raw_yaml)
+
+    registry_dir = tmp_path / "registry"
+    registry_dir.mkdir()
+    monkeypatch.setattr("dsagt.session.REGISTRY_DIR", registry_dir)
+    monkeypatch.setattr("dsagt.session.REGISTRY_FILE", registry_dir / "projects.yaml")
+    register_project("proj", pdir)
+    return pdir
+
+
+def test_config_sources_classifies_env_file(tmp_path, monkeypatch):
+    _write_project(tmp_path, monkeypatch,
+        "project: proj\nagent: goose\nllm:\n  provider: ${LLM_PROVIDER}\n  model: ${LLM_MODEL}\n")
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_PROVIDER=openai\nLLM_MODEL=gpt-4\n")
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+
+    rows = {r["path"]: r for r in _config_sources("proj", env_file)}
+    assert rows["llm.provider"] == {"path": "llm.provider", "value": "openai", "source": ".env"}
+    assert rows["llm.model"]["value"] == "gpt-4"
+    assert rows["llm.model"]["source"] == ".env"
+
+
+def test_config_sources_classifies_environment(tmp_path, monkeypatch):
+    _write_project(tmp_path, monkeypatch,
+        "project: proj\nagent: goose\nllm:\n  provider: ${LLM_PROVIDER}\n")
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+
+    rows = {r["path"]: r for r in _config_sources("proj", tmp_path / "missing.env")}
+    assert rows["llm.provider"]["value"] == "anthropic"
+    assert rows["llm.provider"]["source"] == "environment"
+
+
+def test_config_sources_classifies_unresolved(tmp_path, monkeypatch):
+    _write_project(tmp_path, monkeypatch,
+        "project: proj\nagent: goose\nllm:\n  provider: ${LLM_PROVIDER}\n")
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
+    rows = {r["path"]: r for r in _config_sources("proj", tmp_path / "missing.env")}
+    assert rows["llm.provider"]["source"] == "unresolved"
+    assert rows["llm.provider"]["value"] == "${LLM_PROVIDER}"
+
+
+def test_config_sources_classifies_literal(tmp_path, monkeypatch):
+    _write_project(tmp_path, monkeypatch,
+        "project: proj\nagent: goose\nproxy:\n  port: 4000\n")
+
+    rows = {r["path"]: r for r in _config_sources("proj", tmp_path / "missing.env")}
+    assert rows["proxy.port"] == {"path": "proxy.port", "value": "4000", "source": "config"}
+
+
+def test_config_sources_masks_api_key(tmp_path, monkeypatch):
+    _write_project(tmp_path, monkeypatch,
+        "project: proj\nagent: goose\nllm:\n  api_key: ${LLM_API_KEY}\n")
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_API_KEY=sk-1234567890abcdef\n")
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+
+    rows = {r["path"]: r for r in _config_sources("proj", env_file)}
+    assert rows["llm.api_key"]["value"] == "sk-1...cdef"
+    assert rows["llm.api_key"]["source"] == ".env"
+
+
+def test_config_sources_skips_internal_sections(tmp_path, monkeypatch):
+    _write_project(tmp_path, monkeypatch,
+        "project: proj\nagent: goose\nknowledge:\n  chunk_size: 1024\nextraction:\n  threshold: 0\ncategories:\n  qc: stuff\n")
+
+    paths = {r["path"] for r in _config_sources("proj", tmp_path / "missing.env")}
+    assert "knowledge.chunk_size" not in paths
+    assert "extraction.threshold" not in paths
+    assert "categories.qc" not in paths
+    assert "project" in paths

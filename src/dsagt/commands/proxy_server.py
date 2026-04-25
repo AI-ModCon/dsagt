@@ -20,13 +20,13 @@ DEFAULT_PORT = 4000
 DEFAULT_RECORDS_DIR = "runtime/trace_archive"
 
 
-def _generate_config(model: str, base_url: str) -> str:
+def _generate_config(model: str, base_url: str, provider: str) -> str:
     """Generate a LiteLLM proxy config YAML.
 
-    Routes the configured model through LiteLLM's openai-compatible provider
-    pointed at *base_url*.  This lets the proxy forward to OpenAI-compatible
-    gateways (e.g. PNNL's ai-incubator-api) that serve Anthropic-named
-    models.  LiteLLM normalizes incoming Anthropic- and OpenAI-format
+    Routes the configured model through the chosen LiteLLM provider pointed
+    at *base_url*.  ``provider`` is the LiteLLM provider prefix (e.g.
+    ``openai``, ``anthropic``, ``bedrock``) and selects request-format and
+    auth handling.  LiteLLM normalizes incoming Anthropic- and OpenAI-format
     requests, so both Claude Code and Goose work against the same config.
 
     Callbacks (DSAGTCallback for provenance, MlflowLogger for LLM traces)
@@ -37,18 +37,19 @@ def _generate_config(model: str, base_url: str) -> str:
     that gap and works regardless of LiteLLM's config-loading internals.
 
     The wildcard fallback that catches agent sidechannel calls comes from
-    ``dsagt.sidechannel`` — see that module for why and how.
+    ``dsagt.observability`` (sidechannel section) — see that module for why
+    and how.
     """
-    from dsagt.sidechannel import WILDCARD_ROUTE_YAML
+    from dsagt.observability import SIDECHANNEL_WILDCARD_ROUTE_YAML
 
     return f"""\
 model_list:
   - model_name: {model}
     litellm_params:
-      model: openai/{model}
+      model: {provider}/{model}
       api_base: {base_url}
       api_key: os.environ/LLM_API_KEY
-{WILDCARD_ROUTE_YAML}\
+{SIDECHANNEL_WILDCARD_ROUTE_YAML}\
 litellm_settings:
   drop_params: true
 """
@@ -65,7 +66,10 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--config", default=None, help="Path to existing LiteLLM config YAML")
     parser.add_argument("--model", default="claude-sonnet-4-20250514")
     parser.add_argument("--base-url", required=True,
-        help="Upstream OpenAI-compatible endpoint (from dsagt_config.yaml llm.base_url)")
+        help="Upstream LLM endpoint (from dsagt_config.yaml llm.base_url)")
+    parser.add_argument("--provider", required=True,
+        help="LiteLLM provider prefix, e.g. openai, anthropic, bedrock. "
+             "See https://docs.litellm.ai/docs/providers for the full list.")
     parser.add_argument("--mlflow-url", default=None,
         help="MLflow tracking URL (enables LiteLLM → MLflow trace autologging)")
     parser.add_argument("--verbose", action="store_true")
@@ -139,7 +143,7 @@ def main(argv: list[str] | None = None):
     if args.config:
         config_path = args.config
     else:
-        config_content = _generate_config(args.model, args.base_url)
+        config_content = _generate_config(args.model, args.base_url, args.provider)
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".yaml", prefix="dsagt_litellm_", delete=False,
         )

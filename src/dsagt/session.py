@@ -31,7 +31,7 @@ from pathlib import Path
 
 import yaml
 
-from dsagt import sidechannel as _sidechannel
+from dsagt import observability as _observability
 from dsagt.memory import delete_session_log, extract_session
 from dsagt.knowledge import KnowledgeBase
 
@@ -123,11 +123,18 @@ def default_config_content(project_name: str, agent: str) -> str:
     can ``dsagt init`` any number of new projects without re-typing keys.
     ``resolve_env_vars`` substitutes values at config-load time.
     """
-    return yaml.dump(
+    header = (
+        "# llm.provider: LiteLLM provider prefix (selects request format + auth).\n"
+        "#   Common: openai, anthropic, bedrock, vertex_ai, azure, gemini,\n"
+        "#   ollama, mistral, groq, deepseek.\n"
+        "#   Full list: https://docs.litellm.ai/docs/providers\n"
+    )
+    return header + yaml.dump(
         {
             "project": project_name,
             "agent": agent,
             "llm": {
+                "provider": "${LLM_PROVIDER}",
                 "model": "${LLM_MODEL}",
                 "base_url": "${LLM_BASE_URL}",
                 "api_key": "${LLM_API_KEY}",
@@ -230,6 +237,13 @@ def _validate(config: dict) -> None:
     backend = config.get("mlflow", {}).get("backend")
     if backend and backend not in VALID_MLFLOW_BACKENDS:
         raise ValueError(f"'mlflow.backend' must be one of {VALID_MLFLOW_BACKENDS}, got '{backend}'")
+
+    if not config.get("llm", {}).get("provider"):
+        raise ValueError(
+            "'llm.provider' is required in dsagt_config.yaml — set it to a "
+            "LiteLLM provider prefix (openai, anthropic, bedrock, ...). "
+            "See https://docs.litellm.ai/docs/providers"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +456,7 @@ def start_services(config: dict) -> dict[str, int]:
         "--mlflow-url", mlflow_url,
         "--model", config["llm"]["model"],
         "--base-url", config["llm"]["base_url"],
+        "--provider", config["llm"]["provider"],
     ]
 
     proxy_log = pdir / "proxy.log"
@@ -461,9 +476,9 @@ def start_services(config: dict) -> dict[str, int]:
             "DSAGT_AGENT": config["agent"],
             # DSAGT callback compares this against each request's model to
             # detect sidechannel/wildcard hits.  The env var name is owned
-            # by dsagt.sidechannel — importing it keeps the contract in one
-            # place if we ever rename the variable.
-            _sidechannel.PRIMARY_MODEL_ENV: config["llm"]["model"],
+            # by dsagt.observability (sidechannel section) — importing it
+            # keeps the contract in one place if we ever rename the variable.
+            _observability.SIDECHANNEL_PRIMARY_MODEL_ENV: config["llm"]["model"],
             "DSAGT_EXTRACTION_THRESHOLD": str(
                 config.get("extraction", {}).get("threshold", 0)
             ),
@@ -748,7 +763,15 @@ def run_extraction(project_name: str) -> dict:
         delete_session_log(trace_dir)
         return {"status": "skipped", "reason": "no_api_key"}
 
-    kb = KnowledgeBase(index_dir=pdir / "kb_index")
+    emb_config = config.get("embedding", {})
+    kb = KnowledgeBase(
+        index_dir=pdir / "kb_index",
+        embedder_kwargs={
+            "model": emb_config.get("model"),
+            "base_url": emb_config.get("base_url"),
+            "api_key": emb_config.get("api_key"),
+        },
+    )
     try:
         return extract_session(
             trace_dir=trace_dir,

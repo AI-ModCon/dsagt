@@ -113,6 +113,7 @@ class TestLoadConfig:
         name = self._write_config(tmp_path, "myproject", {
             "project": "myproject",
             "agent": "goose",
+            "llm": {"provider": "openai"},
         })
 
         config = load_config(name)
@@ -127,6 +128,7 @@ class TestLoadConfig:
         name = self._write_config(tmp_path, "myproject", {
             "project": "myproject",
             "agent": "claude-code",
+            "llm": {"provider": "openai"},
             "proxy": {"port": 9000},
         })
 
@@ -148,6 +150,14 @@ class TestLoadConfig:
         with pytest.raises(ValueError, match="copilot"):
             load_config(name)
 
+    def test_missing_provider_raises(self, tmp_path):
+        name = self._write_config(tmp_path, "myproject", {
+            "project": "myproject",
+            "agent": "goose",
+        })
+        with pytest.raises(ValueError, match="llm.provider"):
+            load_config(name)
+
     def test_missing_file_raises(self):
         with pytest.raises(FileNotFoundError):
             load_config("nonexistent")
@@ -156,6 +166,7 @@ class TestLoadConfig:
         name = self._write_config(tmp_path, "myproject", {
             "project": "myproject",
             "agent": "goose",
+            "llm": {"provider": "openai"},
         })
         config = load_config(name)
         assert config["project_dir"] == str(tmp_path / "myproject")

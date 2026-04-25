@@ -981,7 +981,7 @@ def _tag_mlflow_session(session_id: str | None) -> None:
 
 
 def _handle_success(store: ToolRecordStore, kwargs, response_obj, start_time, end_time):
-    from dsagt.sidechannel import record as _record_sidechannel
+    from dsagt.observability import record_sidechannel_call as _record_sidechannel
 
     messages = kwargs.get("messages", [])
     response_data = _response_to_dict(response_obj)

@@ -634,11 +634,17 @@ class KnowledgeBase:
         return self._routes.get(collection, self._default_route)
 
     def _get_embedder(self, route: CollectionRoute) -> BaseEmbeddingClient:
-        """Return (possibly cached) embedder matching *route*."""
-        key = f"{route.embedding_backend}|{sorted(route.embedder_kwargs.items())}"
+        """Return (possibly cached) embedder matching *route*.
+
+        Routes carry per-collection overrides (e.g. a specific model name);
+        credentials (api_key, base_url) live on the kb's default route.
+        Merge so explicit routes inherit defaults unless they override.
+        """
+        merged = {**self._default_route.embedder_kwargs, **route.embedder_kwargs}
+        key = f"{route.embedding_backend}|{sorted(merged.items())}"
         if key not in self._embedder_cache:
             self._embedder_cache[key] = _make_embedder(
-                route.embedding_backend, **route.embedder_kwargs
+                route.embedding_backend, **merged
             )
         return self._embedder_cache[key]
 

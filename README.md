@@ -11,28 +11,38 @@ DSAgt connects an MCP-compatible AI agent to tool registration, a semantic knowl
 ```bash
 git clone https://github.com/AI-ModCon/BaseData_pipeline_agent.git
 cd BaseData_pipeline_agent
-uv sync                      # add --group dev if you plan to run the test suite
+uv sync                      # add --all-groups for the test suite
 source .venv/bin/activate    # activate the venv so `dsagt` is on PATH
+
+cp .env.example .env         # then edit .env with your endpoint + keys
+set -a; source .env; set +a  # export vars into the shell
 ```
 
-All examples below assume the venv is activated. Re-run `source .venv/bin/activate` in each new shell.
+`dsagt` resolves all `${VAR}` references in `dsagt_config.yaml` from the environment, so values set in `.env` flow into every project automatically. Re-run `source .venv/bin/activate` (and re-source `.env`) in each new shell.
+
+### Environment variables
+
+| Var | Purpose |
+|---|---|
+| `LLM_PROVIDER`        | LiteLLM provider prefix (`openai`, `anthropic`, `bedrock`, ...). [Full list](https://docs.litellm.ai/docs/providers). |
+| `LLM_API_KEY`         | Auth key for the agent's LLM endpoint (use any non-empty placeholder if the endpoint doesn't auth, e.g. local Ollama). |
+| `LLM_BASE_URL`        | Agent's LLM endpoint URL. |
+| `LLM_MODEL`           | Model name the agent talks to. |
+| `EMBEDDING_API_KEY`   | Auth key for the embedding endpoint (often the same as `LLM_API_KEY`). |
+| `EMBEDDING_BASE_URL`  | OpenAI-compatible embedding endpoint. |
+| `EMBEDDING_MODEL`     | Embedding model name. |
 
 ### First-time knowledge base setup
 
 `dsagt setup-kb` downloads reference repositories and papers (NeMo Curator,
 AIDRIN) and embeds them into ChromaDB collections that every project shares.
-The embedder needs an OpenAI-compatible API (or a local sentence-transformers
-model). Export environment variables once, then run the setup command:
+With `.env` already sourced:
 
 ```bash
-export LLM_API_KEY=sk-...                          # your embedding API key
-export OPENAI_BASE_URL=https://api.example.com/v1  # OpenAI-compatible endpoint
-export EMBEDDING_MODEL=text-embedding-3-small      # embedding model name
-
 dsagt setup-kb
 ```
 
-Alternatively, pass everything on the command line:
+Or pass everything on the command line:
 
 ```bash
 dsagt setup-kb \
@@ -62,14 +72,13 @@ and is reused by every project. Pass `--collection nemo_curator` or
 # Create a project (defaults to ~/dsagt-projects/cheese-metagenome/)
 dsagt init cheese-metagenome --agent claude-code
 
-# Edit the config — set API keys, model, embedding endpoint
-vim ~/dsagt-projects/cheese-metagenome/dsagt_config.yaml
-
-# Start services and launch the agent
+# Start services and launch the agent — picks up endpoint and keys from .env
 dsagt start cheese-metagenome
 ```
 
 `dsagt start` generates agent-specific config files, starts background services (LLM proxy, MLflow), and launches the agent with MCP servers (Tools/Skills, Knowledge Base). When the agent exits, memory extraction runs and services are stopped automatically.
+
+The generated `dsagt_config.yaml` references `.env` via `${VAR}` placeholders — no editing required for the common case. Edit it only to override per-project (different model, port, MLflow backend, etc.).
 
 ## Use Case Examples
 
@@ -87,22 +96,25 @@ a real dataset.
 ## Configuration
 
 Project configuration lives at `<project_dir>/dsagt_config.yaml`. `dsagt init`
-generates sensible defaults; edit to fill in your API credentials and
-endpoint:
+generates the file with `${VAR}` references that resolve from `.env` at
+load time — credentials stay in `.env` (gitignored), the YAML stays
+shareable. Override any field by replacing its `${VAR}` with a literal
+value if a project needs different settings than the workspace default.
 
 ```yaml
 project: cheese-metagenome
 agent: claude-code              # claude-code | goose | roo | cline
 
 llm:
-  model: claude-sonnet-4-20250514
-  base_url: https://api.example.com    # LLM endpoint (used for memory extraction)
-  api_key: ${LLM_API_KEY}              # resolved from env var, or paste a literal key
+  provider: ${LLM_PROVIDER}     # LiteLLM provider prefix (openai, anthropic, ...)
+  model: ${LLM_MODEL}
+  base_url: ${LLM_BASE_URL}
+  api_key: ${LLM_API_KEY}
 
 embedding:
-  model: text-embedding-3-small
-  base_url: https://api.example.com/v1   # OpenAI-compatible embedding endpoint
-  api_key: ${LLM_API_KEY}
+  model: ${EMBEDDING_MODEL}
+  base_url: ${EMBEDDING_BASE_URL}
+  api_key: ${EMBEDDING_API_KEY}
 
 proxy:
   port: 4000
@@ -117,7 +129,9 @@ knowledge:
   rerank: false                 # enable cross-encoder reranking (slower, more accurate)
 ```
 
-To switch agent platforms, change `agent:` and run `dsagt start` again.
+To switch agent platforms, change `agent:` and run `dsagt start` again. To
+inspect resolved values and where each came from (`.env`, environment, or
+literal), run `dsagt info <project>`.
 
 ## Project Directory
 
@@ -206,11 +220,15 @@ script or Snakemake workflow.
 |---------|-------------|
 | `dsagt init <name> --agent <platform>` | Create a new project |
 | `dsagt init <name> --agent <platform> --location <path>` | Create at a custom location |
-| `dsagt start <name>` | Start services, launch agent, clean up on exit |
+| `dsagt start <name> [--script <file>] [--max-turns N]` | Start services, launch agent, clean up on exit |
+| `dsagt stop <name>` | Stop project services (proxy, MLflow); clean up orphans on configured ports |
+| `dsagt info <name> [--json]` | Show resolved config (with source per value) and a session/source/error trace summary |
+| `dsagt mlflow <name> [--port N]` | Run MLflow in the foreground against a project's store |
 | `dsagt setup-kb [--collection <name>]` | Build the core knowledge base |
 | `dsagt list` | List all projects with agent, status, and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project and delete its directory |
+| `dsagt smoke-test [--agent goose\|claude-code]` | Run the end-to-end smoke test (sources `.env`, drives the agent non-interactively, asserts artifacts) |
 
 ## Code Organization
 
@@ -222,10 +240,11 @@ src/dsagt/
   knowledge.py     # KnowledgeBase, embeddings (via LiteLLM), vector indexes
   memory.py        # Explicit + episodic memory, outlier detection
   provenance.py    # Execution capture, LLM tracking, record indexing, pipeline reconstruction
-  observability.py # OTel tracing helpers
+  observability.py # OTel tracing helpers + sidechannel-call interception
 
   commands/
-    cli.py               # User-facing CLI (dsagt init/start/setup-kb/list/mv)
+    cli.py               # User-facing CLI (init/start/stop/info/mlflow/list/mv/rm/smoke-test/setup-kb)
+    info.py              # `dsagt info` — config-source + trace summary report
     setup_core_kb.py     # Core KB build logic (called via dsagt setup-kb)
     proxy_server.py      # LiteLLM proxy (internal, launched by dsagt start)
     run_tool.py          # Tool execution wrapper (internal, launched per tool call)
@@ -239,14 +258,14 @@ src/dsagt/
 # All unit tests (no API keys needed)
 uv run pytest -m "not integration"
 
-# Integration tests (requires tests/test_site_config.yaml with valid credentials)
+# Integration tests (require .env with valid credentials)
 uv run pytest -m integration -v
 
 # All tests
 uv run pytest
 ```
 
-Integration tests validate API endpoints (embedding, LLM) and MCP server subprocess behavior. Copy `tests/test_site_config.yaml.example` to `tests/test_site_config.yaml` and fill in your institution's values.
+Integration tests read endpoint and key values from `.env` at the repo root — the same file `dsagt start` uses. Copy `.env.example` to `.env` and fill in your values.
 
 ## Smoke Test
 

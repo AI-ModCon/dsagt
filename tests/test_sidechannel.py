@@ -16,11 +16,11 @@ import json
 
 import pytest
 
-from dsagt.sidechannel import (
-    LOG_FILENAME as _SIDECHANNEL_LOG,
-    PRIMARY_MODEL_ENV,
-    print_warning as _print_sidechannel_warning,
-    record as _record_sidechannel,
+from dsagt.observability import (
+    SIDECHANNEL_LOG_FILENAME as _SIDECHANNEL_LOG,
+    SIDECHANNEL_PRIMARY_MODEL_ENV as PRIMARY_MODEL_ENV,
+    print_sidechannel_warning as _print_sidechannel_warning,
+    record_sidechannel_call as _record_sidechannel,
 )
 
 

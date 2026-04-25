@@ -1057,3 +1057,63 @@ class TestContextManager:
                 kb._get_embedder(route)
 
             mock_client.close.assert_called_once()
+
+
+class TestEmbedderCredentialMerge:
+    """Routes carry per-collection overrides; credentials live on the kb's
+    default route.  Explicit routes (e.g. EPISODIC_MEMORY_ROUTE) must inherit
+    api_key/base_url from the default kb config — otherwise memory extraction
+    falls through to env-var fallbacks and breaks under mixed-endpoint setups
+    where LLM_API_KEY != EMBEDDING_API_KEY.
+    """
+
+    def test_explicit_route_inherits_default_credentials(self, tmp_path):
+        from dsagt.knowledge import CollectionRoute
+
+        with patch("dsagt.knowledge._make_embedder") as mock_make:
+            kb = KnowledgeBase(
+                index_dir=tmp_path / "index",
+                embedder_kwargs={
+                    "api_key": "sk-real-key",
+                    "base_url": "https://embed.example.com",
+                    "model": "text-embedding-3-small",
+                },
+            )
+            # Route with no embedder_kwargs (mimics EPISODIC_MEMORY_ROUTE).
+            route = CollectionRoute(embedding_backend="api", vector_db="chroma")
+            kb._get_embedder(route)
+
+            mock_make.assert_called_once_with(
+                "api",
+                api_key="sk-real-key",
+                base_url="https://embed.example.com",
+                model="text-embedding-3-small",
+            )
+
+    def test_route_kwargs_override_default(self, tmp_path):
+        """Per-route overrides win over kb defaults for matching keys."""
+        from dsagt.knowledge import CollectionRoute
+
+        with patch("dsagt.knowledge._make_embedder") as mock_make:
+            kb = KnowledgeBase(
+                index_dir=tmp_path / "index",
+                embedder_kwargs={
+                    "api_key": "sk-real-key",
+                    "base_url": "https://embed.example.com",
+                    "model": "default-model",
+                },
+            )
+            # Route overrides model but not credentials.
+            route = CollectionRoute(
+                embedding_backend="api",
+                vector_db="chroma",
+                embedder_kwargs={"model": "BAAI/bge-base-en-v1.5"},
+            )
+            kb._get_embedder(route)
+
+            mock_make.assert_called_once_with(
+                "api",
+                api_key="sk-real-key",
+                base_url="https://embed.example.com",
+                model="BAAI/bge-base-en-v1.5",
+            )

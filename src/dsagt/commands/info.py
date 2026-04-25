@@ -18,10 +18,105 @@ No per-span aggregation needed.
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 from pathlib import Path
 
-from dsagt.session import load_config, resolve_env_vars
+import yaml
+
+from dsagt.session import load_config, project_dir, resolve_env_vars
+
+_ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
+_SECRET_LEAF_KEYS = {"api_key"}
+# Internal/derived sections — irrelevant for "where does this credential
+# come from" triage and would just clutter the output.
+_CONFIG_SOURCE_SKIP_PREFIXES = ("categories.", "extraction.", "knowledge.")
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    """Parse a .env file into a flat dict.  Ignores comments and blanks."""
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        out[k.strip()] = v.strip()
+    return out
+
+
+def _mask_secret(value: str) -> str:
+    """Show first/last 4 chars of a secret, mask the middle."""
+    if len(value) <= 12:
+        return "***"
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _flatten(d: dict, prefix: str = ""):
+    """Yield ('dotted.path', leaf_value) pairs from a nested dict."""
+    for k, v in d.items():
+        path = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            yield from _flatten(v, path)
+        else:
+            yield path, v
+
+
+def _config_sources(project_name: str, env_file_path: Path) -> list[dict]:
+    """Return per-leaf source info for the project's dsagt_config.yaml.
+
+    Walks the *raw* YAML (not the env-resolved version) so ${VAR} references
+    are visible.  For each leaf, reports where the resolved value came from:
+    ``.env``, ``environment``, ``config`` (literal in YAML), or
+    ``unresolved`` (``${VAR}`` with no value anywhere).
+    """
+    pdir = project_dir(project_name)
+    raw = yaml.safe_load((pdir / "dsagt_config.yaml").read_text()) or {}
+    env_file_vars = _read_env_file(env_file_path)
+
+    rows: list[dict] = []
+    for path, value in _flatten(raw):
+        if any(path.startswith(p) for p in _CONFIG_SOURCE_SKIP_PREFIXES):
+            continue
+        leaf = path.rsplit(".", 1)[-1]
+        is_secret = leaf in _SECRET_LEAF_KEYS
+
+        if not isinstance(value, str) or not _ENV_VAR_RE.match(value):
+            display = _mask_secret(str(value)) if is_secret else str(value)
+            rows.append({"path": path, "value": display, "source": "config"})
+            continue
+
+        var = _ENV_VAR_RE.match(value).group(1)
+        if var in env_file_vars:
+            source = ".env"
+            resolved = env_file_vars[var]
+        elif var in os.environ:
+            source = "environment"
+            resolved = os.environ[var]
+        else:
+            source = "unresolved"
+            resolved = value
+        if is_secret and source != "unresolved":
+            resolved = _mask_secret(resolved)
+        rows.append({"path": path, "value": resolved, "source": source})
+    return rows
+
+
+def _print_config_sources(rows: list[dict], env_file_path: Path) -> None:
+    if not rows:
+        return
+    path_w = max(len(r["path"]) for r in rows)
+    val_w = max(len(str(r["value"])) for r in rows)
+    print(f"Configuration (env file: {env_file_path}):")
+    for r in rows:
+        print(
+            f"  {r['path']:<{path_w}}  {str(r['value']):<{val_w}}  "
+            f"(from {r['source']})"
+        )
+    print()
 
 
 def _tokens(metadata: dict) -> tuple[int, int]:
@@ -170,6 +265,11 @@ def _print_text(r: dict) -> None:
     print(f"  Model:  {r['model']}")
     print()
 
+    config_sources = r.get("config_sources") or []
+    env_file_path = r.get("env_file_path")
+    if config_sources and env_file_path:
+        _print_config_sources(config_sources, Path(env_file_path))
+
     if r["total_traces"] == 0:
         print("No traces recorded yet (run `dsagt start` to create a session).")
         return
@@ -218,6 +318,9 @@ def run(project: str, as_json: bool) -> int:
     pdir = Path(config["project_dir"])
     mlflow_db = pdir / "mlflow" / "mlflow.db"
 
+    env_file_path = Path.cwd() / ".env"
+    sources = _config_sources(project, env_file_path)
+
     if not mlflow_db.exists():
         # New project, or one that's never been started.  Print the header
         # so the user can verify they got the right project, then a short
@@ -233,6 +336,8 @@ def run(project: str, as_json: bool) -> int:
             "by_source": [],
             "by_session": [],
             "errors": [],
+            "config_sources": sources,
+            "env_file_path": str(env_file_path),
         }
         if as_json:
             print(json.dumps(r, indent=2, default=str))
@@ -242,6 +347,8 @@ def run(project: str, as_json: bool) -> int:
 
     traces, _ = _load_traces(mlflow_db, project)
     r = _report(project, config, traces)
+    r["config_sources"] = sources
+    r["env_file_path"] = str(env_file_path)
 
     if as_json:
         print(json.dumps(r, indent=2, default=str))
