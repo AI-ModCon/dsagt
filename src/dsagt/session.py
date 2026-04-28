@@ -492,6 +492,12 @@ def start_services(config: dict) -> dict[str, int]:
     pid_path = _pid_file(pdir)
     pid_path.write_text(json.dumps(pids, indent=2) + "\n")
 
+    # Wait for MLflow before probing the proxy.  The proxy calls
+    # mlflow.set_experiment() at startup; if MLflow isn't listening yet,
+    # urllib3 retries for ~13 s, pushing total proxy startup past the
+    # readiness-probe timeout and causing a false failure.
+    _wait_for_port(mlflow_port, timeout=30.0)
+
     # Wait for the proxy to actually accept connections.  Without this
     # we hand a half-broken environment to the agent: dsagt start reports
     # success, the agent launches, then the agent's first LLM call fails
@@ -499,7 +505,7 @@ def start_services(config: dict) -> dict[str, int]:
     # config, port conflict, missing dependency).  Probing here makes
     # those failures fail loudly at the right place — dsagt start —
     # instead of at first agent message.
-    if not _wait_for_proxy(proxy_port, proxy_proc, proxy_log, timeout=15.0):
+    if not _wait_for_proxy(proxy_port, proxy_proc, proxy_log, timeout=60.0):
         raise RuntimeError(
             f"LiteLLM proxy failed to start on port {proxy_port}. "
             f"See {proxy_log} for details. "
@@ -510,11 +516,23 @@ def start_services(config: dict) -> dict[str, int]:
     return pids
 
 
+def _wait_for_port(port: int, timeout: float = 30.0) -> bool:
+    """Block until *port* accepts TCP connections or *timeout* seconds elapse."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return True
+        except (ConnectionRefusedError, OSError):
+            time.sleep(0.25)
+    return False
+
+
 def _wait_for_proxy(
     port: int,
     proc: subprocess.Popen,
     log_path: Path,
-    timeout: float = 15.0,
+    timeout: float = 60.0,
 ) -> bool:
     """Poll the proxy until it accepts connections or the process dies.
 
