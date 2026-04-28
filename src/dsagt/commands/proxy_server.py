@@ -20,14 +20,19 @@ DEFAULT_PORT = 4000
 DEFAULT_RECORDS_DIR = "runtime/trace_archive"
 
 
-def _generate_config(model: str, base_url: str, provider: str) -> str:
+def _generate_config(
+    model: str, base_url: str, provider: str,
+    embedding_model: str, embedding_base_url: str, embedding_provider: str,
+) -> str:
     """Generate a LiteLLM proxy config YAML.
 
-    Routes the configured model through the chosen LiteLLM provider pointed
-    at *base_url*.  ``provider`` is the LiteLLM provider prefix (e.g.
-    ``openai``, ``anthropic``, ``bedrock``) and selects request-format and
-    auth handling.  LiteLLM normalizes incoming Anthropic- and OpenAI-format
-    requests, so both Claude Code and Goose work against the same config.
+    Routes the configured LLM and embedding models through their chosen
+    LiteLLM provider prefix.  Each prefix (``openai``, ``anthropic``,
+    ``bedrock``, ``cohere``, ``voyage``, etc.) selects request-format and
+    auth handling.  LiteLLM normalizes incoming Anthropic-, OpenAI-, and
+    Responses-API-shape requests so all five agents (goose, claude-code,
+    cline, roo, codex) and the dsagt-knowledge-server's embedding calls
+    share one config.
 
     Callbacks (DSAGTCallback for provenance, MlflowLogger for LLM traces)
     are registered in Python *before* ``run_server`` rather than via YAML
@@ -36,11 +41,44 @@ def _generate_config(model: str, base_url: str, provider: str) -> str:
     ``litellm_settings.success_callback``).  Direct registration sidesteps
     that gap and works regardless of LiteLLM's config-loading internals.
 
-    The wildcard fallback that catches agent sidechannel calls comes from
-    ``dsagt.observability`` (sidechannel section) — see that module for why
-    and how.
+    Routing: incoming /chat/completions or /v1/messages with the LLM
+    model name → configured LLM upstream.  Incoming /embeddings with the
+    embedding model name → configured embedding upstream.  Everything
+    else hits the sidechannel catchall (mock).  The wildcard fallback
+    comes from ``dsagt.observability`` — see that module for why and how.
     """
     from dsagt.observability import SIDECHANNEL_WILDCARD_ROUTE_YAML
+
+    # Some agents rewrite the requested model name into one of their
+    # hardcoded "known" Anthropic IDs before sending to /v1/messages —
+    # they don't recognize lab-gateway-aliased names like
+    # ``claude-haiku-4-5-20251001-v1-project`` and silently substitute
+    # the agent's current default.  Without aliasing, those primary-
+    # reasoning calls fall through to the sidechannel catchall (mock)
+    # and the agent gets MODEL_NO_ASSISTANT_MESSAGES.
+    #   - roo (v0.1.x): rewrites to ``claude-sonnet-4-5``
+    # Each alias forwards to the configured upstream primary.  Grow this
+    # list when new agents/versions surface their own defaults.
+    _AGENT_PRIMARY_ALIASES = ("claude-sonnet-4-5",)
+
+    # Agent-specific request fields that some upstreams reject.  LiteLLM's
+    # global ``drop_params: true`` only drops fields it recognizes as
+    # "supported by some providers, not this one"; unknown fields pass
+    # through.  ``additional_drop_params`` must be set per-model
+    # (``litellm_params`` level), not globally — verified empirically.
+    #   - ``client_metadata``: Codex sends this; Bedrock Anthropic Messages
+    #     adapter rejects it ("Extra inputs are not permitted").
+    drop_yaml = "      additional_drop_params: [\"client_metadata\"]\n"
+
+    aliases_yaml = "".join(
+        f"""  - model_name: {alias}
+    litellm_params:
+      model: {provider}/{model}
+      api_base: {base_url}
+      api_key: os.environ/LLM_API_KEY
+{drop_yaml}"""
+        for alias in _AGENT_PRIMARY_ALIASES
+    )
 
     return f"""\
 model_list:
@@ -49,6 +87,11 @@ model_list:
       model: {provider}/{model}
       api_base: {base_url}
       api_key: os.environ/LLM_API_KEY
+{drop_yaml}{aliases_yaml}  - model_name: {embedding_model}
+    litellm_params:
+      model: {embedding_provider}/{embedding_model}
+      api_base: {embedding_base_url}
+      api_key: os.environ/EMBEDDING_API_KEY
 {SIDECHANNEL_WILDCARD_ROUTE_YAML}\
 litellm_settings:
   drop_params: true
@@ -70,6 +113,14 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--provider", required=True,
         help="LiteLLM provider prefix, e.g. openai, anthropic, bedrock. "
              "See https://docs.litellm.ai/docs/providers for the full list.")
+    parser.add_argument("--embedding-model", required=True,
+        help="Embedding model name (from dsagt_config.yaml embedding.model)")
+    parser.add_argument("--embedding-base-url", required=True,
+        help="Upstream embedding endpoint (from dsagt_config.yaml embedding.base_url)")
+    parser.add_argument("--embedding-provider", default="openai_like",
+        help="LiteLLM provider prefix for embeddings (openai_like, openai, "
+             "cohere, voyage, bedrock, gemini, etc.).  Default ``openai_like`` "
+             "covers any OpenAI-wire-compatible endpoint.")
     parser.add_argument("--mlflow-url", default=None,
         help="MLflow tracking URL (enables LiteLLM → MLflow trace autologging)")
     parser.add_argument("--verbose", action="store_true")
@@ -83,7 +134,10 @@ def main(argv: list[str] | None = None):
     )
 
     if not os.environ.get("LLM_API_KEY"):
-        logger.error("LLM_API_KEY not set. The proxy needs it to forward requests.")
+        logger.error("LLM_API_KEY not set. The proxy needs it to forward LLM requests.")
+        sys.exit(1)
+    if not os.environ.get("EMBEDDING_API_KEY"):
+        logger.error("EMBEDDING_API_KEY not set. The proxy needs it to forward embedding requests.")
         sys.exit(1)
 
     import litellm
@@ -143,7 +197,10 @@ def main(argv: list[str] | None = None):
     if args.config:
         config_path = args.config
     else:
-        config_content = _generate_config(args.model, args.base_url, args.provider)
+        config_content = _generate_config(
+            args.model, args.base_url, args.provider,
+            args.embedding_model, args.embedding_base_url, args.embedding_provider,
+        )
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".yaml", prefix="dsagt_litellm_", delete=False,
         )

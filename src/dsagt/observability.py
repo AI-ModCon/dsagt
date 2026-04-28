@@ -122,14 +122,16 @@ def init_tracing(
         _install_mlflow_provider(mlflow_url)
         _metadata_stamper = _stamp_metadata_mlflow
         _llm_context_factory = _mlflow_llm_context
-        # Register MLflow's litellm callback so direct litellm.embedding /
-        # litellm.completion calls (e.g. knowledge_server's embeddings,
-        # memory.py's extraction) produce traces with token usage.  The
-        # proxy subprocess installs its own _DSAGTMlflowLogger subclass
-        # via install_mlflow_logger_with_session_tag and never calls
-        # init_tracing, so there is no cross-process clash.
-        import mlflow
-        mlflow.litellm.autolog()
+        # NOTE: we deliberately do NOT call ``mlflow.litellm.autolog()`` here.
+        # Post-Option-A all litellm calls from MCP servers go through the
+        # local proxy at localhost:<proxy_port>, where ``_DSAGTMlflowLogger``
+        # autologs them with full request/response, tokens, cost, and cache
+        # stats.  Enabling autolog here too would produce a second MLflow
+        # trace per call (the MCP-server-side one) carrying only thin span
+        # metadata — a duplicate that's strictly less informative than the
+        # proxy-side trace.  The MCP server's ``kb.*`` / ``registry.*`` /
+        # ``tool.execute`` spans (created by @traced/@llm_source decorators)
+        # remain as attestation that the MCP tool ran.
         _initialized = True
         logger.info(
             "init_tracing: service=%s backend=mlflow url=%s session=%s",
@@ -201,6 +203,46 @@ def _install_otlp_provider(service_name: str, otel_endpoint: str) -> None:
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
     _tracer_provider = provider
+
+
+def extract_cache_stats(usage: dict) -> tuple[int, int]:
+    """Extract (cache_read, cache_write) tokens from a LiteLLM usage dict.
+
+    LiteLLM's ``Usage`` object doesn't backfill cache fields across
+    providers; whichever shape the upstream returned is the one populated.
+    The configured ``LLM_PROVIDER`` (passed to ``dsagt-proxy --provider X``
+    and used as the LiteLLM provider prefix in the model_list) decides
+    which response format we get back.  The four field-name conventions
+    we've seen in practice are all checked here so this function works
+    regardless of provider config:
+
+    Cache read (tokens served from cache at the lower rate):
+        - ``cache_read_input_tokens``           — Anthropic, Bedrock-Claude
+        - ``prompt_tokens_details.cached_tokens`` — OpenAI, Azure-OpenAI
+        - ``cached_content_token_count``        — Gemini
+        - ``prompt_cache_hit_tokens``           — DeepSeek
+
+    Cache write (only Anthropic-family bills cache writes separately at
+    the 1.25× premium; OpenAI/Gemini/DeepSeek auto-cache without a
+    distinct write fee, so the field doesn't exist):
+        - ``cache_creation_input_tokens``       — Anthropic, Bedrock-Claude
+    """
+    if not isinstance(usage, dict):
+        return (0, 0)
+
+    details = usage.get("prompt_tokens_details") or {}
+    if not isinstance(details, dict):
+        details = {}
+
+    read = (
+        usage.get("cache_read_input_tokens")
+        or details.get("cached_tokens")
+        or usage.get("cached_content_token_count")
+        or usage.get("prompt_cache_hit_tokens")
+        or 0
+    )
+    write = usage.get("cache_creation_input_tokens") or 0
+    return (int(read), int(write))
 
 
 def stamp_metadata(metadata: dict) -> None:
@@ -830,6 +872,13 @@ SIDECHANNEL_LOG_FILENAME = "sidechannel.jsonl"
 #: accept it without error.
 _SIDECHANNEL_CANNED_RESPONSE = "session"
 
+#: Post-routing model name LiteLLM resolves the wildcard catchall to.  Only
+#: true mock hits end up here; explicit primary entries and aliases route
+#: to the real upstream regardless of what name the client requested.  The
+#: sidechannel detector uses this to avoid flagging alias hits as
+#: sidechannel — see ``record_sidechannel_call``.
+SIDECHANNEL_CATCHALL_MODEL = "openai/dsagt-sidechannel-catchall"
+
 #: Where the user can read the longer explanation.  Printed in the warning.
 SIDECHANNEL_DOC_LOCATION = "README.md § Sidechannel model calls"
 
@@ -842,7 +891,7 @@ SIDECHANNEL_DOC_LOCATION = "README.md § Sidechannel model calls"
 SIDECHANNEL_WILDCARD_ROUTE_YAML = f"""\
   - model_name: "*"
     litellm_params:
-      model: openai/dsagt-sidechannel-catchall
+      model: {SIDECHANNEL_CATCHALL_MODEL}
       api_base: http://invalid.local
       api_key: unused
       mock_response: "{_SIDECHANNEL_CANNED_RESPONSE}"
@@ -875,23 +924,29 @@ def _sidechannel_client_requested_model(kwargs: dict) -> str | None:
 
 
 def record_sidechannel_call(records_dir: _Path, kwargs: dict) -> None:
-    """Append a JSONL entry when a request hit the wildcard.
+    """Append a JSONL entry when a request hit the wildcard catchall.
 
-    Detection rule: the LiteLLM callback's ``kwargs["model"]`` (after
-    stripping any ``provider/`` prefix) differs from
-    ``$SIDECHANNEL_PRIMARY_MODEL_ENV``.  Called from the DSAGT callback's
-    success handler, so only successful calls get logged — failures land in
-    MLflow as errors regardless.
+    Detection rule: ``kwargs["model"]`` (the post-routing target LiteLLM
+    selected) equals ``SIDECHANNEL_CATCHALL_MODEL``.  This is the only
+    reliable discriminator: name-based comparison against the primary
+    misclassifies alias hits (e.g. ``claude-sonnet-4-5`` aliased to a
+    longer lab-gateway model name) as sidechannel even though they
+    actually routed to the real upstream.
 
-    No-ops when ``SIDECHANNEL_PRIMARY_MODEL_ENV`` isn't set (tests, direct-
-    callback users) or when the requested model matches primary.
+    Called from the DSAGT callback's success handler, so only successful
+    calls get logged — failures land in MLflow as errors regardless.
+    No-ops when ``SIDECHANNEL_PRIMARY_MODEL_ENV`` isn't set.
     """
     primary = os.environ.get(SIDECHANNEL_PRIMARY_MODEL_ENV)
     if not primary:
         return
 
+    routed_to = kwargs.get("model") or ""
+    if routed_to != SIDECHANNEL_CATCHALL_MODEL:
+        return  # real upstream call (primary entry or alias) — not a sidechannel
+
     requested = _sidechannel_client_requested_model(kwargs)
-    if not requested or requested == primary:
+    if not requested:
         return
 
     entry = {

@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-VALID_AGENTS = ("claude-code", "goose", "roo", "cline")
+VALID_AGENTS = ("claude-code", "goose", "roo", "cline", "codex")
 VALID_MLFLOW_BACKENDS = ("sqlite", "flat-file")
 
 DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
@@ -115,13 +115,18 @@ def _deep_merge(defaults: dict, overrides: dict) -> dict:
     return result
 
 
-def default_config_content(project_name: str, agent: str) -> str:
+def default_config_content(project_name: str, agent: str | None = None) -> str:
     """Generate default dsagt_config.yaml content for a new project.
 
     LLM / embedding fields are written as ``${VAR}`` references rather than
     literal placeholders so a developer who has filled in DSAGT/.env once
     can ``dsagt init`` any number of new projects without re-typing keys.
     ``resolve_env_vars`` substitutes values at config-load time.
+
+    ``agent`` is optional: when ``None``, the YAML omits the ``agent:``
+    field and ``dsagt start`` requires ``--agent X`` on first invocation.
+    On that first start the agent name is persisted back into the YAML
+    and subsequent starts don't need the flag.
     """
     header = (
         "# llm.provider: LiteLLM provider prefix (selects request format + auth).\n"
@@ -129,30 +134,29 @@ def default_config_content(project_name: str, agent: str) -> str:
         "#   ollama, mistral, groq, deepseek.\n"
         "#   Full list: https://docs.litellm.ai/docs/providers\n"
     )
-    return header + yaml.dump(
-        {
-            "project": project_name,
-            "agent": agent,
-            "llm": {
-                "provider": "${LLM_PROVIDER}",
-                "model": "${LLM_MODEL}",
-                "base_url": "${LLM_BASE_URL}",
-                "api_key": "${LLM_API_KEY}",
-            },
-            "embedding": {
-                "model": "${EMBEDDING_MODEL}",
-                "base_url": "${EMBEDDING_BASE_URL}",
-                "api_key": "${EMBEDDING_API_KEY}",
-            },
-            "proxy": DEFAULTS["proxy"],
-            "mlflow": DEFAULTS["mlflow"],
-            "knowledge": DEFAULTS["knowledge"],
-            "categories": DEFAULTS["categories"],
-            "extraction": DEFAULTS["extraction"],
+    body: dict = {"project": project_name}
+    if agent is not None:
+        body["agent"] = agent
+    body.update({
+        "llm": {
+            "provider": "${LLM_PROVIDER}",
+            "model": "${LLM_MODEL}",
+            "base_url": "${LLM_BASE_URL}",
+            "api_key": "${LLM_API_KEY}",
         },
-        default_flow_style=False,
-        sort_keys=False,
-    )
+        "embedding": {
+            "provider": "${EMBEDDING_PROVIDER}",
+            "model": "${EMBEDDING_MODEL}",
+            "base_url": "${EMBEDDING_BASE_URL}",
+            "api_key": "${EMBEDDING_API_KEY}",
+        },
+        "proxy": DEFAULTS["proxy"],
+        "mlflow": DEFAULTS["mlflow"],
+        "knowledge": DEFAULTS["knowledge"],
+        "categories": DEFAULTS["categories"],
+        "extraction": DEFAULTS["extraction"],
+    })
+    return header + yaml.dump(body, default_flow_style=False, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -288,9 +292,25 @@ def setup_runtime_kb(base_index_dir: Path, runtime_dir: Path) -> Path:
     return runtime_kb_dir
 
 
-def init_project(project_name: str, agent: str, location: Path | None = None) -> Path:
-    """Create a new project directory with default config and subdirectories."""
-    if agent not in VALID_AGENTS:
+def init_project(
+    project_name: str,
+    agent: str | None = None,
+    location: Path | None = None,
+) -> Path:
+    """Create a new project directory with default config and subdirectories.
+
+    The project's data layer (``dsagt_config.yaml``, ``trace_archive/``,
+    ``mlflow/``, ``skills/``, runtime KB) is agent-agnostic.  The ``agent``
+    parameter is optional:
+
+    - If supplied: the YAML records ``agent: X`` as the project's default,
+      and the agent's static files (instructions, state directories) are
+      written immediately so the user can edit them before first start.
+    - If omitted: the YAML has no ``agent:`` field; ``dsagt start`` will
+      require ``--agent X`` on first invocation and persist the choice
+      into the YAML at that point.
+    """
+    if agent is not None and agent not in VALID_AGENTS:
         raise ValueError(f"agent must be one of {VALID_AGENTS}, got '{agent}'")
 
     pdir = (location or DEFAULT_PROJECTS_BASE) / project_name
@@ -309,8 +329,41 @@ def init_project(project_name: str, agent: str, location: Path | None = None) ->
 
     (pdir / "dsagt_config.yaml").write_text(default_config_content(project_name, agent))
 
+    if agent is not None:
+        # Eager static-record write so the user can edit instructions
+        # files between init and start.  Empty config dict is fine — the
+        # static functions don't read it today (signature reserved for
+        # future project-specific instruction header injection).
+        from dsagt.agents import static_agent_record
+        static_agent_record({}, agent, pdir)
+
     register_project(project_name, pdir)
     return pdir
+
+
+def persist_agent_choice(project_name: str, agent: str) -> None:
+    """Add or update the ``agent:`` field in the project's YAML.
+
+    Called by ``dsagt start`` on the first run that resolves an agent
+    from ``--agent`` when the YAML didn't have one — so the next start
+    doesn't need the flag.  Subsequent ``--agent`` overrides at start
+    are per-run only and don't touch the YAML.
+    """
+    if agent not in VALID_AGENTS:
+        raise ValueError(f"agent must be one of {VALID_AGENTS}, got '{agent}'")
+    pdir = project_dir(project_name)
+    yaml_path = pdir / "dsagt_config.yaml"
+    raw = yaml.safe_load(yaml_path.read_text()) or {}
+    raw["agent"] = agent
+    # Preserve the comment header from default_config_content so
+    # readers still see the provider hint.  Cheap to re-emit.
+    header = (
+        "# llm.provider: LiteLLM provider prefix (selects request format + auth).\n"
+        "#   Common: openai, anthropic, bedrock, vertex_ai, azure, gemini,\n"
+        "#   ollama, mistral, groq, deepseek.\n"
+        "#   Full list: https://docs.litellm.ai/docs/providers\n"
+    )
+    yaml_path.write_text(header + yaml.dump(raw, default_flow_style=False, sort_keys=False))
 
 
 def move_project(project_name: str, new_location: Path) -> Path:
@@ -360,6 +413,19 @@ def _llm_api_key_env(config: dict) -> dict:
     if key and not key.startswith("${"):
         return {"LLM_API_KEY": key}
     return {}
+
+
+def _embedding_provider(config: dict) -> str:
+    """Resolve embedding provider with a fallback for two cases:
+
+    - YAML key absent (older configs predating ``embedding.provider``)
+    - YAML key present but holds an unresolved ``${EMBEDDING_PROVIDER}``
+      literal (newer template, but ``.env`` doesn't set the var)
+    """
+    provider = (config.get("embedding", {}).get("provider") or "").strip()
+    if not provider or provider.startswith("${"):
+        return "openai_like"
+    return provider
 
 
 def _pid_file(pdir: Path) -> Path:
@@ -457,6 +523,13 @@ def start_services(config: dict) -> dict[str, int]:
         "--model", config["llm"]["model"],
         "--base-url", config["llm"]["base_url"],
         "--provider", config["llm"]["provider"],
+        # Embedding routing through the proxy is symmetric with LLM: MCP
+        # servers always send embedding requests to localhost:<proxy_port>,
+        # the proxy translates to whatever provider/endpoint the user
+        # configured.  See commands/proxy_server.py _generate_config.
+        "--embedding-model", config["embedding"]["model"],
+        "--embedding-base-url", config["embedding"]["base_url"],
+        "--embedding-provider", _embedding_provider(config),
     ]
 
     proxy_log = pdir / "proxy.log"
@@ -499,7 +572,11 @@ def start_services(config: dict) -> dict[str, int]:
     # config, port conflict, missing dependency).  Probing here makes
     # those failures fail loudly at the right place — dsagt start —
     # instead of at first agent message.
-    if not _wait_for_proxy(proxy_port, proxy_proc, proxy_log, timeout=15.0):
+    # 30s is generous: LiteLLM's transitive imports (transformers, torch deps)
+    # take ~10-15s on warm cache, longer on cold cache or network-backed disks
+    # (e.g. OneDrive). _wait_for_proxy fast-fails on process death and orphan
+    # listeners, so this timeout only governs the "still loading" case.
+    if not _wait_for_proxy(proxy_port, proxy_proc, proxy_log, timeout=30.0):
         raise RuntimeError(
             f"LiteLLM proxy failed to start on port {proxy_port}. "
             f"See {proxy_log} for details. "
@@ -597,10 +674,78 @@ def _listener_pgid_matches(port: int, expected_pgid: int) -> bool:
 
 
 def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
-    """True if something is listening on *host:port*."""
+    """True if ``port`` is unavailable for a fresh listener.
+
+    Two probes — both have to come up clean for the port to count as free:
+
+    1. ``connect_ex`` — a remote-style probe; catches active listeners.
+    2. ``bind`` — the authoritative probe; if we can't bind even with
+       SO_REUSEADDR, neither can the proxy subprocess we're about to
+       launch.  Catches sockets in CLOSE_WAIT / TIME_WAIT and listeners
+       whose accept queue is wedged (the connect probe sometimes misses
+       these because no SYN-ACK comes back fast enough).
+
+    The bind probe was added after smoke-test runs hit "proxy failed to
+    start" with the old single-probe version because LiteLLM's
+    bind-or-rebind-to-random-port behavior took over: a stuck orphan on
+    4000 wasn't detected by ``connect_ex``, so we picked 4000, then
+    LiteLLM silently rebound to a random port, then ``_wait_for_proxy``
+    rejected the orphan listener as "not our pgid".
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.2)
-        return sock.connect_ex((host, port)) == 0
+        if sock.connect_ex((host, port)) == 0:
+            return True
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return True
+    return False
+
+
+def pick_free_port(preferred: int, *, max_offset: int = 20) -> tuple[int, str | None]:
+    """Try ``preferred``; if taken, pick the next free port within range.
+
+    Returns ``(picked_port, warning_or_None)``.  When the preferred port
+    was free, ``warning`` is ``None``.  When we fell back, ``warning``
+    is a one-line message naming the original port and the cause
+    (likely a stuck dsagt service or an unrelated process), so callers
+    can surface it without the user having to dig.
+
+    Bias toward ``preferred`` so behavior stays deterministic when
+    nothing's holding the port.  The fallback range is small (default
+    20) — wider than that, the right answer is "fix your environment"
+    rather than chase ports forever.
+
+    Raises ``RuntimeError`` if every port in the scan range is taken,
+    so the failure mode is loud rather than a silent hang.
+    """
+    if not port_in_use(preferred):
+        return preferred, None
+    cause = (
+        "looks like a stuck dsagt service — try `dsagt stop`"
+        if not port_held_by_foreign_process(preferred)
+        else "held by another process — `lsof -iTCP:%d -sTCP:LISTEN` to identify" % preferred
+    )
+    for candidate in range(preferred + 1, preferred + 1 + max_offset):
+        if not port_in_use(candidate):
+            return candidate, (
+                f"Port {preferred} in use ({cause}); falling back to {candidate}."
+            )
+    raise RuntimeError(
+        f"All ports {preferred}–{preferred + max_offset} in use. "
+        f"Run `dsagt stop` or pick a different port range with --proxy-port / --mlflow-port."
+    )
+
+
+#: Seconds to wait for a process to exit on SIGTERM before sending SIGKILL.
+#: Set high enough for uvicorn/litellm graceful shutdown (a few seconds);
+#: low enough that an unresponsive process doesn't drag out shutdown.
+#: Used by both ``stop_services`` (PID-file path) and
+#: ``kill_processes_on_port`` (port-sweep path).
+_STOP_GRACE_SECONDS = 5
 
 
 # Command-line fingerprints that identify a process as "ours" — only
@@ -661,17 +806,24 @@ def _looks_like_our_process(pid: int, max_depth: int = 5) -> bool:
 
 
 def kill_processes_on_port(port: int, *, only_ours: bool = True) -> list[int]:
-    """SIGTERM listeners on *port* whose command line looks like ours.
+    """Kill listeners on *port* whose command line looks like ours.
 
-    When ``only_ours`` is True (default), processes whose command line does
-    not contain a DSAGT / MLflow fingerprint are LEFT ALONE — the caller
-    gets an empty list and can decide whether to error out.  This guards
-    against killing an unrelated local service the user happens to have
-    running on the same port (port 4000 / 5001 are common defaults).
+    SIGTERM, then poll up to ``_STOP_GRACE_SECONDS`` for the process group
+    to exit, then SIGKILL stragglers.  Same SIGTERM→wait→SIGKILL pattern
+    as ``stop_services``.  Without the wait+SIGKILL the previous behavior
+    was fire-and-forget SIGTERM, which left orphans alive long enough
+    that the next ``dsagt start`` would race the still-shutting-down
+    proxy and silently rebind to a random port.
 
-    ``dsagt stop`` uses ``only_ours=True``.  There is no caller that wants
-    ``only_ours=False`` today; the flag exists so a future rescue command
-    can opt into the less-safe behavior explicitly.
+    When ``only_ours`` is True (default), processes whose command line
+    does not contain a DSAGT / MLflow fingerprint are LEFT ALONE — the
+    caller gets an empty list and can decide whether to error out.
+    Guards against killing an unrelated local service the user happens
+    to have running on the same port (4000 / 5001 are common defaults).
+
+    Returns the list of pids that were sent SIGTERM (whether or not
+    they exited promptly — caller can compare to ``port_in_use`` if it
+    needs to know whether the port actually freed up).
     """
     try:
         result = subprocess.run(
@@ -682,8 +834,8 @@ def kill_processes_on_port(port: int, *, only_ours: bool = True) -> list[int]:
         return []
 
     pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
+    pgids_to_kill: list[tuple[int, int]] = []  # (pid, pgid)
     pgids_seen: set[int] = set()
-    killed: list[int] = []
     for pid in pids:
         try:
             pgid = os.getpgid(pid)
@@ -699,11 +851,44 @@ def kill_processes_on_port(port: int, *, only_ours: bool = True) -> list[int]:
             )
             continue
         pgids_seen.add(pgid)
+        pgids_to_kill.append((pid, pgid))
+
+    # Phase 1: SIGTERM all
+    killed: list[int] = []
+    alive: list[tuple[int, int]] = []
+    for pid, pgid in pgids_to_kill:
         try:
             os.killpg(pgid, signal.SIGTERM)
             killed.append(pid)
+            alive.append((pid, pgid))
         except (ProcessLookupError, PermissionError):
             pass
+
+    # Phase 2: poll for exit
+    import time
+    deadline = time.monotonic() + _STOP_GRACE_SECONDS
+    while alive and time.monotonic() < deadline:
+        time.sleep(0.2)
+        still_alive: list[tuple[int, int]] = []
+        for pid, pgid in alive:
+            try:
+                os.killpg(pgid, 0)
+                still_alive.append((pid, pgid))
+            except (ProcessLookupError, PermissionError):
+                pass
+        alive = still_alive
+
+    # Phase 3: SIGKILL stragglers
+    for pid, pgid in alive:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            logger.info(
+                "Sent SIGKILL to pid %d on port %d after %ds SIGTERM grace",
+                pid, port, _STOP_GRACE_SECONDS,
+            )
+        except (ProcessLookupError, PermissionError):
+            pass
+
     return killed
 
 
@@ -721,7 +906,17 @@ def port_held_by_foreign_process(port: int) -> bool:
 
 
 def stop_services(project_name: str) -> list[str]:
-    """Stop running services for a project."""
+    """Stop running services for a project.
+
+    SIGTERM, then poll up to ``_STOP_GRACE_SECONDS`` for the process group
+    to exit, then SIGKILL.  Without the wait+SIGKILL the previous behavior
+    was "fire-and-forget SIGTERM and hope" — uvicorn's graceful shutdown
+    takes a couple seconds, and any process that ignores SIGTERM (under
+    load, in cleanup callbacks, etc.) would orphan.  That's why users
+    kept needing to run ``dsagt stop`` manually after smoke runs to free
+    ports 4000/5001 — this function returned "Stopped" before the proxy
+    actually finished shutting down.
+    """
     pid_path = _pid_file(project_dir(project_name))
     stopped = []
 
@@ -730,12 +925,40 @@ def stop_services(project_name: str) -> list[str]:
 
     pids = json.loads(pid_path.read_text())
 
+    # Phase 1: SIGTERM all
+    pgids = {}
     for name, pid in pids.items():
         try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-            stopped.append(f"Stopped {name} (pid {pid})")
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGTERM)
+            pgids[name] = (pid, pgid)
         except (ProcessLookupError, PermissionError):
             stopped.append(f"{name} (pid {pid}) was not running")
+
+    # Phase 2: poll for exit, then SIGKILL stragglers
+    import time
+    deadline = time.monotonic() + _STOP_GRACE_SECONDS
+    while pgids and time.monotonic() < deadline:
+        time.sleep(0.2)
+        for name in list(pgids):
+            pid, pgid = pgids[name]
+            try:
+                os.killpg(pgid, 0)  # signal 0 = liveness check, no signal sent
+            except ProcessLookupError:
+                stopped.append(f"Stopped {name} (pid {pid})")
+                del pgids[name]
+            except PermissionError:
+                # process exists but we can't signal — assume it's gone for our purposes
+                stopped.append(f"Stopped {name} (pid {pid})")
+                del pgids[name]
+
+    # Phase 3: anything still alive gets SIGKILL
+    for name, (pid, pgid) in pgids.items():
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            stopped.append(f"Stopped {name} (pid {pid}, SIGKILL after {_STOP_GRACE_SECONDS}s)")
+        except ProcessLookupError:
+            stopped.append(f"Stopped {name} (pid {pid})")
 
     pid_path.unlink(missing_ok=True)
     return stopped
@@ -755,6 +978,9 @@ def run_extraction(project_name: str) -> dict:
     api_key = llm_config.get("api_key", "")
     model = llm_config.get("model", "claude-sonnet-4-20250514")
     base_url = llm_config.get("base_url", "")
+    provider = llm_config.get("provider") or None
+    if provider and provider.startswith("${"):
+        provider = None
     session_id = config.get("project", "")
     categories = config.get("categories", {})
 
@@ -779,6 +1005,7 @@ def run_extraction(project_name: str) -> dict:
             api_key=api_key,
             model=model,
             base_url=base_url or None,
+            provider=provider,
             session_id=session_id,
             categories=categories if categories else None,
             runtime_dir=pdir,

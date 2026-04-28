@@ -11,7 +11,7 @@ here is the narrower layer smoke_test can't cleanly isolate:
 - **TestLLMEndpoint** — the raw LLM API returns a completion.  Same
   reasoning: bisects "is the upstream reachable" from "is the proxy wired
   correctly".
-- **TestConfigChain** — dsagt init → generate_agent_configs → agent_env
+- **TestConfigChain** — dsagt init → static_agent_record → dynamic_agent_record → agent_env
   without touching the network, since config bugs can masquerade as
   runtime errors that are painful to diagnose via smoke.
 
@@ -144,13 +144,15 @@ class TestConfigChain:
         assert "embedding" in config
 
     def test_agent_configs_have_correct_ports(self, integration_config, tmp_path):
-        """generate_agent_configs writes the correct proxy URL."""
-        from dsagt.agents import generate_agent_configs
+        """dynamic_agent_record writes the correct proxy URL into .dsagt_env."""
+        from dsagt.agents import agent_env, dynamic_agent_record, static_agent_record
 
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        generate_agent_configs(integration_config, working_dir)
+        static_agent_record(integration_config, integration_config["agent"], working_dir)
+        env = agent_env(integration_config)
+        dynamic_agent_record(integration_config, env, working_dir)
 
         env_content = (working_dir / ".dsagt_env").read_text()
         proxy_port = integration_config["proxy"]["port"]
@@ -171,7 +173,7 @@ class TestConfigChain:
             proxy_port = integration_config["proxy"]["port"]
             assert str(proxy_port) in env["ANTHROPIC_BASE_URL"]
 
-    @pytest.mark.parametrize("agent", ["goose", "claude-code", "roo", "cline"])
+    @pytest.mark.parametrize("agent", ["goose", "claude-code", "roo", "cline", "codex"])
     def test_agent_env_matrix(self, integration_config, agent):
         """Every supported agent gets the right env vars pointing at the proxy.
 
@@ -192,14 +194,26 @@ class TestConfigChain:
 
         assert env["DSAGT_AGENT"] == agent
 
-        if agent in ("claude-code", "roo", "cline"):
-            # Anthropic-native agents: point at proxy, pin model, sentinel key.
+        if agent in ("claude-code", "roo"):
+            # Anthropic-native agents that honor env vars: point at proxy,
+            # pin model, sentinel key.  Roo rewrites lab-gateway model
+            # names to its own default before sending; the proxy aliases
+            # that name to the upstream primary (see commands/proxy_server.py
+            # _AGENT_PRIMARY_ALIASES).
             assert env["ANTHROPIC_BASE_URL"] == f"http://localhost:{proxy_port}"
             assert env["ANTHROPIC_MODEL"] == model
             assert env["ANTHROPIC_API_KEY"] == sentinel
-            # Goose-only vars must not leak into other agents' envs.
             assert "OPENAI_HOST" not in env
             assert "GOOSE_MODEL" not in env
+        elif agent == "cline":
+            # Cline ignores ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY; provider
+            # config lives in CLINE_DIR/globalState.json (bootstrapped by
+            # `cline auth` in launch_agent).  agent_env's job is just to
+            # scope CLINE_DIR per project.
+            assert env["CLINE_DIR"].endswith(".cline-data")
+            assert "ANTHROPIC_BASE_URL" not in env
+            assert "ANTHROPIC_API_KEY" not in env
+            assert "OPENAI_HOST" not in env
         elif agent == "goose":
             # OpenAI-native: different env var names, same destination.
             assert env["OPENAI_HOST"] == f"http://localhost:{proxy_port}"
@@ -208,13 +222,31 @@ class TestConfigChain:
             assert env["OPENAI_API_KEY"] == sentinel
             assert "ANTHROPIC_BASE_URL" not in env
             assert "ANTHROPIC_MODEL" not in env
+            assert "CLINE_DIR" not in env
+        elif agent == "codex":
+            # Codex ignores most env vars except CODEX_HOME (which scopes
+            # config.toml + auth state per project) and OPENAI_API_KEY
+            # (consumed by [model_providers.dsagt-proxy] env_key).  The
+            # proxy URL itself lives in $CODEX_HOME/config.toml, written
+            # by _bootstrap_codex at launch.
+            assert env["CODEX_HOME"].endswith(".codex-data")
+            assert env["OPENAI_API_KEY"] == sentinel
+            assert "ANTHROPIC_BASE_URL" not in env
+            assert "ANTHROPIC_MODEL" not in env
+            assert "CLINE_DIR" not in env
+            assert "GOOSE_MODEL" not in env
 
-    def test_mcp_env_block_passes_api_key(self, integration_config):
-        """Resolved API key appears in the MCP server env block."""
-        from dsagt.agents import _mcp_env_block
+    def test_mcp_env_block_routes_through_proxy(self, integration_config):
+        """The MCP server env block points the embedding endpoint at the
+        local proxy with a sentinel key.  The real EMBEDDING_API_KEY only
+        lives in the dsagt-proxy subprocess (inherited from os.environ at
+        proxy startup), where it's used to forward upstream.  See
+        commands/proxy_server.py _generate_config for the model_list entry.
+        """
+        from dsagt.agents import _mcp_env_block, _PROXY_FORWARDED_SENTINEL
 
-        env_block = _mcp_env_block(integration_config)
+        proxy_port = integration_config["proxy"]["port"]
+        env_block = _mcp_env_block(integration_config, proxy_port)
 
-        api_key = integration_config.get("embedding", {}).get("api_key", "")
-        if api_key and not api_key.startswith("${"):
-            assert env_block.get("LLM_API_KEY") == api_key
+        assert env_block["EMBEDDING_BASE_URL"] == f"http://localhost:{proxy_port}"
+        assert env_block["EMBEDDING_API_KEY"] == _PROXY_FORWARDED_SENTINEL

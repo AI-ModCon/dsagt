@@ -17,6 +17,7 @@ import json
 import pytest
 
 from dsagt.observability import (
+    SIDECHANNEL_CATCHALL_MODEL as _CATCHALL,
     SIDECHANNEL_LOG_FILENAME as _SIDECHANNEL_LOG,
     SIDECHANNEL_PRIMARY_MODEL_ENV as PRIMARY_MODEL_ENV,
     print_sidechannel_warning as _print_sidechannel_warning,
@@ -43,8 +44,9 @@ def _kwargs(*, client_model: str | None = None, routed_model: str | None = None)
     """Mimic the kwargs shape LiteLLM passes to a success callback.
 
     - ``standard_logging_object.model_group``: what the client sent
-    - ``model``: what LiteLLM routed to (wildcard's litellm_params.model
-      for sidechannel hits, or the configured primary for exact matches)
+    - ``model``: what LiteLLM routed to.  Equals ``SIDECHANNEL_CATCHALL_MODEL``
+      iff the request hit the wildcard mock; equals the real upstream
+      target for primary or alias hits.
     """
     kw: dict = {}
     if routed_model is not None:
@@ -57,10 +59,6 @@ def _kwargs(*, client_model: str | None = None, routed_model: str | None = None)
 def test_record_logs_client_name_not_routing_target(records_dir, monkeypatch):
     """The warning must show the model the AGENT asked for (sidechannel
     name), not the proxy's internal catchall route target.
-
-    This is the regression test for the bug where ``sidechannel.jsonl``
-    showed ``dsagt-sidechannel-catchall`` — useless for the user — instead
-    of ``gpt-4o-mini``/``claude-haiku-4-5-20251001``.
     """
     monkeypatch.setenv(PRIMARY_MODEL_ENV, "haiku-v1-project")
     monkeypatch.setenv("DSAGT_AGENT", "claude-code")
@@ -68,15 +66,13 @@ def test_record_logs_client_name_not_routing_target(records_dir, monkeypatch):
 
     _record_sidechannel(records_dir, _kwargs(
         client_model="claude-haiku-4-5-20251001",
-        routed_model="dsagt-sidechannel-catchall",
+        routed_model=_CATCHALL,
     ))
 
     entries = [json.loads(l) for l in _log_path(records_dir).read_text().splitlines()]
     assert len(entries) == 1
     e = entries[0]
-    assert e["model"] == "claude-haiku-4-5-20251001", (
-        "must record the agent-requested name, not the proxy's catchall target"
-    )
+    assert e["model"] == "claude-haiku-4-5-20251001"
     assert e["agent"] == "claude-code"
     assert e["session"] == "sess-1"
     assert e["timestamp"].endswith("Z")
@@ -86,18 +82,33 @@ def test_record_strips_provider_prefix(records_dir, monkeypatch):
     monkeypatch.setenv(PRIMARY_MODEL_ENV, "haiku-v1-project")
     _record_sidechannel(records_dir, _kwargs(
         client_model="openai/some-sidechannel",
-        routed_model="dsagt-sidechannel-catchall",
+        routed_model=_CATCHALL,
     ))
     entries = [json.loads(l) for l in _log_path(records_dir).read_text().splitlines()]
     assert entries[0]["model"] == "some-sidechannel"
 
 
-def test_record_match_does_not_write(records_dir, monkeypatch):
-    """Primary model matches → no sidechannel entry."""
+def test_record_alias_hit_not_sidechannel(records_dir, monkeypatch):
+    """Regression: model-name aliases (e.g. roo's ``claude-sonnet-4-5``
+    rewritten on the agent side) route to the real upstream via an explicit
+    proxy alias entry — those are NOT sidechannel calls and must not get
+    logged.  The previous name-based check (``requested != primary``) flagged
+    every aliased call as sidechannel, polluting the warning.
+    """
+    monkeypatch.setenv(PRIMARY_MODEL_ENV, "claude-sonnet-4-5-20250929-v1-project")
+    _record_sidechannel(records_dir, _kwargs(
+        client_model="claude-sonnet-4-5",  # alias name (different from primary)
+        routed_model="openai/claude-sonnet-4-5-20250929-v1-project",  # real upstream
+    ))
+    assert not _log_path(records_dir).exists()
+
+
+def test_record_primary_match_not_sidechannel(records_dir, monkeypatch):
+    """Direct primary-model hits → no sidechannel entry."""
     monkeypatch.setenv(PRIMARY_MODEL_ENV, "haiku-v1-project")
     _record_sidechannel(records_dir, _kwargs(
         client_model="haiku-v1-project",
-        routed_model="haiku-v1-project",
+        routed_model="openai/haiku-v1-project",
     ))
     assert not _log_path(records_dir).exists()
 
@@ -105,24 +116,15 @@ def test_record_match_does_not_write(records_dir, monkeypatch):
 def test_record_without_primary_skipped(records_dir, monkeypatch):
     """No DSAGT_PRIMARY_MODEL (e.g. direct-callback tests) → skip silently."""
     monkeypatch.delenv(PRIMARY_MODEL_ENV, raising=False)
-    _record_sidechannel(records_dir, _kwargs(client_model="anything"))
+    _record_sidechannel(records_dir, _kwargs(
+        client_model="anything",
+        routed_model=_CATCHALL,
+    ))
     assert not _log_path(records_dir).exists()
 
 
-def test_record_falls_back_to_kwargs_model(records_dir, monkeypatch):
-    """When standard_logging_object isn't populated, fall back to kwargs.model.
-
-    Direct-callback use from tests / synthetic paths that don't go through
-    the full LiteLLM routing won't have slo.model_group set — the function
-    should still log something useful rather than silently skip.
-    """
-    monkeypatch.setenv(PRIMARY_MODEL_ENV, "haiku-v1-project")
-    _record_sidechannel(records_dir, {"model": "some-other-model"})
-    entries = [json.loads(l) for l in _log_path(records_dir).read_text().splitlines()]
-    assert entries[0]["model"] == "some-other-model"
-
-
-def test_record_empty_model_skipped(records_dir, monkeypatch):
+def test_record_no_routed_model_skipped(records_dir, monkeypatch):
+    """Missing/empty kwargs.model → can't tell if it's a catchall; skip."""
     monkeypatch.setenv(PRIMARY_MODEL_ENV, "haiku-v1-project")
     _record_sidechannel(records_dir, {"model": ""})
     _record_sidechannel(records_dir, {})

@@ -46,6 +46,35 @@ PROJECT_NAME = "contract-test"
 MOCK_RESPONSE = "Contract-test canned reply"
 
 
+def test_generate_config_drops_client_metadata_per_model():
+    """Bedrock's Anthropic Messages adapter rejects ``client_metadata``
+    (an OpenAI-shape field Codex sends).  LiteLLM's global ``drop_params``
+    only handles fields it recognizes per-provider; unknown fields pass
+    through.  ``additional_drop_params`` must be set on each chat-completion
+    ``litellm_params`` block (not at the global ``litellm_settings`` level —
+    verified empirically).  Lock that in.
+    """
+    from dsagt.commands.proxy_server import _generate_config
+
+    yaml_body = _generate_config(
+        "primary-model", "https://upstream.example.com", "bedrock",
+        "embed-model", "https://embed.example.com", "openai_like",
+    )
+
+    # Each chat-completion entry (primary + every alias) needs the drop list
+    # in its litellm_params.  The embedding entry doesn't need it (embedding
+    # requests don't carry client_metadata) but having it would be harmless.
+    chat_entries = yaml_body.count("model: bedrock/primary-model")
+    assert chat_entries >= 2, (
+        f"expected >=2 chat entries (primary + aliases), got {chat_entries}"
+    )
+    drop_count = yaml_body.count('additional_drop_params: ["client_metadata"]')
+    assert drop_count == chat_entries, (
+        f"every chat-completion entry needs additional_drop_params; "
+        f"got {drop_count} drop lines for {chat_entries} chat entries"
+    )
+
+
 def _free_port() -> int:
     """Bind 0 to grab a free port; release before the proxy binds it.
 
@@ -99,7 +128,14 @@ def proxy(tmp_path_factory):
     # a hand-rolled YAML that could drift.  Override the primary route's
     # mock_response so the primary path is testable without a real upstream.
     from dsagt.commands.proxy_server import _generate_config
-    config_body = _generate_config(MODEL_NAME, "http://localhost:19999", "openai")
+    config_body = _generate_config(
+        MODEL_NAME, "http://localhost:19999", "openai",
+        # embedding entry: contract test only exercises chat completions, but
+        # _generate_config requires embedding params.  Stub them with another
+        # invalid endpoint so the embedding model_list entry is syntactically
+        # valid YAML without changing chat-completions behavior.
+        "test-embedding", "http://localhost:19998", "openai_like",
+    )
     # Inject mock_response into the primary entry.  The wildcard mock is
     # already present; primary needs the inline mock to stay network-free.
     primary_marker = f"      api_key: os.environ/LLM_API_KEY\n"
@@ -127,12 +163,18 @@ def proxy(tmp_path_factory):
             "--model", MODEL_NAME,
             "--base-url", "http://localhost:19999",
             "--provider", "openai",
+            # Embedding args required by argparse since Option A wired
+            # embeddings through the proxy.  Contract test doesn't
+            # exercise the embedding route, so unreachable URL is fine.
+            "--embedding-model", "test-embedding",
+            "--embedding-base-url", "http://localhost:19998",
+            "--embedding-provider", "openai_like",
             "--config", str(config_path),
             "--mlflow-url", f"sqlite:///{mlflow_db}",
             "--session", SESSION_ID,
             "--records-dir", str(records_dir),
         ],
-        env=env,
+        env={**env, "EMBEDDING_API_KEY": "test-embedding-key"},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )

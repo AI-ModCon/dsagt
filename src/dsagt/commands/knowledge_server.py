@@ -806,8 +806,13 @@ def main():
     project_dir = Path(os.environ.get("DSAGT_PROJECT_DIR", "."))
 
     log_file = project_dir / "dsagt_knowledge_server.log"
+    # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  See
+    # registry_server.py main() for rationale (httpcore/urllib3/llama_index
+    # at DEBUG floods agent debug output).
+    _level_name = os.environ.get("DSAGT_LOG_LEVEL", "INFO").upper()
+    _level = getattr(logging, _level_name, logging.INFO)
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
             logging.FileHandler(log_file, mode="a"),

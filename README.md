@@ -6,7 +6,14 @@ DSAgt connects an MCP-compatible AI agent to tool registration, a semantic knowl
 
 ## Installation
 
-**Prerequisites:** Python 3.10–3.13, [uv](https://github.com/astral-sh/uv), and one of the supported agent platforms.
+**Prerequisites:** Python 3.10–3.13, [uv](https://github.com/astral-sh/uv), and one of the supported agent platforms:
+| Agent | Install | Verify |
+|-------|---------|--------|
+| [Claude Code](https://github.com/anthropics/claude-code) | `npm i -g @anthropic-ai/claude-code` | `claude --version` |
+| [Goose](https://github.com/block/goose) | See [Goose docs](https://github.com/block/goose#installation) | `goose --version` |
+| [Roo Code](https://github.com/RooCodeInc/Roo-Code) | `npm i -g @roo-code/cli` | `roo --version` |
+| [Cline](https://github.com/cline/cline) | `npm i -g cline` | `cline --version` |
+| [Codex](https://github.com/openai/codex) | `npm i -g @openai/codex` (or `brew install --cask codex`) | `codex --version` |
 
 ```bash
 git clone https://github.com/AI-ModCon/BaseData_pipeline_agent.git
@@ -42,29 +49,11 @@ With `.env` already sourced:
 dsagt setup-kb
 ```
 
-Or pass everything on the command line:
-
-```bash
-dsagt setup-kb \
-  --embedding-base-url https://api.example.com \
-  --embedding-api-key sk-... \
-  --embedding-model text-embedding-3-small
-```
-
 **Expect this to take 10–20 minutes** if the upstream embedding API is
 rate-limited (common on Azure-backed endpoints). You only need to do this
 once per machine; the resulting index lives under `~/.dsagt/kb_index/`
 and is reused by every project. Pass `--collection nemo_curator` or
 `--collection aidrin` to build only one collection at a time.
-
-### Install an agent platform
-
-| Agent | Install | Verify |
-|-------|---------|--------|
-| [Claude Code](https://github.com/anthropics/claude-code) | `npm i -g @anthropic-ai/claude-code` | `claude --version` |
-| [Goose](https://github.com/block/goose) | See [Goose docs](https://github.com/block/goose#installation) | `goose --version` |
-| [Roo Code](https://github.com/RooCodeInc/Roo-Code) | `npm i -g @roo-code/cli` | `roo --version` |
-| [Cline](https://github.com/cline/cline) | `npm i -g cline` | `cline --version` |
 
 ## Quick Start
 
@@ -76,9 +65,31 @@ dsagt init cheese-metagenome --agent claude-code
 dsagt start cheese-metagenome
 ```
 
-`dsagt start` generates agent-specific config files, starts background services (LLM proxy, MLflow), and launches the agent with MCP servers (Tools/Skills, Knowledge Base). When the agent exits, memory extraction runs and services are stopped automatically.
+`dsagt start` resolves the agent (CLI flag or YAML default), picks free ports, starts background services (LLM proxy, MLflow), writes the agent's runtime config files with the actual ports baked in, and launches the agent with MCP servers (Tools/Skills, Knowledge Base). When the agent exits, memory extraction runs and services are stopped automatically.
+
+`--agent` may be supplied at init OR at first start — the flag is required exactly once across the project's lifetime. After that, the choice is recorded in `dsagt_config.yaml` and `dsagt start` runs without the flag. Passing `--agent` on later starts is a per-run override that doesn't update the YAML default — handy for trying a different agent on the same project's accumulated knowledge base, MLflow data, and registered tools.
+
+```bash
+# Agent-agnostic init: defer the choice until first start
+dsagt init my-project
+dsagt start my-project --agent codex      # codex becomes YAML default
+dsagt start my-project                    # uses codex
+dsagt start my-project --agent goose      # per-run override; YAML still says codex
+
+# If your configured port is taken, dsagt falls back with a warning;
+# pass --proxy-port / --mlflow-port to pick deliberately.
+dsagt start my-project --proxy-port 4100 --mlflow-port 5101
+```
 
 The generated `dsagt_config.yaml` references `.env` via `${VAR}` placeholders — no editing required for the common case. Edit it only to override per-project (different model, port, MLflow backend, etc.).
+
+**Verify your install end-to-end** (~1 min, makes a few real LLM calls):
+
+```bash
+dsagt smoke-test --agent claude-code   # or: goose | cline | roo | codex
+```
+
+This drives the chosen agent through a fixed 6-step script (knowledge ingest → tool registration → directory scan → CSV analysis → explicit memory → recall) and asserts the resulting trace records, KB index, and explicit-memory file are present. See [Smoke Test](#smoke-test) below for what each agent's run produces.
 
 ## Use Case Examples
 
@@ -103,7 +114,7 @@ value if a project needs different settings than the workspace default.
 
 ```yaml
 project: cheese-metagenome
-agent: claude-code              # claude-code | goose | roo | cline
+agent: claude-code              # claude-code | goose | roo | cline | codex
 
 llm:
   provider: ${LLM_PROVIDER}     # LiteLLM provider prefix (openai, anthropic, ...)
@@ -129,9 +140,13 @@ knowledge:
   rerank: false                 # enable cross-encoder reranking (slower, more accurate)
 ```
 
-To switch agent platforms, change `agent:` and run `dsagt start` again. To
-inspect resolved values and where each came from (`.env`, environment, or
-literal), run `dsagt info <project>`.
+To switch agent platforms, either edit `agent:` in the YAML, or pass
+`--agent X` to `dsagt start` (per-run override; doesn't change the YAML).
+The project's data layer (knowledge base, MLflow store, registered
+tools, skills, audit records) is agent-agnostic, so switching agents
+preserves everything you've accumulated. To inspect resolved values
+and where each came from (`.env`, environment, or literal), run
+`dsagt info <project>`.
 
 ## Project Directory
 
@@ -161,6 +176,7 @@ Projects are registered in `~/.dsagt/projects.yaml` so `dsagt start <name>` work
   # Goose:        goose.yaml, .goosehints, .dsagt_env
   # Roo Code:     .roo/mcp.json, .roomodes, .dsagt_env
   # Cline:        cline_mcp.json, .clinerules/dsagt_instructions.md, .dsagt_env
+  # Codex:        AGENTS.md, .codex-data/config.toml, .dsagt_env
 
   # Service logs (written while dsagt start is running)
   proxy.log                       # LiteLLM proxy — LLM request/response forwarding
@@ -218,9 +234,8 @@ script or Snakemake workflow.
 
 | Command | Description |
 |---------|-------------|
-| `dsagt init <name> --agent <platform>` | Create a new project |
-| `dsagt init <name> --agent <platform> --location <path>` | Create at a custom location |
-| `dsagt start <name> [--script <file>] [--max-turns N]` | Start services, launch agent, clean up on exit |
+| `dsagt init <name> [--agent <platform>] [--location <path>]` | Create a new project; `--agent` is optional (defer to first start if omitted) |
+| `dsagt start <name> [--agent <platform>] [--proxy-port N] [--mlflow-port N] [--script <file>] [--max-turns N]` | Resolve agent → pick ports (with auto-fallback) → start services → write configs → launch; clean up on exit |
 | `dsagt stop <name>` | Stop project services (proxy, MLflow); clean up orphans on configured ports |
 | `dsagt info <name> [--json]` | Show resolved config (with source per value) and a session/source/error trace summary |
 | `dsagt mlflow <name> [--port N]` | Run MLflow in the foreground against a project's store |
@@ -228,7 +243,7 @@ script or Snakemake workflow.
 | `dsagt list` | List all projects with agent, status, and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project and delete its directory |
-| `dsagt smoke-test [--agent goose\|claude-code]` | Run the end-to-end smoke test (sources `.env`, drives the agent non-interactively, asserts artifacts) |
+| `dsagt smoke-test [--agent goose\|claude-code\|cline\|roo\|codex]` | Run the end-to-end smoke test (sources `.env`, drives the agent non-interactively, asserts artifacts) |
 
 ## Code Organization
 
@@ -269,7 +284,25 @@ Integration tests read endpoint and key values from `.env` at the repo root — 
 
 ## Smoke Test
 
-A guided walkthrough that validates all core functionality is available at [`tests/smoke_test/WALKTHROUGH.md`](tests/smoke_test/WALKTHROUGH.md). It covers knowledge ingestion, tool registration, execution provenance, memory, observability, and cleanup.
+End-to-end check that exercises every layer (proxy, MCP servers, dsagt-run wrapper, memory, MLflow) through a real agent run.
+
+```bash
+dsagt smoke-test --agent claude-code   # one of: goose | claude-code | cline | roo | codex
+```
+
+The script lifecycle: clean slate (`dsagt rm` + delete dir) → `dsagt init` with the chosen agent → `dsagt start --script` against [`tests/smoke_test/script.txt`](tests/smoke_test/script.txt) (a 6-step task list) → artifact assertions. Each agent gets its own project at `smoke-test-<agent>/`, so consecutive runs across agents preserve state for cross-agent comparison via `dsagt info smoke-test-<agent>`.
+
+Artifacts the run asserts:
+
+| Check | What it verifies |
+|---|---|
+| `csvtool_filter spec written` | agent called `dsagt-registry.save_tool_spec` |
+| `trace_archive has records` + `scan_directory record` | agent invoked the registered tool through the `dsagt-run` provenance wrapper, not bare `python` |
+| `knowledge ingested (route + vectors)` | agent called `dsagt-knowledge.kb_ingest` and ChromaDB index was populated |
+| `explicit memory recorded` | agent called `kb_remember` (file at `explicit_memories.yaml`) |
+| `mlflow has traces` + `LLM dispatch parity` | proxy log requests = MLflow `litellm-*` traces (modulo sidechannel mocks) |
+
+For a slower hands-on tour with the same script, see the manual [`WALKTHROUGH.md`](tests/smoke_test/WALKTHROUGH.md).
 
 ## Troubleshooting
 

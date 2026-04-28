@@ -376,6 +376,7 @@ def call_extraction_llm(
     api_key: str,
     model: str = "claude-sonnet-4-20250514",
     base_url: str | None = None,
+    provider: str | None = None,
 ) -> str:
     """Call the LLM with the extraction prompt. Returns raw response text.
 
@@ -386,11 +387,12 @@ def call_extraction_llm(
     """
     import litellm
 
-    # Route through the openai/ provider when a custom base_url is given —
-    # mirrors what the proxy does for agent calls.  Without an explicit
-    # base_url, leave the model untouched and let LiteLLM pick the provider.
+    # Mirror what the proxy does (commands/proxy_server.py): prefix the model
+    # with the configured provider so LiteLLM picks the right request format.
+    # Falls back to ``openai`` when provider is unset, preserving the historic
+    # behavior for callers that don't yet thread ``llm.provider`` through.
     if base_url:
-        completion_model = f"openai/{model}"
+        completion_model = f"{provider or 'openai'}/{model}"
     else:
         completion_model = model
 
@@ -563,6 +565,7 @@ def extract_session(
     api_key: str,
     model: str = "claude-sonnet-4-20250514",
     base_url: str | None = None,
+    provider: str | None = None,
     categories: dict[str, str] | None = None,
     session_id: str | None = None,
     runtime_dir: Path | None = None,
@@ -574,7 +577,7 @@ def extract_session(
         return {"status": "empty", "facts": 0, "insights": 0}
 
     prompt = build_extraction_prompt(exchanges, categories)
-    response_text = call_extraction_llm(prompt, api_key, model, base_url)
+    response_text = call_extraction_llm(prompt, api_key, model, base_url, provider)
     extracted = parse_extraction_response(response_text)
 
     if not session_id:

@@ -123,6 +123,23 @@ class TestSaveToolSpec:
         assert registry.get_tool("tool_a") is not None
         assert registry.get_tool("tool_b") is not None
 
+    def test_accepts_stringified_spec(self, server, registry):
+        """Some MCP clients (Claude Sonnet/Haiku 4.x) send nested-object args as
+        JSON strings.  The handler must accept both shapes."""
+        import json
+        spec = make_spec("stringy_tool")
+        text = call_tool(server, "save_tool_spec", {"spec": json.dumps(spec)})
+
+        assert "added" in text
+        assert registry.get_tool("stringy_tool") is not None
+
+    def test_rejects_invalid_stringified_spec(self, server, registry):
+        """Non-JSON strings produce a clear error rather than crashing."""
+        text = call_tool(server, "save_tool_spec", {"spec": "not valid json {"})
+
+        assert "Error" in text
+        assert "JSON object" in text
+
 
 # ---------------------------------------------------------------------------
 # get_registry

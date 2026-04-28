@@ -6,6 +6,6 @@ Use the scan_directory tool from the registry to scan the ../tests/smoke_test/da
 
 Look at ../tests/smoke_test/data/samples.csv and give me a short summary — columns, row count, any obvious quality issues.
 
-Remember this: samples.csv has null values in the status and timestamp columns.
+Put this fact in explicit memory: samples.csv has null values in the status and timestamp columns.
 
 What do you remember about the samples dataset?

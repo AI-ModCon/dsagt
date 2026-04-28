@@ -919,7 +919,7 @@ def install_mlflow_logger_with_session_tag() -> None:
     from litellm.integrations.mlflow import MlflowLogger
     from litellm.litellm_core_utils import litellm_logging as _ll
 
-    from dsagt.observability import _stamp_metadata_on_trace
+    from dsagt.observability import _stamp_metadata_on_trace, extract_cache_stats
 
     class _DSAGTMlflowLogger(MlflowLogger):
         def _start_span_or_trace(self, kwargs, start_time):
@@ -945,6 +945,24 @@ def install_mlflow_logger_with_session_tag() -> None:
                 metadata["dsagt.agent"] = agent
             _stamp_metadata_on_trace(span.request_id, metadata)
             return span
+
+        def _extract_and_set_chat_attributes(self, span, kwargs, response_obj):
+            # The response is in hand here, and the trace is still open in
+            # InMemoryTraceManager — last window to stamp cache stats before
+            # _end_span_or_trace exports.  A sibling success-callback firing
+            # later (e.g. DSAGTCallback.async_log_success_event) is too late;
+            # mlflow.update_current_trace silently no-ops on an exported trace.
+            super()._extract_and_set_chat_attributes(span, kwargs, response_obj)
+            if span is None:
+                return
+            usage = (_response_to_dict(response_obj) or {}).get("usage") or {}
+            read, write = extract_cache_stats(usage)
+            if not read and not write:
+                return
+            _stamp_metadata_on_trace(span.request_id, {
+                "dsagt.cache.read_tokens": str(read),
+                "dsagt.cache.write_tokens": str(write),
+            })
 
     # Already installed? Leave it.
     for cb in _ll._in_memory_loggers:
@@ -988,26 +1006,29 @@ def _handle_success(store: ToolRecordStore, kwargs, response_obj, start_time, en
     store.log_exchange(kwargs, response_data)
     store.match_tool_results(messages)
     store.track_tool_uses(response_data)
-    _log_cache_usage(response_data)
+    usage = response_data.get("usage") or {}
+    _log_cache_usage(usage)
     _record_sidechannel(store.records_dir, kwargs)
 
 
-def _log_cache_usage(response_data: dict) -> None:
+def _log_cache_usage(usage: dict) -> None:
     """Emit a one-line summary of prompt-cache hits/misses per completion.
 
-    Anthropic-family responses carry ``cache_creation_input_tokens`` and
-    ``cache_read_input_tokens`` under ``usage``; providers without caching
-    omit both fields (log line prints zeros and the user knows the marker
-    was dropped).  Cheap to leave on — one logger.info per LLM call.
+    Provider-agnostic: ``extract_cache_stats`` handles every cache-field
+    shape we've seen in practice (Anthropic/Bedrock, OpenAI/Azure, Gemini,
+    DeepSeek).  When the upstream omits all known fields the line shows
+    zeros and the user knows caching either wasn't requested or got
+    stripped at the provider boundary.
     """
-    usage = response_data.get("usage") or {}
     if not usage:
         return
+    from dsagt.observability import extract_cache_stats
     prompt = usage.get("prompt_tokens", 0)
     completion = usage.get("completion_tokens", 0)
-    cache_read = usage.get("cache_read_input_tokens", 0) or 0
-    cache_write = usage.get("cache_creation_input_tokens", 0) or 0
+    cache_read, cache_write = extract_cache_stats(usage)
     logger.info(
         "tokens: prompt=%d completion=%d  cache: read=%d write=%d",
         prompt, completion, cache_read, cache_write,
     )
+
+

@@ -827,3 +827,163 @@ def test_search_registry_does_not_emit_span(_reset_tracing, tmp_path):
     spans = _spans_by_name(exporter)
     assert "registry.search" not in spans
     assert "registry.search_registry" not in spans
+
+
+# ---------------------------------------------------------------------------
+# extract_cache_stats — provider-agnostic cache-token reader
+# ---------------------------------------------------------------------------
+#
+# Each provider returns cache stats under a different field name; LiteLLM
+# doesn't backfill across them.  Lock in the field-name handling so a
+# regression can't silently hide cache hits in `dsagt info`.
+
+def test_extract_cache_stats_anthropic_format():
+    from dsagt.observability import extract_cache_stats
+    usage = {
+        "prompt_tokens": 5000,
+        "completion_tokens": 100,
+        "cache_read_input_tokens": 3000,
+        "cache_creation_input_tokens": 2000,
+    }
+    assert extract_cache_stats(usage) == (3000, 2000)
+
+
+def test_extract_cache_stats_openai_format():
+    from dsagt.observability import extract_cache_stats
+    # OpenAI/Azure: cached_tokens nested under prompt_tokens_details, no write field
+    usage = {
+        "prompt_tokens": 5000,
+        "completion_tokens": 100,
+        "prompt_tokens_details": {"cached_tokens": 2400, "audio_tokens": None},
+    }
+    assert extract_cache_stats(usage) == (2400, 0)
+
+
+def test_extract_cache_stats_gemini_format():
+    from dsagt.observability import extract_cache_stats
+    usage = {"prompt_tokens": 1000, "cached_content_token_count": 700}
+    assert extract_cache_stats(usage) == (700, 0)
+
+
+def test_extract_cache_stats_deepseek_format():
+    from dsagt.observability import extract_cache_stats
+    # DeepSeek: prompt_cache_hit_tokens is the read; prompt_cache_miss_tokens
+    # is the COMPLEMENT (uncached prompt tokens), not a "write" — don't count it.
+    usage = {
+        "prompt_tokens": 1000,
+        "prompt_cache_hit_tokens": 600,
+        "prompt_cache_miss_tokens": 400,
+    }
+    assert extract_cache_stats(usage) == (600, 0)
+
+
+def test_extract_cache_stats_no_cache_fields():
+    from dsagt.observability import extract_cache_stats
+    assert extract_cache_stats({"prompt_tokens": 100, "completion_tokens": 10}) == (0, 0)
+
+
+def test_extract_cache_stats_handles_garbage():
+    from dsagt.observability import extract_cache_stats
+    # Real responses occasionally have None or non-dict values where we expect dicts
+    assert extract_cache_stats({"prompt_tokens_details": None}) == (0, 0)
+    assert extract_cache_stats({"prompt_tokens_details": "garbage"}) == (0, 0)
+    assert extract_cache_stats(None) == (0, 0)
+    assert extract_cache_stats({}) == (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Cache stamping happens inside the MlflowLogger subclass (pre-export window)
+# ---------------------------------------------------------------------------
+#
+# Regression guard: cache stamping used to live in a sibling success-callback
+# (DSAGTCallback.async_log_success_event) that fired AFTER LiteLLM's MlflowLogger
+# had already exported the trace, so mlflow.update_current_trace was a no-op
+# on the closed trace.  The fix moves the stamp into _DSAGTMlflowLogger's
+# _extract_and_set_chat_attributes override, which runs while the trace is
+# still in InMemoryTraceManager.  These tests pin that wiring so the same
+# regression can't reappear.
+
+def test_dsagt_mlflow_logger_stamps_cache_on_chat_attributes(monkeypatch):
+    """Cache stats land via the subclass override, not a sibling callback."""
+    from types import SimpleNamespace
+
+    from dsagt import provenance
+    from litellm.litellm_core_utils import litellm_logging as _ll
+
+    monkeypatch.setattr(_ll, "_in_memory_loggers", [])
+
+    stamps: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        "dsagt.observability._stamp_metadata_on_trace",
+        lambda req_id, md: stamps.append((req_id, dict(md))),
+    )
+
+    provenance.install_mlflow_logger_with_session_tag()
+    logger_obj = next(
+        cb for cb in _ll._in_memory_loggers
+        if type(cb).__name__ == "_DSAGTMlflowLogger"
+    )
+
+    # Don't actually run MLflow's chat-attribute extraction (it'd need a
+    # real span and trace_manager); just confirm our override stamps and
+    # then delegates.
+    monkeypatch.setattr(
+        type(logger_obj).__bases__[0],
+        "_extract_and_set_chat_attributes",
+        lambda self, span, kwargs, response: None,
+    )
+
+    span = SimpleNamespace(request_id="trace-abc")
+    response = {
+        "usage": {
+            "prompt_tokens": 1000,
+            "prompt_tokens_details": {"cached_tokens": 600},
+            "cache_read_input_tokens": 600,  # same value, both shapes
+        }
+    }
+    logger_obj._extract_and_set_chat_attributes(span, {}, response)
+
+    cache_stamps = [s for s in stamps if "dsagt.cache.read_tokens" in s[1]]
+    assert len(cache_stamps) == 1, f"expected one cache stamp, got {stamps}"
+    req_id, md = cache_stamps[0]
+    assert req_id == "trace-abc"
+    # The two shapes carry the SAME value — extract_cache_stats short-circuits
+    # so we get 600, not 1200.  Guards against the double-count regression.
+    assert md["dsagt.cache.read_tokens"] == "600"
+    assert md["dsagt.cache.write_tokens"] == "0"
+
+
+def test_dsagt_mlflow_logger_skips_cache_stamp_when_zero(monkeypatch):
+    """No metadata stamp when upstream returned no cache fields."""
+    from types import SimpleNamespace
+
+    from dsagt import provenance
+    from litellm.litellm_core_utils import litellm_logging as _ll
+
+    monkeypatch.setattr(_ll, "_in_memory_loggers", [])
+
+    stamps: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        "dsagt.observability._stamp_metadata_on_trace",
+        lambda req_id, md: stamps.append((req_id, dict(md))),
+    )
+
+    provenance.install_mlflow_logger_with_session_tag()
+    logger_obj = next(
+        cb for cb in _ll._in_memory_loggers
+        if type(cb).__name__ == "_DSAGTMlflowLogger"
+    )
+    monkeypatch.setattr(
+        type(logger_obj).__bases__[0],
+        "_extract_and_set_chat_attributes",
+        lambda self, span, kwargs, response: None,
+    )
+
+    span = SimpleNamespace(request_id="trace-xyz")
+    logger_obj._extract_and_set_chat_attributes(
+        span, {},
+        {"usage": {"prompt_tokens": 1000, "completion_tokens": 50}},
+    )
+
+    cache_stamps = [s for s in stamps if "dsagt.cache.read_tokens" in s[1]]
+    assert cache_stamps == [], f"unexpected cache stamp: {cache_stamps}"

@@ -14,16 +14,20 @@
 
 set -uo pipefail
 
-PROJECT="smoke-test"
 AGENT="${DSAGT_SMOKE_AGENT:-${1:-goose}}"   # arg or env var, default goose
+# Per-agent project name so each agent's mlflow.db, trace_archive, and
+# kb_index/ survive across runs — crucial for cross-agent comparison
+# (e.g., why does claude-code use 10x the tokens roo does?).  Without this,
+# `dsagt rm` at the start of each run wipes the previous agent's state.
+PROJECT="smoke-test-${AGENT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DSAGT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SCRIPT_FILE="${SCRIPT_DIR}/script.txt"
 
 case "${AGENT}" in
-    goose|claude-code) ;;
+    goose|claude-code|cline|roo|codex) ;;
     *)
-        echo "ERROR: agent must be one of: goose, claude-code (got '${AGENT}')" >&2
+        echo "ERROR: agent must be one of: goose, claude-code, cline, roo, codex (got '${AGENT}')" >&2
         exit 2
         ;;
 esac
@@ -70,36 +74,45 @@ PDIR="${DSAGT_ROOT}/${PROJECT}"
 # 4. Run the FULL `dsagt start` lifecycle, with the agent in batch mode.
 #    Wall-clock cap belt-and-suspenders the --max-turns inside.
 #
-#    `timeout` is GNU coreutils — present on Linux, missing on stock macOS.
-#    On macOS Homebrew installs it as `gtimeout`.  Fall back to running
-#    without a wall-clock cap if neither is available; --max-turns 30 is
-#    still a tight bound (~15 min worst case on Haiku).
+#    Pure-bash watcher pattern instead of GNU `timeout` so the smoke test
+#    works on stock macOS without `brew install coreutils`.  SIGTERM gives
+#    dsagt's finally-block a chance to stop services cleanly; the
+#    follow-up SIGKILL after WALL_CLOCK_GRACE catches the agent if it
+#    swallows the term signal.
 # ---------------------------------------------------------------------------
-if command -v timeout >/dev/null 2>&1; then
-    TIMEOUT_BIN="timeout"
-elif command -v gtimeout >/dev/null 2>&1; then
-    TIMEOUT_BIN="gtimeout"
-else
-    TIMEOUT_BIN=""
-    echo "WARN: neither 'timeout' nor 'gtimeout' available; running without wall-clock cap (relying on --max-turns 30). Install GNU coreutils for the safety net: brew install coreutils"
-fi
+WALL_CLOCK_CAP=300   # seconds (5 minutes)
+WALL_CLOCK_GRACE=10  # extra seconds before SIGKILL
 
 echo
-echo "[smoke] Running dsagt start --script…"
-if [[ -n "${TIMEOUT_BIN}" ]]; then
-    "${TIMEOUT_BIN}" 5m dsagt start "${PROJECT}" --script "${SCRIPT_FILE}" --max-turns 30
-else
-    dsagt start "${PROJECT}" --script "${SCRIPT_FILE}" --max-turns 30
-fi
+echo "[smoke] Running dsagt start --script (${WALL_CLOCK_CAP}s wall-clock cap)…"
+dsagt start "${PROJECT}" --script "${SCRIPT_FILE}" --max-turns 30 &
+DSAGT_PID=$!
+(
+    sleep "${WALL_CLOCK_CAP}"
+    kill -TERM "${DSAGT_PID}" 2>/dev/null && \
+        echo "[smoke] WARN: ${WALL_CLOCK_CAP}s cap exceeded — sent SIGTERM to dsagt start (pid ${DSAGT_PID})"
+    sleep "${WALL_CLOCK_GRACE}"
+    kill -KILL "${DSAGT_PID}" 2>/dev/null && \
+        echo "[smoke] WARN: dsagt start did not exit on SIGTERM — sent SIGKILL"
+) &
+WATCHER_PID=$!
+wait "${DSAGT_PID}"
 START_EXIT=$?
+# Tear down the watcher if dsagt exited on its own.
+kill -TERM "${WATCHER_PID}" 2>/dev/null
+wait "${WATCHER_PID}" 2>/dev/null
 
 if [[ ${START_EXIT} -ne 0 ]]; then
     echo "WARN: dsagt start exited non-zero (${START_EXIT}) — continuing to artifact checks anyway"
 fi
 
 # Defensive: ensure no stray services if the lifecycle's finally didn't run
-# (timeout SIGKILL skips Python's finally blocks).
-dsagt stop "${PROJECT}" >/dev/null 2>&1 || true
+# (timeout SIGKILL skips Python's finally blocks).  Output kept visible —
+# if any port is still in use after this, we want to see the warning so
+# the next run doesn't race a half-shutdown orphan.
+echo
+echo "[smoke] Final cleanup…"
+dsagt stop "${PROJECT}" || true
 
 # ---------------------------------------------------------------------------
 # 5. Artifact checks
@@ -120,8 +133,22 @@ check() {
 check "csvtool_filter spec written"  "test -f '${PDIR}/tools/csvtool_filter.md'"
 check "trace_archive has records"    "ls '${PDIR}/trace_archive/'*.json | grep -q ."
 check "scan_directory record"        "ls '${PDIR}/trace_archive/'*scan_directory*.json | grep -q ."
-check "knowledge ingested"           "test -d '${PDIR}/kb_index/knowledge'"
-check "explicit memory recorded"     "find '${PDIR}/kb_index' -name 'chunks.jsonl' -path '*memory*' | grep -q ."
+# Both files are written by dsagt-knowledge-server's kb_ingest_directory MCP
+# tool — chroma.sqlite3 is the actual vector DB, route.json is the collection
+# manifest.  Checking only `test -d kb_index/knowledge` is too weak: an agent
+# can satisfy it by hand-crafting an empty directory tree, masking a broken
+# MCP wiring (which is exactly what we hit when cline's dsagt-knowledge
+# server crashed silently and the LLM compensated by mkdir-ing the path).
+check "knowledge ingested (route)"   "test -f '${PDIR}/kb_index/knowledge/route.json'"
+check "knowledge ingested (vectors)" "test -f '${PDIR}/kb_index/knowledge/chroma.sqlite3'"
+# Explicit memory writes to <project>/explicit_memories.yaml (YAML at the
+# project root), NOT to kb_index/.  Only kb_remember (called deliberately
+# by the agent in response to "Put this in explicit memory" / "remember
+# this") populates the file.  End-of-session episodic extraction writes
+# elsewhere (kb_index/episodic_memory/...) and is independent.  Checking
+# the YAML's existence + non-empty catches the hallucination case where
+# the agent claims it stored a fact but didn't actually call the tool.
+check "explicit memory recorded"     "test -s '${PDIR}/explicit_memories.yaml'"
 check "mlflow has traces"            "test -s '${PDIR}/mlflow/mlflow.db'"
 
 # ---------------------------------------------------------------------------
@@ -137,8 +164,8 @@ check "mlflow has traces"            "test -s '${PDIR}/mlflow/mlflow.db'"
 # and the output is always a single integer.
 #
 # Match both endpoints because different agents send different formats:
-#   - goose / OpenAI-format clients → /chat/completions
-#   - claude-code / Anthropic-format clients → /v1/messages
+#   - goose, cline / OpenAI-format clients → /chat/completions
+#   - claude-code, roo / Anthropic-format clients → /v1/messages
 if [[ -f "${PDIR}/proxy.log" ]]; then
     PROXY_REQUESTS=$(grep -cE 'POST .*(/(v1/)?chat/completions|/v1/messages)' "${PDIR}/proxy.log" 2>/dev/null | head -1)
     PROXY_REQUESTS="${PROXY_REQUESTS:-0}"

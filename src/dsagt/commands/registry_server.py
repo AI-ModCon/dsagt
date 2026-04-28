@@ -142,6 +142,13 @@ async def _handle_save_tool_spec(
     arguments: dict, *, registry: ToolRegistry,
 ) -> str:
     spec = arguments["spec"]
+    # Some MCP clients (notably Claude Sonnet/Haiku 4.x) serialize nested
+    # object args as JSON strings instead of objects.  Accept both shapes.
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except json.JSONDecodeError as e:
+            return f"Error: spec must be a JSON object (or string-encoded JSON object): {e}"
     with registry_save_tool_span(spec.get("name")):
         obs.set("language", spec.get("language"))
         obs.set("n_dependencies", len(spec.get("dependencies") or []))
@@ -419,49 +426,59 @@ def create_registry_server(
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        # ``anyOf`` accepts both a structured object and a
+                        # JSON-encoded string.  Some MCP clients (notably
+                        # Claude Sonnet/Haiku 4.x) serialize nested object
+                        # arguments as JSON strings instead of objects; the
+                        # handler unwraps either shape.
                         "spec": {
-                            "type": "object",
-                            "description": "Tool specification",
-                            "properties": {
-                                "name": {"type": "string", "description": "Unique tool identifier"},
-                                "description": {"type": "string", "description": "What the tool does"},
-                                "executable": {"type": "string", "description": "Command to execute"},
-                                "parameters": {
+                            "description": "Tool specification (object or JSON-encoded string)",
+                            "anyOf": [
+                                {
                                     "type": "object",
-                                    "description": "Parameter definitions",
-                                    "additionalProperties": {
-                                        "type": "object",
-                                        "properties": {
-                                            "type": {"type": "string", "description": "Parameter type"},
-                                            "required": {"type": "boolean"},
-                                            "description": {"type": "string"},
-                                            "default": {"description": "Default value"},
-                                            "cli": {
-                                                "type": "string",
-                                                "description": (
-                                                    "How to render this parameter on the command line: "
-                                                    "'positional[:N]' for positional args, '--name' or '-n' "
-                                                    "for spaced flags, '--name=' or '-n=' for glued flags, "
-                                                    "'key=' for dd-style key=value. Defaults to '--<param_name>' "
-                                                    "if omitted."
-                                                ),
+                                    "properties": {
+                                        "name": {"type": "string", "description": "Unique tool identifier"},
+                                        "description": {"type": "string", "description": "What the tool does"},
+                                        "executable": {"type": "string", "description": "Command to execute"},
+                                        "parameters": {
+                                            "type": "object",
+                                            "description": "Parameter definitions",
+                                            "additionalProperties": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "type": {"type": "string", "description": "Parameter type"},
+                                                    "required": {"type": "boolean"},
+                                                    "description": {"type": "string"},
+                                                    "default": {"description": "Default value"},
+                                                    "cli": {
+                                                        "type": "string",
+                                                        "description": (
+                                                            "How to render this parameter on the command line: "
+                                                            "'positional[:N]' for positional args, '--name' or '-n' "
+                                                            "for spaced flags, '--name=' or '-n=' for glued flags, "
+                                                            "'key=' for dd-style key=value. Defaults to '--<param_name>' "
+                                                            "if omitted."
+                                                        ),
+                                                    },
+                                                },
+                                                "required": ["type", "description"],
                                             },
                                         },
-                                        "required": ["type", "description"],
+                                        "dependencies": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                            "description": "Python packages to install",
+                                        },
+                                        "tags": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                            "description": "Tags for categorizing the tool",
+                                        },
                                     },
+                                    "required": ["name", "description", "executable", "parameters"],
                                 },
-                                "dependencies": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "Python packages to install",
-                                },
-                                "tags": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "Tags for categorizing the tool",
-                                },
-                            },
-                            "required": ["name", "description", "executable", "parameters"],
+                                {"type": "string"},
+                            ],
                         },
                     },
                     "required": ["spec"],
@@ -552,8 +569,15 @@ def main():
     project_dir = Path(os.environ.get("DSAGT_PROJECT_DIR", "."))
 
     log_file = project_dir / "dsagt_registry_server.log"
+    # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  At DEBUG,
+    # transitive libraries (httpcore, urllib3, llama_index, chromadb) flood
+    # stderr with one line per network operation — when an agent like roo
+    # pipes the MCP server's stderr into its own debug stream, the human
+    # output gets buried under thousands of low-value lines.
+    _level_name = os.environ.get("DSAGT_LOG_LEVEL", "INFO").upper()
+    _level = getattr(_logging, _level_name, _logging.INFO)
     _logging.basicConfig(
-        level=_logging.DEBUG,
+        level=_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
             _logging.FileHandler(log_file, mode="a"),

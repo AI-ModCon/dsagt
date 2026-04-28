@@ -17,8 +17,13 @@ from dsagt.session import (
     load_config,
     project_dir,
 )
-from dsagt.agents import generate_agent_configs
-from dsagt.session import init_project
+from dsagt.agents import (
+    agent_env,
+    dynamic_agent_record,
+    static_agent_record,
+    static_agent_files_present,
+)
+from dsagt.session import init_project, persist_agent_choice
 
 
 @pytest.fixture(autouse=True)
@@ -232,39 +237,164 @@ class TestInitProject:
         with pytest.raises(ValueError):
             init_project("myproj", "invalid-agent")
 
+    def test_init_without_agent_omits_field_in_yaml(self, tmp_path):
+        """Optional --agent: when omitted at init, the YAML has no 'agent:'
+        field.  This is what enables `dsagt start --agent X` to set the
+        default on first start.
+        """
+        pdir = init_project("myproj")
+        config = yaml.safe_load((pdir / "dsagt_config.yaml").read_text())
+        assert "agent" not in config
+
+    def test_init_without_agent_skips_static_record(self, tmp_path):
+        """Without --agent at init, no instructions file is written —
+        we don't know which one to write.  Static record happens at
+        first start instead.
+        """
+        pdir = init_project("myproj")
+        # None of the per-agent marker files should exist
+        assert not (pdir / "CLAUDE.md").exists()
+        assert not (pdir / "AGENTS.md").exists()
+        assert not (pdir / ".goosehints").exists()
+        assert not (pdir / ".roomodes").exists()
+
+    def test_init_with_agent_writes_static_record_eagerly(self, tmp_path):
+        """With --agent at init, the static record is written immediately
+        so the user can edit instructions before first start.
+        """
+        pdir = init_project("myproj", "claude-code")
+        assert (pdir / "CLAUDE.md").exists()
+        config = yaml.safe_load((pdir / "dsagt_config.yaml").read_text())
+        assert config["agent"] == "claude-code"
+
 
 # ---------------------------------------------------------------------------
-# CLI: generate_agent_configs
+# persist_agent_choice: first-start agent selection writes back to YAML
 # ---------------------------------------------------------------------------
 
-class TestGenerateAgentConfigs:
+class TestPersistAgentChoice:
+
+    def test_adds_field_when_absent(self, tmp_path):
+        """First start without YAML default: --agent X persists into YAML."""
+        init_project("myproj")
+        persist_agent_choice("myproj", "codex")
+
+        config = load_config("myproj")
+        assert config["agent"] == "codex"
+
+    def test_overwrites_existing_field(self, tmp_path):
+        """If somehow called when YAML already has an agent (e.g., the
+        user manually edited the YAML between starts), the new value
+        wins.  Belt-and-suspenders: _cmd_start only calls this when the
+        YAML had no agent, so overwrite is rare in practice.
+        """
+        init_project("myproj", "goose")
+        persist_agent_choice("myproj", "claude-code")
+
+        config = load_config("myproj")
+        assert config["agent"] == "claude-code"
+
+    def test_invalid_agent_raises(self, tmp_path):
+        init_project("myproj")
+        with pytest.raises(ValueError):
+            persist_agent_choice("myproj", "not-an-agent")
+
+
+# ---------------------------------------------------------------------------
+# pick_free_port: tries preferred, falls back to next free in range
+# ---------------------------------------------------------------------------
+
+class TestPickFreePort:
+
+    def test_returns_preferred_when_free(self, monkeypatch):
+        from dsagt import session
+        monkeypatch.setattr(session, "port_in_use", lambda port: False)
+        port, warn = session.pick_free_port(4000)
+        assert port == 4000
+        assert warn is None
+
+    def test_falls_back_when_preferred_taken(self, monkeypatch):
+        from dsagt import session
+        # 4000 is taken, 4001 is free
+        monkeypatch.setattr(
+            session, "port_in_use", lambda port: port == 4000,
+        )
+        monkeypatch.setattr(session, "port_held_by_foreign_process", lambda port: False)
+        port, warn = session.pick_free_port(4000)
+        assert port == 4001
+        assert warn is not None
+        assert "4000" in warn
+        assert "4001" in warn
+
+    def test_warning_mentions_dsagt_stop_for_orphan(self, monkeypatch):
+        """When the preferred port looks like a stuck dsagt service, the
+        warning suggests `dsagt stop` so users can reclaim it."""
+        from dsagt import session
+        monkeypatch.setattr(session, "port_in_use", lambda port: port == 4000)
+        monkeypatch.setattr(session, "port_held_by_foreign_process", lambda port: False)
+        _, warn = session.pick_free_port(4000)
+        assert "dsagt stop" in warn
+
+    def test_warning_mentions_lsof_for_foreign(self, monkeypatch):
+        """When the preferred port is held by a non-dsagt process, the
+        warning points at lsof so the user can identify the squatter."""
+        from dsagt import session
+        monkeypatch.setattr(session, "port_in_use", lambda port: port == 4000)
+        monkeypatch.setattr(session, "port_held_by_foreign_process", lambda port: True)
+        _, warn = session.pick_free_port(4000)
+        assert "lsof" in warn
+
+    def test_raises_when_all_in_range_taken(self, monkeypatch):
+        from dsagt import session
+        monkeypatch.setattr(session, "port_in_use", lambda port: True)
+        monkeypatch.setattr(session, "port_held_by_foreign_process", lambda port: True)
+        with pytest.raises(RuntimeError, match="All ports"):
+            session.pick_free_port(4000, max_offset=3)
+
+
+# ---------------------------------------------------------------------------
+# Per-agent record writers: static_agent_record + dynamic_agent_record
+#
+# Each test runs both writers against a project init'd with --agent,
+# mirroring what `dsagt start` does in production.  Cline's dynamic
+# writer would shell out to `cline auth` here, so cline gets exercised
+# by ``test_cline_mcp_config_shape`` (mocked subprocess) instead of
+# the full dynamic writer.
+# ---------------------------------------------------------------------------
+
+class TestAgentRecord:
 
     def _init_and_load(self, agent):
         init_project("testproj", agent)
         return load_config("testproj")
 
-    def test_claude_code_generates_mcp_json(self, tmp_path):
+    def _write_both(self, config, working_dir):
+        """Run static then dynamic — what dsagt start does, minus services."""
+        static_agent_record(config, config["agent"], working_dir)
+        env = agent_env(config)
+        dynamic_agent_record(config, env, working_dir)
+
+    def test_claude_code_writes_mcp_json(self, tmp_path):
         config = self._init_and_load("claude-code")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        actions = generate_agent_configs(config, working_dir)
+        self._write_both(config, working_dir)
 
         mcp_path = working_dir / ".mcp.json"
         assert mcp_path.exists()
         mcp = json.loads(mcp_path.read_text())
         assert "dsagt-registry" in mcp["mcpServers"]
         assert "dsagt-knowledge" in mcp["mcpServers"]
-
-        # Env file written
         assert (working_dir / ".dsagt_env").exists()
+        assert (working_dir / "CLAUDE.md").exists()
 
-    def test_goose_generates_goose_yaml(self, tmp_path):
+    def test_goose_writes_goose_yaml(self, tmp_path):
         config = self._init_and_load("goose")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        generate_agent_configs(config, working_dir)
+        self._write_both(config, working_dir)
 
         goose_path = working_dir / "goose.yaml"
         assert goose_path.exists()
@@ -272,30 +402,133 @@ class TestGenerateAgentConfigs:
         assert "registry" in goose["extensions"]
         assert "knowledge" in goose["extensions"]
         assert goose["GOOSE_PROVIDER"] == "openai"
+        assert (working_dir / ".goosehints").exists()
 
-    def test_roo_generates_roo_mcp(self, tmp_path):
+    def test_roo_writes_static_and_env_dynamic(self, tmp_path):
+        # Roo's static record creates .roo/ + .roomodes; dynamic writes
+        # .roo/mcp.json (env-block-baked) and .dsagt_env.  Splitting was
+        # the whole point of the refactor — pin both halves here.
         config = self._init_and_load("roo")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        generate_agent_configs(config, working_dir)
+        self._write_both(config, working_dir)
 
-        mcp_path = working_dir / ".roo" / "mcp.json"
-        assert mcp_path.exists()
-        mcp = json.loads(mcp_path.read_text())
-        assert "dsagt-registry" in mcp["mcpServers"]
+        assert (working_dir / ".roo").is_dir()
+        assert (working_dir / ".roomodes").exists()
+        assert (working_dir / ".roo" / "mcp.json").exists()
 
-    def test_cline_generates_mcp_json(self, tmp_path):
+        env_content = (working_dir / ".dsagt_env").read_text()
+        assert "DSAGT_PROJECT" in env_content
+
+    def test_cline_writes_static_only_in_split_test(self, tmp_path):
+        # Cline's dynamic writer shells out to `cline auth` and `cline mcp
+        # add`, which would fail without cline installed.  Test only the
+        # static half here; ``test_cline_mcp_config_shape`` covers the
+        # dynamic half with mocked subprocess.
         config = self._init_and_load("cline")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        generate_agent_configs(config, working_dir)
+        static_agent_record(config, config["agent"], working_dir)
 
-        mcp_path = working_dir / "cline_mcp.json"
-        assert mcp_path.exists()
-        mcp = json.loads(mcp_path.read_text())
-        assert "alwaysAllow" in mcp["mcpServers"]["dsagt-registry"]
+        instructions = working_dir / ".clinerules" / "dsagt_instructions.md"
+        assert instructions.exists()
+        assert (working_dir / ".cline-data").is_dir()
+
+    def test_codex_writes_static_and_dynamic(self, tmp_path):
+        # Codex's CODEX_HOME comes from agent_env, which derives it from
+        # project_dir (not working_dir).  In production these are the
+        # same path; mirror that in the test by using project_dir as
+        # working_dir.
+        config = self._init_and_load("codex")
+        working_dir = Path(config["project_dir"])
+
+        self._write_both(config, working_dir)
+
+        assert (working_dir / "AGENTS.md").exists()
+        assert (working_dir / ".codex-data").is_dir()
+        assert (working_dir / ".codex-data" / "config.toml").exists()
+
+        env_content = (working_dir / ".dsagt_env").read_text()
+        assert "CODEX_HOME" in env_content
+        assert str(working_dir / ".codex-data") in env_content
+
+    def test_static_is_idempotent(self, tmp_path):
+        # Running static twice doesn't duplicate or destroy content —
+        # the marker check skips the second write.  This is what lets
+        # users edit CLAUDE.md / AGENTS.md between init and start
+        # without losing edits.
+        config = self._init_and_load("claude-code")
+        working_dir = tmp_path / "workdir"
+        working_dir.mkdir()
+
+        static_agent_record(config, "claude-code", working_dir)
+        first = (working_dir / "CLAUDE.md").read_text()
+        # Simulate a user edit
+        (working_dir / "CLAUDE.md").write_text(first + "\n\n## My project notes\nfoo")
+        edited = (working_dir / "CLAUDE.md").read_text()
+        # Re-run static — should be no-op since marker is present
+        static_agent_record(config, "claude-code", working_dir)
+        assert (working_dir / "CLAUDE.md").read_text() == edited
+
+    def test_static_files_present_check(self, tmp_path):
+        # Used by `dsagt start` to decide whether to call static_agent_record.
+        config = self._init_and_load("codex")
+        working_dir = tmp_path / "workdir"
+        working_dir.mkdir()
+
+        assert not static_agent_files_present("codex", working_dir)
+        static_agent_record(config, "codex", working_dir)
+        assert static_agent_files_present("codex", working_dir)
+
+    def test_codex_config_toml_shape(self, tmp_path):
+        """_render_codex_config produces a config.toml that routes Codex
+        through the dsagt proxy with explicit MCP env injection.
+
+        Pins the four invariants: model_provider name, base_url shape,
+        wire_api=responses (Codex's only supported value), and
+        disable_response_storage=true (required because the upstream
+        behind our proxy translates /v1/responses -> /v1/chat/completions
+        and can't honor previous_response_id state).
+        """
+        from dsagt.agents import _render_codex_config
+
+        config = {
+            "agent": "codex",
+            "project": "p",
+            "project_dir": "/proj",
+            "proxy": {"port": 4242},
+            "llm": {"model": "test-model"},
+        }
+        env = {}
+        mcp_env = {"DSAGT_PROJECT_DIR": "/proj", "MLFLOW_TRACKING_URI": "http://localhost:5001"}
+
+        toml = _render_codex_config(config, env, mcp_env)
+
+        assert 'model = "test-model"' in toml
+        assert 'model_provider = "dsagt-proxy"' in toml
+        assert "[model_providers.dsagt-proxy]" in toml
+        assert 'base_url = "http://localhost:4242/v1"' in toml
+        assert 'wire_api = "responses"' in toml
+        assert "disable_response_storage = true" in toml
+        assert "requires_openai_auth = false" in toml
+        assert 'env_key = "OPENAI_API_KEY"' in toml
+        assert "[mcp_servers.dsagt-registry]" in toml
+        assert "[mcp_servers.dsagt-knowledge]" in toml
+        assert "[mcp_servers.dsagt-registry.env]" in toml
+        assert 'MLFLOW_TRACKING_URI = "http://localhost:5001"' in toml
+
+    def test_mcp_servers_dict_shape(self):
+        from dsagt.agents import _build_mcp_servers_dict
+
+        env_block = {"DSAGT_PROJECT_DIR": "/tmp/x", "MLFLOW_TRACKING_URI": "http://localhost:5001"}
+        mcp = _build_mcp_servers_dict(env_block)
+
+        assert set(mcp["mcpServers"]) == {"dsagt-registry", "dsagt-knowledge"}
+        assert mcp["mcpServers"]["dsagt-knowledge"]["disabled"] is False
+        # Env block plumbs through so the MCP server children have what they need.
+        assert mcp["mcpServers"]["dsagt-registry"]["env"]["MLFLOW_TRACKING_URI"] == "http://localhost:5001"
 
     def test_mcp_config_has_project_dir_in_env(self, tmp_path):
         """MCP server entries should have DSAGT_PROJECT_DIR in their env
@@ -304,7 +537,7 @@ class TestGenerateAgentConfigs:
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        generate_agent_configs(config, working_dir)
+        self._write_both(config, working_dir)
 
         mcp = json.loads((working_dir / ".mcp.json").read_text())
         reg_env = mcp["mcpServers"]["dsagt-registry"].get("env", {})
@@ -318,7 +551,7 @@ class TestGenerateAgentConfigs:
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        generate_agent_configs(config, working_dir)
+        self._write_both(config, working_dir)
 
         env_content = (working_dir / ".dsagt_env").read_text()
         assert "ANTHROPIC_BASE_URL" in env_content
@@ -330,7 +563,7 @@ class TestGenerateAgentConfigs:
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        generate_agent_configs(config, working_dir)
+        self._write_both(config, working_dir)
 
         env_content = (working_dir / ".dsagt_env").read_text()
         assert "OPENAI_HOST" in env_content
@@ -384,17 +617,17 @@ class TestAgentEnv:
         assert env["OPENAI_HOST"] == "http://localhost:4000"
         assert "ANTHROPIC_BASE_URL" not in env
 
-    def test_embedding_key_set(self):
-        from dsagt.agents import agent_env
+    def test_embedding_routed_through_proxy(self):
+        """agent_env points the embedding endpoint at our local proxy with
+        a sentinel key.  The real EMBEDDING_API_KEY only lives in the
+        dsagt-proxy subprocess (inherited from os.environ before the
+        agent_env override) — agent and MCP children only see the sentinel.
+        """
+        from dsagt.agents import agent_env, _PROXY_FORWARDED_SENTINEL
         env = agent_env(self._make_config("claude-code"))
-        assert env["LLM_API_KEY"] == "test-key"
-
-    def test_unresolved_env_ref_skipped(self):
-        from dsagt.agents import agent_env
-        config = self._make_config("claude-code")
-        config["embedding"]["api_key"] = "${UNSET_VAR}"
-        env = agent_env(config)
-        assert env.get("LLM_API_KEY") != "${UNSET_VAR}"
+        assert env["EMBEDDING_BASE_URL"] == "http://localhost:4000"
+        assert env["EMBEDDING_API_KEY"] == _PROXY_FORWARDED_SENTINEL
+        assert env["OPENAI_BASE_URL"] == "http://localhost:4000"
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +656,10 @@ class TestAgentCommand:
         from dsagt.agents import agent_command
         assert agent_command({"agent": "cline"}) == ["cline"]
 
+    def test_codex(self):
+        from dsagt.agents import agent_command
+        assert agent_command({"agent": "codex"}) == ["codex"]
+
 
 # ---------------------------------------------------------------------------
 # Config flow: embedding config propagation
@@ -436,33 +673,28 @@ class TestConfigFlow:
         parsed = yaml.safe_load(content)
         assert "base_url" in parsed["embedding"]
 
-    def test_mcp_env_block_includes_base_url(self):
-        """_mcp_env_block passes OPENAI_BASE_URL from config."""
-        from dsagt.agents import _mcp_env_block
+    def test_mcp_env_block_routes_embedding_through_proxy(self):
+        """_mcp_env_block points the MCP server's EMBEDDING_BASE_URL at the
+        local proxy with a sentinel key — embeddings go through the same
+        translation/observability pipeline as LLM calls."""
+        from dsagt.agents import _mcp_env_block, _PROXY_FORWARDED_SENTINEL
         config = {"project_dir": "/p", "embedding": {"api_key": "k", "base_url": "https://api.test/v1", "model": "m"}}
-        env = _mcp_env_block(config)
-        assert env["OPENAI_BASE_URL"] == "https://api.test/v1"
+        env = _mcp_env_block(config, proxy_port=4000)
+        assert env["EMBEDDING_BASE_URL"] == "http://localhost:4000"
+        assert env["EMBEDDING_API_KEY"] == _PROXY_FORWARDED_SENTINEL
+        assert env["OPENAI_BASE_URL"] == "http://localhost:4000"
 
     def test_mcp_env_block_includes_model(self):
-        """_mcp_env_block passes EMBEDDING_MODEL from config."""
+        """_mcp_env_block passes EMBEDDING_MODEL through so MCP-server-side
+        litellm.embedding(model=...) matches the proxy's model_list entry."""
         from dsagt.agents import _mcp_env_block
         config = {"project_dir": "/p", "embedding": {"api_key": "k", "base_url": "u", "model": "my-model"}}
-        env = _mcp_env_block(config)
+        env = _mcp_env_block(config, proxy_port=4000)
         assert env["EMBEDDING_MODEL"] == "my-model"
 
-    def test_mcp_env_block_skips_empty_values(self):
-        """_mcp_env_block doesn't set empty string env vars (except DSAGT_PROJECT_DIR)."""
-        from dsagt.agents import _mcp_env_block
-        config = {"project_dir": "/p", "embedding": {"api_key": "", "base_url": "", "model": ""}}
-        env = _mcp_env_block(config)
-        assert "LLM_API_KEY" not in env
-        assert "OPENAI_BASE_URL" not in env
-        assert "EMBEDDING_MODEL" not in env
-        assert env["DSAGT_PROJECT_DIR"] == "/p"
-
-    def test_agent_env_includes_embedding_base_url(self):
-        """agent_env() sets OPENAI_BASE_URL from config."""
-        from dsagt.agents import agent_env
+    def test_agent_env_routes_embedding_through_proxy(self):
+        """agent_env() points the embedding endpoint at the local proxy."""
+        from dsagt.agents import agent_env, _PROXY_FORWARDED_SENTINEL
         config = {
             "project": "test",
             "agent": "claude-code",
@@ -472,14 +704,16 @@ class TestConfigFlow:
             "embedding": {"api_key": "k", "base_url": "https://api.test/v1", "model": "m"},
         }
         env = agent_env(config)
-        assert env["OPENAI_BASE_URL"] == "https://api.test/v1"
+        assert env["EMBEDDING_BASE_URL"] == "http://localhost:4000"
+        assert env["EMBEDDING_API_KEY"] == _PROXY_FORWARDED_SENTINEL
+        assert env["OPENAI_BASE_URL"] == "http://localhost:4000"
         assert env["EMBEDDING_MODEL"] == "m"
 
     def test_mcp_server_args_are_just_command(self):
         """MCP server args are just ["run", "dsagt-<name>-server"].
 
         All configuration flows through env vars (DSAGT_PROJECT_DIR,
-        LLM_API_KEY, OPENAI_BASE_URL, EMBEDDING_MODEL) and
+        EMBEDDING_BASE_URL/API_KEY pointing at proxy, EMBEDDING_MODEL) and
         dsagt_config.yaml.  No CLI flags needed.
         """
         from dsagt.agents import _mcp_server_args
@@ -494,8 +728,6 @@ class TestConfigFlow:
             "project_dir": "/home/user/dsagt-projects/test",
             "embedding": {"model": "m", "base_url": "u", "api_key": "k"},
         }
-        env = _mcp_env_block(config)
+        env = _mcp_env_block(config, proxy_port=4000)
         assert env["DSAGT_PROJECT_DIR"] == "/home/user/dsagt-projects/test"
         assert env["EMBEDDING_MODEL"] == "m"
-        assert env["OPENAI_BASE_URL"] == "u"
-        assert env["LLM_API_KEY"] == "k"

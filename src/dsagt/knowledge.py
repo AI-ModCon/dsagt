@@ -217,7 +217,16 @@ class APIEmbeddingClient(BaseEmbeddingClient):
     ):
         self.model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small-project")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
-        self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+        # EMBEDDING_API_KEY is the canonical name; LLM_API_KEY/OPENAI_API_KEY
+        # are legacy fallbacks from when the embedding endpoint shared the
+        # LLM endpoint's auth.  When embeddings route through dsagt's proxy
+        # (the default), this is a sentinel — the proxy holds the real key.
+        self.api_key = (
+            api_key
+            or os.getenv("EMBEDDING_API_KEY")
+            or os.getenv("LLM_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+        )
         self.timeout = timeout
         self.batch_size = batch_size
 
