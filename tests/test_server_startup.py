@@ -30,7 +30,7 @@ def _write_minimal_config(project_dir: Path, project_name: str = "test") -> None
     import yaml
     config = {
         "project": project_name,
-        "agent": "claude-code",
+        "agent": "claude",
         "embedding": {
             "model": "test-model",
             "base_url": "http://localhost:9999",
@@ -63,7 +63,7 @@ class TestRegistryServerStartup:
         # starts with kb=None (fast, no ChromaDB init).
         (project / "dsagt_config.yaml").write_text(_yaml.dump({
             "project": "test",
-            "agent": "claude-code",
+            "agent": "claude",
             "embedding": {"model": "", "base_url": "", "api_key": ""},
             "knowledge": {"chunk_size": 1024, "vector_db": "chroma", "rerank": False},
         }))
@@ -137,7 +137,7 @@ class TestKnowledgeServerStartup:
         # Write config with placeholder credentials that should be rejected.
         config = {
             "project": "test",
-            "agent": "claude-code",
+            "agent": "claude",
             "embedding": {
                 "model": "test-model",
                 "base_url": "http://localhost:9999",

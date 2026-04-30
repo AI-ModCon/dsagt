@@ -61,7 +61,7 @@ def test_record_logs_client_name_not_routing_target(records_dir, monkeypatch):
     name), not the proxy's internal catchall route target.
     """
     monkeypatch.setenv(PRIMARY_MODEL_ENV, "haiku-v1-project")
-    monkeypatch.setenv("DSAGT_AGENT", "claude-code")
+    monkeypatch.setenv("DSAGT_AGENT", "claude")
     monkeypatch.setenv("DSAGT_SESSION_ID", "sess-1")
 
     _record_sidechannel(records_dir, _kwargs(
@@ -73,7 +73,7 @@ def test_record_logs_client_name_not_routing_target(records_dir, monkeypatch):
     assert len(entries) == 1
     e = entries[0]
     assert e["model"] == "claude-haiku-4-5-20251001"
-    assert e["agent"] == "claude-code"
+    assert e["agent"] == "claude"
     assert e["session"] == "sess-1"
     assert e["timestamp"].endswith("Z")
 
@@ -147,8 +147,8 @@ def test_print_noop_without_log(tmp_path, capsys):
 
 def test_print_dedups_and_counts(tmp_path, capsys):
     _write_log(tmp_path, [
-        {"model": "haiku-X", "session": "sess-1", "agent": "claude-code", "timestamp": "t1"},
-        {"model": "haiku-X", "session": "sess-1", "agent": "claude-code", "timestamp": "t2"},
+        {"model": "haiku-X", "session": "sess-1", "agent": "claude", "timestamp": "t1"},
+        {"model": "haiku-X", "session": "sess-1", "agent": "claude", "timestamp": "t2"},
         {"model": "gpt-mini", "session": "sess-1", "agent": "goose", "timestamp": "t3"},
     ])
     _print_sidechannel_warning(tmp_path, "sess-1")

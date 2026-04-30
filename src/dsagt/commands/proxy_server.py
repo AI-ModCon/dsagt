@@ -30,7 +30,7 @@ def _generate_config(
     LiteLLM provider prefix.  Each prefix (``openai``, ``anthropic``,
     ``bedrock``, ``cohere``, ``voyage``, etc.) selects request-format and
     auth handling.  LiteLLM normalizes incoming Anthropic-, OpenAI-, and
-    Responses-API-shape requests so all five agents (goose, claude-code,
+    Responses-API-shape requests so all five agents (goose, claude,
     cline, roo, codex) and the dsagt-knowledge-server's embedding calls
     share one config.
 

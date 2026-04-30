@@ -41,7 +41,7 @@ git clone https://github.com/BioinfoMachineLearning/cryoppp.git demo_repos/cryop
 ### 4. Initialize a DSAgt project
 
 ```bash
-dsagt init cryoem-pipeline --agent claude-code
+dsagt init cryoem-pipeline --agent claude
 ```
 
 Edit `~/dsagt-projects/cryoem-pipeline/dsagt_config.yaml` — set your API keys and embedding endpoint.

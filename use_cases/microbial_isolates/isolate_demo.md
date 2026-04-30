@@ -42,7 +42,7 @@ git clone https://github.com/voutcn/megahit.git demo_repos/megahit
 ### 4. Initialize a DSAgt project
 
 ```bash
-dsagt init isolate-pipeline --agent claude-code
+dsagt init isolate-pipeline --agent claude
 ```
 
 Edit `~/dsagt-projects/isolate-pipeline/dsagt_config.yaml` — set your API keys and embedding endpoint.

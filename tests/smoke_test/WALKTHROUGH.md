@@ -12,7 +12,7 @@ This walkthrough validates all core DSAgt functionality after installation. You 
 ```bash
 cd DSAGT
 source .venv/bin/activate
-dsagt init smoke-test --agent claude-code
+dsagt init smoke-test --agent claude
 dsagt mv smoke-test ./
 ```
 

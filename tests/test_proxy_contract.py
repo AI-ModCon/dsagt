@@ -16,7 +16,7 @@ observability invariants the smoke test relies on:
   ``_DSAGTMlflowLogger`` subclass — a subtle install that'd silently regress
   if LiteLLM's logger-cache conventions change.
 - **Wire-shape translation** — ``/v1/messages`` (Anthropic-native, sent by
-  claude-code/roo/cline) reaches the same mock_response as
+  claude/roo/cline) reaches the same mock_response as
   ``/chat/completions`` (OpenAI-native, sent by goose).  Validates
   ``use_chat_completions_url_for_anthropic_messages`` is in force.
 
@@ -40,7 +40,7 @@ import httpx
 import pytest
 
 SESSION_ID = "contract-test-session-001"
-AGENT_NAME = "claude-code"
+AGENT_NAME = "claude"
 MODEL_NAME = "contract-test-model"
 PROJECT_NAME = "contract-test"
 MOCK_RESPONSE = "Contract-test canned reply"
@@ -335,7 +335,7 @@ def test_wildcard_catches_unknown_model(proxy):
     The wildcard route catches it and returns the canned mock_response.
     This is the generalization that replaces the per-agent mock list: we
     don't maintain a growing registry of "known hardcoded sidechannel
-    models" (goose's gpt-4o-mini, claude-code's haiku, ...); any unknown
+    models" (goose's gpt-4o-mini, claude's haiku, ...); any unknown
     name gets mocked.
     """
     r = httpx.post(

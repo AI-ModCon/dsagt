@@ -855,6 +855,7 @@ def create_callback(records_dir: str | Path, session_id: str | None = None):
 _CACHE_MARKER = {"type": "ephemeral"}
 
 
+
 def _inject_cache_breakpoints(messages: list, kwargs: dict) -> None:
     """Mark the largest stable request prefix as cacheable.
 
@@ -932,7 +933,7 @@ def install_mlflow_logger_with_session_tag() -> None:
             # Agent-turn LLM calls land here (proxy path).  Stamp:
             #   mlflow.trace.session — session grouping in the UI
             #   dsagt.source=agent   — distinguishes from extraction/embedding
-            #   dsagt.agent          — which platform (goose, claude-code, ...)
+            #   dsagt.agent          — which platform (goose, claude, ...)
             # Non-agent LLM calls (memory extraction, embeddings) go through
             # llm_source(...) decorators and never touch this subclass, so
             # hard-coding source="agent" here is safe.

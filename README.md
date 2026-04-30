@@ -59,7 +59,7 @@ and is reused by every project. Pass `--collection nemo_curator` or
 
 ```bash
 # Create a project (defaults to ~/dsagt-projects/cheese-metagenome/)
-dsagt init cheese-metagenome --agent claude-code
+dsagt init cheese-metagenome --agent claude
 
 # Start services and launch the agent — picks up endpoint and keys from .env
 dsagt start cheese-metagenome
@@ -86,7 +86,7 @@ The generated `dsagt_config.yaml` references `.env` via `${VAR}` placeholders �
 **Verify your install end-to-end** (~1 min, makes a few real LLM calls):
 
 ```bash
-dsagt smoke-test --agent claude-code   # or: goose | cline | roo | codex
+dsagt smoke-test --agent claude   # or: goose | cline | roo | codex
 ```
 
 This drives the chosen agent through a fixed 6-step script (knowledge ingest → tool registration → directory scan → CSV analysis → explicit memory → recall) and asserts the resulting trace records, KB index, and explicit-memory file are present. See [Smoke Test](#smoke-test) below for what each agent's run produces.
@@ -114,7 +114,7 @@ value if a project needs different settings than the workspace default.
 
 ```yaml
 project: cheese-metagenome
-agent: claude-code              # claude-code | goose | roo | cline | codex
+agent: claude              # claude | goose | roo | cline | codex
 
 llm:
   provider: ${LLM_PROVIDER}     # LiteLLM provider prefix (openai, anthropic, ...)
@@ -153,9 +153,9 @@ and where each came from (`.env`, environment, or literal), run
 Default location: `~/dsagt-projects/<name>/`. Override with `--location`:
 
 ```bash
-dsagt init my-project --agent claude-code                        # ~/dsagt-projects/my-project/
-dsagt init my-project --agent claude-code --location /data/runs  # /data/runs/my-project/
-dsagt init my-project --agent claude-code --location .           # ./my-project/
+dsagt init my-project --agent claude                        # ~/dsagt-projects/my-project/
+dsagt init my-project --agent claude --location /data/runs  # /data/runs/my-project/
+dsagt init my-project --agent claude --location .           # ./my-project/
 ```
 
 Projects are registered in `~/.dsagt/projects.yaml` so `dsagt start <name>` works from any directory.
@@ -243,7 +243,7 @@ script or Snakemake workflow.
 | `dsagt list` | List all projects with agent, status, and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project and delete its directory |
-| `dsagt smoke-test [--agent goose\|claude-code\|cline\|roo\|codex]` | Run the end-to-end smoke test (sources `.env`, drives the agent non-interactively, asserts artifacts) |
+| `dsagt smoke-test [--agent goose\|claude\|cline\|roo\|codex]` | Run the end-to-end smoke test (sources `.env`, drives the agent non-interactively, asserts artifacts) |
 
 ## Code Organization
 
@@ -287,7 +287,7 @@ Integration tests read endpoint and key values from `.env` at the repo root — 
 End-to-end check that exercises every layer (proxy, MCP servers, dsagt-run wrapper, memory, MLflow) through a real agent run.
 
 ```bash
-dsagt smoke-test --agent claude-code   # one of: goose | claude-code | cline | roo | codex
+dsagt smoke-test --agent claude   # one of: goose | claude | cline | roo | codex
 ```
 
 The script lifecycle: clean slate (`dsagt rm` + delete dir) → `dsagt init` with the chosen agent → `dsagt start --script` against [`tests/smoke_test/script.txt`](tests/smoke_test/script.txt) (a 6-step task list) → artifact assertions. Each agent gets its own project at `smoke-test-<agent>/`, so consecutive runs across agents preserve state for cross-agent comparison via `dsagt info smoke-test-<agent>`.
@@ -358,7 +358,7 @@ At the end of a `dsagt start` session you may see a yellow warning like:
 | Agent | Sidechannel model | Used for |
 |---|---|---|
 | goose | `gpt-4o-mini` | Session-name generation (the label you see in the session list) |
-| claude-code | `claude-haiku-4-5-20251001` | Conversation title generation |
+| claude | `claude-haiku-4-5-20251001` | Conversation title generation |
 | others | varies | — |
 
 These names are baked into the agent and ignore `GOOSE_MODEL` / `ANTHROPIC_MODEL`. If your upstream gateway doesn't carry the exact bare name (most lab gateways alias with suffixes like `-v1-project`), the request would 400 without the wildcard mock — the warning is just telling you the mock fired.

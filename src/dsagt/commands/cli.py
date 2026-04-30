@@ -37,7 +37,6 @@ from dsagt.agents import (
 )
 from dsagt.session import (
     VALID_AGENTS,
-    kill_processes_on_port,
     list_projects,
     load_config,
     init_project,
@@ -45,7 +44,6 @@ from dsagt.session import (
     move_project,
     persist_agent_choice,
     pick_free_port,
-    port_in_use,
     project_dir,
     remove_project,
     run_extraction,
@@ -125,34 +123,18 @@ def _cmd_start(args):
         f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     )
 
-    # Step 5: pick ports.  CLI overrides take precedence over YAML.
-    # ``pick_free_port`` falls back to the next free port if the
-    # preferred one is taken, with a one-line warning so users don't
-    # silently accumulate orphan services.
-    proxy_pref = args.proxy_port if args.proxy_port else config["proxy"]["port"]
-    mlflow_pref = args.mlflow_port if args.mlflow_port else config["mlflow"]["port"]
-    config["proxy"]["port"], proxy_warn = pick_free_port(proxy_pref)
-    config["mlflow"]["port"], mlflow_warn = pick_free_port(mlflow_pref)
-    if proxy_warn:
-        print(f"  WARNING: {proxy_warn}")
-    if mlflow_warn:
-        print(f"  WARNING: {mlflow_warn}")
-    print(
-        f"  Ports: proxy={config['proxy']['port']}, "
-        f"mlflow={config['mlflow']['port']}"
-    )
-
-    # Step 6: start services.  EVERYTHING from here on must be inside the
-    # try/finally — otherwise an exception between service start and
-    # ``launch_agent`` (e.g. cline auth subprocess failure inside
-    # ``dynamic_agent_record``) leaks the proxy + MLflow we just spawned.
-    # That was the root cause of "ports occupied after a clean smoke
-    # test": a previous run for a *different* agent crashed in step 7
-    # before ``launch_agent``, the finally never ran, and the orphans
-    # survived into the next smoke run for a new agent that succeeded
-    # but ran on fallback ports while the original ports were still
-    # held.
-    start_services(config)
+    # Step 5: start services.  Picks free ports automatically and writes
+    # them to <project>/.runtime; CLI overrides are honored if present.
+    # EVERYTHING from here on must be inside the try/finally — otherwise
+    # an exception between service start and ``launch_agent`` (e.g. cline
+    # auth subprocess failure inside ``dynamic_agent_record``) leaks the
+    # proxy + MLflow we just spawned.
+    if args.proxy_port:
+        config.setdefault("proxy", {})["port"] = args.proxy_port
+    if args.mlflow_port:
+        config.setdefault("mlflow", {})["port"] = args.mlflow_port
+    ports = start_services(config)
+    print(f"  Ports: proxy={ports['proxy']}, mlflow={ports['mlflow']}")
 
     try:
         # Step 7: build env, write dynamic agent configs (with the actual
@@ -190,17 +172,7 @@ def _cmd_start(args):
         except Exception as e:
             print(f"  WARNING: extraction failed: {e}")
 
-        # Full per-project sweep: SIGTERM via stop_services (by pid), then
-        # port-based sweep for orphans, then a final port_in_use check.
-        # Pass the *actually-bound* ports from the in-memory config —
-        # pick_free_port may have fallen back from the YAML default,
-        # and the YAML still says the original port.  Cleaning the YAML
-        # port would leave the real orphan (on the fallback port) alive.
-        _stop_one(
-            args.project,
-            proxy_port=config["proxy"]["port"],
-            mlflow_port=config["mlflow"]["port"],
-        )
+        _stop_one(args.project)
 
         try:
             from dsagt.observability import print_sidechannel_warning as _sidechannel_warning
@@ -231,14 +203,15 @@ def _cmd_list(args):
             except (FileNotFoundError, ValueError):
                 pass
 
-        pid_path = pdir / ".pids"
-        if pid_path.exists():
-            pids = json.loads(pid_path.read_text())
-            status = f"{len(pids)} service(s) running"
+        runtime_path = pdir / ".runtime"
+        if runtime_path.exists():
+            state = json.loads(runtime_path.read_text())
+            ports = state.get("ports", {})
+            status = f"running (proxy:{ports.get('proxy','?')} mlflow:{ports.get('mlflow','?')})"
         else:
             status = "stopped"
 
-        print(f"  {name:<20} {agent:<14} {status:<24} {path}")
+        print(f"  {name:<20} {agent:<14} {status:<40} {path}")
 
 
 def _cmd_mv(args):
@@ -280,15 +253,9 @@ def _cmd_mlflow(args):
     """Run MLflow in the foreground for post-session trace inspection."""
     config = load_config(args.project)
     pdir = Path(config["project_dir"])
-    port = args.port if args.port is not None else config["mlflow"]["port"]
+    port = args.port if args.port is not None else pick_free_port()
 
-    if port_in_use(port):
-        print(f"Error: port {port} is already in use.", file=sys.stderr)
-        print(f"  Run 'dsagt stop {args.project}' to clear stale services, "
-              f"or pass --port N to use a different port.", file=sys.stderr)
-        return 1
-
-    cmd = mlflow_command(pdir, config["mlflow"], port=port)
+    cmd = mlflow_command(pdir, config.get("mlflow", {}), port=port)
 
     print(f"  MLflow UI: http://localhost:{port}")
     print(f"  Project:   {args.project}")
@@ -302,86 +269,27 @@ def _cmd_mlflow(args):
         return 0
 
 
-def _stop_one(
-    project: str,
-    *,
-    proxy_port: int | None = None,
-    mlflow_port: int | None = None,
-) -> int:
-    """Stop services + sweep ports for a single project.  Returns the
-    number of actions taken (so the caller can report "nothing to do"
-    when the whole sweep was idle).
+def _stop_one(project: str) -> int:
+    """Stop services for a single project via the .runtime state file.
 
-    Tries the PID-file path first (fast, specific via ``stop_services``,
-    which kills by pid → wait → SIGKILL), then sweeps any processes
-    still listening on the project's proxy/mlflow ports — the common
-    case after a session exits before its finally-block cleanup could
-    run, or after a port-fallback start where the YAML port is stale.
-
-    ``proxy_port`` / ``mlflow_port`` override the YAML values.
-    ``_cmd_start`` passes the actually-bound ports here because
-    ``pick_free_port`` may have fallen back from the YAML default —
-    cleaning the YAML port instead of the actual port would leak the
-    real orphan.  External callers (``dsagt stop``) leave both None
-    and we read from YAML.
-
-    Final step: verify both ports are actually free.  If anything's
-    still listening after we've done everything we can, surface a loud
-    message naming what's left so the user can act on it before the
-    next ``dsagt start`` races a half-shutdown orphan.
+    Returns the number of services killed (0 when nothing was running),
+    so callers can report "nothing to do" cleanly.  Idempotent — safe
+    to call when no project state file exists.
     """
-    from dsagt.session import port_held_by_foreign_process, port_in_use
-
     try:
-        config = load_config(project)
+        load_config(project)  # validates the project is registered + parsable
     except (FileNotFoundError, ValueError) as e:
         # Registered project whose config is missing or malformed — skip
-        # rather than abort the whole sweep so other projects still get
-        # cleaned up.
+        # rather than abort a multi-project sweep.
         print(f"  [{project}] skipping: {e}")
         return 0
 
-    actions = 0
-    proxy_port = proxy_port if proxy_port is not None else config["proxy"]["port"]
-    mlflow_port = mlflow_port if mlflow_port is not None else config["mlflow"]["port"]
-
-    pids_msgs = stop_services(project)
-    if pids_msgs != ["No running services found."]:
-        for msg in pids_msgs:
-            print(f"  [{project}] {msg}")
-            actions += 1
-
-    for name, port in (("proxy", proxy_port), ("mlflow", mlflow_port)):
-        killed = kill_processes_on_port(port)
-        for pid in killed:
-            print(f"  [{project}] Killed orphan {name} on port {port} (pid {pid})")
-            actions += 1
-        if not killed and port_held_by_foreign_process(port):
-            print(
-                f"  [{project}] Port {port} ({name}) is held by an unrelated process — "
-                f"left alone (run lsof -iTCP:{port} to inspect)"
-            )
-            actions += 1
-
-    # Verify: did the cleanup actually free the ports?  ``port_in_use``'s
-    # bind probe catches half-stuck listeners that ``connect_ex`` alone
-    # would miss.  Loud message so users notice before the next start
-    # picks a fallback port and accumulates more orphans.
-    for name, port in (("proxy", proxy_port), ("mlflow", mlflow_port)):
-        if port_in_use(port):
-            print(
-                f"  [{project}] WARNING: port {port} ({name}) is STILL in use after "
-                f"cleanup.  Run `lsof -iTCP:{port} -sTCP:LISTEN` to identify the "
-                f"holder.  Next `dsagt start` will fall back to a different port."
-            )
-            actions += 1
-
-    if actions == 0:
-        print(
-            f"  [{project}] no services or orphans "
-            f"(checked proxy:{proxy_port}, mlflow:{mlflow_port})."
-        )
-    return actions
+    msgs = stop_services(project)
+    for msg in msgs:
+        print(f"  [{project}] {msg}")
+    if not msgs:
+        print(f"  [{project}] no running services.")
+    return len(msgs)
 
 
 def _cmd_stop(args):
@@ -488,7 +396,7 @@ def main(argv=None):
 
     p_smoke = sub.add_parser("smoke-test",
         help="Run the end-to-end smoke test (sources DSAGT/.env, drives the agent non-interactively, asserts artifacts)")
-    p_smoke.add_argument("--agent", choices=["goose", "claude-code", "cline", "roo", "codex"], default="goose",
+    p_smoke.add_argument("--agent", choices=["goose", "claude", "cline", "roo", "codex"], default="goose",
         help="Which agent to drive (default: goose).")
 
     p_setup_kb = sub.add_parser("setup-kb", help="Build the core knowledge base collections")

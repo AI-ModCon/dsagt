@@ -90,7 +90,7 @@ def test_is_error_handles_enum_reprs(state, expected):
 @pytest.fixture
 def config():
     return {
-        "agent": "claude-code",
+        "agent": "claude",
         "llm": {"model": "claude-haiku-test"},
     }
 
@@ -101,7 +101,7 @@ def test_report_empty_traces(config):
     assert r["by_source"] == []
     assert r["by_session"] == []
     assert r["errors"] == []
-    assert r["agent"] == "claude-code"
+    assert r["agent"] == "claude"
     assert r["model"] == "claude-haiku-test"
 
 
@@ -139,7 +139,7 @@ def test_report_aggregates_by_source_and_session(config):
             "state": "ERROR",
             "request_time": 300,
             "trace_metadata": _metadata(
-                session="sess-B", source="agent", agent="claude-code",
+                session="sess-B", source="agent", agent="claude",
                 in_t=800, out_t=20,
             ),
         },

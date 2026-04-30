@@ -17,7 +17,7 @@ set -uo pipefail
 AGENT="${DSAGT_SMOKE_AGENT:-${1:-goose}}"   # arg or env var, default goose
 # Per-agent project name so each agent's mlflow.db, trace_archive, and
 # kb_index/ survive across runs — crucial for cross-agent comparison
-# (e.g., why does claude-code use 10x the tokens roo does?).  Without this,
+# (e.g., why does claude use 10x the tokens roo does?).  Without this,
 # `dsagt rm` at the start of each run wipes the previous agent's state.
 PROJECT="smoke-test-${AGENT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,9 +25,9 @@ DSAGT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SCRIPT_FILE="${SCRIPT_DIR}/script.txt"
 
 case "${AGENT}" in
-    goose|claude-code|cline|roo|codex) ;;
+    goose|claude|cline|roo|codex) ;;
     *)
-        echo "ERROR: agent must be one of: goose, claude-code, cline, roo, codex (got '${AGENT}')" >&2
+        echo "ERROR: agent must be one of: goose, claude, cline, roo, codex (got '${AGENT}')" >&2
         exit 2
         ;;
 esac
@@ -165,7 +165,7 @@ check "mlflow has traces"            "test -s '${PDIR}/mlflow/mlflow.db'"
 #
 # Match both endpoints because different agents send different formats:
 #   - goose, cline / OpenAI-format clients → /chat/completions
-#   - claude-code, roo / Anthropic-format clients → /v1/messages
+#   - claude, roo / Anthropic-format clients → /v1/messages
 if [[ -f "${PDIR}/proxy.log" ]]; then
     PROXY_REQUESTS=$(grep -cE 'POST .*(/(v1/)?chat/completions|/v1/messages)' "${PDIR}/proxy.log" 2>/dev/null | head -1)
     PROXY_REQUESTS="${PROXY_REQUESTS:-0}"

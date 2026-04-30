@@ -92,7 +92,7 @@ def integration_config(tmp_path, monkeypatch):
     project_name = "test-integration"
     config_data = {
         "project": project_name,
-        "agent": "claude-code",
+        "agent": "claude",
         "llm": {
             "provider": _require(env, "LLM_PROVIDER"),
             "model": _require(env, "LLM_MODEL"),

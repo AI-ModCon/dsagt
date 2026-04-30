@@ -836,7 +836,7 @@ def truncate(value: str, limit: int = 256) -> str:
 # ---------------------------------------------------------------------------
 #
 # Every agent platform hardcodes a small/fast model for internal features
-# (goose → gpt-4o-mini session-namer; claude-code → claude-haiku-4-5... title
+# (goose → gpt-4o-mini session-namer; claude → claude-haiku-4-5... title
 # generator; the next agent will pick its own).  When the user's gateway
 # doesn't carry that exact bare name — which is the norm for lab gateways
 # that alias every model — those requests would 400 and clutter MLflow.
@@ -868,7 +868,7 @@ SIDECHANNEL_PRIMARY_MODEL_ENV = "DSAGT_PRIMARY_MODEL"
 SIDECHANNEL_LOG_FILENAME = "sidechannel.jsonl"
 
 #: Canned reply the wildcard returns.  Short enough that goose's
-#: session-namer (expects ≤4 words) and claude-code's title generator both
+#: session-namer (expects ≤4 words) and claude's title generator both
 #: accept it without error.
 _SIDECHANNEL_CANNED_RESPONSE = "session"
 

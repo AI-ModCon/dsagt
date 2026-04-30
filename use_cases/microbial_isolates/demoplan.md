@@ -1,6 +1,6 @@
 # Demo Plan
 
-1. Initialize project: `dsagt init isolate-pipeline --agent claude-code`
+1. Initialize project: `dsagt init isolate-pipeline --agent claude`
 2. Configure `dsagt_config.yaml` with API keys and embedding endpoint
 3. Start session: `dsagt start isolate-pipeline`
 4. Ask agent to load fastp and megahit docs into knowledge base

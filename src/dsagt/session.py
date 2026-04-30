@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-VALID_AGENTS = ("claude-code", "goose", "roo", "cline", "codex")
+VALID_AGENTS = ("claude", "goose", "roo", "cline", "codex")
 VALID_MLFLOW_BACKENDS = ("sqlite", "flat-file")
 
 DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
@@ -58,11 +58,7 @@ DEFAULTS = {
         "model": "nomic-embed-text",
         "base_url": "",
     },
-    "proxy": {
-        "port": 4000,
-    },
     "mlflow": {
-        "port": 5001,
         "backend": "sqlite",
     },
     "categories": {
@@ -150,7 +146,6 @@ def default_config_content(project_name: str, agent: str | None = None) -> str:
             "base_url": "${EMBEDDING_BASE_URL}",
             "api_key": "${EMBEDDING_API_KEY}",
         },
-        "proxy": DEFAULTS["proxy"],
         "mlflow": DEFAULTS["mlflow"],
         "knowledge": DEFAULTS["knowledge"],
         "categories": DEFAULTS["categories"],
@@ -383,15 +378,15 @@ def move_project(project_name: str, new_location: Path) -> Path:
 def remove_project(project_name: str, keep_files: bool = False) -> Path:
     """Unregister a project. By default also deletes the project directory.
 
-    Raises RuntimeError if the project's .pids file is present (services still
-    running) — stop the session first, or delete .pids manually if stale.
+    Raises RuntimeError if the project's .runtime file is present (services
+    still running) — stop the session first, or delete .runtime if stale.
     """
     pdir = project_dir(project_name)
 
-    if (pdir / ".pids").exists():
+    if (pdir / ".runtime").exists():
         raise RuntimeError(
-            f"Project '{project_name}' has a .pids file — services may still be "
-            f"running. Stop the session first, or remove {pdir / '.pids'} if stale."
+            f"Project '{project_name}' has a .runtime file — services may still be "
+            f"running. Stop the session first, or remove {pdir / '.runtime'} if stale."
         )
 
     if not keep_files and pdir.exists():
@@ -428,22 +423,30 @@ def _embedding_provider(config: dict) -> str:
     return provider
 
 
-def _pid_file(pdir: Path) -> Path:
-    return pdir / ".pids"
+# ---------------------------------------------------------------------------
+# Service supervision
+#
+# Each ``dsagt start`` writes ``<project>/.runtime`` containing the random
+# ports it picked + the PIDs of the proxy and MLflow.  The next start (or
+# ``dsagt stop``) reads that file and reaps anything still alive whose
+# command line still names what we started — see ``reap_runtime``.  Random
+# ports + a project-local state file means we never have to ask "is this
+# listener on port 4000 mine?" — the file IS the answer.
+# ---------------------------------------------------------------------------
+
+#: Seconds to wait for SIGTERM-ed processes to exit before SIGKILL.  Long
+#: enough for uvicorn + mlflow graceful shutdown (a few seconds), short
+#: enough that an unresponsive process doesn't drag teardown out forever.
+_STOP_GRACE_SECONDS = 5
 
 
-def mlflow_command(pdir: Path, mlflow_config: dict, port: int | None = None) -> list[str]:
-    """Build the argv for launching MLflow against a project's store.
-
-    Shared by ``start_services`` (background, alongside the proxy) and
-    ``dsagt mlflow`` (foreground, for post-session inspection).
-    """
+def mlflow_command(pdir: Path, mlflow_config: dict, port: int) -> list[str]:
+    """Build the argv for launching MLflow against a project's store."""
     mlflow_dir = pdir / "mlflow"
     mlflow_dir.mkdir(exist_ok=True)
-
     backend_uri = (
         f"sqlite:///{mlflow_dir}/mlflow.db"
-        if mlflow_config["backend"] == "sqlite"
+        if mlflow_config.get("backend") == "sqlite"
         else str(mlflow_dir)
     )
     return [
@@ -451,87 +454,136 @@ def mlflow_command(pdir: Path, mlflow_config: dict, port: int | None = None) -> 
         "--backend-store-uri", backend_uri,
         "--default-artifact-root", str(mlflow_dir / "artifacts"),
         "--host", "0.0.0.0",
-        "--port", str(port if port is not None else mlflow_config["port"]),
+        "--port", str(port),
     ]
 
 
-def start_services(config: dict) -> dict[str, int]:
-    """Start the proxy and MLflow for a project. Returns {name: pid}."""
-    pdir = Path(config["project_dir"])
-    pids = {}
+def pick_free_port() -> int:
+    """Bind ``("", 0)`` so the kernel assigns a free port, then release.
 
-    mlflow_port = config["mlflow"]["port"]
-    proxy_port = config["proxy"]["port"]
+    There's a microsecond race between this returning and the subprocess
+    binding the same port — acceptable on a single-user dev machine.  If
+    the subprocess fails to bind, the proxy.log tail surfaces the error
+    via ``_wait_for_proxy``.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
-    # Clear stale *DSAGT* processes on our ports before starting.  If the
-    # port is held by something else (some other dev server the user runs
-    # on 4000), we refuse to start rather than blast it — the user needs
-    # to resolve the collision deliberately.
-    #
-    # Skipping this check lets LiteLLM silently rebind to a random port
-    # when 4000 is occupied (proxy_cli line 947-948), which makes the agent
-    # route LLM calls past our proxy entirely — no tracing, no provenance.
-    for name, port in (("proxy", proxy_port), ("mlflow", mlflow_port)):
-        if not port_in_use(port):
+
+def _process_command(pid: int) -> str:
+    """Return the cmdline for *pid*, or ``""`` if dead/unreadable."""
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, check=False, timeout=2.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip()
+
+
+def reap_runtime(runtime_file: Path) -> list[str]:
+    """SIGTERM, grace-wait, SIGKILL any live PIDs in *runtime_file*.
+
+    PID-recycling guard: between writing the PID and reading it back, the
+    OS could have reassigned that PID to another process; we only signal
+    if its cmdline still names what we started (``mlflow`` / ``proxy``).
+
+    Used by ``start_services`` to clear leftovers from a prior crashed
+    run, and by ``stop_services`` (user-invoked teardown).  Idempotent —
+    safe when the file is missing or PIDs are already dead.
+    """
+    if not runtime_file.exists():
+        return []
+    state = json.loads(runtime_file.read_text())
+    pending: dict[str, tuple[int, int]] = {}  # name -> (pid, pgid)
+    for name, pid in state.get("pids", {}).items():
+        if name not in _process_command(pid):
             continue
-        if port_held_by_foreign_process(port):
-            raise RuntimeError(
-                f"Port {port} ({name}) is in use by a process that is not "
-                f"a DSAGT service.  Something else on your machine is using "
-                f"this port — stop it, or change the {name} port in "
-                f"dsagt_config.yaml.  Run `lsof -iTCP:{port} -sTCP:LISTEN` "
-                f"to see what's holding it."
-            )
-        killed = kill_processes_on_port(port)
-        if killed:
-            logger.info(
-                "Cleared stale %s process(es) on port %d: pid(s)=%s",
-                name, port, killed,
-            )
-            time.sleep(0.5)  # give the kernel a beat to release the socket
+        try:
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGTERM)
+            pending[name] = (pid, pgid)
+        except (ProcessLookupError, PermissionError):
+            pass
 
-    mlflow_cmd = mlflow_command(pdir, config["mlflow"])
+    stopped: list[str] = []
+    deadline = time.monotonic() + _STOP_GRACE_SECONDS
+    while pending and time.monotonic() < deadline:
+        time.sleep(0.2)
+        for name in list(pending):
+            pid, pgid = pending[name]
+            try:
+                os.killpg(pgid, 0)  # liveness probe
+            except (ProcessLookupError, PermissionError):
+                stopped.append(f"Stopped {name} (pid {pid})")
+                del pending[name]
 
-    mlflow_log = pdir / "mlflow.log"
-    mlflow_proc = subprocess.Popen(
-        mlflow_cmd,
-        stdout=open(mlflow_log, "w"),
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    pids["mlflow"] = mlflow_proc.pid
-    logger.info("MLflow started (pid %d) → http://localhost:%d", mlflow_proc.pid, mlflow_port)
+    for name, (pid, pgid) in pending.items():
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            stopped.append(f"Stopped {name} (pid {pid}, SIGKILL after {_STOP_GRACE_SECONDS}s)")
+        except ProcessLookupError:
+            stopped.append(f"Stopped {name} (pid {pid})")
 
-    # Start proxy
-    mlflow_url = f"http://localhost:{mlflow_port}"
-    trace_dir = str(pdir / "trace_archive")
+    runtime_file.unlink(missing_ok=True)
+    return stopped
 
-    # Session id is generated once in _cmd_start and threaded everywhere via
-    # config + DSAGT_SESSION_ID.  Fall back to project name for callers that
-    # reach start_services without going through the CLI (e.g. tests).
+
+def start_services(config: dict) -> dict[str, int]:
+    """Start the proxy and MLflow.  Returns ``{"mlflow": port, "proxy": port}``.
+
+    Picks free ports via the kernel, reaps any leftovers from a prior
+    crashed run, writes ``<project>/.runtime`` (pids + ports + start time),
+    waits for the proxy to accept connections.  Mutates ``config["mlflow"]``
+    and ``config["proxy"]`` in place to record the chosen ports so
+    downstream code (``agents.py`` builds env URLs from those keys) sees
+    the actually-bound values.
+    """
+    pdir = Path(config["project_dir"])
+    runtime_file = pdir / ".runtime"
+
+    reap_runtime(runtime_file)  # clear leftovers from any prior crashed run
+
+    # Honor a pre-set port (CLI overrides set it on config before calling),
+    # otherwise let the kernel pick a free one.
+    mlflow_port = config.get("mlflow", {}).get("port") or pick_free_port()
+    proxy_port = config.get("proxy", {}).get("port") or pick_free_port()
+    config.setdefault("mlflow", {})["port"] = mlflow_port
+    config.setdefault("proxy", {})["port"] = proxy_port
+
     session_id = config.get(
         "session_id",
         f"{config['project']}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
     )
 
+    mlflow_log = pdir / "mlflow.log"
+    mlflow_proc = subprocess.Popen(
+        mlflow_command(pdir, config.get("mlflow", {}), port=mlflow_port),
+        stdout=open(mlflow_log, "w"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    logger.info("MLflow started (pid %d) → http://localhost:%d", mlflow_proc.pid, mlflow_port)
+
     proxy_cmd = [
         sys.executable, "-m", "dsagt.commands.proxy_server",
         "--port", str(proxy_port),
-        "--records-dir", trace_dir,
+        "--records-dir", str(pdir / "trace_archive"),
         "--session", session_id,
-        "--mlflow-url", mlflow_url,
+        "--mlflow-url", f"http://localhost:{mlflow_port}",
         "--model", config["llm"]["model"],
         "--base-url", config["llm"]["base_url"],
         "--provider", config["llm"]["provider"],
         # Embedding routing through the proxy is symmetric with LLM: MCP
-        # servers always send embedding requests to localhost:<proxy_port>,
-        # the proxy translates to whatever provider/endpoint the user
-        # configured.  See commands/proxy_server.py _generate_config.
+        # servers send embedding requests to localhost:<proxy_port>, the
+        # proxy translates to whatever upstream the user configured.  See
+        # commands/proxy_server.py _generate_config.
         "--embedding-model", config["embedding"]["model"],
         "--embedding-base-url", config["embedding"]["base_url"],
         "--embedding-provider", _embedding_provider(config),
     ]
-
     proxy_log = pdir / "proxy.log"
     proxy_proc = subprocess.Popen(
         proxy_cmd,
@@ -544,13 +596,12 @@ def start_services(config: dict) -> dict[str, int]:
             "DSAGT_SESSION_ID": session_id,
             # _DSAGTMlflowLogger reads this in the proxy subprocess to stamp
             # dsagt.agent on every trace.  agent_env() sets it for the agent
-            # subprocess; the proxy is a sibling subprocess and needs its
-            # own copy — same contract, different process tree.
+            # subprocess; the proxy is a sibling subprocess and needs its own
+            # copy — same contract, different process tree.
             "DSAGT_AGENT": config["agent"],
             # DSAGT callback compares this against each request's model to
-            # detect sidechannel/wildcard hits.  The env var name is owned
-            # by dsagt.observability (sidechannel section) — importing it
-            # keeps the contract in one place if we ever rename the variable.
+            # detect sidechannel/wildcard hits.  Env var name owned by
+            # dsagt.observability — importing keeps the contract in one place.
             _observability.SIDECHANNEL_PRIMARY_MODEL_ENV: config["llm"]["model"],
             "DSAGT_EXTRACTION_THRESHOLD": str(
                 config.get("extraction", {}).get("threshold", 0)
@@ -559,409 +610,54 @@ def start_services(config: dict) -> dict[str, int]:
         },
         start_new_session=True,
     )
-    pids["proxy"] = proxy_proc.pid
     logger.info("Proxy started (pid %d) → http://localhost:%d", proxy_proc.pid, proxy_port)
 
-    pid_path = _pid_file(pdir)
-    pid_path.write_text(json.dumps(pids, indent=2) + "\n")
+    runtime_file.write_text(json.dumps({
+        "pids": {"mlflow": mlflow_proc.pid, "proxy": proxy_proc.pid},
+        "ports": {"mlflow": mlflow_port, "proxy": proxy_port},
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }, indent=2) + "\n")
 
-    # Wait for the proxy to actually accept connections.  Without this
-    # we hand a half-broken environment to the agent: dsagt start reports
-    # success, the agent launches, then the agent's first LLM call fails
-    # with ECONNREFUSED because the proxy died during startup (e.g. bad
-    # config, port conflict, missing dependency).  Probing here makes
-    # those failures fail loudly at the right place — dsagt start —
-    # instead of at first agent message.
-    # 30s is generous: LiteLLM's transitive imports (transformers, torch deps)
-    # take ~10-15s on warm cache, longer on cold cache or network-backed disks
-    # (e.g. OneDrive). _wait_for_proxy fast-fails on process death and orphan
-    # listeners, so this timeout only governs the "still loading" case.
-    if not _wait_for_proxy(proxy_port, proxy_proc, proxy_log, timeout=30.0):
-        raise RuntimeError(
-            f"LiteLLM proxy failed to start on port {proxy_port}. "
-            f"See {proxy_log} for details. "
-            f"Common causes: port already in use, missing LLM_API_KEY, "
-            f"or upstream API unreachable."
-        )
+    # Wait for the proxy to accept connections.  Without this the agent
+    # launches into a half-broken environment and its first LLM call hits
+    # ECONNREFUSED.  30s is generous: LiteLLM's transitive imports
+    # (transformers, torch deps) take 10-15s on warm cache, longer cold.
+    _wait_for_proxy(proxy_port, proxy_proc, proxy_log, timeout=30.0)
 
-    return pids
+    return {"mlflow": mlflow_port, "proxy": proxy_port}
 
 
 def _wait_for_proxy(
-    port: int,
-    proc: subprocess.Popen,
-    log_path: Path,
-    timeout: float = 15.0,
-) -> bool:
-    """Poll the proxy until it accepts connections or the process dies.
+    port: int, proc: subprocess.Popen, log_path: Path, timeout: float = 30.0,
+) -> None:
+    """Poll ``port`` until the proxy answers, the subprocess dies, or we time out.
 
-    Returns True if the proxy is reachable on ``port`` AND the listener is
-    in the proxy's process group, False if it never came up, exited, or the
-    listener on ``port`` is a different process (LiteLLM silently rolls to a
-    random port when 4000 is already in use — without the pgid check we'd
-    accept an orphan as "ready" and the agent would route around our proxy).
+    Raises ``RuntimeError`` on failure with the proxy.log tail attached, so
+    the failure surfaces at ``dsagt start`` rather than at first agent message.
     """
-    import socket
     deadline = time.monotonic() + timeout
-    our_pgid = os.getpgid(proc.pid)
     while time.monotonic() < deadline:
-        # Did the subprocess die?  Fail fast — no point waiting longer.
         if proc.poll() is not None:
-            logger.error(
-                "Proxy process exited with code %d before becoming ready. "
-                "Tail of %s:", proc.returncode, log_path,
+            tail = log_path.read_text().splitlines()[-20:] if log_path.exists() else []
+            raise RuntimeError(
+                f"Proxy exited with code {proc.returncode} before becoming ready.\n  "
+                + "\n  ".join(tail)
             )
-            try:
-                tail = log_path.read_text().splitlines()[-20:]
-                for line in tail:
-                    logger.error("  %s", line)
-            except OSError:
-                pass
-            return False
-
-        # Is something listening on the port?  Cheap TCP connect first.
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                pass
+                return
         except (ConnectionRefusedError, OSError):
             time.sleep(0.25)
-            continue
-
-        # Verify the listener belongs to our proxy's process group.  LiteLLM
-        # rebinds to a random port when 4000 is taken (proxy_cli line 947-948),
-        # so "port is up" alone isn't enough — we must confirm the PID is ours.
-        if _listener_pgid_matches(port, our_pgid):
-            return True
-
-        logger.error(
-            "Port %d is bound but the listener is NOT our proxy subprocess "
-            "(likely LiteLLM silently rebound to a random port because %d was "
-            "in use). Run `dsagt stop <project>` to clear orphans.",
-            port, port,
-        )
-        return False
-
-    # Deadline exceeded.
-    return False
-
-
-def _listener_pgid_matches(port: int, expected_pgid: int) -> bool:
-    """True if every listener on *port* is in process group *expected_pgid*."""
-    try:
-        result = subprocess.run(
-            ["lsof", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
-            capture_output=True, text=True, check=False, timeout=2.0,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        # lsof unavailable → we can't verify; trust the TCP connect.  Better
-        # to be lenient than to block on a platform without lsof.
-        return True
-    pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
-    if not pids:
-        return False
-    for pid in pids:
-        try:
-            if os.getpgid(pid) != expected_pgid:
-                return False
-        except ProcessLookupError:
-            return False
-    return True
-
-    logger.error(
-        "Proxy did not accept connections on port %d within %.1fs", port, timeout,
-    )
-    return False
-
-
-def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
-    """True if ``port`` is unavailable for a fresh listener.
-
-    Two probes — both have to come up clean for the port to count as free:
-
-    1. ``connect_ex`` — a remote-style probe; catches active listeners.
-    2. ``bind`` — the authoritative probe; if we can't bind even with
-       SO_REUSEADDR, neither can the proxy subprocess we're about to
-       launch.  Catches sockets in CLOSE_WAIT / TIME_WAIT and listeners
-       whose accept queue is wedged (the connect probe sometimes misses
-       these because no SYN-ACK comes back fast enough).
-
-    The bind probe was added after smoke-test runs hit "proxy failed to
-    start" with the old single-probe version because LiteLLM's
-    bind-or-rebind-to-random-port behavior took over: a stuck orphan on
-    4000 wasn't detected by ``connect_ex``, so we picked 4000, then
-    LiteLLM silently rebound to a random port, then ``_wait_for_proxy``
-    rejected the orphan listener as "not our pgid".
-    """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(0.2)
-        if sock.connect_ex((host, port)) == 0:
-            return True
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind((host, port))
-        except OSError:
-            return True
-    return False
-
-
-def pick_free_port(preferred: int, *, max_offset: int = 20) -> tuple[int, str | None]:
-    """Try ``preferred``; if taken, pick the next free port within range.
-
-    Returns ``(picked_port, warning_or_None)``.  When the preferred port
-    was free, ``warning`` is ``None``.  When we fell back, ``warning``
-    is a one-line message naming the original port and the cause
-    (likely a stuck dsagt service or an unrelated process), so callers
-    can surface it without the user having to dig.
-
-    Bias toward ``preferred`` so behavior stays deterministic when
-    nothing's holding the port.  The fallback range is small (default
-    20) — wider than that, the right answer is "fix your environment"
-    rather than chase ports forever.
-
-    Raises ``RuntimeError`` if every port in the scan range is taken,
-    so the failure mode is loud rather than a silent hang.
-    """
-    if not port_in_use(preferred):
-        return preferred, None
-    cause = (
-        "looks like a stuck dsagt service — try `dsagt stop`"
-        if not port_held_by_foreign_process(preferred)
-        else "held by another process — `lsof -iTCP:%d -sTCP:LISTEN` to identify" % preferred
-    )
-    for candidate in range(preferred + 1, preferred + 1 + max_offset):
-        if not port_in_use(candidate):
-            return candidate, (
-                f"Port {preferred} in use ({cause}); falling back to {candidate}."
-            )
     raise RuntimeError(
-        f"All ports {preferred}–{preferred + max_offset} in use. "
-        f"Run `dsagt stop` or pick a different port range with --proxy-port / --mlflow-port."
+        f"Proxy did not accept connections on port {port} within {timeout:.0f}s. "
+        f"See {log_path} for details."
     )
-
-
-#: Seconds to wait for a process to exit on SIGTERM before sending SIGKILL.
-#: Set high enough for uvicorn/litellm graceful shutdown (a few seconds);
-#: low enough that an unresponsive process doesn't drag out shutdown.
-#: Used by both ``stop_services`` (PID-file path) and
-#: ``kill_processes_on_port`` (port-sweep path).
-_STOP_GRACE_SECONDS = 5
-
-
-# Command-line fingerprints that identify a process as "ours" — only
-# processes whose command line contains one of these strings are safe to
-# kill on a port sweep.  Port 4000 and 5001 are popular defaults, so we
-# must never blast an unrelated dev server / gateway the user happens to
-# be running.
-_OUR_PROCESS_FINGERPRINTS = (
-    "dsagt-proxy",
-    "dsagt.commands.proxy_server",
-    "mlflow server",
-    "-m mlflow",
-)
-
-
-def _process_command(pid: int) -> str:
-    """Return the full command line for *pid*, or ``""`` if we can't read it."""
-    try:
-        result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "command="],
-            capture_output=True, text=True, check=False, timeout=2.0,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return ""
-    return result.stdout.strip()
-
-
-def _parent_pid(pid: int) -> int | None:
-    """Return the parent PID of *pid*, or ``None`` if we can't read it."""
-    try:
-        result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "ppid="],
-            capture_output=True, text=True, check=False, timeout=2.0,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    text = result.stdout.strip()
-    return int(text) if text.isdigit() else None
-
-
-def _looks_like_our_process(pid: int, max_depth: int = 5) -> bool:
-    """True if *pid* or any of its ancestors has a DSAGT / MLflow cmdline.
-
-    Walks up the process tree because MLflow spawns uvicorn workers whose
-    own cmdline doesn't mention "mlflow" — only the parent's does.  Without
-    the ancestry walk, the port sweep leaves those workers stranded when
-    their parent was killed but the workers haven't yet noticed.
-    """
-    current = pid
-    for _ in range(max_depth):
-        if current is None or current <= 1:
-            return False
-        cmd = _process_command(current)
-        if any(fp in cmd for fp in _OUR_PROCESS_FINGERPRINTS):
-            return True
-        current = _parent_pid(current)
-    return False
-
-
-def kill_processes_on_port(port: int, *, only_ours: bool = True) -> list[int]:
-    """Kill listeners on *port* whose command line looks like ours.
-
-    SIGTERM, then poll up to ``_STOP_GRACE_SECONDS`` for the process group
-    to exit, then SIGKILL stragglers.  Same SIGTERM→wait→SIGKILL pattern
-    as ``stop_services``.  Without the wait+SIGKILL the previous behavior
-    was fire-and-forget SIGTERM, which left orphans alive long enough
-    that the next ``dsagt start`` would race the still-shutting-down
-    proxy and silently rebind to a random port.
-
-    When ``only_ours`` is True (default), processes whose command line
-    does not contain a DSAGT / MLflow fingerprint are LEFT ALONE — the
-    caller gets an empty list and can decide whether to error out.
-    Guards against killing an unrelated local service the user happens
-    to have running on the same port (4000 / 5001 are common defaults).
-
-    Returns the list of pids that were sent SIGTERM (whether or not
-    they exited promptly — caller can compare to ``port_in_use`` if it
-    needs to know whether the port actually freed up).
-    """
-    try:
-        result = subprocess.run(
-            ["lsof", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
-            capture_output=True, text=True, check=False,
-        )
-    except FileNotFoundError:
-        return []
-
-    pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
-    pgids_to_kill: list[tuple[int, int]] = []  # (pid, pgid)
-    pgids_seen: set[int] = set()
-    for pid in pids:
-        try:
-            pgid = os.getpgid(pid)
-        except ProcessLookupError:
-            continue
-        if pgid in pgids_seen:
-            continue
-        if only_ours and not _looks_like_our_process(pid):
-            logger.warning(
-                "Port %d is held by pid %d but its command doesn't look like "
-                "a DSAGT / MLflow process; leaving it alone. cmd=%r",
-                port, pid, _process_command(pid)[:120],
-            )
-            continue
-        pgids_seen.add(pgid)
-        pgids_to_kill.append((pid, pgid))
-
-    # Phase 1: SIGTERM all
-    killed: list[int] = []
-    alive: list[tuple[int, int]] = []
-    for pid, pgid in pgids_to_kill:
-        try:
-            os.killpg(pgid, signal.SIGTERM)
-            killed.append(pid)
-            alive.append((pid, pgid))
-        except (ProcessLookupError, PermissionError):
-            pass
-
-    # Phase 2: poll for exit
-    import time
-    deadline = time.monotonic() + _STOP_GRACE_SECONDS
-    while alive and time.monotonic() < deadline:
-        time.sleep(0.2)
-        still_alive: list[tuple[int, int]] = []
-        for pid, pgid in alive:
-            try:
-                os.killpg(pgid, 0)
-                still_alive.append((pid, pgid))
-            except (ProcessLookupError, PermissionError):
-                pass
-        alive = still_alive
-
-    # Phase 3: SIGKILL stragglers
-    for pid, pgid in alive:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-            logger.info(
-                "Sent SIGKILL to pid %d on port %d after %ds SIGTERM grace",
-                pid, port, _STOP_GRACE_SECONDS,
-            )
-        except (ProcessLookupError, PermissionError):
-            pass
-
-    return killed
-
-
-def port_held_by_foreign_process(port: int) -> bool:
-    """True if the listener on *port* exists and isn't one of ours."""
-    try:
-        result = subprocess.run(
-            ["lsof", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
-            capture_output=True, text=True, check=False,
-        )
-    except FileNotFoundError:
-        return False
-    pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
-    return bool(pids) and not all(_looks_like_our_process(p) for p in pids)
 
 
 def stop_services(project_name: str) -> list[str]:
-    """Stop running services for a project.
+    """User-invoked teardown.  Returns ``[]`` when nothing was running."""
+    return reap_runtime(project_dir(project_name) / ".runtime")
 
-    SIGTERM, then poll up to ``_STOP_GRACE_SECONDS`` for the process group
-    to exit, then SIGKILL.  Without the wait+SIGKILL the previous behavior
-    was "fire-and-forget SIGTERM and hope" — uvicorn's graceful shutdown
-    takes a couple seconds, and any process that ignores SIGTERM (under
-    load, in cleanup callbacks, etc.) would orphan.  That's why users
-    kept needing to run ``dsagt stop`` manually after smoke runs to free
-    ports 4000/5001 — this function returned "Stopped" before the proxy
-    actually finished shutting down.
-    """
-    pid_path = _pid_file(project_dir(project_name))
-    stopped = []
-
-    if not pid_path.exists():
-        return ["No running services found."]
-
-    pids = json.loads(pid_path.read_text())
-
-    # Phase 1: SIGTERM all
-    pgids = {}
-    for name, pid in pids.items():
-        try:
-            pgid = os.getpgid(pid)
-            os.killpg(pgid, signal.SIGTERM)
-            pgids[name] = (pid, pgid)
-        except (ProcessLookupError, PermissionError):
-            stopped.append(f"{name} (pid {pid}) was not running")
-
-    # Phase 2: poll for exit, then SIGKILL stragglers
-    import time
-    deadline = time.monotonic() + _STOP_GRACE_SECONDS
-    while pgids and time.monotonic() < deadline:
-        time.sleep(0.2)
-        for name in list(pgids):
-            pid, pgid = pgids[name]
-            try:
-                os.killpg(pgid, 0)  # signal 0 = liveness check, no signal sent
-            except ProcessLookupError:
-                stopped.append(f"Stopped {name} (pid {pid})")
-                del pgids[name]
-            except PermissionError:
-                # process exists but we can't signal — assume it's gone for our purposes
-                stopped.append(f"Stopped {name} (pid {pid})")
-                del pgids[name]
-
-    # Phase 3: anything still alive gets SIGKILL
-    for name, (pid, pgid) in pgids.items():
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-            stopped.append(f"Stopped {name} (pid {pid}, SIGKILL after {_STOP_GRACE_SECONDS}s)")
-        except ProcessLookupError:
-            stopped.append(f"Stopped {name} (pid {pid})")
-
-    pid_path.unlink(missing_ok=True)
-    return stopped
 
 
 # ---------------------------------------------------------------------------

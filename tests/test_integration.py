@@ -133,13 +133,13 @@ class TestConfigChain:
         monkeypatch.setattr("dsagt.session._save_registry", lambda r: reg.update(r))
         monkeypatch.setattr("dsagt.session.register_project", lambda n, p: reg.update({n: str(p)}))
 
-        pdir = init_project("test-proj", "claude-code")
+        pdir = init_project("test-proj", "claude")
 
         config_path = pdir / "dsagt_config.yaml"
         assert config_path.exists()
         config = yaml.safe_load(config_path.read_text())
         assert config["project"] == "test-proj"
-        assert config["agent"] == "claude-code"
+        assert config["agent"] == "claude"
         assert "llm" in config
         assert "embedding" in config
 
@@ -169,17 +169,17 @@ class TestConfigChain:
         assert "DSAGT_PROJECT_DIR" in env
 
         # Claude Code should get ANTHROPIC_BASE_URL pointing at the proxy
-        if integration_config["agent"] == "claude-code":
+        if integration_config["agent"] == "claude":
             proxy_port = integration_config["proxy"]["port"]
             assert str(proxy_port) in env["ANTHROPIC_BASE_URL"]
 
-    @pytest.mark.parametrize("agent", ["goose", "claude-code", "roo", "cline", "codex"])
+    @pytest.mark.parametrize("agent", ["goose", "claude", "roo", "cline", "codex"])
     def test_agent_env_matrix(self, integration_config, agent):
         """Every supported agent gets the right env vars pointing at the proxy.
 
         Per-agent correctness here is what prevents a silent "agent talks to
         the real upstream instead of the proxy" regression — we've hit that
-        bug twice in this codebase, once for claude-code's default model and
+        bug twice in this codebase, once for claude's default model and
         once for goose's ~/.config override.
         """
         from dsagt.agents import agent_env
@@ -194,7 +194,7 @@ class TestConfigChain:
 
         assert env["DSAGT_AGENT"] == agent
 
-        if agent in ("claude-code", "roo"):
+        if agent in ("claude", "roo"):
             # Anthropic-native agents that honor env vars: point at proxy,
             # pin model, sentinel key.  Roo rewrites lab-gateway model
             # names to its own default before sending; the proxy aliases

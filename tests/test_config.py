@@ -125,16 +125,18 @@ class TestLoadConfig:
 
         assert config["project"] == "myproject"
         assert config["agent"] == "goose"
-        assert config["proxy"]["port"] == 4000  # default
-        assert config["mlflow"]["port"] == 5001  # default
+        # Ports are no longer defaulted in YAML — start_services picks them
+        # at runtime via socket.bind(("", 0)) and writes them to .runtime.
+        assert "proxy" not in config or "port" not in config.get("proxy", {})
         assert config["llm"]["model"] == "claude-sonnet-4-20250514"
+        assert config["mlflow"]["backend"] == "sqlite"  # default kept
 
     def test_overrides_defaults(self, tmp_path):
         name = self._write_config(tmp_path, "myproject", {
             "project": "myproject",
-            "agent": "claude-code",
+            "agent": "claude",
             "llm": {"provider": "openai"},
-            "proxy": {"port": 9000},
+            "proxy": {"port": 9000},  # explicit override stays honored
         })
 
         config = load_config(name)
@@ -223,10 +225,10 @@ class TestInitProject:
         assert not (pdir / "tools").exists()
 
     def test_config_is_valid(self):
-        init_project("myproj", "claude-code")
+        init_project("myproj", "claude")
         config = load_config("myproj")
         assert config["project"] == "myproj"
-        assert config["agent"] == "claude-code"
+        assert config["agent"] == "claude"
 
     def test_duplicate_raises(self):
         init_project("myproj", "goose")
@@ -262,10 +264,10 @@ class TestInitProject:
         """With --agent at init, the static record is written immediately
         so the user can edit instructions before first start.
         """
-        pdir = init_project("myproj", "claude-code")
+        pdir = init_project("myproj", "claude")
         assert (pdir / "CLAUDE.md").exists()
         config = yaml.safe_load((pdir / "dsagt_config.yaml").read_text())
-        assert config["agent"] == "claude-code"
+        assert config["agent"] == "claude"
 
 
 # ---------------------------------------------------------------------------
@@ -289,10 +291,10 @@ class TestPersistAgentChoice:
         YAML had no agent, so overwrite is rare in practice.
         """
         init_project("myproj", "goose")
-        persist_agent_choice("myproj", "claude-code")
+        persist_agent_choice("myproj", "claude")
 
         config = load_config("myproj")
-        assert config["agent"] == "claude-code"
+        assert config["agent"] == "claude"
 
     def test_invalid_agent_raises(self, tmp_path):
         init_project("myproj")
@@ -301,55 +303,86 @@ class TestPersistAgentChoice:
 
 
 # ---------------------------------------------------------------------------
-# pick_free_port: tries preferred, falls back to next free in range
+# pick_free_port: kernel-assigned via socket.bind(("", 0))
 # ---------------------------------------------------------------------------
 
 class TestPickFreePort:
 
-    def test_returns_preferred_when_free(self, monkeypatch):
-        from dsagt import session
-        monkeypatch.setattr(session, "port_in_use", lambda port: False)
-        port, warn = session.pick_free_port(4000)
-        assert port == 4000
-        assert warn is None
+    def test_returns_a_usable_port(self):
+        """The kernel hands back a positive port number we can bind."""
+        from dsagt.session import pick_free_port
+        import socket as _socket
 
-    def test_falls_back_when_preferred_taken(self, monkeypatch):
+        port = pick_free_port()
+        assert isinstance(port, int)
+        assert 1024 <= port <= 65535
+        # And we can actually bind it (no leak, no half-stuck socket).
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+            s.bind(("", port))
+
+    def test_consecutive_calls_pick_different_ports(self):
+        """No memoization, no preferred-port bias — consecutive calls just
+        reflect whatever the kernel hands out (almost always different on
+        a quiet box, very rarely the same; this test tolerates that)."""
+        from dsagt.session import pick_free_port
+        ports = {pick_free_port() for _ in range(10)}
+        # Not strictly guaranteed all 10 differ, but >1 distinct is expected.
+        assert len(ports) > 1
+
+
+# ---------------------------------------------------------------------------
+# reap_runtime: SIGTERM PIDs in <project>/.runtime, grace, SIGKILL stragglers
+# ---------------------------------------------------------------------------
+
+class TestReapRuntime:
+
+    def test_no_runtime_file_returns_empty(self, tmp_path):
+        from dsagt.session import reap_runtime
+        assert reap_runtime(tmp_path / ".runtime") == []
+
+    def test_skips_pids_whose_cmdline_doesnt_match(self, tmp_path, monkeypatch):
+        """PID-recycling guard: cmdline doesn't name our service → leave alone."""
         from dsagt import session
-        # 4000 is taken, 4001 is free
+        runtime = tmp_path / ".runtime"
+        runtime.write_text(json.dumps({
+            "pids": {"mlflow": 99999, "proxy": 99998},
+            "ports": {"mlflow": 12345, "proxy": 12346},
+        }))
+        # Pretend both PIDs are recycled — cmdline doesn't contain our name.
+        monkeypatch.setattr(session, "_process_command", lambda pid: "/bin/zsh")
+        killed = session.reap_runtime(runtime)
+        assert killed == []
+        # File still gets cleaned up so a stale .runtime doesn't linger.
+        assert not runtime.exists()
+
+    def test_signals_pids_whose_cmdline_matches(self, tmp_path, monkeypatch):
+        """When the cmdline still names our service, SIGTERM is sent."""
+        from dsagt import session
+        runtime = tmp_path / ".runtime"
+        runtime.write_text(json.dumps({
+            "pids": {"mlflow": 11111, "proxy": 22222},
+            "ports": {"mlflow": 12345, "proxy": 12346},
+        }))
         monkeypatch.setattr(
-            session, "port_in_use", lambda port: port == 4000,
+            session, "_process_command",
+            lambda pid: f"python -m {'mlflow' if pid == 11111 else 'dsagt.commands.proxy_server'}",
         )
-        monkeypatch.setattr(session, "port_held_by_foreign_process", lambda port: False)
-        port, warn = session.pick_free_port(4000)
-        assert port == 4001
-        assert warn is not None
-        assert "4000" in warn
-        assert "4001" in warn
+        signals_sent: list[tuple[int, int]] = []
 
-    def test_warning_mentions_dsagt_stop_for_orphan(self, monkeypatch):
-        """When the preferred port looks like a stuck dsagt service, the
-        warning suggests `dsagt stop` so users can reclaim it."""
-        from dsagt import session
-        monkeypatch.setattr(session, "port_in_use", lambda port: port == 4000)
-        monkeypatch.setattr(session, "port_held_by_foreign_process", lambda port: False)
-        _, warn = session.pick_free_port(4000)
-        assert "dsagt stop" in warn
+        def fake_killpg(pgid, sig):
+            signals_sent.append((pgid, sig))
 
-    def test_warning_mentions_lsof_for_foreign(self, monkeypatch):
-        """When the preferred port is held by a non-dsagt process, the
-        warning points at lsof so the user can identify the squatter."""
-        from dsagt import session
-        monkeypatch.setattr(session, "port_in_use", lambda port: port == 4000)
-        monkeypatch.setattr(session, "port_held_by_foreign_process", lambda port: True)
-        _, warn = session.pick_free_port(4000)
-        assert "lsof" in warn
+        monkeypatch.setattr(session.os, "killpg", fake_killpg)
+        monkeypatch.setattr(session.os, "getpgid", lambda pid: pid)
+        # Make grace-wait short and the process appear to exit immediately.
+        monkeypatch.setattr(session, "_STOP_GRACE_SECONDS", 0)
 
-    def test_raises_when_all_in_range_taken(self, monkeypatch):
-        from dsagt import session
-        monkeypatch.setattr(session, "port_in_use", lambda port: True)
-        monkeypatch.setattr(session, "port_held_by_foreign_process", lambda port: True)
-        with pytest.raises(RuntimeError, match="All ports"):
-            session.pick_free_port(4000, max_offset=3)
+        killed = session.reap_runtime(runtime)
+        assert len(killed) == 2
+        # Both PIDs got SIGTERM.
+        import signal as _signal
+        sigterm_pgids = {pgid for pgid, sig in signals_sent if sig == _signal.SIGTERM}
+        assert sigterm_pgids == {11111, 22222}
 
 
 # ---------------------------------------------------------------------------
@@ -369,13 +402,19 @@ class TestAgentRecord:
         return load_config("testproj")
 
     def _write_both(self, config, working_dir):
-        """Run static then dynamic — what dsagt start does, minus services."""
+        """Run static then dynamic — what dsagt start does, minus services.
+
+        ``start_services`` populates ``config["proxy"]["port"]`` and
+        ``config["mlflow"]["port"]`` in production; we stub those here so
+        ``agent_env`` (which reads them to build URLs) doesn't KeyError."""
+        config.setdefault("proxy", {})["port"] = 4000
+        config.setdefault("mlflow", {})["port"] = 5001
         static_agent_record(config, config["agent"], working_dir)
         env = agent_env(config)
         dynamic_agent_record(config, env, working_dir)
 
-    def test_claude_code_writes_mcp_json(self, tmp_path):
-        config = self._init_and_load("claude-code")
+    def test_claude_writes_mcp_json(self, tmp_path):
+        config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -459,17 +498,17 @@ class TestAgentRecord:
         # the marker check skips the second write.  This is what lets
         # users edit CLAUDE.md / AGENTS.md between init and start
         # without losing edits.
-        config = self._init_and_load("claude-code")
+        config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
-        static_agent_record(config, "claude-code", working_dir)
+        static_agent_record(config, "claude", working_dir)
         first = (working_dir / "CLAUDE.md").read_text()
         # Simulate a user edit
         (working_dir / "CLAUDE.md").write_text(first + "\n\n## My project notes\nfoo")
         edited = (working_dir / "CLAUDE.md").read_text()
         # Re-run static — should be no-op since marker is present
-        static_agent_record(config, "claude-code", working_dir)
+        static_agent_record(config, "claude", working_dir)
         assert (working_dir / "CLAUDE.md").read_text() == edited
 
     def test_static_files_present_check(self, tmp_path):
@@ -533,7 +572,7 @@ class TestAgentRecord:
     def test_mcp_config_has_project_dir_in_env(self, tmp_path):
         """MCP server entries should have DSAGT_PROJECT_DIR in their env
         block so the servers know where to find their config and data."""
-        config = self._init_and_load("claude-code")
+        config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -547,7 +586,7 @@ class TestAgentRecord:
         assert "DSAGT_PROJECT_DIR" in kb_env
 
     def test_env_file_has_proxy_url(self, tmp_path):
-        config = self._init_and_load("claude-code")
+        config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
@@ -605,9 +644,9 @@ class TestAgentEnv:
             "embedding": {"api_key": "test-key"},
         }
 
-    def test_claude_code_sets_anthropic_base_url(self):
+    def test_claude_sets_anthropic_base_url(self):
         from dsagt.agents import agent_env
-        env = agent_env(self._make_config("claude-code"))
+        env = agent_env(self._make_config("claude"))
         assert env["ANTHROPIC_BASE_URL"] == "http://localhost:4000"
         assert env["DSAGT_PROJECT"] == "test"
 
@@ -624,7 +663,7 @@ class TestAgentEnv:
         agent_env override) — agent and MCP children only see the sentinel.
         """
         from dsagt.agents import agent_env, _PROXY_FORWARDED_SENTINEL
-        env = agent_env(self._make_config("claude-code"))
+        env = agent_env(self._make_config("claude"))
         assert env["EMBEDDING_BASE_URL"] == "http://localhost:4000"
         assert env["EMBEDDING_API_KEY"] == _PROXY_FORWARDED_SENTINEL
         assert env["OPENAI_BASE_URL"] == "http://localhost:4000"
@@ -636,9 +675,9 @@ class TestAgentEnv:
 
 class TestAgentCommand:
 
-    def test_claude_code(self):
+    def test_claude(self):
         from dsagt.agents import agent_command
-        assert agent_command({"agent": "claude-code"}) == ["claude"]
+        assert agent_command({"agent": "claude"}) == ["claude"]
 
     def test_goose(self):
         from dsagt.agents import agent_command
@@ -669,7 +708,7 @@ class TestConfigFlow:
 
     def test_default_config_has_embedding_base_url(self):
         """default_config_content() includes embedding.base_url."""
-        content = default_config_content("test", "claude-code")
+        content = default_config_content("test", "claude")
         parsed = yaml.safe_load(content)
         assert "base_url" in parsed["embedding"]
 
@@ -697,7 +736,7 @@ class TestConfigFlow:
         from dsagt.agents import agent_env, _PROXY_FORWARDED_SENTINEL
         config = {
             "project": "test",
-            "agent": "claude-code",
+            "agent": "claude",
             "project_dir": "/proj",
             "proxy": {"port": 4000},
             "llm": {"model": "test-model"},
