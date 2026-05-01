@@ -125,8 +125,12 @@ docs/_build/
 docs/_static/
 docs/_templates/
 
-# UV lock file (optional - uncomment if you don't want to track it)
-# uv.lock
+# UV lock file
+uv.lock
+
+# Claude Code
+.claude/
+.mcp.json
 
 # Local configuration overrides
 config.local.yaml

@@ -2,11 +2,10 @@
 
 **D**ata **S**cience **A**gent **T**oolkit — AI-assisted data pipeline builder.
 
-DSAGT connects an MCP-compatible AI agent to three servers for building scientific data pipelines:
+DSAGT connects an MCP-compatible AI agent to MCP services for building scientific data pipelines:
 
-1. **Pipeline Server** — Runs registered tools, logs provenance. Supports general-purpose processing and American Science Cloud targets; extendable to domain-specific workflows.
-2. **Registry Builder** — Analyzes CLI tools, documentation, and APIs to generate and store tool specifications.
-3. **Knowledge Base** — Semantic search over indexed document collections (FAISS + optional cross-encoder reranking).
+1. **Registry Builder** — Analyzes CLI tools, documentation, and APIs to generate and store tool specifications.
+2. **Knowledge Base** — Semantic search over indexed document collections (FAISS + optional cross-encoder reranking).
 
 The servers are platform-agnostic and communicate over MCP stdio.
 
@@ -26,9 +25,8 @@ cd dsagt
 uv sync --all-groups
 ```
 
-This installs three CLI entry points:
+This installs the CLI entry points:
 
-- `dsagt-pipeline-server`
 - `dsagt-registry-server`
 - `dsagt-knowledge-server`
 
@@ -41,7 +39,7 @@ The default registry ships with general-purpose data tools. To register addition
 1. Point the agent at a CLI tool, its `--help` output, or documentation
 2. The agent uses the registry builder to analyze the interface (it can read files, fetch URLs, and run commands)
 3. The agent proposes a tool spec and saves it via `save_tool_spec`
-4. The tool is immediately available through the pipeline server
+4. The tool is immediately available for agent use
 
 Registry builder tools exposed to the agent:
 
@@ -52,9 +50,9 @@ Registry builder tools exposed to the agent:
 - `get_registry` — List all registered tools
 - `search_registry` — Search tools by name or description
 
-### Pipeline Execution
+### Tool Execution
 
-1. The pipeline server copies the base `registry.yaml` to `runtime/registry.yaml` at startup
+1. A session copies the base `registry.yaml` to `runtime/registry.yaml`
 2. The agent runs tools from the session registry
 3. Each execution is logged to a provenance file
 
@@ -73,18 +71,7 @@ This clones repos, downloads papers, chunks content, and builds FAISS indexes in
 
 ## Running the Servers
 
-### Pipeline Server
-
-```bash
-# Default bundled registry
-uv run dsagt-pipeline-server
-
-# Custom registry from a previous session
-uv run dsagt-pipeline-server --registry my_registry.yaml
-
-# Specify registry file and runtime directory
-uv run dsagt-pipeline-server --registry path/to/registry.yaml --runtime-dir ./my_session
-```
+Note: This is typically done through your MCP config, so you don't need to run these commands explicitly
 
 ### Registry Builder Server
 
@@ -130,31 +117,33 @@ uv run dsagt-knowledge-server --base-index-dir /absolute/path/to/kb_index
 ### Example Session
 
 ```
-User: I have a script at scripts/preprocess.py that cleans CSV files.
+User: I have a script at /bin/ls that reads directory contents.
       Register it as a pipeline tool.
 
 Agent: [reads the file, runs --help, proposes a spec]
-       Registered "preprocess" with parameters for input_file,
-       output_file, and --drop-nulls. Want to try it?
+       Registered list_directory in the session registry. It wraps /bin/ls with parameters for path (required), long_format (-l), and show_hidden (-a). Registry now has 2 tools.
 
-User: Run it on data/raw.csv
+User: Run it on current directory
 
-Agent: [executes via pipeline server]
-       Output written to data/cleaned.csv. 142 rows processed,
-       3 null rows dropped.
+Agent: [executes the registered tool]
+        Contents of /Users/shreyas/Dev/git/BaseData_pipeline_agent:
+        LICENSE         README.md       agents
+        data            dsagt_knowledge_server.log      kb_index
+        pyproject.toml  runtime         scripts         src
+        tests           use_cases       uv.lock
 ```
 
 ## Smoke Test
 
-`tests/smoke_test/` contains fixtures for verifying all three servers end-to-end. Knowledge base steps require an embedding API key; skip them if you don't have one.
+`tests/smoke_test/` contains the tracked fixtures for verifying the MCP services end-to-end. Knowledge base steps require an embedding API key; skip them if you don't have one.
 
 ```
 tests/smoke_test/
 ├── greet.py                  # Simple CLI tool to register and execute
 └── knowledge/                # Documents for KB ingestion
     ├── DESCRIPTION.md
-    ├── installation.md
     ├── api_reference.md
+    ├── installation.md
     └── troubleshooting.md
 ```
 
@@ -166,7 +155,7 @@ uv run python tests/smoke_test/greet.py World
 
 Expected output: `{"message": "Hello, World!", "status": "ok"}`
 
-### 2. Start a session with all three servers
+### 2. Start a session with all MCP servers
 
 Follow `agents/<platform>/README.md` to launch a session. The knowledge server runs without reranking by default; add `--rerank` to enable cross-encoder reranking (triggers model download on first use).
 
@@ -175,7 +164,7 @@ Without an embedding API key, omit the knowledge server and skip steps 5–6.
 ### 3. Register a tool
 
 ```
-Register tests/smoke_test/greet.py as a pipeline tool.
+Register tests/smoke_test/greet.py as a tool.
 Run "python tests/smoke_test/greet.py --help" to see its interface.
 ```
 
@@ -281,36 +270,65 @@ Run the isolate demo by following `demo/isolate_demo.md` from the DSAGT project 
 ## Project Structure
 
 ```
-├── demo/
-│   ├── isolate_demo.md            # Microbial isolate demo runbook
-│   ├── isolate_session.txt        # Prompt sequence
-│   ├── genomics.md                # Domain context doc
-│   ├── fastp_megahit_best_practices.md
-│   └── demoplan.md
-├── src/dsagt/
-│   ├── __init__.py
-│   ├── mcp_utils.py                # Shared MCP server utilities
-│   ├── registry.py                 # Tool registry management
-│   ├── registry.yaml               # Default tool registry (bundled)
-│   ├── knowledge.py                # Semantic search over document collections
-│   ├── pipeline_server.py          # MCP server: tool execution
-│   ├── registry_server.py          # MCP server: tool registration
-│   └── knowledge_server.py         # MCP server: knowledge base search
 ├── agents/
-│   ├── goose/                      # Goose agent config and quickstart
-│   ├── roo/                        # Roo Code (VS Code) config and quickstart
-│   └── claude-code/                # Claude Code config and quickstart
-├── tests/
-│   ├── test_registry.py
-│   ├── test_registry_server.py
-│   ├── test_knowledge_base.py
-│   ├── test_knowledge_server.py
-│   ├── test_knowledge_integration.py   # Requires API key
-│   └── smoke_test/
-│       ├── greet.py
-│       └── knowledge/
+│   ├── Agents.md
+│   ├── README.md
+│   ├── claude-code/
+│   │   ├── README.md
+│   │   ├── claude_code_mcp.json
+│   │   └── dsagt_instructions.md
+│   ├── cline/
+│   │   ├── README.md
+│   │   ├── cline_mcp.json
+│   │   └── dsagt_instructions.md
+│   ├── goose/
+│   │   ├── .goosehints
+│   │   ├── README.md
+│   │   └── goose.yaml
+│   └── roo/
+│       ├── README.md
+│       ├── roo_mcp.json
+│       └── roomodes
 ├── scripts/
 │   └── setup_core_kb.py
+├── src/dsagt/
+│   ├── __init__.py
+│   ├── knowledge.py
+│   ├── knowledge_server.py
+│   ├── mcp_utils.py
+│   ├── registry.py
+│   ├── registry_server.py
+│   ├── skills/
+│   │   └── scan_directory.md
+│   └── tools/
+│       └── scan_directory.py
+├── tests/
+│   ├── __init__.py
+│   ├── smoke_test/
+│   │   ├── greet.py
+│   │   └── knowledge/
+│   │       ├── DESCRIPTION.md
+│   │       ├── api_reference.md
+│   │       ├── installation.md
+│   │       └── troubleshooting.md
+│   ├── test_dependency_integration.py
+│   ├── test_knowledge_base.py
+│   ├── test_knowledge_integration.py
+│   ├── test_knowledge_server.py
+│   ├── test_registry.py
+│   ├── test_registry_server.py
+│   └── test_server_startup.py
+├── use_cases/
+│   ├── microbial_isolates/
+│   │   ├── demoplan.md
+│   │   ├── fastp_megahit_best_practices.md
+│   │   ├── genomics.md
+│   │   ├── isolate_demo.md
+│   │   └── isolate_session.txt
+│   └── tokamak_stability/
+│       ├── hdf5.py
+│       └── test_hdf5_tools.py
+├── LICENSE
 ├── pyproject.toml
 └── README.md
 ```
@@ -338,7 +356,6 @@ Registry tests mock `subprocess.run`. Server tests invoke MCP handlers directly 
 ### MCP Server Not Found
 
 ```bash
-uv run which dsagt-pipeline-server
 uv run which dsagt-registry-server
 uv run which dsagt-knowledge-server
 
@@ -366,7 +383,9 @@ args:
   - /full/path/to/registry.yaml
 ```
 
-# DSAGT Development Plan
+# DSAGT Development Plan (2026-03-19) 
+
+Note: This plan was written on 2026-03-19 and maybe superceded by newer plans
 
 ## Motivation
 
@@ -375,7 +394,7 @@ DSAGT currently shows high run-to-run variance (even at temperature 0). The root
 ## Track 1: Structured Tool Execution
 
 - **Goal:** Reduce stochastic behavior with stronger execution structure.
-- **Problem:** Routing through the MCP pipeline server adds indirection and limits direct access to Unix return codes/process signals. Registry entries are too sparse for consistent tool selection and invocation.
+- **Problem:** Routing tool execution through an MCP layer adds indirection and limits direct access to Unix return codes/process signals. Registry entries are too sparse for consistent tool selection and invocation.
 - **Plan:**
   - Extend the registry so each tool is paired with a skill (usage patterns, expected I/O, invocation examples).
   - Use an agent-driven skill builder (in progress by Jean-Luca) to generate/refine tool skills as tools are registered.
