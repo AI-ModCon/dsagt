@@ -62,6 +62,22 @@ The knowledge base provides semantic search over indexed document collections us
 
 To set up the core collections (NeMo Curator, AIDRIN):
 
+Set the following additional environment variables:
+
+### Environment variables
+
+| Var | Purpose |
+|---|---|
+| `LLM_PROVIDER`        | LiteLLM provider prefix (`openai`, `anthropic`, `bedrock`, ...). [Full list](https://docs.litellm.ai/docs/providers). |
+| `LLM_API_KEY`         | Auth key for the agent's LLM endpoint (use any non-empty placeholder if the endpoint doesn't auth, e.g. local Ollama). |
+| `LLM_BASE_URL`        | Agent's LLM endpoint URL. |
+| `LLM_MODEL`           | Model name the agent talks to. |
+| `EMBEDDING_API_KEY`   | Auth key for the embedding endpoint (often the same as `LLM_API_KEY`). |
+| `EMBEDDING_BASE_URL`  | OpenAI-compatible embedding endpoint. |
+| `EMBEDDING_MODEL`     | Embedding model name. |
+| `OPENAI_API_KEY`      | Auth key for the agent's OpenAI compatible LLM endpoint |
+| `OPENAI_BASE_URL`      | Agent's OpenAI compatible LLM endpoint URL. |
+
 ```bash
 export LLM_API_KEY="your-api-key"
 uv run python scripts/setup_core_kb.py
