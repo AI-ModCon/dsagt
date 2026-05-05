@@ -40,8 +40,8 @@ from dsagt.observability import (
 )
 from dsagt.provenance import reconstruct_pipeline
 from dsagt.registry import (
-    SKILL_REGISTRY_COLLECTION,
-    TOOL_REGISTRY_COLLECTION,
+    SKILLS_COLLECTION,
+    TOOLS_COLLECTION,
     SkillRegistry,
     ToolRegistry,
 )
@@ -179,6 +179,39 @@ async def _handle_save_tool_spec(
         return message
 
 
+async def _handle_save_skill(
+    arguments: dict, *, skill_registry: SkillRegistry,
+) -> str:
+    """Register a skill (workflow / agent instructions) for later reuse.
+
+    Symmetric with save_tool_spec — writes SKILL.md to
+    ``<project>/skills/<name>/`` and indexes it into
+    ``registered_skills`` so future ``search_skills`` calls find it.
+    """
+    spec = arguments["spec"]
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except json.JSONDecodeError as e:
+            return f"Error: spec must be a JSON object (or string-encoded JSON object): {e}"
+    body = arguments.get("body")
+    reference_files = arguments.get("reference_files")
+    if isinstance(reference_files, str):
+        try:
+            reference_files = json.loads(reference_files)
+        except json.JSONDecodeError as e:
+            return f"Error: reference_files must be a JSON object: {e}"
+    try:
+        action = skill_registry.save_skill(spec, body=body, reference_files=reference_files)
+    except (KeyError, ValueError, OSError) as e:
+        return f"Error saving skill: {e}"
+    skill_count = len(skill_registry.list_skills())
+    return (
+        f"Skill '{spec['name']}' {action} successfully. "
+        f"Registry now contains {skill_count} skills."
+    )
+
+
 async def _handle_get_registry(
     arguments: dict, *, registry: ToolRegistry,
 ) -> str:
@@ -213,9 +246,11 @@ async def _handle_search_registry(
             "tool_name for KB-free lookups."
         )
 
+    # Single ``tools`` collection — bundled and registered entries
+    # coexist, distinguished by ``metadata.source`` if needed.
     results = kb.search(
         query=query or "tool",
-        collection=TOOL_REGISTRY_COLLECTION,
+        collection=TOOLS_COLLECTION,
         top_k=top_k * 3 if tag else top_k,
     )
     if tag and results:
@@ -266,9 +301,10 @@ async def _handle_search_skills(
             "skill_name for KB-free lookups."
         )
 
+    # Single ``skills`` collection — bundled and registered entries.
     results = kb.search(
         query=query or "skill",
-        collection=SKILL_REGISTRY_COLLECTION,
+        collection=SKILLS_COLLECTION,
         top_k=top_k * 3 if tag else top_k,
     )
     if tag and results:
@@ -368,6 +404,7 @@ def create_registry_server(
         "http_request": _handle_http_request,
         "run_command": _handle_run_command,
         "save_tool_spec": partial(_handle_save_tool_spec, registry=registry),
+        "save_skill": partial(_handle_save_skill, skill_registry=skill_registry),
         "get_registry": partial(_handle_get_registry, registry=registry),
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
         "search_skills": partial(_handle_search_skills, kb=kb, skill_registry=skill_registry),
@@ -485,6 +522,65 @@ def create_registry_server(
                 },
             ),
             types.Tool(
+                name="save_skill",
+                description=(
+                    "Register a skill (agent workflow / instructions) into "
+                    "<project>/skills/<name>/SKILL.md and index it into the "
+                    "registered_skills KB collection.  Symmetric with "
+                    "save_tool_spec — use this when you've designed a "
+                    "reusable instruction set you want future sessions to "
+                    "discover via search_skills."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        # ``anyOf`` for spec mirrors save_tool_spec — accept
+                        # both structured object and JSON-encoded string for
+                        # MCP clients that serialize nested args.
+                        "spec": {
+                            "description": "Skill spec (object or JSON-encoded string)",
+                            "anyOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string", "description": "Unique skill identifier (becomes the directory name)"},
+                                        "description": {"type": "string", "description": "What the skill does / when to use it"},
+                                        "tags": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                            "description": "Tags for categorizing the skill",
+                                        },
+                                    },
+                                    "required": ["name", "description"],
+                                },
+                                {"type": "string"},
+                            ],
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": (
+                                "Markdown body of the SKILL.md (workflow / "
+                                "instructions the agent will follow).  When "
+                                "updating an existing skill, omit to preserve "
+                                "the existing body."
+                            ),
+                        },
+                        "reference_files": {
+                            "description": (
+                                "Optional additional files to write into the "
+                                "skill directory.  Object mapping relative "
+                                "path -> file contents, or JSON-encoded string."
+                            ),
+                            "anyOf": [
+                                {"type": "object", "additionalProperties": {"type": "string"}},
+                                {"type": "string"},
+                            ],
+                        },
+                    },
+                    "required": ["spec"],
+                },
+            ),
+            types.Tool(
                 name="get_registry",
                 description="Get all tools from the registry",
                 inputSchema={"type": "object", "properties": {}},
@@ -566,7 +662,17 @@ def main():
     """
     import logging as _logging
 
-    project_dir = Path(os.environ.get("DSAGT_PROJECT_DIR", "."))
+    # The server is launched as a subprocess by ``dsagt start``, which sets
+    # DSAGT_PROJECT_DIR.  Falling back to cwd silently dumps log files and
+    # state into whatever directory the user happened to be in (often the
+    # repo root) — fail fast so the misuse is obvious instead of silent.
+    project_dir_env = os.environ.get("DSAGT_PROJECT_DIR")
+    if not project_dir_env:
+        raise RuntimeError(
+            "DSAGT_PROJECT_DIR is not set. dsagt-registry-server is meant "
+            "to be launched by `dsagt start <project>`, not run directly."
+        )
+    project_dir = Path(project_dir_env)
 
     log_file = project_dir / "dsagt_registry_server.log"
     # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  At DEBUG,
@@ -601,21 +707,50 @@ def main():
     # get_registry, read_file, run_command, etc.) work without it.  Only
     # search_registry and search_skills need the KB for semantic search;
     # they return a clear error if the KB is None.
-    api_key = emb_config["api_key"]
-    has_credentials = api_key and not api_key.startswith("${") and emb_config["base_url"]
+    backend = (emb_config.get("backend") or "local").lower()
+    # Cross-backend leakage guard: see the matching block in
+    # knowledge_server.py for the rationale.  In short: when
+    # ``embedding.backend`` is ``local`` but the resolved model name is
+    # an OpenAI-style alias (no slash), drop the override so we fall
+    # back to the LocalEmbeddingClient default rather than 404 from HF.
+    raw_model = (emb_config.get("model") or "").strip()
+    embedder_kwargs: dict = {}
+    if raw_model and not raw_model.startswith("${"):
+        looks_hf = "/" in raw_model
+        if backend == "local" and not looks_hf:
+            log.warning(
+                "Ignoring embedding.model=%r for backend=local (does not "
+                "look like a HuggingFace identifier).  Falling back to the "
+                "LocalEmbeddingClient default.",
+                raw_model,
+            )
+        else:
+            embedder_kwargs["model"] = raw_model
+    if backend == "local":
+        kb_available = True
+    else:  # backend == "api"
+        api_key = emb_config.get("api_key") or ""
+        kb_available = (
+            api_key and not api_key.startswith("${")
+            and emb_config.get("base_url")
+        )
+        embedder_kwargs.update({
+            "base_url": emb_config.get("base_url") or "",
+            "api_key": api_key,
+        })
 
     kb = None
-    if has_credentials:
+    if kb_available:
         kb = KnowledgeBase(
             index_dir=project_dir / "kb_index",
-            default_embedder="api",
+            default_embedder=backend,
             default_index=config["knowledge"]["vector_db"],
-            embedder_kwargs={
-                "model": emb_config["model"],
-                "base_url": emb_config["base_url"],
-                "api_key": api_key,
-            },
+            embedder_kwargs=embedder_kwargs,
         )
+        # Background-load the embedder so the model is ready when the
+        # agent's first search_registry / save_tool_spec call lands.
+        # See knowledge_server for the same rationale.
+        kb.preload_default_embedder()
 
     registry = ToolRegistry(
         source_tools_dir=None,
@@ -629,13 +764,12 @@ def main():
         kb=kb,
     )
 
-    if kb:
-        tool_count = registry.reindex_all()
-        skill_count = skill_reg.reindex_all()
-        if tool_count:
-            log.info("Indexed %d tools into KB", tool_count)
-        if skill_count:
-            log.info("Indexed %d skills into KB", skill_count)
+    # Bundled tools/skills are pre-embedded in the shared
+    # ~/.dsagt/kb_index/ by ``dsagt setup-kb`` (or by the auto-bootstrap
+    # in ``dsagt start``) and COPIED into the project's kb_index by
+    # ``setup_runtime_kb`` before either MCP server spawns.  This server
+    # does no embedding work for bundled content at startup; agent's
+    # save_tool_spec / save_skill incur a single embed at save time.
 
     server = create_registry_server(registry, kb, skill_reg)
     asyncio.run(_run_stdio(server, "registry"))

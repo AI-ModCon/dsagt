@@ -20,6 +20,62 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
+
+# Silence noisy parser libraries.  pypdf logs "invalid pdf header", "EOF
+# marker not found", and "Ignoring wrong pointing object" at WARNING for
+# every malformed PDF it touches — usually image-derived "PDFs" or stripped
+# arXiv source.  We already count read/parse failures as ``skipped_files``
+# in the ingest result, so these per-file warnings add no signal and a lot
+# of noise.  Demote to ERROR so genuine PDF library bugs still surface.
+for _noisy in ("pypdf", "pypdf2", "PyPDF2", "pdfminer", "fontTools"):
+    logging.getLogger(_noisy).setLevel(logging.ERROR)
+
+# sentence-transformers / huggingface_hub / httpx emit a wall of INFO at
+# embedding-model load time: every cached HEAD request to huggingface.co,
+# the SentenceTransformer "Loading model from..." line, the cache redirects.
+# Demote to WARNING so end-of-session extraction doesn't bury the actual
+# extraction result under model-cache validation traffic.  Errors still
+# surface (genuine network failures, missing models, etc.).
+for _noisy in ("httpx", "httpcore", "huggingface_hub", "sentence_transformers",
+               "transformers", "transformers_modules"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+# huggingface_hub's "you are sending unauthenticated requests" warning is
+# emitted both via ``logger.warning`` and via ``warnings.warn`` (one
+# stderr line each).  It's informational — anonymous downloads work
+# fine, just at lower rate limits — but it surfaces under roo's
+# ``--debug`` (which forwards MCP-server stderr) and confuses users
+# who don't realise HF_TOKEN is unrelated to whether dsagt works.
+# Demote the logger and filter the warning.
+logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
+
+# ``transformers`` BertModel loader writes a "LOAD REPORT" table to stdout
+# when missing/unexpected keys differ from the checkpoint — informational
+# for ML researchers debugging finetunes, noise for everyone else.  Their
+# own env var silences it.
+import os as _os
+_os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+# Disable huggingface_hub's tqdm progress bars (the "Loading weights:
+# 100%|...| 199/199" line at model load).  For cached models this loads
+# in <1s — the bar is pure noise.
+_os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+# Silence the FutureWarning sentence-transformers prints about its own
+# renamed method (``get_sentence_embedding_dimension`` →
+# ``get_embedding_dimension``); upstream still calls the deprecated form.
+import warnings as _warnings
+_warnings.filterwarnings(
+    "ignore",
+    message="The `get_sentence_embedding_dimension` method has been renamed",
+    category=FutureWarning,
+)
+# Silence huggingface_hub's "Warning: You are sending unauthenticated
+# requests to the HF Hub" notice (UserWarning on the ``huggingface_hub``
+# module).  Setting HF_TOKEN works too, but we never bake user creds
+# into MCP env blocks on disk — see ``_mcp_env_block`` docstring.
+_warnings.filterwarnings(
+    "ignore",
+    message=r".*unauthenticated requests to the HF Hub.*",
+)
+
 import numpy as np
 
 # llama_index is intentionally NOT imported at module top.
@@ -32,7 +88,6 @@ from dsagt.observability import (
     kb_embed_span,
     kb_index_search_span,
     kb_rerank_span,
-    llm_source,
     obs,
     traced,
 )
@@ -86,25 +141,75 @@ class BaseVectorIndex(ABC):
 class LocalEmbeddingClient(BaseEmbeddingClient):
     """sentence-transformers, runs fully offline."""
 
+    #: Default local model.  ``bge-small-en-v1.5`` (33M params, ~130 MB
+    #: on disk, ~250 MB resident) is ~3× faster and ~3× smaller than the
+    #: ``bge-base`` variant we used previously, with ~2 nDCG@10 points
+    #: lower MTEB retrieval score — a hard-to-notice difference for
+    #: typical DSAGT KB sizes (single-digit thousands of chunks).
+    #: Override via ``embedding.model`` in ``dsagt_config.yaml`` (e.g.
+    #: ``BAAI/bge-large-en-v1.5`` for higher quality at the cost of
+    #: ~10× memory and ~5× CPU).
+    DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
+
     def __init__(
         self,
-        model: str = "BAAI/bge-base-en-v1.5",
+        model: str | None = None,
         batch_size: int = 256,
         device: str | None = None,
     ):
+        import sys
         from sentence_transformers import SentenceTransformer
+        model = model or self.DEFAULT_MODEL
         self.batch_size = batch_size
-        self._model = SentenceTransformer(model, device=device)
-        logger.info("Loaded local embedding model: %s (dim=%d)",
-                    model, self._model.get_sentence_embedding_dimension())
+        # Probe the HF cache for the model's config.  If hit, load with
+        # ``local_files_only=True`` so SentenceTransformer skips the
+        # ETag-validation HEAD requests it would otherwise issue against
+        # huggingface.co — those round-trips are anonymous (HF_TOKEN
+        # isn't propagated into MCP-server env blocks for cline / roo /
+        # codex), so they trigger an "unauthenticated requests" warning
+        # surfaced under roo's ``--debug``.  Cache miss path stays
+        # online so first-run downloads still work.
+        try:
+            from huggingface_hub import try_to_load_from_cache
+            cache_hit = try_to_load_from_cache(model, "config.json") is not None
+        except Exception:
+            cache_hit = False
+        if cache_hit:
+            self._model = SentenceTransformer(
+                model, device=device, local_files_only=True,
+            )
+        else:
+            print(
+                f"  Downloading {model} from HuggingFace "
+                "(set HF_TOKEN for faster throughput)...",
+                file=sys.stderr, flush=True,
+            )
+            self._model = SentenceTransformer(model, device=device)
+        # Belt-and-suspenders: dsagt/__init__.py sets OMP_NUM_THREADS /
+        # MKL_NUM_THREADS env vars before heavy imports, but PyTorch
+        # also has its own intra-op thread count that ignores those env
+        # vars in some configurations.  Cap explicitly here.
+        try:
+            import torch
+            torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", "4")))
+        except Exception:  # noqa: BLE001 — best-effort cap, never fatal
+            pass
+        logger.info(
+            "Loaded local embedding model: %s (dim=%d)",
+            model, self._model.get_sentence_embedding_dimension(),
+        )
 
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:
             return np.array([], dtype=np.float32)
+        # Show the progress bar only for non-trivial inputs so single-query
+        # search calls (kb.search → embed([query])) stay silent while large
+        # ingest / setup-kb runs surface tqdm progress.
+        show_bar = len(texts) > self.batch_size
         return self._model.encode(
             texts,
             batch_size=self.batch_size,
-            show_progress_bar=False,
+            show_progress_bar=show_bar,
             normalize_embeddings=True,
         ).astype(np.float32)
 
@@ -251,7 +356,6 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         # model identifier, not a provider prefix.
         self._litellm_model = f"openai_like/{self.model}"
 
-    @llm_source("embedding")
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:
             return np.array([], dtype=np.float32)
@@ -443,6 +547,117 @@ class ChromaIndex(BaseVectorIndex):
         return len(self._ids)
 
 
+# BM25 sparse-retrieval token splitter.  Splits on every non-alphanumeric
+# character so ``snake_case`` and ``kebab-case`` identifiers fan out into
+# their parts; this matters because much of what an agent searches the KB
+# for ("get_user_id", "kb-ingest") is identifier-shaped, and BM25 needs
+# token-level matches to score them at all.  CamelCase still survives as
+# a single token, which is fine — the dense embedding handles those.
+_BM25_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
+
+
+def _bm25_tokenize(text: str) -> list[str]:
+    return [t.lower() for t in _BM25_TOKEN_RE.findall(text)]
+
+
+class BM25Index:
+    """Sparse BM25 keyword index over a collection's chunk texts.
+
+    Maintained alongside the dense vector index so :meth:`KnowledgeBase.search`
+    can fuse the two via Reciprocal Rank Fusion.  Stored as a single
+    pickle file (``bm25.pkl``) per collection.
+
+    Rebuilt from scratch on every ``add_entries`` / ``append`` because BM25
+    IDF stats are corpus-global — there is no cheap incremental update.
+    For DSAGT corpus sizes (single-digit thousands of chunks) the rebuild
+    is millisecond-scale, so this is fine.  Watch the cost if a collection
+    grows past tens of thousands of entries.
+    """
+
+    _FILENAME = "bm25.pkl"
+
+    def __init__(self):
+        self._bm25 = None
+        self._n = 0
+
+    def build(self, texts: list[str]) -> None:
+        from rank_bm25 import BM25Okapi
+        if not texts:
+            self._bm25 = None
+            self._n = 0
+            return
+        tokenized = [_bm25_tokenize(t) for t in texts]
+        self._bm25 = BM25Okapi(tokenized)
+        self._n = len(texts)
+
+    def search(self, query: str, k: int) -> tuple[np.ndarray, np.ndarray]:
+        """Return (scores, positional_indices) for the top *k* hits."""
+        if self._bm25 is None or self._n == 0 or k <= 0:
+            return (
+                np.array([], dtype=np.float32),
+                np.array([], dtype=np.int64),
+            )
+        tokens = _bm25_tokenize(query)
+        if not tokens:
+            return (
+                np.array([], dtype=np.float32),
+                np.array([], dtype=np.int64),
+            )
+        scores = self._bm25.get_scores(tokens)
+        k = min(k, self._n)
+        # argpartition is O(n); we only need the top-k unsorted, then sort
+        # those k.  Faster than np.argsort on the full array for big k.
+        top_idx = np.argpartition(-scores, k - 1)[:k]
+        top_idx = top_idx[np.argsort(-scores[top_idx])]
+        return scores[top_idx].astype(np.float32), top_idx.astype(np.int64)
+
+    def save(self, directory: Path) -> None:
+        import pickle
+        with open(directory / self._FILENAME, "wb") as f:
+            pickle.dump({"bm25": self._bm25, "n": self._n}, f)
+
+    @classmethod
+    def load(cls, directory: Path) -> "BM25Index":
+        import pickle
+        obj = cls()
+        path = directory / cls._FILENAME
+        if path.exists():
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+            obj._bm25 = data["bm25"]
+            obj._n = data["n"]
+        return obj
+
+    @property
+    def size(self) -> int:
+        return self._n
+
+
+def _rrf_merge(
+    rankings: list[list[int]],
+    k: int = 60,
+) -> list[tuple[int, float]]:
+    """Reciprocal Rank Fusion across multiple ranked-index lists.
+
+    Each ranking is a list of positional indices in descending relevance.
+    Combined RRF score for doc ``i`` is ``sum_r 1 / (k + rank_r(i) + 1)``
+    summed across rankers that included ``i``.  *k=60* is the standard
+    constant from Cormack et al. — large enough to dampen the long tail
+    of the per-ranker rank curve, small enough that the top few ranks
+    still dominate.
+
+    Returns a list of ``(positional_index, rrf_score)`` tuples sorted
+    by descending score.
+    """
+    scores: dict[int, float] = {}
+    for ranking in rankings:
+        for rank, idx in enumerate(ranking):
+            if idx < 0:
+                continue
+            scores[idx] = scores.get(idx, 0.0) + 1.0 / (k + rank + 1)
+    return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+
+
 # map short names to embedding client constructors
 EMBEDDER_REGISTRY: dict[str, type[BaseEmbeddingClient]] = {
     "local": LocalEmbeddingClient,
@@ -491,6 +706,14 @@ class CollectionRoute:
     description : str
         Human-readable note shown in ``list_collections()`` when no
         DESCRIPTION.md file exists.
+    hybrid : bool
+        If True (default), maintain a BM25 sparse index alongside the
+        dense vector index and fuse results via Reciprocal Rank Fusion
+        on every search.  Costs one pickle file per collection and a
+        rebuild on every write; gains are exact-token recall (API
+        names, error strings, identifiers) that cosine on dense
+        embeddings tends to under-rank.  Set False to skip BM25 entirely
+        for a collection.
     """
 
     embedding_backend: str = "api"
@@ -498,6 +721,7 @@ class CollectionRoute:
     embedder_kwargs: dict = field(default_factory=dict)
     index_kwargs: dict = field(default_factory=dict)
     description: str = ""
+    hybrid: bool = True
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -606,9 +830,19 @@ class KnowledgeBase:
         # Shared embedder cache: embedder_key → client instance
         # Key is "<embedding_backend>|<sorted embedder_kwargs>" so identical configs share one client.
         self._embedder_cache: dict[str, BaseEmbeddingClient] = {}
+        # Serializes embedder construction so a background preload (see
+        # ``preload_default_embedder``) and a foreground first-query call
+        # don't race and double-load the model.  Construction is rare;
+        # the lock isn't a hot-path concern.
+        import threading as _threading
+        self._embedder_lock = _threading.Lock()
 
         # Collection runtime cache: name → (BaseVectorIndex, list[dict])
         self._cache: dict[str, tuple[BaseVectorIndex, list[dict]]] = {}
+
+        # BM25 sparse-index cache for hybrid-enabled collections.  Loaded
+        # from disk on first search, rebuilt and resaved on every write.
+        self._bm25_cache: dict[str, BM25Index] = {}
 
         # Per-file-type parser cache. Constructing a CodeSplitter loads the
         # tree-sitter language definition (~25ms each), so a 300-file ingest
@@ -623,6 +857,31 @@ class KnowledgeBase:
         self._chunk_skip_count: int = 0
 
         self._reranker = None
+
+    @staticmethod
+    def _stale_index_message(collection: str, exc: Exception) -> str | None:
+        """Return a user-friendly hint when *exc* looks like a dim mismatch.
+
+        Chroma raises ``InvalidDimensionException`` and FAISS raises
+        ``RuntimeError``/``AssertionError`` with "dimension" in the
+        message when a query vector's dimension doesn't match the index's.
+        That happens when the embedder used to BUILD the index has been
+        swapped for one with a different output dim — typically because
+        the user changed ``embedding.backend`` or ``embedding.model`` in
+        their config after init.  Detect on message-shape (no chroma
+        import here) and return the recovery instructions.
+        """
+        msg = str(exc).lower()
+        if "dimension" in msg or "dim mismatch" in msg or "shape" in msg:
+            return (
+                f"Embedding dimension mismatch in collection {collection!r}. "
+                f"The index was built with a different embedder than the one "
+                f"currently configured.  Run `dsagt setup-kb` with the active "
+                f"embedding settings, then drop the stale collection: "
+                f"`rm -rf <project>/kb_index/{collection}` and re-init/start "
+                f"the project."
+            )
+        return None
 
     # route management
 
@@ -651,11 +910,40 @@ class KnowledgeBase:
         """
         merged = {**self._default_route.embedder_kwargs, **route.embedder_kwargs}
         key = f"{route.embedding_backend}|{sorted(merged.items())}"
-        if key not in self._embedder_cache:
-            self._embedder_cache[key] = _make_embedder(
-                route.embedding_backend, **merged
-            )
-        return self._embedder_cache[key]
+        with self._embedder_lock:
+            if key not in self._embedder_cache:
+                self._embedder_cache[key] = _make_embedder(
+                    route.embedding_backend, **merged
+                )
+            return self._embedder_cache[key]
+
+    def preload_default_embedder(self) -> None:
+        """Kick off embedder construction in a daemon thread.
+
+        Called at MCP server startup so the heavy load — sentence-
+        transformers import, ``SentenceTransformer(...)`` model load,
+        etc., ~5–10s for the default local backend — happens in
+        parallel with the rest of server bootstrap.  By the time the
+        agent makes its first kb call, the embedder is cached and the
+        call completes immediately instead of paying the load cost.
+
+        Failure inside the thread is swallowed: the model-load error
+        will surface again (with full traceback) on the first real
+        embedding call, where the agent can surface it usefully.  The
+        background thread shouldn't crash the server before the agent
+        even gets a chance to query.
+        """
+        import threading
+
+        def _load() -> None:
+            try:
+                self._get_embedder(self._default_route)
+            except Exception as e:
+                logger.warning("Background embedder preload failed: %s", e)
+
+        threading.Thread(
+            target=_load, name="dsagt-embedder-preload", daemon=True,
+        ).start()
 
     @property
     def collections(self) -> list[str]:
@@ -795,6 +1083,9 @@ class KnowledgeBase:
             for chunk in chunks:
                 f.write(json.dumps(chunk) + "\n")
 
+        if active_route.hybrid:
+            self._rebuild_bm25(collection, chunks)
+
         self._cache[collection] = (index, chunks)
         return {
             "collection": collection,
@@ -865,6 +1156,8 @@ class KnowledgeBase:
                 f.write(json.dumps(chunk) + "\n")
 
         all_chunks = existing_chunks + new_chunks
+        if active_route.hybrid:
+            self._rebuild_bm25(collection, all_chunks)
         self._cache[collection] = (index, all_chunks)
         return {
             "collection": collection,
@@ -969,10 +1262,16 @@ class KnowledgeBase:
             new_chunks.append(chunk)
 
         # Store embeddings (with metadata on ChromaDB)
-        if active_route.vector_db == "chroma" and metadatas is not None:
-            index.add(embeddings, metadatas=metadatas)
-        else:
-            index.add(embeddings)
+        try:
+            if active_route.vector_db == "chroma" and metadatas is not None:
+                index.add(embeddings, metadatas=metadatas)
+            else:
+                index.add(embeddings)
+        except Exception as e:
+            hint = self._stale_index_message(collection, e)
+            if hint:
+                raise RuntimeError(hint) from e
+            raise
 
         index.save(coll_dir)
         self.register_route(collection, active_route)
@@ -983,6 +1282,8 @@ class KnowledgeBase:
                 f.write(json.dumps(chunk) + "\n")
 
         all_chunks = existing_chunks + new_chunks
+        if active_route.hybrid:
+            self._rebuild_bm25(collection, all_chunks)
         self._cache[collection] = (index, all_chunks)
 
         result = {
@@ -1021,7 +1322,9 @@ class KnowledgeBase:
             (set from ``knowledge.rerank`` in dsagt_config.yaml).
         where : dict, optional
             ChromaDB ``where`` filter clause.  Only effective on ChromaDB-backed
-            collections; silently ignored for FAISS collections.
+            collections; silently ignored for FAISS collections.  When set,
+            disables the BM25 sparse leg of hybrid search (BM25 has no
+            metadata-filter equivalent), so the result is dense-only.
         """
         if rerank is None:
             rerank = self.default_rerank
@@ -1036,30 +1339,101 @@ class KnowledgeBase:
                            active_route.embedder_kwargs.get("model"), 1):
             query_emb = self._normalize(embedder.embed([query]))[0]
 
-        search_k = min(top_k * 10 if rerank else top_k, len(chunks))
+        # Wider candidate pool when reranking (cross-encoder reorders top-N)
+        # OR when hybrid (RRF fuses two ranked lists; needs candidates from
+        # each ranker before merging).  Floor of 50 keeps RRF meaningful on
+        # small top_k.
         filtered = where is not None and active_route.vector_db == "chroma"
-        with kb_index_search_span(active_route.vector_db, search_k, filtered):
-            if filtered:
-                scores, indices = index.search(query_emb, search_k, where=where)
-            else:
-                scores, indices = index.search(query_emb, search_k)
+        do_hybrid = active_route.hybrid and not filtered
+        oversample = (rerank or do_hybrid)
+        candidate_k = min(
+            max(top_k * 10, 50) if oversample else top_k,
+            len(chunks),
+        )
 
-        results = [
-            {"chunk": chunks[i], "score": float(scores[j])}
-            for j, i in enumerate(indices) if i >= 0
-        ]
+        with kb_index_search_span(active_route.vector_db, candidate_k, filtered):
+            try:
+                if filtered:
+                    dense_scores, dense_indices = index.search(
+                        query_emb, candidate_k, where=where,
+                    )
+                else:
+                    dense_scores, dense_indices = index.search(
+                        query_emb, candidate_k,
+                    )
+            except Exception as e:
+                hint = self._stale_index_message(collection, e)
+                if hint:
+                    raise RuntimeError(hint) from e
+                raise
+
+        if do_hybrid:
+            bm25 = self._get_bm25(collection)
+            _, sparse_indices = bm25.search(query, candidate_k)
+            dense_ranking = [int(i) for i in dense_indices if i >= 0]
+            sparse_ranking = [int(i) for i in sparse_indices]
+            merged = _rrf_merge([dense_ranking, sparse_ranking])
+            results = [
+                {"chunk": chunks[idx], "score": float(score)}
+                for idx, score in merged
+            ]
+        else:
+            results = [
+                {"chunk": chunks[i], "score": float(dense_scores[j])}
+                for j, i in enumerate(dense_indices) if i >= 0
+            ]
 
         if rerank and results:
             with kb_rerank_span(self.rerank_model, len(results)):
                 final = self._rerank(query, results, top_k)
-            obs.set("hits", len(final))
-            obs.set_outputs({"hits": len(final), "top_texts": [r["chunk"].get("text", "")[:200] for r in final[:3]]})
-            return final
+        else:
+            final = results[:top_k]
 
-        final = results[:top_k]
         obs.set("hits", len(final))
-        obs.set_outputs({"hits": len(final), "top_texts": [r["chunk"].get("text", "")[:200] for r in final[:3]]})
+        obs.set_outputs({
+            "hits": len(final),
+            "top_texts": [r["chunk"].get("text", "")[:200] for r in final[:3]],
+        })
         return final
+
+    def _rebuild_bm25(self, collection: str, chunks: list[dict]) -> None:
+        """Build (or rebuild) the BM25 index for *collection* from *chunks*.
+
+        Called from every write path of a hybrid-enabled collection.  BM25
+        IDF stats are corpus-global, so there is no incremental update —
+        we always rebuild from the full chunk list.  Cached on the KB
+        instance and persisted to ``<collection>/bm25.pkl``.
+        """
+        bm25 = BM25Index()
+        bm25.build([c["text"] for c in chunks])
+        bm25.save(self.index_dir / collection)
+        self._bm25_cache[collection] = bm25
+
+    def _get_bm25(self, collection: str) -> BM25Index:
+        """Return the cached BM25 index, loading from disk on first hit.
+
+        Raises ``FileNotFoundError`` if the collection's route has
+        ``hybrid=True`` but no ``bm25.pkl`` exists on disk — i.e. the
+        collection was built by a pre-hybrid dsagt.  Migration is
+        ``delete the collection and re-ingest``; we deliberately do NOT
+        rebuild lazily on first search because that would silently turn
+        the next search into an N-document tokenization run.
+        """
+        cached = self._bm25_cache.get(collection)
+        if cached is not None:
+            return cached
+        coll_dir = self.index_dir / collection
+        bm25_path = coll_dir / BM25Index._FILENAME
+        if not bm25_path.exists():
+            raise FileNotFoundError(
+                f"Collection '{collection}' has hybrid=True in its route but "
+                f"no bm25.pkl on disk. The collection was built before hybrid "
+                f"retrieval was added. To fix: delete {coll_dir} and re-ingest, "
+                f"or set hybrid=False in route.json."
+            )
+        bm25 = BM25Index.load(coll_dir)
+        self._bm25_cache[collection] = bm25
+        return bm25
 
     @staticmethod
     def _normalize(arr: np.ndarray) -> np.ndarray:
@@ -1164,6 +1538,8 @@ class KnowledgeBase:
 
     def _chunk_file(self, path: Path, collection: str) -> Iterator[dict]:
         # Lazy import — see the module-top comment about cold-start cost.
+        import contextlib
+        import io as _io
         from llama_index.core import SimpleDirectoryReader
 
         # Per-file read/parse failures are kept as soft failures (count
@@ -1173,8 +1549,15 @@ class KnowledgeBase:
         # blobs misnamed .txt, malformed UTF-8) that shouldn't kill an
         # ingest of thousands of files.  Callers see the skip count
         # and can investigate if it's suspiciously high.
+        #
+        # llama_index's SimpleDirectoryReader prints "Failed to load file
+        # ... Skipping..." directly to stdout (literal print(), not
+        # logger) for every file it can't parse — there's no level switch
+        # for this.  Capture it: the file is already counted as a miss
+        # below, so the per-file print is pure noise.
         try:
-            docs = SimpleDirectoryReader(input_files=[str(path)]).load_data()
+            with contextlib.redirect_stdout(_io.StringIO()):
+                docs = SimpleDirectoryReader(input_files=[str(path)]).load_data()
         except (FileNotFoundError, IOError, ValueError) as e:
             logger.warning("Could not read %s: %s", path, e)
             self._chunk_skip_count += 1
@@ -1246,6 +1629,7 @@ class KnowledgeBase:
             client.close()
         self._embedder_cache.clear()
         self._parsers.clear()
+        self._bm25_cache.clear()
 
     def __enter__(self):
         return self

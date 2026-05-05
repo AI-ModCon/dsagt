@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
 import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -21,12 +22,6 @@ logger = logging.getLogger(__name__)
 
 # Master instructions ship with the package, one directory above this file.
 _INSTRUCTIONS_PATH = Path(__file__).parent.parent / "dsagt_instructions.md"
-
-# Sentinel API key planted in agent / MCP-child env so that if anything
-# bypasses the proxy and calls api.openai.com / api.anthropic.com directly,
-# the upstream returns 401 — failing loudly instead of silently leaking
-# requests around our provenance + tracing pipeline.
-_PROXY_FORWARDED_SENTINEL = "dsagt-proxy-forwarded-disable-direct-calls"
 
 # Marker string we look for to decide whether an instructions file already
 # carries the dsagt body.  Present in the master instructions header and in
@@ -44,7 +39,7 @@ _DSAGT_MARKER = "DSAgt Pipeline Builder"
 _DSAGT_MCP_ALWAYS_ALLOW = {
     "registry": [
         "get_registry", "http_request", "install_dependencies", "read_file",
-        "reconstruct_pipeline", "run_command", "save_tool_spec",
+        "reconstruct_pipeline", "run_command", "save_skill", "save_tool_spec",
         "search_registry", "search_skills",
     ],
     "knowledge": [
@@ -53,6 +48,68 @@ _DSAGT_MCP_ALWAYS_ALLOW = {
         "kb_list_collections", "kb_remember", "kb_search",
     ],
 }
+
+
+# Sentinel API key planted in agent / MCP-child env when the optional
+# proxy is enabled, so any direct call that bypasses the proxy returns
+# 401 fast — fails loudly instead of silently leaking around our
+# observability pipeline.
+_PROXY_FORWARDED_SENTINEL = "dsagt-proxy-forwarded-disable-direct-calls"
+
+
+def _real(value) -> str | None:
+    """Return *value* trimmed, or ``None`` if blank or an unresolved
+    ``${VAR}`` interpolation.  Centralized so each agent's
+    ``env_overrides`` filters config values consistently — we never
+    propagate a placeholder to a downstream env var.
+    """
+    s = (value or "").strip() if isinstance(value, str) else ""
+    if not s or s.startswith("${"):
+        return None
+    return s
+
+
+def _anthropic_env(llm: dict) -> dict[str, str]:
+    """Anthropic-protocol env vars from ``llm.*`` config.
+
+    Returns ``{}`` unless ``llm.provider == "anthropic"`` — never
+    propagates anthropic vars on top of an openai-shaped upstream,
+    where they'd be meaningless or actively misleading.
+
+    Called only by agent setups whose native runtime speaks anthropic
+    (claude code), and by multi-protocol agents (goose, cline, roo)
+    when the configured provider matches.
+    """
+    if (_real(llm.get("provider")) or "").lower() != "anthropic":
+        return {}
+    out: dict[str, str] = {}
+    if api_key := _real(llm.get("api_key")):
+        out["ANTHROPIC_API_KEY"] = api_key
+    if base_url := _real(llm.get("base_url")):
+        out["ANTHROPIC_BASE_URL"] = base_url
+    if model := _real(llm.get("model")):
+        out["ANTHROPIC_MODEL"] = model
+    return out
+
+
+def _openai_env(llm: dict) -> dict[str, str]:
+    """OpenAI-protocol env vars from ``llm.*`` config.
+
+    Returns ``{}`` unless ``llm.provider`` is one of the OpenAI-wire
+    aliases (``openai``, ``openai_like``, ``azure``).  Only called by
+    agents whose native runtime speaks the OpenAI wire protocol (codex,
+    LiteLLM-backed paths) or by multi-protocol agents (goose, cline,
+    roo) when the configured provider matches.
+    """
+    provider = (_real(llm.get("provider")) or "").lower()
+    if provider not in ("openai", "openai_like", "azure"):
+        return {}
+    out: dict[str, str] = {}
+    if api_key := _real(llm.get("api_key")):
+        out["OPENAI_API_KEY"] = api_key
+    if base_url := _real(llm.get("base_url")):
+        out["OPENAI_BASE_URL"] = base_url
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -68,26 +125,37 @@ def _mcp_server_args(server: str) -> list[str]:
     return ["run", f"dsagt-{server}-server"]
 
 
-def _mcp_env_block(config: dict, proxy_port: int) -> dict:
-    """Build the env block for MCP server entries that get embedded in JSON.
+def _mcp_env_block(config: dict) -> dict[str, str]:
+    """Env vars the dsagt MCP server children need at startup.
 
-    Embedding requests from dsagt-knowledge-server route through our local
-    LiteLLM proxy at localhost:<proxy_port>, same as agent LLM calls — the
-    proxy holds the real upstream credentials.  MCP children only see the
-    sentinel API key and the proxy URL; if anything misroutes around the
-    proxy, a direct call to api.openai.com / api.cohere.com / etc. 401s
-    the sentinel and fails loudly instead of silently bypassing.
+    Built from the project's internal config — runs deterministically
+    at ``dsagt init`` time without depending on the user's shell env.
+    Includes the MLflow tracking URI derived from the port pinned at
+    init so MCP-server logging lands in the project's MLflow regardless
+    of whether the agent inherits shell env into its MCP children
+    (cline / roo / codex don't; claude / goose do).
+
+    Empty values are dropped — for ``backend: local`` embedding, the
+    EMBEDDING_* keys aren't needed; for ``backend: api`` the user must
+    set ``EMBEDDING_API_KEY`` in their shell env (we don't bake creds
+    into project-on-disk artifacts).
     """
-    proxy_url = f"http://localhost:{proxy_port}"
-    return {
-        "DSAGT_PROJECT_DIR": config["project_dir"],
-        "EMBEDDING_BASE_URL": proxy_url,
-        "EMBEDDING_API_KEY": _PROXY_FORWARDED_SENTINEL,
-        # OPENAI_BASE_URL kept aligned with EMBEDDING_BASE_URL so any
-        # LiteLLM internal openai-client fallback also goes through proxy.
-        "OPENAI_BASE_URL": proxy_url,
-        "EMBEDDING_MODEL": config.get("embedding", {}).get("model", ""),
+    emb = config.get("embedding") or {}
+    mlflow_port = (config.get("mlflow") or {}).get("port")
+    block: dict[str, str] = {
+        "DSAGT_PROJECT": config["project"],
+        "DSAGT_PROJECT_DIR": str(config["project_dir"]),
     }
+    if mlflow_port:
+        block["MLFLOW_TRACKING_URI"] = f"http://localhost:{mlflow_port}"
+    for key, src in (
+        ("EMBEDDING_BACKEND", emb.get("backend")),
+        ("EMBEDDING_MODEL", emb.get("model")),
+        ("EMBEDDING_BASE_URL", emb.get("base_url")),
+    ):
+        if src:
+            block[key] = str(src)
+    return block
 
 
 def _load_master_instructions() -> str | None:
@@ -116,12 +184,6 @@ def _format_roomodes(instructions: str) -> str:
     }, indent=2)
 
 
-def _write_env_file(path: Path, env_vars: dict) -> None:
-    """Write a sourceable ``.dsagt_env`` shell file."""
-    lines = [f'export {k}="{v}"' for k, v in env_vars.items()]
-    path.write_text("\n".join(lines) + "\n")
-
-
 def _append_or_write(path: Path, content: str, marker: str) -> str | None:
     """Idempotent write for instructions files.
 
@@ -139,28 +201,6 @@ def _append_or_write(path: Path, content: str, marker: str) -> str | None:
         return f"Appended DSAgt instructions to {path}"
     path.write_text(content)
     return f"Wrote {path}"
-
-
-def _mcp_subprocess_env(parent_env: dict) -> dict:
-    """Pick the env vars a dsagt MCP server child needs from the launch env.
-
-    Cline, roo, and codex strip parent env when spawning MCP server
-    subprocesses (claude and goose inherit, so they don't need this).
-    Everything the server needs at startup must be listed explicitly.  The
-    ``${LLM_*}``/``${EMBEDDING_*}`` placeholders in dsagt_config.yaml are
-    resolved at server startup via ``resolve_env_vars``; if any are missing,
-    the placeholder leaks through and the knowledge server's
-    ``api_key.startswith("${")`` validation kills the process — manifesting
-    agent-side as a silent connection failure.  Pass them all through.
-    """
-    keys = (
-        "DSAGT_PROJECT_DIR", "DSAGT_PROJECT", "DSAGT_SESSION_ID", "DSAGT_AGENT",
-        "LLM_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL",
-        "EMBEDDING_API_KEY", "EMBEDDING_BASE_URL", "EMBEDDING_MODEL",
-        "OPENAI_BASE_URL",
-        "MLFLOW_TRACKING_URI",
-    )
-    return {k: parent_env[k] for k in keys if k in parent_env}
 
 
 def _build_mcp_servers_dict(env_block: dict | None) -> dict:
@@ -249,6 +289,71 @@ class AgentSetup(ABC):
     static_marker: ClassVar[str]
     install_hint: ClassVar[str] = "Install the agent CLI first."
 
+    def __init__(self, proxy_port: int | None = None):
+        """Rebind ``write_dynamic`` / ``run_script`` to their proxy-mode
+        analogs (``proxy_write_dynamic`` / ``proxy_run_script``) when
+        Phase 2 proxy mode is active AND the subclass overrides them.
+
+        Encapsulates the dispatch so callers always say ``setup.write_dynamic(...)``
+        without knowing whether the BYOA or proxy implementation runs.
+
+        Why the override check: the base default ``proxy_write_dynamic``
+        delegates to ``self.write_dynamic`` for fall-through.  If we
+        rebind ``self.write_dynamic = self.proxy_write_dynamic`` when
+        the subclass DOESN'T override, the delegation infinite-loops
+        (proxy_write_dynamic → self.write_dynamic → proxy_write_dynamic).
+        Only rebind when the subclass has its own implementation.
+
+        Net effect: agents whose proxy + BYOA setup is identical (claude,
+        goose, roo's write_dynamic) inherit the BYOA path under proxy
+        mode too — no override, no rebind, ``setup.write_dynamic`` stays
+        as ``write_dynamic``.  Agents that genuinely differ (cline +
+        codex + opencode write_dynamic; cline + roo run_script) get
+        their proxy_* override bound in.
+        """
+        self.proxy_port = proxy_port
+        if proxy_port:
+            cls = type(self)
+            if cls.proxy_write_dynamic is not AgentSetup.proxy_write_dynamic:
+                self.write_dynamic = self.proxy_write_dynamic  # type: ignore[method-assign]
+            if cls.proxy_run_script is not AgentSetup.proxy_run_script:
+                self.run_script = self.proxy_run_script  # type: ignore[method-assign]
+
+    #: Env vars the agent's runtime reads for credentials / endpoint
+    #: routing — i.e. the vars our ``env_overrides`` translates ``llm.*``
+    #: config into.  Used by ``agent_env`` to surface a transparency
+    #: warning when the project YAML is empty: we list which of these
+    #: are actually present in the user's shell so the user can see
+    #: what the agent will pick up.  Empty for IDE-extension agents
+    #: that never read env-var credentials.
+    credential_env_vars: ClassVar[tuple[str, ...]] = ()
+
+    #: Whether this agent makes its LLM calls visible in MLflow natively
+    #: (without DSAgt's optional ``dsagt-proxy``).  Drives whether
+    #: ``dsagt info`` / live audit / memory extraction see the agent's
+    #: reasoning + tool calls or just see the agent as a black box.
+    #:
+    #: ``"full"``        — verified end-to-end (Claude Code, Goose).
+    #:                     Every agent turn lands in MLflow as a trace
+    #:                     with messages + response + tool_use blocks.
+    #:                     ``--enable-proxy`` is unnecessary.
+    #: ``"partial"``     — agent emits OTel but spans don't carry
+    #:                     message content (Codex: only token counts +
+    #:                     tool names).  Conversation may be available
+    #:                     via a non-OTel side-channel (Codex's
+    #:                     ``~/.codex/sessions/*.jsonl``); not yet
+    #:                     wired in.  ``--enable-proxy`` recommended.
+    #: ``"none"``        — agent emits no OTel traces, or emits only
+    #:                     metrics without payloads (Cline, Roo Code).
+    #:                     The agent is a black box from DSAgt's
+    #:                     perspective; ``--enable-proxy`` is the only
+    #:                     way to see what it's doing.  Tool execution
+    #:                     + KB observability still work regardless via
+    #:                     dsagt-run / MCP-server spans.
+    #:
+    #: See agents/<name>.py docstrings for the per-agent investigation.
+    otel_payload_support: ClassVar[str] = "full"
+
     @abstractmethod
     def write_static(self, working_dir: Path) -> list[str]:
         """Write the agent's instructions file + any state directories.
@@ -265,26 +370,69 @@ class AgentSetup(ABC):
         env: dict,
         working_dir: Path,
         pdir: Path,
-        proxy_port: int,
     ) -> list[str]:
         """Write the agent's runtime-dependent files (MCP config, .dsagt_env).
 
-        Caller must have already populated ``config["proxy"]["port"]`` /
-        ``config["mlflow"]["port"]`` with the actually-bound ports and
-        built ``env`` via :func:`agent_env`.  Returns a list of one-line
-        action descriptions.
+        Caller must have already populated ``config["mlflow"]["port"]`` with
+        the actually-bound port and built ``env`` via :func:`agent_env`.
+        Returns a list of one-line action descriptions.
         """
 
-    @abstractmethod
-    def env_overrides(self, config: dict, proxy_port: int) -> dict[str, str]:
-        """Per-agent additions to the base env dict.
+    def runtime_env(self, config: dict) -> dict[str, str]:
+        """Dsagt-owned env vars the agent process needs at runtime (BYOA).
 
-        Examples: ANTHROPIC_BASE_URL for claude/roo, OPENAI_HOST for goose,
-        CODEX_HOME for codex, sentinel API keys to prevent direct upstream
-        calls.  See :func:`agent_env` (in ``__init__.py``) for how this
-        layers with the always-on env vars (embedding URL, MLflow URI,
-        session id) shared across all agents.
+        Returned dict is layered into ``agent_env`` and the launch shim's
+        telemetry block.  Default returns ``telemetry_env`` (claude's
+        OTEL_LOG_* / CLAUDE_CODE_* gates, etc.).  Subclasses augment with
+        per-project state-dir env (``CLINE_DIR``, ``CODEX_HOME``).
+
+        This is the only method allowed to set agent-affecting env in
+        BYOA.  Provider credentials (ANTHROPIC_*, OPENAI_*, GOOSE_*) are
+        the user's responsibility — exported in their shell, never
+        translated from ``config["llm"]``.
         """
+        del config
+        return dict(self.telemetry_env)
+
+    def env_overrides(self, config: dict) -> dict[str, str]:
+        """Phase-2 proxy-mode hook.  Not called in BYOA.
+
+        Reserved for the proxy/OTel-redirect path that ``observability.py``
+        will own when Phase 2 lands — the hook each agent uses to translate
+        ``config["llm"].*`` into provider env vars (after the proxy has
+        already rewritten the upstream URL).  Default implementation
+        returns ``{}``; agents override with their own translation logic
+        as needed.
+        """
+        del config
+        return {}
+
+    def proxy_env_overrides(self, proxy_port: int) -> dict[str, str]:
+        """Env vars that route the agent's LLM calls through dsagt-proxy.
+
+        Default implementation covers every agent we support today —
+        we set the well-known base URLs (``ANTHROPIC_BASE_URL``,
+        ``OPENAI_BASE_URL``) for both wire protocols so an agent that
+        speaks either still hits the proxy, plus the embedding base
+        URL so MCP-server children inherit proxy routing for
+        ``litellm.embedding`` calls.  Real upstream credentials live
+        only in the proxy subprocess; we plant the sentinel API key in
+        every standard slot so a direct call (bypassing the proxy)
+        fails loudly with 401 rather than silently leaking around our
+        observability pipeline.
+
+        Subclasses may override only if an agent reads non-standard
+        env names.  None do today.
+        """
+        proxy_url = f"http://localhost:{proxy_port}"
+        return {
+            "ANTHROPIC_BASE_URL": proxy_url,
+            "OPENAI_BASE_URL": proxy_url,
+            "EMBEDDING_BASE_URL": proxy_url,
+            "ANTHROPIC_API_KEY": _PROXY_FORWARDED_SENTINEL,
+            "OPENAI_API_KEY": _PROXY_FORWARDED_SENTINEL,
+            "EMBEDDING_API_KEY": _PROXY_FORWARDED_SENTINEL,
+        }
 
     def interactive_command(self, config: dict) -> list[str]:
         """Return the argv list for interactive launch.
@@ -294,6 +442,44 @@ class AgentSetup(ABC):
         """
         del config
         return list(self.base_command)
+
+    #: Telemetry env vars this agent emits via its native OTel SDK.
+    #: Set by subclasses with ``otel_payload_support`` of "full" or
+    #: "partial".  Empty for agents that don't emit OTel (cline / roo).
+    #: Used by ``byoa_env_hints`` to surface what the user should
+    #: export in their shell to get full visibility.
+    telemetry_env: ClassVar[dict[str, str]] = {}
+
+    #: Per-agent provider-credential hints surfaced by ``byoa_env_hints``.
+    #: List of ``(env_var_name, hint)`` tuples shown to the user with a
+    #: "skip if already configured" note.
+    credential_hints: ClassVar[tuple[tuple[str, str], ...]] = ()
+
+    def byoa_env_hints(
+        self, mlflow_port: int, project: str, project_dir: Path
+    ) -> list[tuple[str, str]]:
+        """Provider-credential env vars the user should set in their shell.
+
+        BYOA design: dsagt-internal env (project routing, MLflow URL,
+        OTel endpoint + headers, telemetry verbosity flags) lives in
+        the per-project launch shim — not the user's shell.  This
+        method returns only the credentials the user owns, with one
+        hint string each.
+        """
+        del mlflow_port, project, project_dir
+        return list(self.credential_hints)
+
+    def launch_oneliner(self, project: str, project_dir: Path) -> str:
+        """Shell command to launch the agent interactively.
+
+        ``cd <pdir>`` puts both the agent and any ``dsagt-run`` children
+        in the project directory; readers find ``dsagt_config.yaml``
+        there and use it as the single source of truth for project /
+        agent / mlflow routing — no DSAGT_* env vars to manage.
+        """
+        del project
+        cmd = " ".join(shlex.quote(part) for part in self.interactive_command({}))
+        return f"cd {shlex.quote(str(project_dir))} && {cmd}"
 
     @abstractmethod
     def run_script(
@@ -309,3 +495,43 @@ class AgentSetup(ABC):
         Each agent has a different shape for "run a script"; see the
         per-agent docstrings.  Returns the agent's exit code.
         """
+
+    def vscode_hint(self, project_dir: Path) -> list[str] | None:
+        """One-or-two-line hint for users who run this agent as a VS Code
+        extension instead of via the CLI.  Returns ``None`` for agents
+        without a working VS Code extension (most of them — only claude
+        and roo currently have extensions that auto-discover dsagt's
+        per-project files from the workspace root).
+
+        ``dsagt init`` prints these lines under "Or with VS Code extension".
+        """
+        del project_dir
+        return None
+
+    # --- Phase 2 proxy-mode analogs ---------------------------------------
+    # ``__init__`` rebinds ``write_dynamic`` / ``run_script`` to these when
+    # ``proxy_port`` is set, so callers don't branch.  Defaults defer to
+    # the BYOA implementation — agents whose proxy + BYOA paths are the
+    # same (claude, goose, roo's write_dynamic) inherit this fallthrough.
+    # Override in subclasses where proxy mode genuinely differs (cline
+    # auth -b proxy, codex [model_providers.dsagt-proxy] block, opencode
+    # baseURL override, cline/roo run_script un-punt).
+
+    def proxy_write_dynamic(
+        self,
+        config: dict,
+        env: dict,
+        working_dir: Path,
+        pdir: Path,
+    ) -> list[str]:
+        return self.write_dynamic(config, env, working_dir, pdir)
+
+    def proxy_run_script(
+        self,
+        config: dict,
+        env: dict,
+        working_dir: Path,
+        script_path: Path,
+        max_turns: int,
+    ) -> int:
+        return self.run_script(config, env, working_dir, script_path, max_turns)

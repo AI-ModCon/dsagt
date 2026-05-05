@@ -14,7 +14,6 @@ from unittest.mock import patch
 import pytest
 
 from dsagt.provenance import (
-    _inject_cache_breakpoints,
     _parse_file_list,
     _resolve_records_dir,
     _write_record,
@@ -100,16 +99,20 @@ class TestResolveRecordsDir:
     def test_explicit_wins(self):
         assert _resolve_records_dir("/custom/dir") == Path("/custom/dir")
 
-    def test_env_var(self):
-        with patch.dict(os.environ, {"DSAGT_RECORDS_DIR": "/from/env"}):
-            assert _resolve_records_dir(None) == Path("/from/env")
+    def test_uses_cwd_dsagt_config(self, tmp_path, monkeypatch):
+        """No --records-dir → reads ``<cwd>/dsagt_config.yaml`` and uses
+        ``<cwd>/trace_archive``.  Env vars are not consulted; the project
+        dir is the single source of truth."""
+        (tmp_path / "dsagt_config.yaml").write_text("project: t\n")
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_records_dir(None) == tmp_path / "trace_archive"
 
-    def test_no_env_raises(self):
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("DSAGT_RECORDS_DIR", None)
-            os.environ.pop("DSAGT_PROJECT_DIR", None)
-            with pytest.raises(ValueError, match="No records directory"):
-                _resolve_records_dir(None)
+    def test_no_config_in_cwd_raises(self, tmp_path, monkeypatch):
+        """If cwd has no dsagt_config.yaml, fail clearly — don't walk
+        up the tree, don't fall back to env vars."""
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ValueError, match="No dsagt_config.yaml"):
+            _resolve_records_dir(None)
 
 
 # ---------------------------------------------------------------------------
@@ -305,9 +308,35 @@ class TestMain:
         real backend.  dsagt-run is only ever invoked inside a `dsagt start`
         context in production, where MLFLOW_TRACKING_URI is always set; the
         tests need to mirror that so init_tracing doesn't (correctly) refuse
-        to silently no-op."""
+        to silently no-op.
+
+        Also stub the OTLPSpanExporter — init_tracing now builds one pointed
+        at <tracking_uri>/v1/traces, and a file:// URL would otherwise emit
+        async export-failure warnings to stderr that confuse test output.
+        We don't assert on what spans were exported here; that's covered
+        by test_observability.py with an InMemorySpanExporter.
+        """
         monkeypatch.setenv("MLFLOW_TRACKING_URI", f"file://{tmp_path}/mlruns")
         monkeypatch.setenv("DSAGT_PROJECT", "test")
+
+        class _NoopExporter:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def export(self, spans):
+                from opentelemetry.sdk.trace.export import SpanExportResult
+                return SpanExportResult.SUCCESS
+
+            def shutdown(self):
+                pass
+
+            def force_flush(self, timeout_millis=30000):
+                return True
+
+        monkeypatch.setattr(
+            "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter",
+            _NoopExporter,
+        )
 
     def test_basic_invocation(self, tmp_path):
         """main() runs a command and returns its exit code."""
@@ -340,72 +369,3 @@ class TestMain:
         assert exit_code == 7
 
 
-# ---------------------------------------------------------------------------
-# Prompt cache breakpoint injection
-# ---------------------------------------------------------------------------
-
-class TestInjectCacheBreakpoints:
-    """Cache markers must land on the LAST tool and on the system message."""
-
-    _MARK = {"type": "ephemeral"}
-
-    def test_string_system_promoted_to_blocks_with_marker(self):
-        messages = [{"role": "system", "content": "you are an agent"}]
-        kwargs = {}
-        _inject_cache_breakpoints(messages, kwargs)
-        assert messages[0]["content"] == [{
-            "type": "text",
-            "text": "you are an agent",
-            "cache_control": self._MARK,
-        }]
-
-    def test_block_system_marker_on_last_block(self):
-        messages = [{
-            "role": "system",
-            "content": [
-                {"type": "text", "text": "first"},
-                {"type": "text", "text": "last"},
-            ],
-        }]
-        _inject_cache_breakpoints(messages, {})
-        assert "cache_control" not in messages[0]["content"][0]
-        assert messages[0]["content"][1]["cache_control"] == self._MARK
-
-    def test_marker_on_last_tool_only(self):
-        kwargs = {
-            "tools": [
-                {"type": "function", "function": {"name": "a"}},
-                {"type": "function", "function": {"name": "b"}},
-                {"type": "function", "function": {"name": "c"}},
-            ],
-        }
-        _inject_cache_breakpoints([], kwargs)
-        assert "cache_control" not in kwargs["tools"][0]
-        assert "cache_control" not in kwargs["tools"][1]
-        assert kwargs["tools"][2]["cache_control"] == self._MARK
-
-    def test_no_tools_no_crash(self):
-        messages = [{"role": "system", "content": "x"}, {"role": "user", "content": "hi"}]
-        _inject_cache_breakpoints(messages, {})  # no tools key
-        # System still got marked
-        assert messages[0]["content"][0]["cache_control"] == self._MARK
-
-    def test_no_system_no_crash(self):
-        messages = [{"role": "user", "content": "hi"}]
-        kwargs = {"tools": [{"type": "function", "function": {"name": "a"}}]}
-        _inject_cache_breakpoints(messages, kwargs)
-        assert kwargs["tools"][0]["cache_control"] == self._MARK
-        # User message untouched
-        assert messages[0] == {"role": "user", "content": "hi"}
-
-    def test_only_first_system_message_marked(self):
-        messages = [
-            {"role": "system", "content": "primary"},
-            {"role": "user", "content": "hi"},
-            {"role": "system", "content": "injected later"},
-        ]
-        _inject_cache_breakpoints(messages, {})
-        # First system promoted with marker
-        assert messages[0]["content"][0]["cache_control"] == self._MARK
-        # Second one untouched (no cache_control)
-        assert messages[2]["content"] == "injected later"

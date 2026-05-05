@@ -1117,3 +1117,229 @@ class TestEmbedderCredentialMerge:
                 base_url="https://embed.example.com",
                 model="BAAI/bge-base-en-v1.5",
             )
+
+
+# ---------------------------------------------------------------------------
+# BM25 sparse index + RRF hybrid retrieval
+# ---------------------------------------------------------------------------
+
+class TestBM25Tokenize:
+    """The tokenizer drives recall — verify identifier-style splits land."""
+
+    def test_lowercases(self):
+        from dsagt.knowledge import _bm25_tokenize
+        assert _bm25_tokenize("Hello WORLD") == ["hello", "world"]
+
+    def test_splits_on_underscore(self):
+        from dsagt.knowledge import _bm25_tokenize
+        # snake_case must fan out for BM25 to score "user_id" queries against
+        # surrounding code.
+        assert _bm25_tokenize("get_user_id") == ["get", "user", "id"]
+
+    def test_splits_on_hyphen(self):
+        from dsagt.knowledge import _bm25_tokenize
+        assert _bm25_tokenize("kb-ingest") == ["kb", "ingest"]
+
+    def test_drops_punctuation(self):
+        from dsagt.knowledge import _bm25_tokenize
+        assert _bm25_tokenize("foo.bar(baz)") == ["foo", "bar", "baz"]
+
+    def test_keeps_numbers(self):
+        from dsagt.knowledge import _bm25_tokenize
+        assert _bm25_tokenize("v1.2.3 model") == ["v1", "2", "3", "model"]
+
+
+class TestBM25Index:
+
+    def test_build_then_search_finds_exact_match(self, tmp_path):
+        from dsagt.knowledge import BM25Index
+        idx = BM25Index()
+        idx.build([
+            "Alpha rocket fuel composition.",
+            "Beta submarine pressure hull.",
+            "Gamma rocket telemetry parser.",
+        ])
+        scores, indices = idx.search("rocket", k=3)
+        assert len(indices) == 3
+        # Docs 0 and 2 mention "rocket", should outrank doc 1.
+        top_two = set(indices[:2].tolist())
+        assert top_two == {0, 2}
+
+    def test_empty_corpus_returns_empty(self, tmp_path):
+        from dsagt.knowledge import BM25Index
+        idx = BM25Index()
+        idx.build([])
+        scores, indices = idx.search("anything", k=5)
+        assert len(scores) == 0 and len(indices) == 0
+
+    def test_empty_query_returns_empty(self, tmp_path):
+        from dsagt.knowledge import BM25Index
+        idx = BM25Index()
+        idx.build(["alpha", "beta"])
+        # Punctuation-only query tokenizes to []; should not crash.
+        scores, indices = idx.search("...!!!", k=5)
+        assert len(scores) == 0 and len(indices) == 0
+
+    def test_save_load_roundtrip(self, tmp_path):
+        from dsagt.knowledge import BM25Index
+        idx = BM25Index()
+        idx.build(["foo bar", "baz qux", "foo qux"])
+        idx.save(tmp_path)
+
+        loaded = BM25Index.load(tmp_path)
+        assert loaded.size == 3
+        scores_a, idx_a = idx.search("foo", k=2)
+        scores_b, idx_b = loaded.search("foo", k=2)
+        assert idx_a.tolist() == idx_b.tolist()
+        assert scores_a.tolist() == scores_b.tolist()
+
+    def test_load_missing_file_returns_empty(self, tmp_path):
+        from dsagt.knowledge import BM25Index
+        loaded = BM25Index.load(tmp_path)
+        assert loaded.size == 0
+
+
+class TestRRFMerge:
+
+    def test_single_ranker_passes_through_order(self):
+        from dsagt.knowledge import _rrf_merge
+        merged = _rrf_merge([[5, 2, 7]])
+        assert [idx for idx, _ in merged] == [5, 2, 7]
+
+    def test_two_rankers_promote_shared_top(self):
+        from dsagt.knowledge import _rrf_merge
+        # Doc 1 is rank-1 in both rankings; doc 2 only in one.  RRF must
+        # rank doc 1 above all unique docs.
+        merged = _rrf_merge([[1, 2, 3], [1, 4, 5]])
+        idxs = [idx for idx, _ in merged]
+        assert idxs[0] == 1
+
+    def test_skips_negative_indices(self):
+        from dsagt.knowledge import _rrf_merge
+        # FAISS pads with -1 when fewer than k results; must not pollute scores.
+        merged = _rrf_merge([[0, -1, -1], [0, 1, 2]])
+        idxs = [idx for idx, _ in merged]
+        assert -1 not in idxs
+
+
+class TestHybridSearch:
+    """End-to-end hybrid search behavior on a real KnowledgeBase."""
+
+    @pytest.fixture
+    def kb_with_data(self, tmp_path):
+        index_dir = tmp_path / "index"
+        source_folder = tmp_path / "test_docs"
+        source_folder.mkdir()
+        create_test_docs(source_folder)
+
+        mock_client = MagicMock()
+        mock_client.embed = fake_embed
+
+        with patch("dsagt.knowledge._make_embedder", return_value=mock_client):
+            kb = KnowledgeBase(index_dir=index_dir, default_index="faiss")
+            kb.ingest(source_folder)
+            yield kb
+            kb.close()
+
+    def test_ingest_writes_bm25_when_hybrid(self, kb_with_data, tmp_path):
+        """Hybrid is on by default; ingest must produce bm25.pkl."""
+        bm25_path = tmp_path / "index" / "test_docs" / "bm25.pkl"
+        assert bm25_path.exists()
+
+    def test_search_succeeds_with_hybrid_default(self, kb_with_data):
+        """Hybrid path returns results without errors."""
+        results = kb_with_data.search(
+            "installation",
+            collection="test_docs",
+            top_k=3,
+            rerank=False,
+        )
+        assert len(results) > 0
+
+    def test_search_raises_when_hybrid_but_no_bm25(self, tmp_path):
+        """Hybrid=True with missing bm25.pkl is a loud failure."""
+        from dsagt.knowledge import KnowledgeBase, CollectionRoute
+
+        index_dir = tmp_path / "index"
+        source_folder = tmp_path / "docs"
+        source_folder.mkdir()
+        (source_folder / "doc.txt").write_text("Some content here.")
+
+        mock_client = MagicMock()
+        mock_client.embed = fake_embed
+
+        # Build with hybrid=False so no bm25.pkl is written, then flip the
+        # persisted route to hybrid=True to simulate a pre-hybrid collection
+        # in a now-hybrid-aware install.
+        with patch("dsagt.knowledge._make_embedder", return_value=mock_client):
+            kb = KnowledgeBase(index_dir=index_dir, default_index="faiss")
+            kb.ingest(
+                source_folder,
+                route=CollectionRoute(
+                    embedding_backend="api",
+                    vector_db="faiss",
+                    hybrid=False,
+                ),
+            )
+            kb.close()
+
+            # Mutate the persisted route on disk.
+            import json as _json
+            route_path = index_dir / "docs" / "route.json"
+            route_data = _json.loads(route_path.read_text())
+            route_data["hybrid"] = True
+            route_path.write_text(_json.dumps(route_data))
+
+            # Fresh KB instance: no in-memory cache, must read from disk.
+            kb2 = KnowledgeBase(index_dir=index_dir, default_index="faiss")
+            with pytest.raises(FileNotFoundError, match="bm25.pkl"):
+                kb2.search("anything", collection="docs", top_k=3, rerank=False)
+            kb2.close()
+
+    def test_add_entries_rebuilds_bm25(self, tmp_path):
+        """add_entries must rebuild bm25.pkl with the new entry texts."""
+        from dsagt.knowledge import KnowledgeBase
+
+        mock_client = MagicMock()
+        mock_client.embed = fake_embed
+
+        with patch("dsagt.knowledge._make_embedder", return_value=mock_client):
+            kb = KnowledgeBase(index_dir=tmp_path / "index", default_index="faiss")
+            kb.add_entries(
+                texts=["alpha document", "beta document"],
+                collection="memory",
+            )
+            bm25_path = tmp_path / "index" / "memory" / "bm25.pkl"
+            assert bm25_path.exists()
+
+            kb.add_entries(texts=["gamma document"], collection="memory")
+            # BM25 must now know about all three docs.
+            bm25 = kb._get_bm25("memory")
+            assert bm25.size == 3
+            kb.close()
+
+    def test_route_persists_hybrid_flag(self, tmp_path):
+        """route.json must round-trip the hybrid field."""
+        from dsagt.knowledge import KnowledgeBase, CollectionRoute
+        import json as _json
+
+        mock_client = MagicMock()
+        mock_client.embed = fake_embed
+
+        with patch("dsagt.knowledge._make_embedder", return_value=mock_client):
+            kb = KnowledgeBase(index_dir=tmp_path / "index", default_index="faiss")
+            kb.add_entries(
+                texts=["x"],
+                collection="c",
+                route=CollectionRoute(
+                    embedding_backend="api",
+                    vector_db="faiss",
+                    hybrid=False,
+                ),
+            )
+            kb.close()
+
+        route_data = _json.loads(
+            (tmp_path / "index" / "c" / "route.json").read_text()
+        )
+        assert route_data["hybrid"] is False

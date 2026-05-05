@@ -25,13 +25,24 @@ _uv_available = shutil.which("uv") is not None
 pytestmark = pytest.mark.skipif(not _uv_available, reason="uv not available")
 
 
-def _write_minimal_config(project_dir: Path, project_name: str = "test") -> None:
-    """Write the minimum dsagt_config.yaml the servers need to start."""
+def _write_minimal_config(
+    project_dir: Path,
+    project_name: str = "test",
+    backend: str = "api",
+) -> None:
+    """Write the minimum dsagt_config.yaml the servers need to start.
+
+    Default backend is ``"api"`` here (with fake credentials) so startup
+    doesn't trigger a sentence-transformers model load — keeps these
+    tests fast.  Tests that need to exercise the local backend pass
+    ``backend="local"`` explicitly.
+    """
     import yaml
     config = {
         "project": project_name,
         "agent": "claude",
         "embedding": {
+            "backend": backend,
             "model": "test-model",
             "base_url": "http://localhost:9999",
             "api_key": "test-fake-key",
@@ -59,12 +70,19 @@ class TestRegistryServerStartup:
         import yaml as _yaml
         project = tmp_path / "runtime"
         project.mkdir()
-        # Minimal config with placeholder credentials so the server
-        # starts with kb=None (fast, no ChromaDB init).
+        # backend="api" with empty credentials → kb_available=False →
+        # registry runs with kb=None.  This is the fast path the test
+        # cares about (no ChromaDB / sentence-transformers init).  With
+        # backend="local" (the default for new projects) registry would
+        # eagerly load the local embedder, which is the slow path
+        # exercised by other tests.
         (project / "dsagt_config.yaml").write_text(_yaml.dump({
             "project": "test",
             "agent": "claude",
-            "embedding": {"model": "", "base_url": "", "api_key": ""},
+            "embedding": {
+                "backend": "api",
+                "model": "", "base_url": "", "api_key": "",
+            },
             "knowledge": {"chunk_size": 1024, "vector_db": "chroma", "rerank": False},
         }))
         proc = start_server(
@@ -127,18 +145,23 @@ class TestKnowledgeServerStartup:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_fails_fast_without_api_key(self, tmp_path):
-        """Knowledge server must fail at startup if embedding credentials
-        are missing — not silently start with a broken embedder.
+    def test_api_backend_fails_fast_without_api_key(self, tmp_path):
+        """When the user explicitly opts into backend='api', the knowledge
+        server must fail at startup if the api key is missing — better than
+        booting with a broken embedder that 401s on the first kb_search.
+
+        With the post-refactor default of backend='local' (no creds
+        needed), this hard-fail only fires for users who have explicitly
+        said they want the api backend.
         """
         import yaml
         project = tmp_path / "runtime"
         project.mkdir()
-        # Write config with placeholder credentials that should be rejected.
         config = {
             "project": "test",
             "agent": "claude",
             "embedding": {
+                "backend": "api",
                 "model": "test-model",
                 "base_url": "http://localhost:9999",
                 "api_key": "${LLM_API_KEY}",  # unresolved placeholder
@@ -158,6 +181,5 @@ class TestKnowledgeServerStartup:
             [sys.executable, "-m", "dsagt.commands.knowledge_server"],
             env=clean_env,
         )
-        # Server should exit quickly with a non-zero code.
         rc = proc.wait(timeout=10)
-        assert rc != 0, "Server should have failed with unresolved API key"
+        assert rc != 0, "backend='api' without api_key must fail at startup"

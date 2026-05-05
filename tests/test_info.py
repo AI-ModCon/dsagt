@@ -23,12 +23,10 @@ from dsagt.commands.info import (
 )
 
 
-def _metadata(*, session: str, source: str | None, agent: str | None,
+def _metadata(*, session: str, agent: str | None,
               in_t: int, out_t: int) -> dict:
     """Build a trace_metadata dict in MLflow's on-disk shape."""
     md = {"mlflow.trace.session": session}
-    if source is not None:
-        md["dsagt.source"] = source
     if agent is not None:
         md["dsagt.agent"] = agent
     if in_t or out_t:
@@ -38,6 +36,21 @@ def _metadata(*, session: str, source: str | None, agent: str | None,
             "total_tokens": in_t + out_t,
         })
     return md
+
+
+def _spans_for(service_name: str | None) -> list:
+    """Build the ``spans`` column entry: one root span carrying service.name.
+
+    ``_source_from_spans`` reads ``service.name`` off the root span's
+    attributes (MLflow's OTLP receiver flows the OTel resource attribute
+    through to span attributes), so a single SimpleNamespace is enough
+    for the report-side test.  ``None`` → empty spans list, source falls
+    through to ``"unknown"``.
+    """
+    from types import SimpleNamespace
+    if service_name is None:
+        return []
+    return [SimpleNamespace(attributes={"service.name": service_name})]
 
 
 def _traces_df(rows: list[dict]) -> pd.DataFrame:
@@ -106,42 +119,48 @@ def test_report_empty_traces(config):
 
 
 def test_report_aggregates_by_source_and_session(config):
+    """Source bucketing comes from the root span's ``service.name``.
+
+    Three claude-code agent traces (one of which errored) + one
+    knowledge-server trace, across two sessions.  Sums + bucket counts
+    match expected totals.
+    """
     df = _traces_df([
         {
             "trace_id": "t1",
             "state": "OK",
             "request_time": 100,
             "trace_metadata": _metadata(
-                session="sess-A", source="agent", agent="goose",
-                in_t=1000, out_t=100,
+                session="sess-A", agent="claude", in_t=1000, out_t=100,
             ),
+            "spans": _spans_for("claude-code"),
         },
         {
             "trace_id": "t2",
             "state": "OK",
             "request_time": 200,
             "trace_metadata": _metadata(
-                session="sess-A", source="agent", agent="goose",
-                in_t=500, out_t=50,
+                session="sess-A", agent="claude", in_t=500, out_t=50,
             ),
+            "spans": _spans_for("claude-code"),
         },
         {
             "trace_id": "t3",
             "state": "OK",
             "request_time": 150,
             "trace_metadata": _metadata(
-                session="sess-A", source="embedding", agent="goose",
-                in_t=200, out_t=0,
+                session="sess-A", agent="claude", in_t=200, out_t=0,
             ),
+            "spans": _spans_for("dsagt-knowledge-server"),
         },
         {
             "trace_id": "t4",
             "state": "ERROR",
             "request_time": 300,
             "trace_metadata": _metadata(
-                session="sess-B", source="agent", agent="claude",
-                in_t=800, out_t=20,
+                session="sess-B", agent="claude", in_t=800, out_t=20,
             ),
+            "spans": _spans_for("claude-code"),
         },
     ])
 
@@ -152,40 +171,38 @@ def test_report_aggregates_by_source_and_session(config):
     assert r["input_tokens"] == 2500
     assert r["output_tokens"] == 170
 
-    # By source: agent (3 traces) and embedding (1 trace).
     sources = {row["source"]: row for row in r["by_source"]}
-    assert sources["agent"]["traces"] == 3
-    assert sources["agent"]["input_tokens"] == 2300
-    assert sources["agent"]["output_tokens"] == 170
-    assert sources["agent"]["errors"] == 1
-    assert sources["embedding"]["traces"] == 1
-    assert sources["embedding"]["errors"] == 0
+    assert sources["claude-code"]["traces"] == 3
+    assert sources["claude-code"]["input_tokens"] == 2300
+    assert sources["claude-code"]["output_tokens"] == 170
+    assert sources["claude-code"]["errors"] == 1
+    assert sources["dsagt-knowledge-server"]["traces"] == 1
+    assert sources["dsagt-knowledge-server"]["errors"] == 0
 
-    # By session: sess-B has a later request_time, so it lands first.
     assert [s["session"] for s in r["by_session"]] == ["sess-B", "sess-A"]
     sess_a = next(s for s in r["by_session"] if s["session"] == "sess-A")
     assert sess_a["traces"] == 3
     assert sess_a["input_tokens"] == 1700
-    assert sess_a["agent"] == "goose"
+    assert sess_a["agent"] == "claude"
 
-    # Errors surface the triage-relevant fields.
     assert len(r["errors"]) == 1
     err = r["errors"][0]
     assert err["session"] == "sess-B"
-    assert err["source"] == "agent"
+    assert err["source"] == "claude-code"
     assert err["trace_id"] == "t4"
 
 
 def test_report_missing_source_falls_back_to_unknown(config):
+    """No spans column / no service.name → bucket is "unknown"."""
     df = _traces_df([
         {
             "trace_id": "t1",
             "state": "OK",
             "request_time": 100,
             "trace_metadata": _metadata(
-                session="sess-A", source=None, agent=None,
-                in_t=0, out_t=0,
+                session="sess-A", agent=None, in_t=0, out_t=0,
             ),
+            "spans": _spans_for(None),
         },
     ])
     r = _report("proj", config, df)
@@ -296,3 +313,157 @@ def test_config_sources_skips_internal_sections(tmp_path, monkeypatch):
     assert "extraction.threshold" not in paths
     assert "categories.qc" not in paths
     assert "project" in paths
+
+
+# ---------------------------------------------------------------------------
+# _kb_collections — read chunks.jsonl, count entries, break down by source
+# ---------------------------------------------------------------------------
+
+def _write_chunk(path, text="x", source=None):
+    """Append one chunks.jsonl line with optional metadata.source."""
+    md = {"chunk_index": 0}
+    if source is not None:
+        md["source"] = source
+    with path.open("a") as f:
+        f.write(json.dumps({"text": text, "metadata": md}) + "\n")
+
+
+def test_kb_collections_empty_when_no_kb_index(tmp_path):
+    from dsagt.commands.info import _kb_collections
+    assert _kb_collections(tmp_path) == []
+
+
+def test_kb_collections_counts_chunks_and_breaks_down_sources(tmp_path):
+    from dsagt.commands.info import _kb_collections
+
+    kb = tmp_path / "kb_index"
+    (kb / "tools").mkdir(parents=True)
+    (kb / "skills").mkdir(parents=True)
+    (kb / "research").mkdir(parents=True)
+
+    # Tools: 2 bundled, 1 project
+    for _ in range(2):
+        _write_chunk(kb / "tools" / "chunks.jsonl", source="bundled")
+    _write_chunk(kb / "tools" / "chunks.jsonl", source="project")
+
+    # Skills: 1 bundled
+    _write_chunk(kb / "skills" / "chunks.jsonl", source="bundled")
+
+    # Research: 3 chunks, no source field
+    for _ in range(3):
+        _write_chunk(kb / "research" / "chunks.jsonl")
+
+    rows = {r["collection"]: r for r in _kb_collections(tmp_path)}
+    assert rows["tools"] == {
+        "collection": "tools",
+        "chunks": 3,
+        "by_source": {"bundled": 2, "project": 1},
+    }
+    assert rows["skills"]["chunks"] == 1
+    assert rows["skills"]["by_source"] == {"bundled": 1}
+    assert rows["research"]["chunks"] == 3
+    assert rows["research"]["by_source"] == {}
+
+
+def test_kb_collections_skips_dirs_without_chunks_jsonl(tmp_path):
+    from dsagt.commands.info import _kb_collections
+
+    kb = tmp_path / "kb_index"
+    (kb / "no_chunks").mkdir(parents=True)
+    (kb / "no_chunks" / "route.json").write_text("{}")
+    assert _kb_collections(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# _kb_retrieval — pull kb.search spans out of a synthetic traces frame
+# ---------------------------------------------------------------------------
+
+def _trace_with_kb_spans(session: str, hits_per_search: list[int]) -> dict:
+    """Build a single trace row carrying one kb.search span per hits entry."""
+    from types import SimpleNamespace
+    spans = [
+        SimpleNamespace(name="kb.search", attributes={"hits": h})
+        for h in hits_per_search
+    ]
+    # Stick a non-kb span in there too so the filter is exercised.
+    spans.append(SimpleNamespace(name="kb.embed", attributes={}))
+    return {
+        "trace_id": f"t-{session}",
+        "state": "OK",
+        "request_time": 1,
+        "trace_metadata": {"mlflow.trace.session": session},
+        "spans": spans,
+    }
+
+
+def test_kb_retrieval_empty_when_no_traces():
+    from dsagt.commands.info import _kb_retrieval
+    assert _kb_retrieval(None) == []
+    assert _kb_retrieval(pd.DataFrame()) == []
+
+
+def test_kb_retrieval_aggregates_searches_and_hits_by_session():
+    from dsagt.commands.info import _kb_retrieval
+
+    df = pd.DataFrame([
+        _trace_with_kb_spans("sess-A", hits_per_search=[3, 5]),
+        _trace_with_kb_spans("sess-A", hits_per_search=[2]),
+        _trace_with_kb_spans("sess-B", hits_per_search=[7]),
+    ])
+    rows = {r["session"]: r for r in _kb_retrieval(df)}
+    assert rows["sess-A"] == {"session": "sess-A", "searches": 3, "hits": 10}
+    assert rows["sess-B"] == {"session": "sess-B", "searches": 1, "hits": 7}
+
+
+def test_kb_retrieval_handles_missing_session():
+    from dsagt.commands.info import _kb_retrieval
+    from types import SimpleNamespace
+
+    df = pd.DataFrame([{
+        "trace_id": "t1",
+        "state": "OK",
+        "request_time": 1,
+        "trace_metadata": {},  # no mlflow.trace.session
+        "spans": [SimpleNamespace(name="kb.search", attributes={"hits": 4})],
+    }])
+    rows = _kb_retrieval(df)
+    assert len(rows) == 1
+    assert rows[0]["session"] == "(no-session)"
+    assert rows[0]["hits"] == 4
+
+
+def test_kb_retrieval_ignores_non_kb_spans():
+    from dsagt.commands.info import _kb_retrieval
+    from types import SimpleNamespace
+
+    df = pd.DataFrame([{
+        "trace_id": "t1",
+        "state": "OK",
+        "request_time": 1,
+        "trace_metadata": {"mlflow.trace.session": "s"},
+        "spans": [
+            SimpleNamespace(name="kb.embed", attributes={}),
+            SimpleNamespace(name="registry.save_tool_spec", attributes={}),
+        ],
+    }])
+    assert _kb_retrieval(df) == []
+
+
+# ---------------------------------------------------------------------------
+# _project_created — best-effort project-start date
+# ---------------------------------------------------------------------------
+
+def test_project_created_returns_iso_date_for_existing_dir(tmp_path):
+    from dsagt.commands.info import _project_created
+
+    pdir = tmp_path / "proj"
+    pdir.mkdir()
+    out = _project_created(pdir)
+    assert out is not None
+    # YYYY-MM-DD format.
+    assert len(out) == 10 and out[4] == "-" and out[7] == "-"
+
+
+def test_project_created_returns_none_when_dir_missing(tmp_path):
+    from dsagt.commands.info import _project_created
+    assert _project_created(tmp_path / "does-not-exist") is None

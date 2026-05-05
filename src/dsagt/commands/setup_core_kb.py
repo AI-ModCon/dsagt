@@ -144,8 +144,6 @@ def clone_github(url: str, dest: Path, branch: str = "main", include: list[str] 
     critical packaging metadata the agent needs to install dependencies
     correctly when it registers tools against the library.
     """
-    print(f"  Cloning {url} (branch: {branch})...")
-
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp) / "repo"
         result = subprocess.run(
@@ -176,8 +174,6 @@ def clone_github(url: str, dest: Path, branch: str = "main", include: list[str] 
 
 def download_arxiv(paper_id: str, dest: Path):
     """Download arXiv paper (source if available, else PDF)."""
-    print(f"  Downloading arXiv:{paper_id}...")
-    
     client = httpx.Client(timeout=60.0, follow_redirects=True)
     
     try:
@@ -210,11 +206,20 @@ def setup_collection(
     embedder_kwargs: dict,
     embedding_backend: str,
     vector_db: str,
+    kb=None,
 ) -> dict:
-    """Download sources and ingest a collection."""
-    print(f"\n{'='*60}")
-    print(f"Setting up: {name}")
-    print(f"{'='*60}")
+    """Download sources and ingest a collection.
+
+    When *kb* is provided, the existing KnowledgeBase is reused — its
+    embedder cache stays warm so the local sentence-transformers model
+    isn't reloaded per collection.  When None (default for backwards
+    compat with direct callers), a fresh KB is constructed and closed
+    around this call.
+
+    ``run_setup_kb`` always passes a shared *kb* so a multi-collection
+    run pays the model-load cost once, not N times.
+    """
+    print(f"Setting up {name}...", flush=True)
 
     with tempfile.TemporaryDirectory() as tmp:
         download_dir = Path(tmp) / name
@@ -240,31 +245,39 @@ def setup_collection(
         # Write DESCRIPTION.md
         (download_dir / "DESCRIPTION.md").write_text(config["description"])
 
-        # Ingest using KnowledgeBase
-        print("  Indexing (this may take several minutes per collection)...")
-
-        from dsagt.knowledge import KnowledgeBase
-
-        kb = KnowledgeBase(
-            index_dir=index_dir,
-            default_embedder=embedding_backend,
-            default_index=vector_db,
-            embedder_kwargs=embedder_kwargs,
-        )
+        owned_kb = kb is None
+        if owned_kb:
+            from dsagt.knowledge import KnowledgeBase
+            kb = KnowledgeBase(
+                index_dir=index_dir,
+                default_embedder=embedding_backend,
+                default_index=vector_db,
+                embedder_kwargs=embedder_kwargs,
+            )
         try:
             result = kb.ingest(
                 download_dir,
                 exclude_patterns=config.get("exclude_patterns") or DEFAULT_EXCLUDE_PATTERNS,
             )
             skipped = result.get("skipped_files", 0)
-            skip_msg = f", skipped {skipped} unreadable" if skipped else ""
+            miss_msg = f", {skipped} file misses" if skipped else ""
             print(
-                f"  Done: {result['files']} files, {result['chunks']} chunks"
-                f"{skip_msg}"
+                f"  {name}: {result['chunks']} chunks{miss_msg}",
+                flush=True,
             )
             return result
         finally:
-            kb.close()
+            if owned_kb:
+                kb.close()
+
+
+def _current_dsagt_version() -> str:
+    """Return the installed dsagt package version, or ``"unknown"`` if absent."""
+    try:
+        from importlib.metadata import version
+        return version("dsagt")
+    except Exception:
+        return "unknown"
 
 
 def add_setup_kb_args(parser):
@@ -287,8 +300,14 @@ def add_setup_kb_args(parser):
     parser.add_argument(
         "--embedding-backend",
         choices=["api", "local"],
-        default="api",
-        help="Embedding backend (default: api)",
+        default="local",
+        help=(
+            "Embedding backend (default: local — sentence-transformers, "
+            "no API credentials needed).  Pass --embedding-backend api to "
+            "build collections against a hosted embedding endpoint; that "
+            "path requires --embedding-base-url and --embedding-api-key (or "
+            "the corresponding env vars)."
+        ),
     )
     parser.add_argument(
         "--embedding-model", default=None,
@@ -323,12 +342,20 @@ def run_setup_kb(args):
     ``add_setup_kb_args``.  Called from both the ``dsagt setup-kb``
     subcommand and the standalone ``dsagt-setup-kb`` entry point.
     """
-    # Surface batch progress and rate-limit retry warnings.
+    # Show only warnings/errors during setup-kb — the per-collection
+    # print() lines below are the user-visible progress story.  Surfacing
+    # every "Found N files" / "Created M chunks" log line on top creates
+    # the noisy play-by-play we deliberately stripped out.
+    #
+    # ``force=True`` overrides cli.py's earlier basicConfig (which sets
+    # INFO + a "[dsagt]" format for the rest of the CLI).  Without
+    # ``force``, the second basicConfig is a no-op because the root
+    # logger already has handlers, and the INFO-level chatter survives.
     import logging as _logging
     _logging.basicConfig(
-        level=_logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S",
+        level=_logging.WARNING,
+        format="%(levelname)s: %(message)s",
+        force=True,
     )
 
     # Check git is available.
@@ -363,44 +390,95 @@ def run_setup_kb(args):
     from dsagt.observability import configure_litellm_retries
     configure_litellm_retries()
 
-    print("DSAGT Core Knowledge Base Setup")
-    print(f"Index directory: {args.index_dir}")
-    print(f"Embedding backend: {args.embedding_backend}")
-    print(f"Vector DB: {args.vector_db}")
-    print("Note: API-backed embedding of the full core KB typically takes 15-30 minutes.")
+    # One KnowledgeBase per setup-kb invocation.  The embedder cache
+    # lives on the KB instance, so creating fresh KBs per collection
+    # would reload the local sentence-transformers model every time
+    # (~11s × N collections of pure waste).  Threaded through to
+    # setup_collection (and used directly for the bundled tools+skills
+    # block below) so the model loads once.
+    args.index_dir.mkdir(parents=True, exist_ok=True)
+    from dsagt.knowledge import KnowledgeBase
+    from dsagt.registry import (
+        SKILLS_COLLECTION, TOOLS_COLLECTION,
+        ToolRegistry, SkillRegistry, _parse_frontmatter,
+    )
+    shared_kb = KnowledgeBase(
+        index_dir=args.index_dir,
+        default_embedder=args.embedding_backend,
+        default_index=args.vector_db,
+        embedder_kwargs=embedder_kwargs or {},
+    )
+    try:
+        # Bundled tools + skills: each spec file is a single chunk with
+        # rich metadata.  Wipe-and-rebuild every run — there's no
+        # version sentinel, so the user controls when this happens.
+        current_version = _current_dsagt_version()
 
-    collections = {args.collection: COLLECTIONS[args.collection]} if args.collection else COLLECTIONS
+        tool_paths = [
+            p for p in sorted(ToolRegistry._PACKAGE_TOOLS_DIR.glob("*.md"))
+            if _parse_frontmatter(p).get("name")
+        ]
+        skill_dirs = [
+            d for d in sorted(SkillRegistry._PACKAGE_SKILLS_DIR.iterdir())
+            if d.is_dir()
+            and (d / "SKILL.md").exists()
+            and _parse_frontmatter(d / "SKILL.md").get("name")
+        ]
 
-    results = {}
-    for name, config in collections.items():
-        target_dir = args.index_dir / name
-        if _collection_exists(target_dir):
-            if not args.rebuild:
-                print(f"\nSkipping {name}: already indexed at {target_dir}. "
-                      "Pass --rebuild to force re-ingest.")
-                results[name] = {"chunks": 0, "skipped": True}
-                continue
-            # --rebuild: wipe the existing collection so chroma sqlite state
-            # and any orphan files from a prior schema don't bleed through.
-            print(f"\nRebuilding {name}: removing existing {target_dir}")
-            shutil.rmtree(target_dir)
-        results[name] = setup_collection(
-            name, config, args.index_dir,
-            embedder_kwargs=embedder_kwargs,
-            embedding_backend=args.embedding_backend,
-            vector_db=args.vector_db,
-        )
+        for name in (TOOLS_COLLECTION, SKILLS_COLLECTION):
+            coll_dir = args.index_dir / name
+            if coll_dir.exists():
+                shutil.rmtree(coll_dir)
 
-    print(f"\n{'='*60}")
-    print("Summary")
-    print(f"{'='*60}")
-    for name, result in results.items():
-        if result.get("skipped"):
-            print(f"  {name}: skipped (already indexed)")
-        else:
-            print(f"  {name}: {result.get('chunks', 0)} chunks")
+        if tool_paths:
+            tool_specs = [_parse_frontmatter(p) for p in tool_paths]
+            shared_kb.add_entries(
+                texts=[p.read_text() for p in tool_paths],
+                collection=TOOLS_COLLECTION,
+                metadatas=[{
+                    "tool_name": s["name"],
+                    "tags": ",".join(s.get("tags", [])),
+                    "executable": s.get("executable", ""),
+                    "has_dependencies": str(bool(s.get("dependencies"))),
+                    "source": "bundled",
+                    "dsagt_version": current_version,
+                } for s in tool_specs],
+            )
 
-    print("\nDone!")
+        if skill_dirs:
+            skill_specs = [_parse_frontmatter(d / "SKILL.md") for d in skill_dirs]
+            shared_kb.add_entries(
+                texts=[(d / "SKILL.md").read_text() for d in skill_dirs],
+                collection=SKILLS_COLLECTION,
+                metadatas=[{
+                    "skill_name": s["name"],
+                    "tags": ",".join(s.get("tags", [])),
+                    "source": "bundled",
+                    "dsagt_version": current_version,
+                } for s in skill_specs],
+            )
+
+        print("  bundled tools + skills: indexed", flush=True)
+
+        collections = {args.collection: COLLECTIONS[args.collection]} if args.collection else COLLECTIONS
+
+        for name, config in collections.items():
+            target_dir = args.index_dir / name
+            if _collection_exists(target_dir):
+                if not args.rebuild:
+                    print(f"  {name}: already indexed (use --rebuild to force)",
+                          flush=True)
+                    continue
+                shutil.rmtree(target_dir)
+            setup_collection(
+                name, config, args.index_dir,
+                embedder_kwargs=embedder_kwargs,
+                embedding_backend=args.embedding_backend,
+                vector_db=args.vector_db,
+                kb=shared_kb,
+            )
+    finally:
+        shared_kb.close()
 
 
 def main():

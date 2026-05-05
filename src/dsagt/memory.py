@@ -8,9 +8,31 @@ Two memory types:
     at session start. Supports remember, supersede, remove, and retrieval.
 
 **Episodic memory** (extract_session and friends):
-    End-of-session LLM extraction of facts, summaries, and insights from
-    the session log. Stored in the ``episodic_memory`` ChromaDB collection.
-    Includes outlier detection via per-category embedding centroids.
+    End-of-session LLM extraction of facts, summaries, and insights.
+    Conversation history comes from MLflow traces with
+    ``service.name = "dsagt-proxy"`` — i.e., LLM calls forwarded
+    through ``dsagt-proxy`` and autologged via
+    ``mlflow.litellm.autolog()`` into a uniform shape
+    (``mlflow.spanInputs`` = request kwargs with ``messages``,
+    ``mlflow.spanOutputs`` = provider-specific response).
+
+    Native agent OTel emission (Claude Code, Goose) does NOT feed
+    extraction, even though those traces are visible in the MLflow UI.
+    The reason is shape divergence: Claude Code puts conversation in
+    span events (``api_response_body``), Goose puts tool calls in
+    ``dispatch_tool_call`` spans with a domain-specific schema, and
+    LiteLLM autolog uses ``mlflow.spanInputs`` / ``mlflow.spanOutputs``.
+    Parsing all three would mean three parallel parsers in this module
+    and per-agent maintenance forever.  Instead, extraction reads one
+    canonical shape (the one ``dsagt-proxy`` emits via autolog) and
+    users who want extraction run ``dsagt start --enable-proxy``.
+
+    ``drain_session_traces`` queries proxy-shape traces in the session,
+    skips ones already tagged with ``dsagt.memory.extracted = "true"``,
+    formats each into the exchange shape the prompt expects, and tags
+    consumed traces so re-runs are idempotent.  Stored in the
+    ``episodic_memory`` ChromaDB collection.  Includes outlier
+    detection via per-category embedding centroids.
 
 Files on disk (in project directory):
   explicit_memories.yaml       — active user-confirmed facts
@@ -29,11 +51,9 @@ from pathlib import Path
 
 import numpy as np
 
-from dsagt.observability import llm_source
 import yaml
 
 from dsagt.knowledge import CollectionRoute, KnowledgeBase
-from dsagt.provenance import SESSION_LOG_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -176,13 +196,20 @@ class ExplicitMemory:
 # Episodic memory: constants
 # ---------------------------------------------------------------------------
 
-EPISODIC_COLLECTION = "episodic_memory"
+#: Project-local collection holding extracted-at-end-of-session facts,
+#: insights, and summaries.  Renamed from ``episodic_memory`` to match
+#: the user-facing terminology in ``dsagt info`` ("session memory").
+SESSION_MEMORY_COLLECTION = "session_memory"
 
-EPISODIC_MEMORY_ROUTE = CollectionRoute(
-    embedding_backend="api",
-    vector_db="chroma",
-    description="Episodic memory: extracted facts, summaries, and insights from sessions.",
-)
+#: Backwards-compat alias.  New code should use ``SESSION_MEMORY_COLLECTION``.
+EPISODIC_COLLECTION = SESSION_MEMORY_COLLECTION
+
+# session_memory inherits the kb's default backend / vector_db — it
+# used to hardcode ``embedding_backend="api"`` from when embedding was
+# assumed to be API-only, but that forced ``kb_remember`` to retry
+# against the (possibly invalid) embedding API even when the project
+# was otherwise configured for local embeddings, hanging the agent
+# for ~60s per call on the retry backoff.
 
 STOCK_CATEGORIES = {
     "quality_control": "Assessment or filtering of data quality, QC metrics, thresholds, pass/fail rates",
@@ -199,48 +226,184 @@ DEFAULT_SENSITIVITY = 0.35
 
 
 # ---------------------------------------------------------------------------
-# Session log reading
+# Session-trace reading (MLflow)
 # ---------------------------------------------------------------------------
 
-def load_session_log(trace_dir: Path) -> list[dict]:
-    """Read the session log JSONL file. Returns list of exchange dicts."""
-    log_path = trace_dir / SESSION_LOG_FILE
-    if not log_path.exists():
+#: Trace tag we set after consuming a trace into an extraction run, so
+#: re-runs of ``extract_session`` for the same session don't double-feed
+#: the same exchange into the LLM.  ``MlflowClient.set_trace_tag`` is the
+#: idempotent equivalent of the old ``drain → unlink`` pattern.
+DSAGT_MEMORY_PROCESSED_TAG = "dsagt.memory.extracted"
+
+
+def _safe_parse_json(value):
+    """Parse value as JSON; return as-is if already a dict/list."""
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trace_to_exchange(row) -> dict | None:
+    """Format one MLflow ``search_traces`` row as an extraction-prompt exchange.
+
+    The exchange shape mirrors what the proxy used to write to
+    ``session_log.jsonl`` so ``_render_conversation`` doesn't need to
+    change:
+
+        {"timestamp": ..., "trace_id": ..., "model": ...,
+         "new_messages": [...], "response": [...content blocks...]}
+
+    Returns None when the trace doesn't carry recognisable LLM-call
+    request/response shape (e.g. tool-execute spans, kb.* spans) so
+    callers can skip silently.
+    """
+    request = _safe_parse_json(row.get("request"))
+    response = _safe_parse_json(row.get("response"))
+
+    messages = request.get("messages") if isinstance(request, dict) else None
+    if not messages:
+        return None
+
+    response_blocks: list[dict] = []
+    if isinstance(response, dict):
+        # Anthropic shape: top-level ``content`` already a list of blocks.
+        if isinstance(response.get("content"), list):
+            response_blocks.extend(response["content"])
+        # OpenAI shape: choices[].message.content (str or block list) plus
+        # tool_calls (translated to tool_use blocks for prompt consistency).
+        for choice in response.get("choices") or []:
+            msg = choice.get("message") or {}
+            content = msg.get("content")
+            if isinstance(content, str) and content:
+                response_blocks.append({"type": "text", "text": content})
+            elif isinstance(content, list):
+                response_blocks.extend(content)
+            for tc in msg.get("tool_calls") or []:
+                func = tc.get("function") or {}
+                response_blocks.append({
+                    "type": "tool_use",
+                    "id": tc.get("id"),
+                    "name": func.get("name"),
+                    "input": _safe_parse_json(func.get("arguments")) or {},
+                })
+
+    return {
+        "timestamp": str(row.get("request_time") or ""),
+        "trace_id": row.get("trace_id") or "",
+        "model": (request.get("model") if isinstance(request, dict) else "") or "",
+        "new_messages": messages,
+        "response": response_blocks,
+    }
+
+
+#: Service name extraction reads from.  Restricting to ``dsagt-proxy``
+#: keeps the parser simple — every trace emitted by the proxy is
+#: guaranteed LiteLLM-autolog shape (``mlflow.spanInputs`` /
+#: ``mlflow.spanOutputs``), the same shape ``_trace_to_exchange`` parses.
+#: Native agent traces (claude-code, goose) skip extraction by design;
+#: see module docstring for why.
+DSAGT_EXTRACTION_SOURCE_SERVICE_NAME = "dsagt-proxy"
+
+
+def drain_session_traces(
+    project_name: str, session_id: str, mlflow_uri: str | None = None,
+) -> list[dict]:
+    """Pull untagged proxy-shape session traces, format as exchanges, tag.
+
+    Uses ``mlflow.search_traces`` to find traces in the project's
+    experiment whose ``mlflow.trace.session`` metadata matches
+    *session_id*, then filters to those emitted by ``dsagt-proxy``
+    (the only canonical-shape source — see module docstring).  Skips
+    ones already tagged with ``DSAGT_MEMORY_PROCESSED_TAG``; tags each
+    consumed trace so a subsequent extraction run on the same session
+    is a no-op.
+
+    Returns a list of exchange dicts in chronological order.  Empty
+    list when no experiment, no proxy-shape traces, or every trace was
+    already processed.  Importantly, an empty result when the user ran
+    without ``--enable-proxy`` is *expected*: native-OTel agents
+    (Claude Code, Goose) emit traces in shapes this parser doesn't
+    handle, and the design choice is to require the proxy for
+    extraction rather than maintain N per-agent parsers.
+    """
+    import os
+    import mlflow
+    from mlflow.tracking import MlflowClient
+
+    uri = mlflow_uri or os.environ.get("MLFLOW_TRACKING_URI")
+    if not uri:
+        logger.warning("MLFLOW_TRACKING_URI not set; cannot drain session traces")
         return []
 
-    entries = []
-    for line in log_path.read_text().splitlines():
-        line = line.strip()
-        if line:
-            entries.append(json.loads(line))
-    return entries
-
-
-def drain_session_log(trace_dir: Path) -> list[dict]:
-    """Atomically read and remove the session log."""
-    log_path = trace_dir / SESSION_LOG_FILE
-    if not log_path.exists():
+    mlflow.set_tracking_uri(uri)
+    client = MlflowClient(uri)
+    exp = client.get_experiment_by_name(project_name)
+    if exp is None:
         return []
 
-    consumed_path = log_path.with_suffix(".consumed")
-    log_path.rename(consumed_path)
+    df = mlflow.search_traces(
+        locations=[exp.experiment_id],
+        filter_string=f"metadata.`mlflow.trace.session` = '{session_id}'",
+        max_results=10000,
+        order_by=["timestamp_ms ASC"],
+    )
+    if df is None or df.empty:
+        return []
 
-    entries = []
-    for line in consumed_path.read_text().splitlines():
-        line = line.strip()
-        if line:
-            entries.append(json.loads(line))
+    exchanges: list[dict] = []
+    consumed_ids: list[str] = []
+    for _, row in df.iterrows():
+        tags = row.get("tags") or {}
+        if isinstance(tags, dict) and tags.get(DSAGT_MEMORY_PROCESSED_TAG) == "true":
+            continue
+        if not _trace_emitted_by(row, DSAGT_EXTRACTION_SOURCE_SERVICE_NAME):
+            continue
+        ex = _trace_to_exchange(row)
+        if ex:
+            exchanges.append(ex)
+        # Tag every proxy-shape trace we considered (parsed or not), so
+        # the next run doesn't re-inspect them.  Non-proxy traces are
+        # left untagged on purpose — a future extraction run that
+        # broadens the source filter will pick them up.
+        trace_id = row.get("trace_id")
+        if trace_id:
+            consumed_ids.append(trace_id)
 
-    consumed_path.unlink()
-    return entries
+    for trace_id in consumed_ids:
+        try:
+            client.set_trace_tag(trace_id, DSAGT_MEMORY_PROCESSED_TAG, "true")
+        except Exception as e:
+            # Tag failure is non-fatal — worst case we re-extract that trace
+            # next session, which is annoying but not data-destroying.
+            logger.debug("set_trace_tag(%s) failed: %s", trace_id, e)
+
+    return exchanges
 
 
-def delete_session_log(trace_dir: Path) -> bool:
-    """Delete the session log. Returns True if a file was deleted."""
-    log_path = trace_dir / SESSION_LOG_FILE
-    if log_path.exists():
-        log_path.unlink()
-        return True
+def _trace_emitted_by(row, service_name: str) -> bool:
+    """Return True when *row*'s root span carries ``service.name == name``.
+
+    MLflow's OTLP receiver flows the OTel resource attribute through to
+    each span's attributes, so every span in a trace from a given
+    process carries the same ``service.name``.  We check the first span
+    we find — the shape varies (Span object / dict / pandas Series)
+    across MLflow versions, mirroring info.py:_source_from_spans.
+    """
+    spans = row.get("spans") or []
+    try:
+        for span in spans:
+            attrs = getattr(span, "attributes", None)
+            if attrs is None and isinstance(span, dict):
+                attrs = span.get("attributes")
+            if attrs and attrs.get("service.name") == service_name:
+                return True
+    except (TypeError, AttributeError):
+        pass
     return False
 
 
@@ -370,7 +533,6 @@ def parse_extraction_response(response_text: str) -> dict:
 # LLM call
 # ---------------------------------------------------------------------------
 
-@llm_source("extraction")
 def call_extraction_llm(
     prompt: str,
     api_key: str,
@@ -560,7 +722,7 @@ def check_and_queue_outliers(
 # ---------------------------------------------------------------------------
 
 def extract_session(
-    trace_dir: Path,
+    project_name: str,
     kb: KnowledgeBase,
     api_key: str,
     model: str = "claude-sonnet-4-20250514",
@@ -570,9 +732,21 @@ def extract_session(
     session_id: str | None = None,
     runtime_dir: Path | None = None,
     outlier_sensitivity: float = 0.0,
+    mlflow_uri: str | None = None,
+    exchanges: list[dict] | None = None,
 ) -> dict:
-    """Extract memories from the session log and store in episodic_memory."""
-    exchanges = drain_session_log(trace_dir)
+    """Extract memories from a session's MLflow traces; store in episodic_memory.
+
+    *project_name* is the MLflow experiment name (matches ``DSAGT_PROJECT``).
+    *session_id* selects which traces to consume; required when *exchanges*
+    is not supplied.  Tests pass *exchanges* directly to bypass MLflow.
+    """
+    if not session_id:
+        return {"status": "empty", "facts": 0, "insights": 0,
+                "reason": "no_session_id"}
+
+    if exchanges is None:
+        exchanges = drain_session_traces(project_name, session_id, mlflow_uri)
     if not exchanges:
         return {"status": "empty", "facts": 0, "insights": 0}
 
@@ -580,15 +754,11 @@ def extract_session(
     response_text = call_extraction_llm(prompt, api_key, model, base_url, provider)
     extracted = parse_extraction_response(response_text)
 
-    if not session_id:
-        first_ts = exchanges[0].get("timestamp", "unknown")
-        session_id = f"session_{first_ts[:10]}"
-
     timestamps = [ex.get("timestamp", "") for ex in exchanges if ex.get("timestamp")]
     timestamp_start = min(timestamps) if timestamps else ""
     timestamp_end = max(timestamps) if timestamps else ""
-    call_ids = [ex.get("call_id", "") for ex in exchanges if ex.get("call_id")]
-    trace_refs = ",".join(call_ids) if call_ids else ""
+    trace_ids = [ex.get("trace_id", "") for ex in exchanges if ex.get("trace_id")]
+    trace_refs = ",".join(trace_ids) if trace_ids else ""
 
     batch_meta = {
         "session_id": session_id,
@@ -626,7 +796,6 @@ def extract_session(
             texts=fact_texts,
             collection=EPISODIC_COLLECTION,
             metadatas=fact_metas,
-            route=EPISODIC_MEMORY_ROUTE,
             return_embeddings=need_embeddings,
         )
         stored["facts"] = len(extracted["facts"])
@@ -634,7 +803,12 @@ def extract_session(
         stored["summary"] = 1 if extracted["summary"] else 0
 
         if need_embeddings:
-            project_dir = runtime_dir or trace_dir.parent
+            if runtime_dir is None:
+                raise ValueError(
+                    "extract_session: runtime_dir is required when "
+                    "outlier_sensitivity > 0 (centroids/suggestions live there)"
+                )
+            project_dir = runtime_dir
             centroids_obj = CategoryCentroids(project_dir / "centroids.json")
             queue = SuggestionQueue(project_dir / "suggestions.json")
 

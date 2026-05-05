@@ -39,7 +39,7 @@ from mcp.server.lowlevel import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 
 from dsagt.knowledge import EMBEDDER_REGISTRY, VECTORINDEX_REGISTRY, CollectionRoute, KnowledgeBase
-from dsagt.memory import EPISODIC_MEMORY_ROUTE, SuggestionQueue
+from dsagt.memory import SuggestionQueue
 from dsagt.memory import ExplicitMemory
 from dsagt.session import REGISTRY_DIR, _collection_exists, setup_runtime_kb  # noqa: F401
 
@@ -471,13 +471,12 @@ async def _handle_kb_remember(
     await asyncio.to_thread(
         kb.add_entries,
         texts=[text],
-        collection="episodic_memory",
+        collection="session_memory",
         metadatas=[{
             "source_type": "explicit_memory",
             "category": category,
             "session_id": session_id,
         }],
-        route=EPISODIC_MEMORY_ROUTE,
     )
 
     if promoted_from:
@@ -803,7 +802,17 @@ def main():
 
     No CLI arguments — the server derives everything from its environment.
     """
-    project_dir = Path(os.environ.get("DSAGT_PROJECT_DIR", "."))
+    # The server is launched as a subprocess by ``dsagt start``, which sets
+    # DSAGT_PROJECT_DIR.  Falling back to cwd silently dumps log files and
+    # state into whatever directory the user happened to be in (often the
+    # repo root) — fail fast so the misuse is obvious instead of silent.
+    project_dir_env = os.environ.get("DSAGT_PROJECT_DIR")
+    if not project_dir_env:
+        raise RuntimeError(
+            "DSAGT_PROJECT_DIR is not set. dsagt-knowledge-server is meant "
+            "to be launched by `dsagt start <project>`, not run directly."
+        )
+    project_dir = Path(project_dir_env)
 
     log_file = project_dir / "dsagt_knowledge_server.log"
     # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  See
@@ -832,22 +841,58 @@ def main():
     kb_config = config["knowledge"]
     emb_config = config["embedding"]
 
-    # Validate embedding credentials — we must not silently fall back to an
-    # endpoint the user hasn't explicitly configured.
-    model = emb_config["model"]
-    base_url = emb_config["base_url"]
-    api_key = emb_config["api_key"]
+    # Embedding backend selection.  Default is "local" (sentence-transformers,
+    # CPU, no creds) so a fresh ``dsagt init`` works zero-config.  Switching
+    # to "api" requires base_url + api_key — validate eagerly so a misconfig
+    # surfaces at MCP-server startup rather than at the first kb_search.
+    backend = (emb_config.get("backend") or "local").lower()
+    if backend not in ("local", "api"):
+        raise ValueError(
+            f"embedding.backend must be 'local' or 'api' (got {backend!r})"
+        )
 
-    if not base_url:
-        raise ValueError(
-            "embedding.base_url is required in dsagt_config.yaml. "
-            "Set it to your OpenAI-compatible embedding endpoint."
-        )
-    if not api_key or api_key.startswith("${"):
-        raise ValueError(
-            "embedding.api_key is required in dsagt_config.yaml. "
-            "Set it to your embedding API key, or export LLM_API_KEY."
-        )
+    # Only pass an explicit ``model`` when the user filled one in.  Empty /
+    # ``${EMBEDDING_MODEL}`` placeholders mean "use the backend's default"
+    # — LocalEmbeddingClient has its own default; APIEmbeddingClient has
+    # no default and will raise downstream, which is what we want for a
+    # misconfigured api setup.
+    #
+    # Cross-backend leakage guard: HuggingFace identifiers ("org/repo")
+    # and OpenAI-style aliases ("text-embedding-3-small") share the same
+    # ``EMBEDDING_MODEL`` env var in most setups.  When a user switches
+    # ``embedding.backend`` from api → local without also retargeting
+    # the env var, the api alias flows into LocalEmbeddingClient and
+    # produces a confusing 404 from HuggingFace at first embed.  Drop
+    # the override when it's clearly mis-shaped for the active backend.
+    raw_model = (emb_config.get("model") or "").strip()
+    embedder_kwargs: dict = {}
+    if raw_model and not raw_model.startswith("${"):
+        looks_hf = "/" in raw_model
+        if backend == "local" and not looks_hf:
+            logger.warning(
+                "Ignoring embedding.model=%r for backend=local (does not "
+                "look like a HuggingFace identifier).  Falling back to the "
+                "LocalEmbeddingClient default.",
+                raw_model,
+            )
+        else:
+            embedder_kwargs["model"] = raw_model
+    if backend == "api":
+        base_url = emb_config.get("base_url") or ""
+        api_key = emb_config.get("api_key") or ""
+        if not base_url:
+            raise ValueError(
+                "embedding.backend='api' requires embedding.base_url in "
+                "dsagt_config.yaml.  Either set it to your OpenAI-compatible "
+                "endpoint, or change backend to 'local'."
+            )
+        if not api_key or api_key.startswith("${"):
+            raise ValueError(
+                "embedding.backend='api' requires embedding.api_key in "
+                "dsagt_config.yaml.  Either fill it in (or export the "
+                "${EMBEDDING_API_KEY} env var), or change backend to 'local'."
+            )
+        embedder_kwargs.update({"base_url": base_url, "api_key": api_key})
 
     from dsagt.observability import init_tracing, configure_litellm_retries
     init_tracing("dsagt-knowledge-server")  # session_id picked up from DSAGT_SESSION_ID env
@@ -855,14 +900,20 @@ def main():
 
     runtime_kb_dir = setup_runtime_kb(REGISTRY_DIR / "kb_index", project_dir)
 
+    logger.info("Knowledge backend: %s", backend)
     kb = KnowledgeBase(
         index_dir=runtime_kb_dir,
         chunk_size=kb_config["chunk_size"],
         default_rerank=kb_config["rerank"],
-        default_embedder="api",
+        default_embedder=backend,
         default_index=kb_config["vector_db"],
-        embedder_kwargs={"model": model, "base_url": base_url, "api_key": api_key},
+        embedder_kwargs=embedder_kwargs,
     )
+    # Background-load the embedder so the model is ready when the
+    # agent's first kb call lands.  Without this, the first call pays
+    # the ~5–10s sentence-transformers import + SentenceTransformer
+    # construction cost, which looks like a hang to the operator.
+    kb.preload_default_embedder()
 
     server = create_knowledge_server(kb, runtime_dir=str(project_dir))
     try:

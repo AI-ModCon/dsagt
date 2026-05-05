@@ -315,8 +315,11 @@ Goose, Roo Code, and Cline.
 ]
 
 % ===== Legend (left of Agent) =====
+% Left edge aligned with the Knowledge<->ChromaDB vertical run at
+% x=-3.5.  Legend width is 14mm = 1.4 units, so center sits at
+% x=-3.5 + 0.7 = -2.8.
 \node[ext, minimum width=14mm, minimum height=5mm,
-      font=\scriptsize] (leg1) at (-4.2, 0.4)
+      font=\scriptsize] (leg1) at (-2.8, 0.4)
   {External};
 \node[svc, minimum width=14mm, minimum height=5mm,
       font=\scriptsize, below=1mm of leg1]
@@ -325,48 +328,68 @@ Goose, Roo Code, and Cline.
       font=\scriptsize, below=1mm of leg2]
   (leg3) {Artifacts};
 
-% ===== Row 1: Agent <-> Proxy <-> API =====
-\node[ext] (agent) at (-0.4,0) {Agent};
-\node[svc] (proxy) at (5.5,0) {LiteLLM\\Proxy};
-\node[ext] (api)   at (9,0) {API\\Endpoint};
+% ===== Row 1: Agent <-> API =====
+% Row 3 collections are placed on a uniform 2.2-unit grid (see Row 3
+% comment); every other row's x-coordinates are derived from that grid.
+% Agent is centered between Knowledge (-0.9) and Registry (3.5) at x=1.3.
+% API is symmetric around the figure's central column at x=3.5, landing
+% at x=5.7.  Both boxes narrowed to 18mm to match the artifact row.
+\node[ext, minimum width=18mm] (agent) at (1.3,0) {Agent};
+\node[ext, minimum width=18mm] (api)   at (5.7,0) {API\\Endpoint};
 
-\draw[bilink] (agent) -- (proxy);
-\draw[bilink] (proxy) -- (api);
+\draw[bilink] (agent) -- (api);
 
-% ===== Row 2: MCP servers + Proxy outputs =====
-\node[svc] (knowledge) at (-2.0,-2) {Knowledge\\Server};
-\node[svc] (registry)  at (1.2,-2)  {Registry\\Server};
-\node[art] (mlflow)    at (4.4,-2)  {MLflow\\Traces};
+% ===== Row 2: MCP servers + MLflow + dsagt-run =====
+% Knowledge centered above (Explicit, Domain); Registry above (Skills,
+% Tool Specs); MLflow directly above Episodic; dsagt-run directly above
+% Tool Records.  All x-coordinates fall out of the row-3 grid below.
+\node[svc] (knowledge) at (-0.9,-2) {Knowledge\\Server};
+\node[svc] (registry)  at (3.5,-2)  {Registry\\Server};
+\node[art] (mlflow)    at (6.8,-2)  {MLflow\\Traces};
+% dsagt-run width matches the artifact boxes (18mm) so it visually
+% pairs with MLflow Traces and Tool Records on either side.
+\node[svc, minimum width=18mm] (dsagtrun) at (9.0,-2) {\texttt{dsagt-run}};
 
-% Agent -> MCP servers
-\draw[link] (agent.south) -- ++(0,-0.3) -| (knowledge.north);
-\draw[link] (agent.south) -- ++(0,-0.3) -| (registry.north);
-\node[lbl] at (-0.4,-1.2) {MCP};
+% Agent <-> MCP servers (symmetric forks; bidirectional because MCP is
+% request/response — the server replies travel back to the agent).
+\draw[bilink] (agent.south) -- ++(0,-0.3) -| (knowledge.north);
+\draw[bilink] (agent.south) -- ++(0,-0.3) -| (registry.north);
+% MCP label centered below the agent, between the two MCP-server forks.
+\node[lbl] at (1.3,-1.2) {MCP};
 
-% Proxy -> stores
-\draw[link] (proxy.south) -- ++(0,-0.3) -| (mlflow.north);
+% Agent -> MLflow + dsagt-run (fork off the same trunk as the MCP servers,
+% drop vertically directly above each box).
+\draw[link] (agent.south) -- ++(0,-0.3) -| (mlflow.north);
+\draw[link] (agent.south) -- ++(0,-0.3) -| (dsagtrun.north);
 
 % Registry -> MLflow (direct horizontal hop, same row)
 \draw[link] (registry.east) -- (mlflow.west);
 
 % Knowledge -> MLflow (routed under row 2 to avoid the registry box).
-% Stem x=-1.45 = midway between knowledge->domain arrow (x=-2.0) and the
-% lower-right corner of Knowledge Server (x=-0.9).
-% End-stem x=3.95 = midway between the lower-left corner of MLflow Traces
-% (x=3.5) and the mlflow->episodic arrow (x=4.4).
+% Stem x=0.0 = right of the knowledge->domain diagonal (which exits
+% knowledge.south near x=-0.57) but still inside the Knowledge Server's
+% south edge (spans x=-2.0 to x=0.2).
+% End-stem x=6.15 = on MLflow's south edge, offset left of the
+% mlflow->episodic arrow at x=6.8 to avoid overlap.
 % Horizontal run y=-3 = midway between row 2 (y=-2) and row 3 (y=-4).
 \draw[link, rounded corners=3pt]
-  (-1.45,-2.6) -- (-1.45,-3) -- (3.95,-3) -- (3.95,-2.6);
+  (0.0,-2.6) -- (0.0,-3) -- (6.15,-3) -- (6.15,-2.6);
 
 % ===== Row 3: Collections =====
-\node[art] (domain)   at (-2.0,-4) {Domain\\Knowledge};
-\node[art] (skills)   at (0.2,-4)  {Skills};
-\node[art] (tools)    at (2.2,-4)  {Tool\\Specs};
-\node[art] (episodic) at (4.4,-4)  {Episodic\\Memory};
-\node[art] (history)  at (6.6,-4)  {Tool\\Records};
-\node[art] (explicit) at (8.8,-4)  {Explicit\\Memory};
+% Six artifact boxes on a uniform 2.2-unit grid (left edge to left edge):
+% Explicit Memory, Domain Knowledge, Skills, Tool Specs, Episodic Memory,
+% Tool Records.  Knowledge MCP server feeds Explicit Memory via
+% kb_remember; dsagt-run wrapper writes Tool Records to the trace archive
+% on every registered-tool invocation.
+\node[art] (explicit) at (-2.0,-4) {Explicit\\Memory};
+\node[art] (domain)   at (0.2,-4)  {Domain\\Knowledge};
+\node[art] (skills)   at (2.4,-4)  {Skills};
+\node[art] (tools)    at (4.6,-4)  {Tool\\Specs};
+\node[art] (episodic) at (6.8,-4)  {Episodic\\Memory};
+\node[art] (history)  at (9.0,-4)  {Tool\\Records};
 
-% Knowledge -> domain knowledge and ChromaDB (only two connections)
+% Knowledge -> explicit memory (kb_remember) and domain knowledge
+\draw[link] (knowledge) -- (explicit);
 \draw[link] (knowledge) -- (domain);
 
 % Registry -> skills and tool specs
@@ -376,15 +399,14 @@ Goose, Roo Code, and Cline.
 % MLflow -> episodic memory
 \draw[link] (mlflow) -- (episodic);
 
-% Proxy -> Tool Records (drawn here so history node is defined;
-% passes through old records box position at (6.6,-2))
-\draw[link] (proxy.south) -- ++(0,-0.3) -| (history.north);
-
-% Proxy -> explicit memory (diagonal)
-\draw[link] ([yshift=-3mm]proxy.east) -- (explicit.north);
+% dsagt-run -> Tool Records (vertical drop, mirrors MLflow -> Episodic)
+\draw[link] (dsagtrun) -- (history);
 
 % ===== Row 4: ChromaDB bus =====
-\node[db, minimum width=126mm] (chroma) at (3.4,-5.8)
+% Centered at x=3.5 (the row-3 midpoint) and 130mm wide so chroma.west
+% lands exactly at x=-3.0, where the knowledge<->chroma bend already
+% terminates (no spurious final hop).
+\node[db, minimum width=130mm] (chroma) at (3.5,-5.8)
   {ChromaDB Vector Index Collections};
 
 \foreach \n in {domain, skills, tools, episodic,
@@ -392,22 +414,27 @@ Goose, Roo Code, and Cline.
     \draw[link] (\n) -- (\n |- chroma.north);
 }
 
-% Knowledge <-> ChromaDB (bidirectional, bent left — clear path)
+% Knowledge <-> ChromaDB (bidirectional, bent left — clear path).
+% Bend offset is -1.5 (not -1.0) so the path's final horizontal segment
+% into chroma.west has nonzero length; otherwise the |- operator would
+% land on top of chroma.west with no clear direction for the arrowhead.
 \draw[bilink, rounded corners=3pt]
-  (knowledge.west) -- ++(-1.0,0) |- (chroma.west);
+  (knowledge.west) -- ++(-1.5,0) |- (chroma.west);
 
 \end{tikzpicture}%
 }% end resizebox
 \caption{%
   DSAgt architecture.
-  The agent communicates with the LLM via a bidirectional
-  LiteLLM proxy that captures OTel traces to MLflow,
-  tool execution records, and explicit memory entries.
-  Two MCP servers handle knowledge base search (left) and
-  tool/skill registration (right).
+  The agent communicates directly with the LLM API endpoint;
+  its native OpenTelemetry exporter writes traces to a
+  per-project MLflow store, and the \texttt{dsagt-run}
+  tool wrapper records each tool invocation to the trace
+  archive.
+  Two MCP servers handle knowledge base search and explicit
+  memory writes (left) and tool/skill registration (right).
   Six independently partitioned ChromaDB collections hold
-  domain knowledge, skills, tool specs, episodic memory,
-  tool records, and explicit memory, each with its own
+  explicit memory, domain knowledge, skills, tool specs,
+  episodic memory, and tool records, each with its own
   embedding backend and vector-DB route.
   The knowledge server dispatches queries to the appropriate
   collection and applies optional cross-encoder reranking

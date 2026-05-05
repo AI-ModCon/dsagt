@@ -31,9 +31,9 @@ from pathlib import Path
 
 import yaml
 
-from dsagt import observability as _observability
-from dsagt.memory import delete_session_log, extract_session
+from dsagt.memory import extract_session
 from dsagt.knowledge import KnowledgeBase
+from dsagt.provenance import index_trace_archive
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-VALID_AGENTS = ("claude", "goose", "roo", "cline", "codex")
+VALID_AGENTS = ("claude", "goose", "roo", "cline", "codex", "opencode")
 VALID_MLFLOW_BACKENDS = ("sqlite", "flat-file")
 
 DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
@@ -50,12 +50,29 @@ REGISTRY_DIR = Path.home() / ".dsagt"
 REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
 
 DEFAULTS = {
+    # ``llm`` block uses ${VAR} placeholders so per-project config
+    # references the user's shell env at resolve time.  In BYOA mode
+    # (the default), agent_env's proxy_port gate at agents/__init__.py
+    # short-circuits the env_overrides call, so this block sits dormant
+    # — no agent env-var leaks.  In proxy mode (--enable-proxy),
+    # env_overrides reads these values to translate into per-agent env
+    # vars and proxy_server.py reads them to render its YAML.
     "llm": {
-        "model": "claude-sonnet-4-20250514",
-        "base_url": "",
+        "provider": "${LLM_PROVIDER}",
+        "model": "${LLM_MODEL}",
+        "base_url": "${LLM_BASE_URL}",
+        "api_key": "${LLM_API_KEY}",
     },
     "embedding": {
-        "model": "nomic-embed-text",
+        # Default backend: "local" — sentence-transformers, CPU-side, no
+        # API credentials needed.  Switch to "api" to route through
+        # litellm to a hosted endpoint (then fill in base_url / api_key
+        # below and pick a model name your endpoint serves).
+        # Local default is the HuggingFace identifier ``LocalEmbeddingClient``
+        # downloads; user can override with any sentence-transformers
+        # repo (e.g. ``BAAI/bge-large-en-v1.5`` for higher quality).
+        "backend": "local",
+        "model": "BAAI/bge-small-en-v1.5",
         "base_url": "",
     },
     "mlflow": {
@@ -111,47 +128,31 @@ def _deep_merge(defaults: dict, overrides: dict) -> dict:
     return result
 
 
-def default_config_content(project_name: str, agent: str | None = None) -> str:
-    """Generate default dsagt_config.yaml content for a new project.
+def default_config_content(
+    project_name: str,
+    agent: str,
+    mlflow_port: int,
+) -> str:
+    """Generate the internal dsagt_config.yaml for a new project.
 
-    LLM / embedding fields are written as ``${VAR}`` references rather than
-    literal placeholders so a developer who has filled in DSAGT/.env once
-    can ``dsagt init`` any number of new projects without re-typing keys.
-    ``resolve_env_vars`` substitutes values at config-load time.
+    Internal-only: users don't edit this.  Holds the project's
+    embedding / mlflow / knowledge / extraction settings plus the
+    pinned MLflow port so MCP servers (started fresh per agent run)
+    know where to log without relying on shell-env inheritance.
 
-    ``agent`` is optional: when ``None``, the YAML omits the ``agent:``
-    field and ``dsagt start`` requires ``--agent X`` on first invocation.
-    On that first start the agent name is persisted back into the YAML
-    and subsequent starts don't need the flag.
+    User credentials are NOT here — the agent reads them from the
+    user's shell env directly (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc).
     """
-    header = (
-        "# llm.provider: LiteLLM provider prefix (selects request format + auth).\n"
-        "#   Common: openai, anthropic, bedrock, vertex_ai, azure, gemini,\n"
-        "#   ollama, mistral, groq, deepseek.\n"
-        "#   Full list: https://docs.litellm.ai/docs/providers\n"
-    )
-    body: dict = {"project": project_name}
-    if agent is not None:
-        body["agent"] = agent
-    body.update({
-        "llm": {
-            "provider": "${LLM_PROVIDER}",
-            "model": "${LLM_MODEL}",
-            "base_url": "${LLM_BASE_URL}",
-            "api_key": "${LLM_API_KEY}",
-        },
-        "embedding": {
-            "provider": "${EMBEDDING_PROVIDER}",
-            "model": "${EMBEDDING_MODEL}",
-            "base_url": "${EMBEDDING_BASE_URL}",
-            "api_key": "${EMBEDDING_API_KEY}",
-        },
-        "mlflow": DEFAULTS["mlflow"],
+    body: dict = {
+        "project": project_name,
+        "agent": agent,
+        "mlflow": {**DEFAULTS["mlflow"], "port": mlflow_port},
+        "embedding": dict(DEFAULTS["embedding"]),
         "knowledge": DEFAULTS["knowledge"],
         "categories": DEFAULTS["categories"],
         "extraction": DEFAULTS["extraction"],
-    })
-    return header + yaml.dump(body, default_flow_style=False, sort_keys=False)
+    }
+    return yaml.dump(body, default_flow_style=False, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -237,13 +238,6 @@ def _validate(config: dict) -> None:
     if backend and backend not in VALID_MLFLOW_BACKENDS:
         raise ValueError(f"'mlflow.backend' must be one of {VALID_MLFLOW_BACKENDS}, got '{backend}'")
 
-    if not config.get("llm", {}).get("provider"):
-        raise ValueError(
-            "'llm.provider' is required in dsagt_config.yaml — set it to a "
-            "LiteLLM provider prefix (openai, anthropic, bedrock, ...). "
-            "See https://docs.litellm.ai/docs/providers"
-        )
-
 
 # ---------------------------------------------------------------------------
 # Project initialization
@@ -268,44 +262,58 @@ def _collection_exists(path: Path) -> bool:
 
 
 def setup_runtime_kb(base_index_dir: Path, runtime_dir: Path) -> Path:
-    """Symlink base indexes into a project's kb_index directory.
+    """Copy base KB collections into a project's kb_index directory.
 
-    Creates ``<runtime_dir>/kb_index`` if missing. Each collection under
-    *base_index_dir* that looks populated gets a symlink; existing entries
-    are left alone so a project can override a base collection locally.
+    Creates ``<runtime_dir>/kb_index`` if missing.  For each collection
+    under *base_index_dir* that looks populated and whose project-local
+    twin doesn't already exist, **copies** (not symlinks) the entire
+    collection directory into the project's kb_index.
+
+    Why copy instead of symlink: different projects on the same machine
+    may run different dsagt versions, and a symlink would let one
+    project's ``dsagt setup-kb --rebuild`` mutate every project's view
+    of bundled content.  A copy pins each project to whatever bundled
+    content was current when the project first ran.
+
+    Existing project-local collections are left alone, so an agent's
+    saved tools / skills / ingests are preserved across re-runs.
     """
     runtime_kb_dir = runtime_dir / "kb_index"
     runtime_kb_dir.mkdir(parents=True, exist_ok=True)
 
-    if base_index_dir.exists():
-        for collection_dir in base_index_dir.iterdir():
-            if _collection_exists(collection_dir):
-                dest = runtime_kb_dir / collection_dir.name
-                if not dest.exists():
-                    dest.symlink_to(collection_dir.resolve())
+    if not base_index_dir.exists():
+        return runtime_kb_dir
+
+    for collection_dir in base_index_dir.iterdir():
+        if not _collection_exists(collection_dir):
+            continue
+        dest = runtime_kb_dir / collection_dir.name
+        if dest.exists():
+            continue
+        # Resolve in case the source collection itself is a symlink
+        # (older projects that used the symlink path).
+        shutil.copytree(collection_dir.resolve(), dest)
 
     return runtime_kb_dir
 
 
 def init_project(
     project_name: str,
-    agent: str | None = None,
+    agent: str,
+    mlflow_port: int | None = None,
     location: Path | None = None,
-) -> Path:
+) -> tuple[Path, int]:
     """Create a new project directory with default config and subdirectories.
 
-    The project's data layer (``dsagt_config.yaml``, ``trace_archive/``,
-    ``mlflow/``, ``skills/``, runtime KB) is agent-agnostic.  The ``agent``
-    parameter is optional:
+    BYOA model: at init we lay down everything the user needs to point
+    their own agent process at our MCP servers.  Picks (or honors) an
+    MLflow port and writes it to the internal ``dsagt_config.yaml`` so
+    later ``dsagt mlflow <project>`` and the MCP-server children all
+    agree on where traces land.
 
-    - If supplied: the YAML records ``agent: X`` as the project's default,
-      and the agent's static files (instructions, state directories) are
-      written immediately so the user can edit them before first start.
-    - If omitted: the YAML has no ``agent:`` field; ``dsagt start`` will
-      require ``--agent X`` on first invocation and persist the choice
-      into the YAML at that point.
+    Returns ``(project_dir, mlflow_port)``.
     """
-    if agent is not None and agent not in VALID_AGENTS:
+    if agent not in VALID_AGENTS:
         raise ValueError(f"agent must be one of {VALID_AGENTS}, got '{agent}'")
 
     pdir = (location or DEFAULT_PROJECTS_BASE) / project_name
@@ -317,23 +325,35 @@ def init_project(
     # `tools/` and `tools/code/` are created by ToolRegistry on first server
     # startup so bundled tools get copied in (it short-circuits if tools/
     # already exists).
-    for subdir in ("trace_archive", "mlflow", "skills"):
+    for subdir in ("trace_archive", "mlflow", "skills", ".dsagt"):
         (pdir / subdir).mkdir(parents=True, exist_ok=True)
 
     setup_runtime_kb(REGISTRY_DIR / "kb_index", pdir)
 
-    (pdir / "dsagt_config.yaml").write_text(default_config_content(project_name, agent))
+    # If the shared KB hasn't been built yet, warn — the project's
+    # kb_index/ will be empty until ``dsagt setup-kb`` runs.  Don't
+    # rebuild here: that conflicts with the contract that ``dsagt
+    # init`` does no embedding work.
+    shared_kb = REGISTRY_DIR / "kb_index"
+    if not shared_kb.exists() or not any(
+        _collection_exists(c) for c in shared_kb.iterdir()
+    ):
+        print(
+            f"  Warning: shared KB at {shared_kb} is empty — "
+            "run `dsagt setup-kb` to build bundled tools and skills "
+            "before launching your agent.",
+            flush=True,
+        )
 
-    if agent is not None:
-        # Eager static-record write so the user can edit instructions
-        # files between init and start.  Empty config dict is fine — the
-        # static functions don't read it today (signature reserved for
-        # future project-specific instruction header injection).
-        from dsagt.agents import static_agent_record
-        static_agent_record({}, agent, pdir)
+    if mlflow_port is None:
+        mlflow_port = pick_free_port()
+
+    (pdir / "dsagt_config.yaml").write_text(
+        default_config_content(project_name, agent, mlflow_port)
+    )
 
     register_project(project_name, pdir)
-    return pdir
+    return pdir, mlflow_port
 
 
 def persist_agent_choice(project_name: str, agent: str) -> None:
@@ -402,14 +422,6 @@ def remove_project(project_name: str, keep_files: bool = False) -> Path:
 # Service start / stop
 # ---------------------------------------------------------------------------
 
-def _llm_api_key_env(config: dict) -> dict:
-    """Return {"LLM_API_KEY": key} if the config has a resolved LLM API key."""
-    key = config.get("llm", {}).get("api_key", "")
-    if key and not key.startswith("${"):
-        return {"LLM_API_KEY": key}
-    return {}
-
-
 def _embedding_provider(config: dict) -> str:
     """Resolve embedding provider with a fallback for two cases:
 
@@ -427,11 +439,11 @@ def _embedding_provider(config: dict) -> str:
 # Service supervision
 #
 # Each ``dsagt start`` writes ``<project>/.runtime`` containing the random
-# ports it picked + the PIDs of the proxy and MLflow.  The next start (or
-# ``dsagt stop``) reads that file and reaps anything still alive whose
-# command line still names what we started — see ``reap_runtime``.  Random
-# ports + a project-local state file means we never have to ask "is this
-# listener on port 4000 mine?" — the file IS the answer.
+# port MLflow bound + its pid.  The next start (or ``dsagt stop``) reads
+# that file and reaps anything still alive whose command line still names
+# ``mlflow`` — see ``reap_runtime``.  Random ports + a project-local
+# state file means we never have to ask "is this listener on port 5000
+# mine?" — the file IS the answer.
 # ---------------------------------------------------------------------------
 
 #: Seconds to wait for SIGTERM-ed processes to exit before SIGKILL.  Long
@@ -463,8 +475,8 @@ def pick_free_port() -> int:
 
     There's a microsecond race between this returning and the subprocess
     binding the same port — acceptable on a single-user dev machine.  If
-    the subprocess fails to bind, the proxy.log tail surfaces the error
-    via ``_wait_for_proxy``.
+    the subprocess fails to bind, the mlflow.log tail surfaces the error
+    via ``_wait_for_mlflow``.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
@@ -532,31 +544,51 @@ def reap_runtime(runtime_file: Path) -> list[str]:
 
 
 def start_services(config: dict) -> dict[str, int]:
-    """Start the proxy and MLflow.  Returns ``{"mlflow": port, "proxy": port}``.
+    """Start MLflow, optionally start the dsagt-proxy too.
 
-    Picks free ports via the kernel, reaps any leftovers from a prior
-    crashed run, writes ``<project>/.runtime`` (pids + ports + start time),
-    waits for the proxy to accept connections.  Mutates ``config["mlflow"]``
-    and ``config["proxy"]`` in place to record the chosen ports so
-    downstream code (``agents.py`` builds env URLs from those keys) sees
-    the actually-bound values.
+    Picks free ports (or honors pre-set ones), reaps any leftovers from a
+    prior crashed run, writes ``<project>/.runtime`` (pids + ports +
+    start time), and waits for each service to accept connections.
+
+    Returns ``{"mlflow": port, "proxy": port}`` when the proxy was
+    requested (``"proxy"`` key present in config), else just
+    ``{"mlflow": port}``.
+
+    The proxy is opt-in via ``dsagt start --enable-proxy``.  Used for
+    agents that don't natively emit OTel traces with full LLM-call
+    payloads (cline, roo, codex partial) — the proxy interposes on their
+    LLM calls and produces traces on their behalf via the same OTLP path
+    Claude Code uses natively.  See ``commands/proxy_server.py``.
     """
     pdir = Path(config["project_dir"])
     runtime_file = pdir / ".runtime"
 
     reap_runtime(runtime_file)  # clear leftovers from any prior crashed run
 
-    # Honor a pre-set port (CLI overrides set it on config before calling),
-    # otherwise let the kernel pick a free one.
+    # KB bootstrap is intentionally NOT here.  The contract:
+    #   * ``dsagt setup-kb`` builds shared ~/.dsagt/kb_index/ (one-time
+    #     per machine, the only place embedding work happens for bundled
+    #     content)
+    #   * ``dsagt init`` copies the shared collections into the project
+    #   * ``dsagt start`` does no embedding work, no implicit rebuild,
+    #     no sentinel checks — just spawns services
+    # If the project KB is empty or stale, the MCP servers surface a
+    # clear "run dsagt setup-kb" error rather than silently rebuilding.
+
     mlflow_port = config.get("mlflow", {}).get("port") or pick_free_port()
-    proxy_port = config.get("proxy", {}).get("port") or pick_free_port()
     config.setdefault("mlflow", {})["port"] = mlflow_port
-    config.setdefault("proxy", {})["port"] = proxy_port
+
+    proxy_requested = "proxy" in config
+    proxy_port = None
+    if proxy_requested:
+        proxy_port = config["proxy"].get("port") or pick_free_port()
+        config["proxy"]["port"] = proxy_port
 
     session_id = config.get(
         "session_id",
         f"{config['project']}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
     )
+    config["session_id"] = session_id
 
     mlflow_log = pdir / "mlflow.log"
     mlflow_proc = subprocess.Popen(
@@ -565,28 +597,94 @@ def start_services(config: dict) -> dict[str, int]:
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
-    logger.info("MLflow started (pid %d) → http://localhost:%d", mlflow_proc.pid, mlflow_port)
+    logger.info(
+        "MLflow started (pid %d) → http://localhost:%d",
+        mlflow_proc.pid, mlflow_port,
+    )
 
-    proxy_cmd = [
+    pids = {"mlflow": mlflow_proc.pid}
+    ports = {"mlflow": mlflow_port}
+
+    proxy_proc = None
+    if proxy_requested:
+        # MLflow has to be up before the proxy starts because the proxy's
+        # init_tracing() calls mlflow.set_experiment() during startup.
+        _wait_for_mlflow(mlflow_port, mlflow_proc, mlflow_log, timeout=30.0)
+
+        proxy_proc = _start_proxy(config, pdir, mlflow_port, proxy_port, session_id)
+        pids["proxy"] = proxy_proc.pid
+        ports["proxy"] = proxy_port
+
+    runtime_file.write_text(json.dumps({
+        "pids": pids,
+        "ports": ports,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }, indent=2) + "\n")
+
+    if not proxy_requested:
+        _wait_for_mlflow(mlflow_port, mlflow_proc, mlflow_log, timeout=30.0)
+    if proxy_proc is not None:
+        _wait_for_proxy(proxy_port, proxy_proc, pdir / "proxy.log", timeout=45.0)
+
+    return ports
+
+
+def _start_proxy(
+    config: dict, pdir: Path, mlflow_port: int, proxy_port: int, session_id: str,
+) -> subprocess.Popen:
+    """Spawn the dsagt-proxy subprocess.
+
+    Forwards LLM + embedding requests using the user's configured
+    upstream credentials (LLM_API_KEY / EMBEDDING_API_KEY from
+    os.environ) and emits OTLP traces to MLflow via init_tracing.
+
+    Crashes loudly if required config keys are missing — better than
+    spawning a half-configured proxy that 500s on the first agent
+    request.
+    """
+    llm = config.get("llm") or {}
+    emb = config.get("embedding") or {}
+    for required in ("model", "base_url", "provider"):
+        if not llm.get(required):
+            raise RuntimeError(
+                f"--enable-proxy needs config.llm.{required} (got {llm.get(required)!r})"
+            )
+
+    cmd = [
         sys.executable, "-m", "dsagt.commands.proxy_server",
         "--port", str(proxy_port),
-        "--records-dir", str(pdir / "trace_archive"),
-        "--session", session_id,
         "--mlflow-url", f"http://localhost:{mlflow_port}",
-        "--model", config["llm"]["model"],
-        "--base-url", config["llm"]["base_url"],
-        "--provider", config["llm"]["provider"],
-        # Embedding routing through the proxy is symmetric with LLM: MCP
-        # servers send embedding requests to localhost:<proxy_port>, the
-        # proxy translates to whatever upstream the user configured.  See
-        # commands/proxy_server.py _generate_config.
-        "--embedding-model", config["embedding"]["model"],
-        "--embedding-base-url", config["embedding"]["base_url"],
-        "--embedding-provider", _embedding_provider(config),
+        "--project", config["project"],
+        "--session", session_id,
+        "--records-dir", str(pdir / "trace_archive"),
+        "--model", llm["model"],
+        "--base-url", llm["base_url"],
+        "--provider", llm["provider"],
     ]
+    # Embedding routing through the proxy is only relevant when the
+    # project's embedding backend is ``api`` — in ``local`` mode the
+    # knowledge MCP server uses sentence-transformers in-process and
+    # never makes HTTP embedding calls, so the proxy doesn't need an
+    # embedding route at all.
+    if (emb.get("backend") or "local").lower() == "api":
+        for required in ("model", "base_url", "provider"):
+            if not emb.get(required):
+                raise RuntimeError(
+                    f"--enable-proxy with embedding.backend=api needs "
+                    f"config.embedding.{required} (got {emb.get(required)!r})"
+                )
+        cmd.extend([
+            "--embedding-model", emb["model"],
+            "--embedding-base-url", emb["base_url"],
+            "--embedding-provider", emb["provider"],
+        ])
     proxy_log = pdir / "proxy.log"
+    # The proxy needs the *real* upstream credentials in env (not the
+    # sentinel agents see).  os.environ already has them from the user's
+    # shell or .env file.  We pass DSAGT_PROJECT explicitly so
+    # _resolve_experiment_id picks the right experiment.
     proxy_proc = subprocess.Popen(
-        proxy_cmd,
+        cmd,
         stdout=open(proxy_log, "w"),
         stderr=subprocess.STDOUT,
         env={
@@ -594,46 +692,28 @@ def start_services(config: dict) -> dict[str, int]:
             "DSAGT_PROJECT": config["project"],
             "DSAGT_PROJECT_DIR": str(pdir),
             "DSAGT_SESSION_ID": session_id,
-            # _DSAGTMlflowLogger reads this in the proxy subprocess to stamp
-            # dsagt.agent on every trace.  agent_env() sets it for the agent
-            # subprocess; the proxy is a sibling subprocess and needs its own
-            # copy — same contract, different process tree.
-            "DSAGT_AGENT": config["agent"],
-            # DSAGT callback compares this against each request's model to
-            # detect sidechannel/wildcard hits.  Env var name owned by
-            # dsagt.observability — importing keeps the contract in one place.
-            _observability.SIDECHANNEL_PRIMARY_MODEL_ENV: config["llm"]["model"],
-            "DSAGT_EXTRACTION_THRESHOLD": str(
-                config.get("extraction", {}).get("threshold", 0)
-            ),
-            **_llm_api_key_env(config),
+            "DSAGT_AGENT": config.get("agent", ""),
+            "MLFLOW_TRACKING_URI": f"http://localhost:{mlflow_port}",
         },
         start_new_session=True,
     )
-    logger.info("Proxy started (pid %d) → http://localhost:%d", proxy_proc.pid, proxy_port)
-
-    runtime_file.write_text(json.dumps({
-        "pids": {"mlflow": mlflow_proc.pid, "proxy": proxy_proc.pid},
-        "ports": {"mlflow": mlflow_port, "proxy": proxy_port},
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }, indent=2) + "\n")
-
-    # Wait for the proxy to accept connections.  Without this the agent
-    # launches into a half-broken environment and its first LLM call hits
-    # ECONNREFUSED.  30s is generous: LiteLLM's transitive imports
-    # (transformers, torch deps) take 10-15s on warm cache, longer cold.
-    _wait_for_proxy(proxy_port, proxy_proc, proxy_log, timeout=30.0)
-
-    return {"mlflow": mlflow_port, "proxy": proxy_port}
+    logger.info(
+        "Proxy started (pid %d) → http://localhost:%d",
+        proxy_proc.pid, proxy_port,
+    )
+    return proxy_proc
 
 
 def _wait_for_proxy(
-    port: int, proc: subprocess.Popen, log_path: Path, timeout: float = 30.0,
+    port: int, proc: subprocess.Popen, log_path: Path, timeout: float = 45.0,
 ) -> None:
-    """Poll ``port`` until the proxy answers, the subprocess dies, or we time out.
+    """Poll *port* until the proxy answers, the subprocess dies, or we time out.
 
-    Raises ``RuntimeError`` on failure with the proxy.log tail attached, so
-    the failure surfaces at ``dsagt start`` rather than at first agent message.
+    Generous default (45s) because LiteLLM's transitive imports
+    (transformers/torch dependencies) can take 10-15s on warm cache,
+    longer cold.  Raises with proxy.log tail attached so
+    ``dsagt start`` surfaces the failure instead of the agent's first
+    LLM call hitting ECONNREFUSED.
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -654,6 +734,34 @@ def _wait_for_proxy(
     )
 
 
+def _wait_for_mlflow(
+    port: int, proc: subprocess.Popen, log_path: Path, timeout: float = 30.0,
+) -> None:
+    """Poll *port* until MLflow answers, the subprocess dies, or we time out.
+
+    Raises ``RuntimeError`` on failure with the mlflow.log tail attached,
+    so the failure surfaces at ``dsagt start`` rather than at the agent's
+    first OTLP export attempt.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            tail = log_path.read_text().splitlines()[-20:] if log_path.exists() else []
+            raise RuntimeError(
+                f"MLflow exited with code {proc.returncode} before becoming ready.\n  "
+                + "\n  ".join(tail)
+            )
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return
+        except (ConnectionRefusedError, OSError):
+            time.sleep(0.25)
+    raise RuntimeError(
+        f"MLflow did not accept connections on port {port} within {timeout:.0f}s. "
+        f"See {log_path} for details."
+    )
+
+
 def stop_services(project_name: str) -> list[str]:
     """User-invoked teardown.  Returns ``[]`` when nothing was running."""
     return reap_runtime(project_dir(project_name) / ".runtime")
@@ -665,38 +773,76 @@ def stop_services(project_name: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def run_extraction(project_name: str) -> dict:
-    """Run memory extraction for a project and clean up the session log."""
+    """Two-phase post-session work, both best-effort.
+
+    1. **Tool-execution indexing** (always): embed every JSON record in
+       ``<pdir>/trace_archive/`` into the project's ``tool_use``
+       collection so the agent can semantic-search prior tool runs in
+       future sessions.  Pure embedding work — no LLM call, no
+       ``DSAGT_MEMORY_*`` needed.  Local-backend embeddings (BYOA
+       default) need no credentials at all.
+    2. **LLM-based memory extraction** (gated on ``DSAGT_MEMORY_*``):
+       summarises MLflow LLM-call traces into episodic memories.
+       Currently reads only ``service.name == "dsagt-proxy"`` traces
+       (see ``memory.DSAGT_EXTRACTION_SOURCE_SERVICE_NAME``); in BYOA
+       these don't exist yet, so this phase is effectively dormant
+       until Phase 2 / native-shape parsers land.
+    """
     config = load_config(project_name)
     pdir = Path(config["project_dir"])
-    trace_dir = pdir / "trace_archive"
-
-    llm_config = config.get("llm", {})
-    api_key = llm_config.get("api_key", "")
-    model = llm_config.get("model", "claude-sonnet-4-20250514")
-    base_url = llm_config.get("base_url", "")
-    provider = llm_config.get("provider") or None
-    if provider and provider.startswith("${"):
-        provider = None
-    session_id = config.get("project", "")
-    categories = config.get("categories", {})
-
-    if not api_key or api_key.startswith("${"):
-        logger.warning("No API key available for extraction, skipping")
-        delete_session_log(trace_dir)
-        return {"status": "skipped", "reason": "no_api_key"}
 
     emb_config = config.get("embedding", {})
-    kb = KnowledgeBase(
-        index_dir=pdir / "kb_index",
-        embedder_kwargs={
+    backend = emb_config.get("backend", "local")
+    # Local backend rejects base_url / api_key (no remote call); api
+    # backend reads creds from the shell.  Local model must be a HF
+    # identifier (``org/repo``); if it isn't (legacy projects had
+    # Ollama-style ``nomic-embed-text`` here), fall through to
+    # LocalEmbeddingClient's default by passing model=None.
+    if backend == "local":
+        model = emb_config.get("model")
+        if model and "/" not in str(model):
+            model = None
+        embedder_kwargs = {"model": model}
+    else:
+        embedder_kwargs = {
             "model": emb_config.get("model"),
             "base_url": emb_config.get("base_url"),
-            "api_key": emb_config.get("api_key"),
-        },
+            "api_key": os.environ.get("EMBEDDING_API_KEY", ""),
+        }
+    kb = KnowledgeBase(
+        index_dir=pdir / "kb_index",
+        default_embedder=backend,
+        embedder_kwargs=embedder_kwargs,
+    )
+
+    # Phase 1: index trace_archive into tool_use collection.
+    tool_use_indexed = 0
+    try:
+        trace_result = index_trace_archive(pdir / "trace_archive", kb)
+        tool_use_indexed = trace_result.get("indexed", 0)
+    except Exception as e:
+        logger.warning("Tool execution indexing failed: %s", e)
+
+    # Phase 2: LLM-based memory extraction.  Skip silently if not configured.
+    api_key = os.environ.get("DSAGT_MEMORY_API_KEY", "")
+    model = os.environ.get("DSAGT_MEMORY_MODEL", "")
+    if not api_key or not model:
+        kb.close()
+        return {"status": "tool_use_only", "tool_use_indexed": tool_use_indexed}
+
+    base_url = os.environ.get("DSAGT_MEMORY_BASE_URL", "")
+    provider = os.environ.get("DSAGT_MEMORY_PROVIDER") or None
+    session_id = config.get("session_id") or config.get("project", "")
+    categories = config.get("categories", {})
+
+    mlflow_port = config.get("mlflow", {}).get("port")
+    mlflow_uri = (
+        f"http://localhost:{mlflow_port}" if mlflow_port
+        else os.environ.get("MLFLOW_TRACKING_URI")
     )
     try:
-        return extract_session(
-            trace_dir=trace_dir,
+        result = extract_session(
+            project_name=project_name,
             kb=kb,
             api_key=api_key,
             model=model,
@@ -708,10 +854,9 @@ def run_extraction(project_name: str) -> dict:
             outlier_sensitivity=float(
                 config.get("extraction", {}).get("outlier_sensitivity", 0)
             ),
+            mlflow_uri=mlflow_uri,
         )
+        result["tool_use_indexed"] = tool_use_indexed
+        return result
     finally:
         kb.close()
-        for suffix in (".jsonl", ".consumed"):
-            leftover = trace_dir / f"session_log{suffix}"
-            if leftover.exists():
-                leftover.unlink()
