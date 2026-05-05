@@ -1,131 +1,173 @@
 """
-dsagt-proxy: Start LiteLLM proxy with MLflow tracing and DSAgt tool records.
+dsagt-proxy: opt-in LiteLLM forwarding proxy for agent transparency.
 
-Usage:
-    dsagt-proxy
-    dsagt-proxy --port 4000 --records-dir runtime/trace_archive
-    dsagt-proxy --mlflow-url http://localhost:5001
+DSAgt's normal observability path is the agent emitting OTel directly to
+MLflow's ``/v1/traces`` (Claude Code, Goose).  For agents that don't
+emit OTel with full LLM-call payloads (Cline, Roo Code, Codex
+partially), running with ``dsagt start --enable-proxy`` makes the
+agent's actions visible at all — every LLM request the agent issues
+becomes an MLflow trace you can inspect in real time and replay later:
+which model, which messages, which tool_use blocks the assistant emits,
+which tool_results came back, full token + cache stats.  Without the
+proxy, the same agent runs as a black box from DSAgt's perspective —
+``dsagt info`` shows only embedding + tool-execute spans, MLflow shows
+no agent turns, and end-of-session memory extraction has no
+conversation to read.
+
+Real-time transparency is the primary value.  Memory extraction works
+as a downstream consequence because the data it needs (request +
+response payloads tagged with the session id) lands in MLflow exactly
+because the proxy autologged it.
+
+Architecture: this process is a regular OTel emitter, structurally
+identical to the MCP servers and ``dsagt-run``.  ``init_tracing()``
+installs an OTLPSpanExporter pointed at MLflow with the experiment-id
+header and enables ``mlflow.litellm.autolog()``, which means every
+forwarded LLM call produces an MLflow trace tagged with ``session.id``
+(resource attribute, promoted by MLflow's OTLP receiver to
+``mlflow.trace.session`` trace_metadata) and
+``service.name = "dsagt-proxy"``.
+
+Routing: requests come in on the local port and LiteLLM forwards them
+to the user's configured upstream (LLM + embedding) using a minimal
+two-route ``model_list`` config.  No multi-provider abstraction beyond
+what LiteLLM already provides.
+
+Activation: ``dsagt start --enable-proxy`` sets ``config["proxy"]`` and
+``start_services`` spawns this command on a kernel-picked free port.
+``agents/__init__.py`` sees the proxy port and overrides the agent's
+``ANTHROPIC_BASE_URL`` / ``OPENAI_BASE_URL`` to point at it, plus
+plants a sentinel API key so any direct call bypassing the proxy 401s
+loudly instead of silently leaking.  Without ``--enable-proxy``, this
+command is never started — agents talk to their providers directly and
+their visibility depends on whether they emit OTel themselves.
 """
+
+from __future__ import annotations
 
 import argparse
 import logging
 import os
 import sys
 import tempfile
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PORT = 4000
-DEFAULT_RECORDS_DIR = "runtime/trace_archive"
+
+# Some agents rewrite the requested model name into one of their hardcoded
+# "known" Anthropic IDs before sending to /v1/messages — they don't
+# recognize lab-gateway-aliased names like
+# ``claude-haiku-4-5-20251001-v1-project`` and silently substitute the
+# agent's current default.  Without aliasing, those primary-reasoning
+# calls fall through to the sidechannel wildcard (mock) and the agent
+# gets MODEL_NO_ASSISTANT_MESSAGES.
+#   - roo (v0.1.x): rewrites to ``claude-sonnet-4-5``
+#   - cline (1.x):  rewrites to ``claude-sonnet-4-5-20250929``
+# Each alias forwards to the configured upstream primary.  Grow this list
+# when new agents/versions surface their own defaults.
+_AGENT_PRIMARY_ALIASES = (
+    "claude-sonnet-4-5",
+    "claude-sonnet-4-5-20250929",
+)
+
+# Agent-specific request fields that some upstreams reject.  LiteLLM's
+# global ``drop_params: true`` only drops fields it recognizes as
+# "supported by some providers, not this one"; unknown fields pass
+# through.  ``additional_drop_params`` must be set per-model
+# (``litellm_params`` level), not globally — verified empirically.
+#   - ``client_metadata``: Codex sends this; Bedrock Anthropic Messages
+#     adapter rejects it ("Extra inputs are not permitted").
+_DROP_PARAMS_YAML = '      additional_drop_params: ["client_metadata"]\n'
 
 
 def _generate_config(
-    model: str, base_url: str, provider: str,
-    embedding_model: str, embedding_base_url: str, embedding_provider: str,
+    llm_model: str, llm_base_url: str, llm_provider: str,
+    embedding_model: str | None = None,
+    embedding_base_url: str | None = None,
+    embedding_provider: str | None = None,
 ) -> str:
-    """Generate a LiteLLM proxy config YAML.
+    """Render the LiteLLM proxy YAML and return the path to a tempfile.
 
-    Routes the configured LLM and embedding models through their chosen
-    LiteLLM provider prefix.  Each prefix (``openai``, ``anthropic``,
-    ``bedrock``, ``cohere``, ``voyage``, etc.) selects request-format and
-    auth handling.  LiteLLM normalizes incoming Anthropic-, OpenAI-, and
-    Responses-API-shape requests so all five agents (goose, claude,
-    cline, roo, codex) and the dsagt-knowledge-server's embedding calls
-    share one config.
-
-    Callbacks (DSAGTCallback for provenance, MlflowLogger for LLM traces)
-    are registered in Python *before* ``run_server`` rather than via YAML
-    because ``run_server``'s CLI path only calls ``ProxyConfig.get_config``
-    (which just parses the YAML) — not ``load_config`` (which would apply
-    ``litellm_settings.success_callback``).  Direct registration sidesteps
-    that gap and works regardless of LiteLLM's config-loading internals.
-
-    Routing: incoming /chat/completions or /v1/messages with the LLM
-    model name → configured LLM upstream.  Incoming /embeddings with the
-    embedding model name → configured embedding upstream.  Everything
-    else hits the sidechannel catchall (mock).  The wildcard fallback
-    comes from ``dsagt.observability`` — see that module for why and how.
+    Layout:
+      * Primary route forwards the configured llm.model to the upstream.
+      * One alias route per ``_AGENT_PRIMARY_ALIASES`` entry, also
+        forwarded to the upstream primary — so cline/roo's hardcoded
+        model rewrites still reach the right model.
+      * Embedding route (only when ``embedding_*`` args provided) forwards
+        the configured embedding model.  In ``local`` embedding mode the
+        knowledge MCP server uses sentence-transformers in-process and
+        bypasses the proxy entirely, so the embedding route is skipped.
+      * Sidechannel wildcard catches everything else (agent title-gen,
+        session-namer, etc.) and returns a canned mock response.
+        ``observability.SIDECHANNEL_WILDCARD_ROUTE_YAML`` provides this.
     """
     from dsagt.observability import SIDECHANNEL_WILDCARD_ROUTE_YAML
-
-    # Some agents rewrite the requested model name into one of their
-    # hardcoded "known" Anthropic IDs before sending to /v1/messages —
-    # they don't recognize lab-gateway-aliased names like
-    # ``claude-haiku-4-5-20251001-v1-project`` and silently substitute
-    # the agent's current default.  Without aliasing, those primary-
-    # reasoning calls fall through to the sidechannel catchall (mock)
-    # and the agent gets MODEL_NO_ASSISTANT_MESSAGES.
-    #   - roo (v0.1.x): rewrites to ``claude-sonnet-4-5``
-    # Each alias forwards to the configured upstream primary.  Grow this
-    # list when new agents/versions surface their own defaults.
-    _AGENT_PRIMARY_ALIASES = ("claude-sonnet-4-5",)
-
-    # Agent-specific request fields that some upstreams reject.  LiteLLM's
-    # global ``drop_params: true`` only drops fields it recognizes as
-    # "supported by some providers, not this one"; unknown fields pass
-    # through.  ``additional_drop_params`` must be set per-model
-    # (``litellm_params`` level), not globally — verified empirically.
-    #   - ``client_metadata``: Codex sends this; Bedrock Anthropic Messages
-    #     adapter rejects it ("Extra inputs are not permitted").
-    drop_yaml = "      additional_drop_params: [\"client_metadata\"]\n"
 
     aliases_yaml = "".join(
         f"""  - model_name: {alias}
     litellm_params:
-      model: {provider}/{model}
-      api_base: {base_url}
+      model: {llm_provider}/{llm_model}
+      api_base: {llm_base_url}
       api_key: os.environ/LLM_API_KEY
-{drop_yaml}"""
+{_DROP_PARAMS_YAML}"""
         for alias in _AGENT_PRIMARY_ALIASES
     )
 
-    return f"""\
+    embedding_yaml = ""
+    if embedding_model and embedding_base_url and embedding_provider:
+        embedding_yaml = (
+            f"  - model_name: {embedding_model}\n"
+            f"    litellm_params:\n"
+            f"      model: {embedding_provider}/{embedding_model}\n"
+            f"      api_base: {embedding_base_url}\n"
+            f"      api_key: os.environ/EMBEDDING_API_KEY\n"
+        )
+
+    body = f"""\
 model_list:
-  - model_name: {model}
+  - model_name: {llm_model}
     litellm_params:
-      model: {provider}/{model}
-      api_base: {base_url}
+      model: {llm_provider}/{llm_model}
+      api_base: {llm_base_url}
       api_key: os.environ/LLM_API_KEY
-{drop_yaml}{aliases_yaml}  - model_name: {embedding_model}
-    litellm_params:
-      model: {embedding_provider}/{embedding_model}
-      api_base: {embedding_base_url}
-      api_key: os.environ/EMBEDDING_API_KEY
-{SIDECHANNEL_WILDCARD_ROUTE_YAML}\
+{_DROP_PARAMS_YAML}{aliases_yaml}{embedding_yaml}{SIDECHANNEL_WILDCARD_ROUTE_YAML}\
 litellm_settings:
   drop_params: true
+  num_retries: 5
+  request_timeout: 300
 """
-
-
-def main(argv: list[str] | None = None):
-    parser = argparse.ArgumentParser(
-        prog="dsagt-proxy",
-        description="Start LiteLLM proxy with MLflow tracing and DSAGT tool records.",
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", prefix="dsagt_litellm_", delete=False,
     )
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--records-dir", default=DEFAULT_RECORDS_DIR)
-    parser.add_argument("--session", default=None)
-    parser.add_argument("--config", default=None, help="Path to existing LiteLLM config YAML")
-    parser.add_argument("--model", default="claude-sonnet-4-20250514")
-    parser.add_argument("--base-url", required=True,
-        help="Upstream LLM endpoint (from dsagt_config.yaml llm.base_url)")
-    parser.add_argument("--provider", required=True,
-        help="LiteLLM provider prefix, e.g. openai, anthropic, bedrock. "
-             "See https://docs.litellm.ai/docs/providers for the full list.")
-    parser.add_argument("--embedding-model", required=True,
-        help="Embedding model name (from dsagt_config.yaml embedding.model)")
-    parser.add_argument("--embedding-base-url", required=True,
-        help="Upstream embedding endpoint (from dsagt_config.yaml embedding.base_url)")
-    parser.add_argument("--embedding-provider", default="openai_like",
-        help="LiteLLM provider prefix for embeddings (openai_like, openai, "
-             "cohere, voyage, bedrock, gemini, etc.).  Default ``openai_like`` "
-             "covers any OpenAI-wire-compatible endpoint.")
-    parser.add_argument("--mlflow-url", default=None,
-        help="MLflow tracking URL (enables LiteLLM → MLflow trace autologging)")
-    parser.add_argument("--verbose", action="store_true")
+    tmp.write(body)
+    tmp.close()
+    return tmp.name
 
-    args = parser.parse_args(argv)
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="dsagt-proxy")
+    parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--mlflow-url", required=True,
+        help="MLflow server URL the OTLP exporter ships traces to.")
+    parser.add_argument("--project", required=True,
+        help="DSAGT project name (= MLflow experiment name).")
+    parser.add_argument("--session", required=True,
+        help="DSAGT session id stamped on every trace via OTel resource attrs.")
+    parser.add_argument("--records-dir", required=True,
+        help="Project's trace_archive/ — sidechannel.jsonl lands adjacent.")
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--base-url", required=True)
+    parser.add_argument("--provider", required=True)
+    # Embedding args optional — only needed when project's embedding
+    # backend is ``api``.  In ``local`` mode the knowledge MCP server
+    # uses sentence-transformers in-process and never routes through
+    # the proxy, so we skip the embedding route entirely.
+    parser.add_argument("--embedding-model", default=None)
+    parser.add_argument("--embedding-base-url", default=None)
+    parser.add_argument("--embedding-provider", default=None)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -134,111 +176,57 @@ def main(argv: list[str] | None = None):
     )
 
     if not os.environ.get("LLM_API_KEY"):
-        logger.error("LLM_API_KEY not set. The proxy needs it to forward LLM requests.")
+        logger.error("LLM_API_KEY not set; the proxy needs it to forward LLM requests.")
         sys.exit(1)
-    if not os.environ.get("EMBEDDING_API_KEY"):
-        logger.error("EMBEDDING_API_KEY not set. The proxy needs it to forward embedding requests.")
+    embedding_routing = bool(
+        args.embedding_model and args.embedding_base_url and args.embedding_provider
+    )
+    if embedding_routing and not os.environ.get("EMBEDDING_API_KEY"):
+        logger.error("EMBEDDING_API_KEY not set; the proxy needs it to forward embedding requests.")
         sys.exit(1)
 
-    import litellm
+    # init_proxy_tracing sets OTEL_EXPORTER_OTLP_* env so litellm.callbacks
+    # = ["otel"] (registered inside) ships standard OTLP spans to MLflow's
+    # /v1/traces tagged with service.name=dsagt-proxy + session.id.  Also
+    # registers the DSAGTCallback for cache-breakpoint injection on
+    # outgoing requests + sidechannel-call detection on incoming responses.
+    from dsagt.observability import init_proxy_tracing
+    init_proxy_tracing(
+        mlflow_url=args.mlflow_url,
+        project=args.project,
+        session_id=args.session,
+        records_dir=args.records_dir,
+    )
 
     # Claude Code sends native Anthropic-format requests (POST /v1/messages).
-    # By default LiteLLM translates those to the OpenAI Responses API
-    # (/responses) for openai-compatible upstreams, but most project
-    # gateways (e.g. PNNL's ai-incubator-api) only expose /chat/completions.
-    # This flag opts out of the Responses-API path so Anthropic requests get
-    # translated to /chat/completions, which every openai-compatible gateway
-    # supports.  Harmless for goose (which already talks /chat/completions).
+    # Default LiteLLM behavior translates those to /responses, which most
+    # project gateways don't expose.  Force the /chat/completions path so
+    # any openai-compatible upstream works.
+    import litellm
     litellm.use_chat_completions_url_for_anthropic_messages = True
 
-    from dsagt.provenance import create_callback
+    # Tell the DSAGT callback what the configured primary model is, so its
+    # sidechannel detector can distinguish "real upstream call" from
+    # "wildcard catchall hit".  See observability.record_sidechannel_call.
+    os.environ["DSAGT_PRIMARY_MODEL"] = args.model
 
-    callback = create_callback(
-        records_dir=args.records_dir,
-        session_id=args.session,
+    config_path = _generate_config(
+        args.model, args.base_url, args.provider,
+        args.embedding_model, args.embedding_base_url, args.embedding_provider,
     )
-    litellm.callbacks = [callback]
+    logger.info("Generated LiteLLM config at %s", config_path)
+    logger.info("Starting LiteLLM proxy on %s:%d", args.host, args.port)
 
-    records_path = Path(args.records_dir).resolve()
-    logger.info("DSAGT callback registered → tool records at %s", records_path)
-
-    if args.mlflow_url:
-        import mlflow
-        from dsagt.provenance import install_mlflow_logger_with_session_tag
-
-        mlflow.set_tracking_uri(args.mlflow_url)
-        # Project name is already the store boundary (each project has its own
-        # mlflow/mlflow.db); the experiment is just a container inside that
-        # store, so a single stable name keeps all sessions comparable.
-        mlflow.set_experiment(os.environ.get("DSAGT_PROJECT", "dsagt"))
-
-        # Pre-seed LiteLLM's logger cache with our MlflowLogger subclass so
-        # the string "mlflow" in success_callback resolves to it (subclass
-        # passes the isinstance check LiteLLM uses to dedupe loggers).  This
-        # is what gets `mlflow.trace.session` stamped onto LLM-completion
-        # traces — see install_mlflow_logger_with_session_tag's docstring.
-        install_mlflow_logger_with_session_tag()
-
-        # Register the built-in "mlflow" callback by NAME, not instance.
-        # LiteLLM's async dispatch (what the proxy uses) resolves string names
-        # to logger classes via an internal registry at each call; passing an
-        # MlflowLogger *instance* skips that resolution step and the callback
-        # gets missed on the async path.
-        if "mlflow" not in (litellm.success_callback or []):
-            litellm.success_callback = (litellm.success_callback or []) + ["mlflow"]
-        if "mlflow" not in (litellm.failure_callback or []):
-            litellm.failure_callback = (litellm.failure_callback or []) + ["mlflow"]
-
-        logger.info("MLflow tracing enabled → %s (experiment=%s)",
-                    args.mlflow_url, os.environ.get("DSAGT_PROJECT", "dsagt"))
-    else:
-        logger.info("MLflow tracing disabled (use --mlflow-url to enable)")
-
-    if args.config:
-        config_path = args.config
-    else:
-        config_content = _generate_config(
-            args.model, args.base_url, args.provider,
-            args.embedding_model, args.embedding_base_url, args.embedding_provider,
-        )
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", prefix="dsagt_litellm_", delete=False,
-        )
-        tmp.write(config_content)
-        tmp.close()
-        config_path = tmp.name
-        logger.info("Generated LiteLLM config at %s", config_path)
-
-    logger.info("Starting LiteLLM proxy on port %d", args.port)
-
-    # Invoke litellm's run_server in-process so the DSAgt callback we
-    # registered via litellm.callbacks above is actually attached when
-    # requests come in.  There is no subprocess fallback: if this fails,
-    # the DSAgt tool-record + observability path is broken and the user
-    # needs to know.  start_services() probes the port and will surface
-    # the failure to dsagt start with a clean error message.
-    #
-    # run_server is a Click command, so we invoke it via
-    # .main(args=..., standalone_mode=False) — calling it positionally
-    # would either error (40+ params) or, in older versions, raise
-    # TypeError because Click commands aren't callable with kwargs the
-    # same way functions are.  standalone_mode=False makes Click raise
-    # on errors instead of calling sys.exit().
+    # run_server is a Click command.  standalone_mode=False makes Click
+    # raise on errors instead of sys.exit; we still catch SystemExit
+    # because Click can raise it on clean shutdown.
     from litellm.proxy.proxy_cli import run_server
     try:
         run_server.main(
-            args=[
-                "--host", "0.0.0.0",
-                "--port", str(args.port),
-                "--config", config_path,
-            ],
+            args=["--host", args.host, "--port", str(args.port), "--config", config_path],
             standalone_mode=False,
         )
     except SystemExit:
-        # Click in standalone_mode=False can still raise SystemExit when
-        # the underlying server exits cleanly.  Treat that as success;
-        # any other exception propagates and crashes dsagt-proxy, which
-        # is what start_services()'s readiness probe expects.
         pass
 
 

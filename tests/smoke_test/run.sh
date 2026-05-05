@@ -4,7 +4,9 @@
 # Drives the SAME `dsagt start` lifecycle as an interactive run (config
 # generation → start_services → agent → run_extraction → stop_services).
 # Only the agent-launch step swaps from `goose session` to `goose run -i`.
-# Sources DSAGT/.env so the env-var references in dsagt_config.yaml resolve.
+# BYOA: the user's shell must already have the agent's provider creds
+# (per `dsagt init` hints).  No .env handling — that returns with the
+# Phase 2 `--proxy_traces` flag.
 #
 # Run from anywhere:
 #   bash tests/smoke_test/run.sh
@@ -23,52 +25,90 @@ PROJECT="smoke-test-${AGENT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DSAGT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SCRIPT_FILE="${SCRIPT_DIR}/script.txt"
+# Project lives at the default ``dsagt init`` location so smoke-test
+# artifacts stay out of the dsagt source tree.  PDIR mirrors
+# DEFAULT_PROJECTS_BASE in src/dsagt/session.py.
+PDIR="${HOME}/dsagt-projects/${PROJECT}"
 
 case "${AGENT}" in
-    goose|claude|cline|roo|codex) ;;
+    goose|claude|cline|roo|codex|opencode) ;;
     *)
-        echo "ERROR: agent must be one of: goose, claude, cline, roo, codex (got '${AGENT}')" >&2
+        echo "ERROR: agent must be one of: goose, claude, cline, roo, codex, opencode (got '${AGENT}')" >&2
         exit 2
         ;;
 esac
-echo "[smoke] Agent: ${AGENT}"
+
+# Proxy-mode opt-in.  ``DSAGT_SMOKE_PROXY=1`` (or arg #2 == "proxy")
+# routes the run through ``dsagt start --enable-proxy``, which spawns
+# dsagt-proxy and forwards the agent's LLM calls through it — required
+# for cline / roo (their CLIs hardcode model-ID whitelists incompatible
+# with lab-gateway aliases; the proxy translates names back to the
+# upstream's served IDs via _AGENT_PRIMARY_ALIASES).  Default off.
+PROXY_FLAG=""
+if [[ "${DSAGT_SMOKE_PROXY:-${2:-}}" == "1" || "${DSAGT_SMOKE_PROXY:-${2:-}}" == "proxy" ]]; then
+    PROXY_FLAG="--enable-proxy"
+    echo "[smoke] Agent: ${AGENT} (proxy mode)"
+else
+    echo "[smoke] Agent: ${AGENT}"
+fi
+
+# Cline / roo only work in proxy mode (see agents/cline.py + roo.py
+# module docstrings for the model-whitelist + endpoint-lockout reasons).
+if [[ -z "${PROXY_FLAG}" && ( "${AGENT}" == "cline" || "${AGENT}" == "roo" ) ]]; then
+    echo
+    echo "[smoke] ${AGENT} requires proxy mode in BYOA — skipping."
+    echo "[smoke] Re-run with: DSAGT_SMOKE_PROXY=1 dsagt smoke-test --agent ${AGENT}"
+    echo "[smoke] (or pass 'proxy' as the second arg to this script)"
+    exit 0
+fi
 
 cd "${DSAGT_ROOT}"
 
-# ---------------------------------------------------------------------------
-# 1. Load .env
-# ---------------------------------------------------------------------------
-if [[ ! -f .env ]]; then
-    echo "ERROR: ${DSAGT_ROOT}/.env not found." >&2
-    echo "  Copy .env.example to .env and fill in your values." >&2
-    exit 2
+# Proxy mode needs LLM_*/EMBEDDING_* in env so the proxy can forward
+# upstream.  Source .env if present (BYOA runs without it; only proxy
+# runs need these vars).  Validation happens at proxy spawn time —
+# session.py:_start_proxy raises if config["llm"] keys are missing.
+if [[ -n "${PROXY_FLAG}" && -f .env ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+    echo "[smoke] Sourced .env for proxy mode"
 fi
-set -a
-# shellcheck disable=SC1091
-source .env
-set +a
-
-for var in LLM_PROVIDER LLM_API_KEY LLM_BASE_URL LLM_MODEL EMBEDDING_API_KEY EMBEDDING_BASE_URL EMBEDDING_MODEL; do
-    if [[ -z "${!var:-}" ]]; then
-        echo "ERROR: ${var} is empty in .env" >&2
-        exit 2
-    fi
-done
 
 # ---------------------------------------------------------------------------
 # 2. Clean slate (idempotent — silent if nothing exists)
 # ---------------------------------------------------------------------------
 dsagt stop "${PROJECT}" >/dev/null 2>&1 || true
 dsagt rm "${PROJECT}" -y >/dev/null 2>&1 || true
-rm -rf "${DSAGT_ROOT}/${PROJECT}"
+rm -rf "${PDIR}"
+
+# Wipe claude code's per-directory session history for the smoke project.
+# Claude stashes one .jsonl per past session under ~/.claude/projects/<encoded-cwd>/
+# (path with all '/' replaced by '-').  Without this, claude's project-memory
+# layer can leak details from prior runs into the current one and the agent
+# reports things that didn't happen — false hangs, fake api errors, ghost
+# duplicates.  Only relevant for --agent claude.
+if [[ "${AGENT}" == "claude" ]]; then
+    smoke_path_encoded=$(echo "${PDIR}" | sed 's|/|-|g')
+    rm -rf "${HOME}/.claude/projects/${smoke_path_encoded}"
+fi
 
 # ---------------------------------------------------------------------------
-# 3. Init + move into DSAGT/ so '../tests/smoke_test/...' paths resolve
-#    from the agent's cwd.
+# 3. Init at the default ``~/dsagt-projects/`` location so smoke artifacts
+#    don't pollute the dsagt source tree.  The agent's cwd will be
+#    ``${PDIR}``; the script template uses ``{{SMOKE_DIR}}`` placeholders
+#    that we substitute below so prompt paths resolve regardless of where
+#    PDIR lives.
 # ---------------------------------------------------------------------------
 dsagt init "${PROJECT}" --agent "${AGENT}"
-dsagt mv "${PROJECT}" "${DSAGT_ROOT}"
-PDIR="${DSAGT_ROOT}/${PROJECT}"
+
+# Substitute {{SMOKE_DIR}} → absolute smoke_test/ path before the agent
+# sees the script.  Prompts can then reference data/knowledge files via
+# absolute paths regardless of the agent's cwd.
+RENDERED_SCRIPT=$(mktemp -t dsagt-smoke-script.XXXXXX)
+trap 'rm -f "${RENDERED_SCRIPT}"' EXIT
+sed "s|{{SMOKE_DIR}}|${SCRIPT_DIR}|g" "${SCRIPT_FILE}" > "${RENDERED_SCRIPT}"
 
 # ---------------------------------------------------------------------------
 # 4. Run the FULL `dsagt start` lifecycle, with the agent in batch mode.
@@ -84,8 +124,8 @@ WALL_CLOCK_CAP=300   # seconds (5 minutes)
 WALL_CLOCK_GRACE=10  # extra seconds before SIGKILL
 
 echo
-echo "[smoke] Running dsagt start --script (${WALL_CLOCK_CAP}s wall-clock cap)…"
-dsagt start "${PROJECT}" --script "${SCRIPT_FILE}" --max-turns 30 &
+echo "[smoke] Running dsagt start --script ${PROXY_FLAG} (${WALL_CLOCK_CAP}s wall-clock cap)…"
+dsagt start "${PROJECT}" --script "${RENDERED_SCRIPT}" --max-turns 30 ${PROXY_FLAG} &
 DSAGT_PID=$!
 (
     sleep "${WALL_CLOCK_CAP}"
@@ -152,72 +192,70 @@ check "explicit memory recorded"     "test -s '${PDIR}/explicit_memories.yaml'"
 check "mlflow has traces"            "test -s '${PDIR}/mlflow/mlflow.db'"
 
 # ---------------------------------------------------------------------------
-# 6. LLM dispatch parity: every chat/completions request that hit the proxy
-#    must produce exactly one litellm-* trace in MLflow.  A delta means
-#    LiteLLM's async callback dispatch dropped one — we'd never notice
-#    without this check (no other artifact distinguishes "LLM call dropped"
-#    from "agent didn't make that call").
+# 6. Agent LLM-call observability: every agent turn must produce at least
+#    one trace in MLflow with this session's id, tagged with the agent's
+#    service.name.  Replaces the proxy-log parity check from before
+#    proxy removal — the agent now emits OTel directly to MLflow's OTLP
+#    receiver, so MLflow IS the source of truth.  A zero count means
+#    either the agent didn't emit telemetry (e.g. CLAUDE_CODE_ENABLE_TELEMETRY=1
+#    not honored) or the OTel endpoint was misconfigured.
 # ---------------------------------------------------------------------------
-# grep -c exits 1 when it finds zero matches, so pairing with `|| echo 0`
-# concatenates grep's "0" with echo's "0" into "0\n0", which [[ -gt ]] then
-# can't parse.  Use a pipe to wc -l instead so the final exit code is always 0
-# and the output is always a single integer.
-#
-# Match both endpoints because different agents send different formats:
-#   - goose, cline / OpenAI-format clients → /chat/completions
-#   - claude, roo / Anthropic-format clients → /v1/messages
-if [[ -f "${PDIR}/proxy.log" ]]; then
-    PROXY_REQUESTS=$(grep -cE 'POST .*(/(v1/)?chat/completions|/v1/messages)' "${PDIR}/proxy.log" 2>/dev/null | head -1)
-    PROXY_REQUESTS="${PROXY_REQUESTS:-0}"
-else
-    PROXY_REQUESTS=0
-fi
-LLM_TRACES=$(python -c "
+AGENT_OTEL_SUPPORT=$(uv run --quiet python -c "from dsagt.agents import agent_otel_support; print(agent_otel_support('${AGENT}'))" 2>/dev/null)
+AGENT_OTEL_SUPPORT="${AGENT_OTEL_SUPPORT:-unknown}"
+
+AGENT_TRACES=$(uv run --quiet python <<PY 2>/dev/null
 import mlflow
-mlflow.set_tracking_uri('sqlite:///${PDIR}/mlflow/mlflow.db')
-exp = mlflow.get_experiment_by_name('${PROJECT}')
+mlflow.set_tracking_uri("sqlite:///${PDIR}/mlflow/mlflow.db")
+exp = mlflow.get_experiment_by_name("${PROJECT}")
 if exp is None:
     print(0); raise SystemExit
-traces = mlflow.search_traces(experiment_ids=[exp.experiment_id], max_results=500)
-n = sum(1 for _, row in traces.iterrows()
-        if any(s['name'].startswith('litellm-') for s in row['spans']))
+df = mlflow.search_traces(
+    locations=[exp.experiment_id],
+    max_results=500,
+)
+n = 0
+for _, row in df.iterrows():
+    spans = row.get("spans") or []
+    # Match by service.name on root span — agent-emitted traces only.
+    # MCP-server traces (kb.*, registry.*, tool.execute) carry
+    # service.name = "dsagt-knowledge-server" / "dsagt-registry-server" /
+    # "dsagt-run" and shouldn't count toward agent turn parity.
+    for s in spans:
+        attrs = getattr(s, "attributes", None) or (
+            s.get("attributes") if isinstance(s, dict) else None
+        )
+        if attrs and not str(attrs.get("service.name", "")).startswith("dsagt-"):
+            n += 1
+            break
 print(n)
-" 2>/dev/null)
-LLM_TRACES="${LLM_TRACES:-0}"
+PY
+)
+AGENT_TRACES="${AGENT_TRACES:-0}"
 
-# Sidechannel wildcard hits on Anthropic /v1/messages fire DSAGT's callback
-# but LiteLLM skips MlflowLogger for mock_response on that path, leaving an
-# orphan request with no trace.  Known quirk; not a real dispatch bug.
-# Count sidechannel entries for this session and tolerate that many drops.
-if [[ -f "${PDIR}/sidechannel.jsonl" ]]; then
-    SIDECHANNEL_DROPS=$(wc -l < "${PDIR}/sidechannel.jsonl" 2>/dev/null | tr -d ' ')
-    SIDECHANNEL_DROPS="${SIDECHANNEL_DROPS:-0}"
-else
-    SIDECHANNEL_DROPS=0
-fi
-
-if [[ "${PROXY_REQUESTS}" -eq 0 ]]; then
-    echo "  FAIL  LLM dispatch parity: proxy log shows 0 chat/completions requests (proxy not exercised?)"
-    FAIL=1
-else
-    DROPPED=$((PROXY_REQUESTS - LLM_TRACES))
-    if [[ "${DROPPED}" -gt "${SIDECHANNEL_DROPS}" ]]; then
-        UNEXPLAINED=$((DROPPED - SIDECHANNEL_DROPS))
-        echo "  FAIL  LLM dispatch parity: ${PROXY_REQUESTS} requests, ${LLM_TRACES} traces — DROPPED ${DROPPED} (${UNEXPLAINED} unexplained after allowing ${SIDECHANNEL_DROPS} sidechannel)"
-        FAIL=1
-    elif [[ "${DROPPED}" -gt 0 ]]; then
-        # All drops attributed to sidechannel wildcard mocks on the
-        # Anthropic endpoint — a LiteLLM mock_response quirk, not ours.
-        echo "  PASS  LLM dispatch parity: ${PROXY_REQUESTS} requests, ${LLM_TRACES} traces (-${DROPPED} expected from sidechannel mocks)"
-    else
-        EXTRA=$((LLM_TRACES - PROXY_REQUESTS))
-        if [[ "${EXTRA}" -gt 0 ]]; then
-            echo "  PASS  LLM dispatch parity: ${PROXY_REQUESTS} proxy requests, ${LLM_TRACES} traces (+${EXTRA} from non-proxy litellm calls)"
+# Grade by the agent's verified support tier rather than fail-or-pass:
+# agents we know don't emit OTel payloads (cline, roo) get SKIP, agents
+# we know partial-emit (codex) get WARN, agents we know full-emit
+# (claude, goose) get PASS-or-FAIL.  See agents/__init__.py module
+# docstring for the matrix.
+case "${AGENT_OTEL_SUPPORT}" in
+    full)
+        if [[ "${AGENT_TRACES}" -eq 0 ]]; then
+            echo "  FAIL  agent transparency: 0 agent LLM-call traces in MLflow (agent supports full payload but emitted none — env vars not honored?)"
+            FAIL=1
         else
-            echo "  PASS  LLM dispatch parity: ${PROXY_REQUESTS} requests, ${LLM_TRACES} traces"
+            echo "  PASS  agent transparency: ${AGENT_TRACES} agent LLM-call trace(s) visible in MLflow"
         fi
-    fi
-fi
+        ;;
+    partial)
+        echo "  WARN  agent transparency: ${AGENT} emits only token counts + tool names natively (${AGENT_TRACES} agent trace(s)); use 'dsagt start --enable-proxy' to capture full LLM-call payloads"
+        ;;
+    none)
+        echo "  SKIP  agent transparency: ${AGENT} emits no payload-bearing OTel traces (${AGENT_TRACES} agent trace(s)); use 'dsagt start --enable-proxy' to make agent LLM calls visible in MLflow"
+        ;;
+    *)
+        echo "  WARN  agent transparency: support tier unknown for ${AGENT}; ${AGENT_TRACES} agent trace(s)"
+        ;;
+esac
 
 echo
 if [[ ${FAIL} -eq 0 ]]; then

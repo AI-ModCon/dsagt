@@ -25,10 +25,8 @@ from dsagt.observability import child_span, init_tracing, obs, traced
 def _reset_tracing(monkeypatch):
     """Reset module state and install an in-memory exporter for each test.
 
-    We bypass ``init_tracing`` (no MLflow / OTLP endpoint to talk to in tests)
-    and install our own TracerProvider with an InMemorySpanExporter directly.
-    The session-stamp strategy is bound to the OTel one so ``_attach_session_id``
-    behaves the way production OTel callers would.
+    We bypass ``init_tracing`` (no MLflow endpoint to talk to in tests) and
+    install our own TracerProvider with an InMemorySpanExporter directly.
     """
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
@@ -40,8 +38,6 @@ def _reset_tracing(monkeypatch):
     monkeypatch.setattr(obs_module, "_initialized", False)
     monkeypatch.setattr(obs_module, "_tracer_provider", None)
     monkeypatch.setattr(obs_module, "_default_session_id", None)
-    monkeypatch.setattr(obs_module, "_metadata_stamper", obs_module._stamp_metadata_otel)
-    monkeypatch.setattr(obs_module, "_llm_context_factory", obs_module._noop_llm_context)
 
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
@@ -57,43 +53,12 @@ def _reset_tracing(monkeypatch):
     exporter.clear()
 
 
-@pytest.mark.parametrize("span_name,expected", [
-    ("tool.execute", "tool"),
-    ("kb.search", "knowledge"),
-    ("kb.embed", "knowledge"),
-    ("registry.save_tool_spec", "registry"),
-    ("litellm-acompletion", None),  # LLM traces use _DSAGTMlflowLogger, not this
-    ("", None),
-    (None, None),
-])
-def test_derive_source_from_span_name(span_name, expected):
-    assert obs_module._derive_source(span_name) == expected
-
-
-def test_traced_stamps_source_derived_from_span_name(_reset_tracing):
-    """Every traced function should emit a span tagged with dsagt.source
-    derived from its name prefix — so dsagt info can bucket them without
-    a decorator at every call site."""
-    exporter = _reset_tracing
-
-    @traced("tool.execute")
-    def fake_tool():
-        return None
-    fake_tool()
-
-    [span] = exporter.get_finished_spans()
-    assert span.attributes.get("dsagt.source") == "tool"
-
-
 def test_init_tracing_no_endpoint_raises(monkeypatch):
     """init_tracing must fail loudly when no backend is configured — silent
     no-op behavior would let a misconfigured subprocess run with tracing
     silently dropped, which is exactly the kind of silent-fallback bug
     DSAGT's design principles prohibit."""
     monkeypatch.setattr(obs_module, "_initialized", False)
-    monkeypatch.setattr(obs_module, "_metadata_stamper", None)
-    monkeypatch.setattr(obs_module, "_llm_context_factory", None)
-    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     with pytest.raises(RuntimeError, match="no observability backend"):
         init_tracing("test-service")
@@ -203,9 +168,11 @@ def test_session_id_attached(_reset_tracing, monkeypatch):
 
     f()
     span = exporter.get_finished_spans()[0]
-    # The metadata stamper writes the MLflow-reserved key on both backends
-    # (MLflow: trace_metadata; OTel: span attribute with the same name).
-    assert span.attributes["mlflow.trace.session"] == "proj-xyz"
+    # We stamp the OTel-semconv ``session.id`` key (not MLflow's reserved
+    # ``mlflow.trace.session``) — MLflow's OTLP receiver promotes session.id
+    # into mlflow.trace.session trace_metadata server-side, so the UI's
+    # native session-filter widget keeps working.
+    assert span.attributes["session.id"] == "proj-xyz"
 
 
 def test_init_tracing_double_call_only_updates_session(monkeypatch):
@@ -214,6 +181,58 @@ def test_init_tracing_double_call_only_updates_session(monkeypatch):
     monkeypatch.setattr(obs_module, "_default_session_id", "old")
     init_tracing("test", session_id="new")
     assert obs_module._default_session_id == "new"
+
+
+def test_init_tracing_configures_otlp_exporter_with_experiment_header(monkeypatch):
+    """init_tracing must build an OTLPSpanExporter pointed at MLflow's
+    /v1/traces endpoint with the numeric experiment id in the
+    x-mlflow-experiment-id header.  MLflow's OTLP receiver returns 422 if
+    the header is missing, so this is the pin that prevents a regression
+    where we drop or misname it.
+    """
+    captured: dict = {}
+
+    class _FakeExporter:
+        def __init__(self, endpoint, headers, **kwargs):
+            captured["endpoint"] = endpoint
+            captured["headers"] = headers
+
+        def shutdown(self):
+            pass
+
+    class _FakeExperiment:
+        experiment_id = "42"
+
+    def _fake_set_experiment(name):
+        captured["experiment_name"] = name
+        return _FakeExperiment()
+
+    def _fake_set_tracking_uri(uri):
+        captured["tracking_uri"] = uri
+
+    import mlflow
+    monkeypatch.setattr(mlflow, "set_experiment", _fake_set_experiment)
+    monkeypatch.setattr(mlflow, "set_tracking_uri", _fake_set_tracking_uri)
+    monkeypatch.setattr(
+        "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter",
+        _FakeExporter,
+    )
+
+    monkeypatch.setattr(obs_module, "_initialized", False)
+    monkeypatch.setattr(obs_module, "_tracer_provider", None)
+    monkeypatch.setenv("DSAGT_PROJECT", "my-project")
+    monkeypatch.delenv("DSAGT_SESSION_ID", raising=False)
+
+    try:
+        init_tracing("dsagt-test", mlflow_url="http://localhost:5000/")
+    finally:
+        obs_module._shutdown()
+        monkeypatch.setattr(obs_module, "_initialized", False)
+
+    assert captured["tracking_uri"] == "http://localhost:5000/"
+    assert captured["experiment_name"] == "my-project"
+    assert captured["endpoint"] == "http://localhost:5000/v1/traces"
+    assert captured["headers"] == {"x-mlflow-experiment-id": "42"}
 
 
 # ---------------------------------------------------------------------------
@@ -890,100 +909,3 @@ def test_extract_cache_stats_handles_garbage():
     assert extract_cache_stats(None) == (0, 0)
     assert extract_cache_stats({}) == (0, 0)
 
-
-# ---------------------------------------------------------------------------
-# Cache stamping happens inside the MlflowLogger subclass (pre-export window)
-# ---------------------------------------------------------------------------
-#
-# Regression guard: cache stamping used to live in a sibling success-callback
-# (DSAGTCallback.async_log_success_event) that fired AFTER LiteLLM's MlflowLogger
-# had already exported the trace, so mlflow.update_current_trace was a no-op
-# on the closed trace.  The fix moves the stamp into _DSAGTMlflowLogger's
-# _extract_and_set_chat_attributes override, which runs while the trace is
-# still in InMemoryTraceManager.  These tests pin that wiring so the same
-# regression can't reappear.
-
-def test_dsagt_mlflow_logger_stamps_cache_on_chat_attributes(monkeypatch):
-    """Cache stats land via the subclass override, not a sibling callback."""
-    from types import SimpleNamespace
-
-    from dsagt import provenance
-    from litellm.litellm_core_utils import litellm_logging as _ll
-
-    monkeypatch.setattr(_ll, "_in_memory_loggers", [])
-
-    stamps: list[tuple[str, dict]] = []
-    monkeypatch.setattr(
-        "dsagt.observability._stamp_metadata_on_trace",
-        lambda req_id, md: stamps.append((req_id, dict(md))),
-    )
-
-    provenance.install_mlflow_logger_with_session_tag()
-    logger_obj = next(
-        cb for cb in _ll._in_memory_loggers
-        if type(cb).__name__ == "_DSAGTMlflowLogger"
-    )
-
-    # Don't actually run MLflow's chat-attribute extraction (it'd need a
-    # real span and trace_manager); just confirm our override stamps and
-    # then delegates.
-    monkeypatch.setattr(
-        type(logger_obj).__bases__[0],
-        "_extract_and_set_chat_attributes",
-        lambda self, span, kwargs, response: None,
-    )
-
-    span = SimpleNamespace(request_id="trace-abc")
-    response = {
-        "usage": {
-            "prompt_tokens": 1000,
-            "prompt_tokens_details": {"cached_tokens": 600},
-            "cache_read_input_tokens": 600,  # same value, both shapes
-        }
-    }
-    logger_obj._extract_and_set_chat_attributes(span, {}, response)
-
-    cache_stamps = [s for s in stamps if "dsagt.cache.read_tokens" in s[1]]
-    assert len(cache_stamps) == 1, f"expected one cache stamp, got {stamps}"
-    req_id, md = cache_stamps[0]
-    assert req_id == "trace-abc"
-    # The two shapes carry the SAME value — extract_cache_stats short-circuits
-    # so we get 600, not 1200.  Guards against the double-count regression.
-    assert md["dsagt.cache.read_tokens"] == "600"
-    assert md["dsagt.cache.write_tokens"] == "0"
-
-
-def test_dsagt_mlflow_logger_skips_cache_stamp_when_zero(monkeypatch):
-    """No metadata stamp when upstream returned no cache fields."""
-    from types import SimpleNamespace
-
-    from dsagt import provenance
-    from litellm.litellm_core_utils import litellm_logging as _ll
-
-    monkeypatch.setattr(_ll, "_in_memory_loggers", [])
-
-    stamps: list[tuple[str, dict]] = []
-    monkeypatch.setattr(
-        "dsagt.observability._stamp_metadata_on_trace",
-        lambda req_id, md: stamps.append((req_id, dict(md))),
-    )
-
-    provenance.install_mlflow_logger_with_session_tag()
-    logger_obj = next(
-        cb for cb in _ll._in_memory_loggers
-        if type(cb).__name__ == "_DSAGTMlflowLogger"
-    )
-    monkeypatch.setattr(
-        type(logger_obj).__bases__[0],
-        "_extract_and_set_chat_attributes",
-        lambda self, span, kwargs, response: None,
-    )
-
-    span = SimpleNamespace(request_id="trace-xyz")
-    logger_obj._extract_and_set_chat_attributes(
-        span, {},
-        {"usage": {"prompt_tokens": 1000, "completion_tokens": 50}},
-    )
-
-    cache_stamps = [s for s in stamps if "dsagt.cache.read_tokens" in s[1]]
-    assert cache_stamps == [], f"unexpected cache stamp: {cache_stamps}"

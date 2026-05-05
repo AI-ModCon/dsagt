@@ -8,11 +8,19 @@ session broke" without scrolling.  Deep investigation still happens in
 the MLflow UI (``dsagt mlflow <project>``); this command is the triage
 layer that tells you *where* to look first.
 
-All aggregation reads ``trace_metadata`` — MLflow stamps per-trace token
-usage as a JSON blob under ``mlflow.trace.tokenUsage`` and our own
-observability layer stamps ``dsagt.source``, ``dsagt.agent``, and
-``mlflow.trace.session`` (see ``install_mlflow_logger_with_session_tag``).
-No per-span aggregation needed.
+Aggregation reads ``trace_metadata`` for token totals + session id
+(MLflow stamps per-trace token usage as a JSON blob under
+``mlflow.trace.tokenUsage``; the OTLP receiver promotes our
+``session.id`` span attribute to ``mlflow.trace.session``).
+
+Source bucketing comes from the OTel ``service.name`` resource attribute
+on each trace's root span (set per emitting process by ``init_tracing``
+and the agent's own OTel SDK).  Possible values:
+  - ``claude-code`` / ``goose`` / ``cline`` / ``roo`` / ``codex`` —
+    agent-emitted LLM-call traces (the bulk of traffic)
+  - ``dsagt-knowledge-server`` / ``dsagt-registry-server`` — MCP server
+    spans (``kb.*``, ``registry.*``)
+  - ``dsagt-run`` — tool-execute spans
 """
 
 from __future__ import annotations
@@ -105,6 +113,46 @@ def _config_sources(project_name: str, env_file_path: Path) -> list[dict]:
     return rows
 
 
+def _print_kb_collections(rows: list[dict]) -> None:
+    """Render the per-collection chunk counts.
+
+    For collections whose chunks carry a ``source`` metadata field
+    (``tools``, ``skills``), shows the bundled-vs-project split inline
+    so the user can see what the agent's local registry contributed
+    over the bundled defaults.
+    """
+    if not rows:
+        return
+    name_w = max(len(r["collection"]) for r in rows)
+    print("Knowledge base:")
+    for r in rows:
+        chunks = _fmt_count(r["chunks"])
+        source_breakdown = ""
+        if r["by_source"]:
+            parts = [f"{k}={v}" for k, v in sorted(r["by_source"].items())]
+            source_breakdown = f"  ({', '.join(parts)})"
+        print(f"  {r['collection']:<{name_w}}  {chunks:>6} chunks{source_breakdown}")
+    print()
+
+
+def _print_kb_retrieval(rows: list[dict]) -> None:
+    """Render per-session ``kb.search`` activity.
+
+    Quiet (single line + table) when present, omitted when no kb.search
+    spans exist (e.g. the agent never queried the knowledge base).
+    """
+    if not rows:
+        return
+    print("KB retrieval (kb.search calls per session):")
+    sess_w = max(len(r["session"]) for r in rows)
+    for r in rows:
+        print(
+            f"  {r['session']:<{sess_w}}  {r['searches']:>4} searches  "
+            f"{r['hits']:>5} hits returned"
+        )
+    print()
+
+
 def _print_config_sources(rows: list[dict], env_file_path: Path) -> None:
     if not rows:
         return
@@ -146,6 +194,44 @@ def _fmt_count(n: int) -> str:
     return f"{n / 1_000_000:.1f}M"
 
 
+def _source_from_spans(spans) -> str | None:
+    """Pull ``service.name`` off the root span's resource attributes.
+
+    MLflow's OTLP receiver stores the OTel resource attribute
+    ``service.name`` on each span (each trace's root span is the one
+    without a parent).  ``mlflow.search_traces`` returns a ``spans``
+    column whose entries vary in shape across MLflow versions (Span
+    object, dict, or pandas Series of dicts), so we defend against
+    both attribute and item access.  Any malformed shape returns None
+    so the caller falls back to "unknown" rather than crashing the report.
+    """
+    if spans is None:
+        return None
+    try:
+        for span in spans:
+            attrs = getattr(span, "attributes", None)
+            if attrs is None and isinstance(span, dict):
+                attrs = span.get("attributes")
+            if attrs:
+                # service.name on the span itself (resource attrs flow
+                # through as span attrs in MLflow's OTLP receiver).
+                if "service.name" in attrs:
+                    return attrs["service.name"]
+            resource = getattr(span, "resource", None) or (
+                span.get("resource") if isinstance(span, dict) else None
+            )
+            if resource:
+                rattrs = getattr(resource, "attributes", None) or (
+                    resource.get("attributes")
+                    if isinstance(resource, dict) else None
+                )
+                if rattrs and "service.name" in rattrs:
+                    return rattrs["service.name"]
+    except (TypeError, AttributeError):
+        return None
+    return None
+
+
 def _is_error(state) -> bool:
     """Trace state comes back as an enum whose ``.value`` is a string.
 
@@ -153,6 +239,100 @@ def _is_error(state) -> bool:
     across MLflow versions that may rename or restructure the enum.
     """
     return str(state).rsplit(".", 1)[-1].upper() == "ERROR"
+
+
+def _project_created(pdir: Path) -> str | None:
+    """Best-effort project-start date from the project directory's metadata.
+
+    Uses ``st_birthtime`` where the OS records it (macOS, BSDs); falls
+    back to ``st_ctime`` on Linux (which is "change time", not "creation
+    time", but is a reasonable proxy for a project directory written
+    once at ``dsagt init``).  Returns ``YYYY-MM-DD`` or ``None`` if the
+    stat fails.
+    """
+    try:
+        st = pdir.stat()
+    except OSError:
+        return None
+    ts = getattr(st, "st_birthtime", None) or st.st_ctime
+    if not ts:
+        return None
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def _kb_collections(pdir: Path) -> list[dict]:
+    """Per-collection summary read directly from ``<project>/kb_index/``.
+
+    Reports chunk count and (when present) a ``metadata.source`` breakdown
+    so tools/skills collections can show bundled-vs-project at a glance.
+    Counts come from line-counting ``chunks.jsonl`` rather than loading
+    the vector index — fast, and survives even if Chroma's sqlite is locked.
+    """
+    kb_dir = pdir / "kb_index"
+    if not kb_dir.exists():
+        return []
+    rows: list[dict] = []
+    for sub in sorted(kb_dir.iterdir()):
+        chunks_file = sub / "chunks.jsonl"
+        if not sub.is_dir() or not chunks_file.exists():
+            continue
+        n_chunks = 0
+        sources: dict[str, int] = {}
+        with chunks_file.open() as f:
+            for line in f:
+                n_chunks += 1
+                try:
+                    src = json.loads(line).get("metadata", {}).get("source")
+                except (ValueError, TypeError):
+                    src = None
+                if src:
+                    sources[src] = sources.get(src, 0) + 1
+        rows.append({
+            "collection": sub.name,
+            "chunks": n_chunks,
+            "by_source": sources,
+        })
+    return rows
+
+
+def _kb_retrieval(traces) -> list[dict]:
+    """Per-session ``kb.search`` activity pulled from MLflow trace spans.
+
+    Each ``kb.search`` span carries a ``hits`` attribute (set by the
+    ``traced`` decorator on ``KnowledgeBase.search``).  Group by
+    ``mlflow.trace.session`` so the user sees which session leaned hardest
+    on retrieval and how many results it actually got back.
+    """
+    if traces is None or traces.empty:
+        return []
+    rows: dict[str, dict] = {}
+    for _, row in traces.iterrows():
+        spans = row.get("spans")
+        if not spans:
+            continue
+        md = row.get("trace_metadata") or {}
+        session = md.get("mlflow.trace.session") or "(no-session)"
+        for span in spans:
+            name = getattr(span, "name", None) or (
+                span.get("name") if isinstance(span, dict) else None
+            )
+            if name != "kb.search":
+                continue
+            attrs = getattr(span, "attributes", None) or (
+                span.get("attributes") if isinstance(span, dict) else None
+            ) or {}
+            try:
+                hits = int(attrs.get("hits", 0))
+            except (TypeError, ValueError):
+                hits = 0
+            r = rows.setdefault(
+                session,
+                {"session": session, "searches": 0, "hits": 0},
+            )
+            r["searches"] += 1
+            r["hits"] += hits
+    return sorted(rows.values(), key=lambda r: r["searches"], reverse=True)
 
 
 def _load_traces(mlflow_db: Path, project_name: str):
@@ -190,6 +370,7 @@ def _report(project_name: str, config: dict, traces) -> dict:
             "by_source": [],
             "by_session": [],
             "errors": [],
+            "kb_retrieval": [],
         }
 
     # Extract flat columns we'll group on.  Using .apply over the metadata
@@ -198,10 +379,21 @@ def _report(project_name: str, config: dict, traces) -> dict:
     md = traces["trace_metadata"].apply(lambda m: m or {})
     in_toks = md.apply(lambda m: _tokens(m)[0])
     out_toks = md.apply(lambda m: _tokens(m)[1])
-    source = md.apply(lambda m: m.get("dsagt.source") or "unknown")
     session = md.apply(lambda m: m.get("mlflow.trace.session") or "(no-session)")
     agent = md.apply(lambda m: m.get("dsagt.agent") or "-")
     errored = traces["state"].apply(_is_error)
+
+    # Source bucket = OTel service.name from the root span.  See
+    # _source_from_spans for shape tolerance across MLflow versions.
+    spans_col = traces["spans"] if "spans" in traces.columns else None
+
+    def _row_source(idx: int) -> str:
+        if spans_col is not None:
+            return _source_from_spans(spans_col.iloc[idx]) or "unknown"
+        return "unknown"
+
+    source = md.reset_index(drop=True).index.to_series().apply(_row_source)
+    source.index = md.index
 
     df = traces.copy()
     df["_in"] = in_toks
@@ -256,6 +448,7 @@ def _report(project_name: str, config: dict, traces) -> dict:
         "by_source": _group_rows("_source"),
         "by_session": _group_rows("_session", sort_by_recency=True),
         "errors": errors,
+        "kb_retrieval": _kb_retrieval(traces),
     }
 
 
@@ -263,12 +456,16 @@ def _print_text(r: dict) -> None:
     print(f"Project: {r['project']}")
     print(f"  Agent:  {r['agent']}")
     print(f"  Model:  {r['model']}")
+    if r.get("created"):
+        print(f"  Started: {r['created']}")
     print()
 
     config_sources = r.get("config_sources") or []
     env_file_path = r.get("env_file_path")
     if config_sources and env_file_path:
         _print_config_sources(config_sources, Path(env_file_path))
+
+    _print_kb_collections(r.get("kb_collections") or [])
 
     if r["total_traces"] == 0:
         print("No traces recorded yet (run `dsagt start` to create a session).")
@@ -304,6 +501,8 @@ def _print_text(r: dict) -> None:
             f"{row['errors']} error{'s' if row['errors'] != 1 else ''}"
         )
 
+    _print_kb_retrieval(r.get("kb_retrieval") or [])
+
     if r["errors"]:
         print()
         print("Errors:")
@@ -320,6 +519,8 @@ def run(project: str, as_json: bool) -> int:
 
     env_file_path = Path.cwd() / ".env"
     sources = _config_sources(project, env_file_path)
+    kb_collections = _kb_collections(pdir)
+    created = _project_created(pdir)
 
     if not mlflow_db.exists():
         # New project, or one that's never been started.  Print the header
@@ -329,6 +530,7 @@ def run(project: str, as_json: bool) -> int:
             "project": project,
             "agent": config.get("agent", "-"),
             "model": config.get("llm", {}).get("model", "-"),
+            "created": created,
             "total_traces": 0,
             "total_errors": 0,
             "input_tokens": 0,
@@ -336,6 +538,8 @@ def run(project: str, as_json: bool) -> int:
             "by_source": [],
             "by_session": [],
             "errors": [],
+            "kb_retrieval": [],
+            "kb_collections": kb_collections,
             "config_sources": sources,
             "env_file_path": str(env_file_path),
         }
@@ -347,6 +551,8 @@ def run(project: str, as_json: bool) -> int:
 
     traces, _ = _load_traces(mlflow_db, project)
     r = _report(project, config, traces)
+    r["created"] = created
+    r["kb_collections"] = kb_collections
     r["config_sources"] = sources
     r["env_file_path"] = str(env_file_path)
 

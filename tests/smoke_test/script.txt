@@ -1,10 +1,10 @@
-Ingest the docs in ../tests/smoke_test/knowledge/ into a collection named knowledge.
+Ingest the docs in {{SMOKE_DIR}}/knowledge/ into a collection named knowledge.
 
-I have a CSV utility called csvtool. Its reference is at ../tests/smoke_test/knowledge/api_reference.md — please register the filter subcommand so we can reuse it later. Use an underscore in the name, not a hyphen.
+I have a CSV utility called csvtool. Its reference is at {{SMOKE_DIR}}/knowledge/api_reference.md — please register the filter subcommand so we can reuse it later. Use an underscore in the name, not a hyphen.
 
-Use the scan_directory tool from the registry to scan the ../tests/smoke_test/data/ directory so I can see what's in it.
+Use the scan_directory tool from the registry to scan the {{SMOKE_DIR}}/data/ directory so I can see what's in it.
 
-Look at ../tests/smoke_test/data/samples.csv and give me a short summary — columns, row count, any obvious quality issues.
+Look at {{SMOKE_DIR}}/data/samples.csv and give me a short summary — columns, row count, any obvious quality issues.
 
 Put this fact in explicit memory: samples.csv has null values in the status and timestamp columns.
 

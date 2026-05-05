@@ -15,11 +15,20 @@ dependencies = [
     "pyyaml>=6.0",
     "httpx>=0.27.0",
     "mcp>=1.0.0",
-    # LLM proxy + observability (used by dsagt-proxy and dsagt start)
+    # LiteLLM is used by MCP servers (knowledge: embeddings),
+    # session.run_extraction (memory extraction LLM call), and Phase 2
+    # ``dsagt start --enable-proxy`` (LiteLLM proxy server bootstrap).
+    # The ``[proxy]`` extra pulls in backoff / fastapi / uvicorn / ...
+    # required by ``litellm.proxy.proxy_cli.run_server``.
     "litellm[proxy]>=1.83.7",  # floor: closes GHSA-r75f / GHSA-v4p8 / GHSA-xqmj — don't downgrade
     "python-dotenv>=1.0",  # transitive via litellm, pinned directly so a fresh venv always has it
 
-    "mlflow>=3.11.0,<4.0",  # pinned: observability.py relies on mlflow.tracing APIs (start_span, update_current_trace, _get_tracer)
+    # MCP-server / dsagt-run observability emits OTLP HTTP to MLflow's
+    # /v1/traces endpoint; floor=3.11.1 so we ship with the latest GenAI
+    # semconv support and well past the 3.6.0 protobuf-response bug fixed
+    # in 3.7.0.  The proxy-side (_DSAGTMlflowLogger in provenance.py) still
+    # uses MLflow's MlflowLogger SDK directly, so MLflow remains a hard dep.
+    "mlflow>=3.11.1,<4.0",
     "opentelemetry-api>=1.27",
     "opentelemetry-sdk>=1.27",
     "opentelemetry-exporter-otlp-proto-http>=1.27",
@@ -31,12 +40,18 @@ dependencies = [
     "faiss-cpu>=1.8",
     "sentence-transformers>=3.0",
     "llama-index-readers-file>=0.1",
+    # Sparse keyword retrieval for hybrid search.  rank_bm25 is pure Python
+    # (~10 KB), no native deps; the corpus and IDF stats live in memory and
+    # are pickled to disk per-collection.  Used alongside dense embeddings
+    # via Reciprocal Rank Fusion in KnowledgeBase.search when the route's
+    # ``hybrid`` flag is set (default True).
+    "rank-bm25>=0.2.2",
 ]
 
 [project.scripts]
 dsagt = "dsagt.commands.cli:main"
-dsagt-proxy = "dsagt.commands.proxy_server:main"
 dsagt-run = "dsagt.commands.run_tool:main"
+dsagt-proxy = "dsagt.commands.proxy_server:main"
 dsagt-registry-server = "dsagt.commands.registry_server:main"
 dsagt-knowledge-server = "dsagt.commands.knowledge_server:main"
 dsagt-setup-kb = "dsagt.commands.setup_core_kb:main"

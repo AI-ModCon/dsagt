@@ -1,12 +1,10 @@
 """
-Provenance and session tracking.
+Provenance for tool executions.
 
 **Execution capture** (dsagt-run wrapper):
-    Wraps a shell command, captures exact execution data, writes a JSON record.
-
-**LLM conversation tracking** (LiteLLM callback):
-    Tracks tool_use/tool_result blocks from LLM conversations, writes intent +
-    report records, maintains the session log for memory extraction.
+    Wraps a shell command, captures exact execution data (command, exit
+    code, stdout/stderr, input/output files), and writes a JSON record
+    to ``trace_archive/<tool>_<ts>_<id>.json``.
 
 **Record indexing** (ChromaDB):
     Indexes execution records into a ``tool_executions`` collection for
@@ -15,6 +13,9 @@ Provenance and session tracking.
 **Pipeline reconstruction**:
     Reads execution records, builds a dependency graph from input/output
     file overlap, and renders as a bash script or Snakemake workflow.
+
+LLM-call provenance lives in MLflow (each MCP-server / agent process
+autologs LiteLLM calls via ``init_tracing`` post-proxy-removal).
 """
 
 from __future__ import annotations
@@ -33,7 +34,13 @@ from dsagt.knowledge import CollectionRoute, KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
-TOOL_EXECUTIONS_COLLECTION = "tool_executions"
+#: Project-local collection of indexed tool-execution records.
+#: Renamed from ``tool_executions`` to match the user-facing
+#: terminology ("tool_use index").
+TOOL_USE_COLLECTION = "tool_use"
+
+#: Backwards-compat alias.  New code should use ``TOOL_USE_COLLECTION``.
+TOOL_EXECUTIONS_COLLECTION = TOOL_USE_COLLECTION
 TOOL_EXECUTIONS_ROUTE = CollectionRoute(
     embedding_backend="api",
     vector_db="chroma",
@@ -46,22 +53,23 @@ TOOL_EXECUTIONS_ROUTE = CollectionRoute(
 # ---------------------------------------------------------------------------
 
 def _resolve_records_dir(explicit: str | None) -> Path:
-    """Determine the records directory from arg, env var, or project dir.
+    """Determine the records directory.
 
-    Priority: explicit flag → $DSAGT_RECORDS_DIR → $DSAGT_PROJECT_DIR/trace_archive.
-    Raises ValueError if none are available.
+    Priority: explicit ``--records-dir`` flag → ``<cwd>/trace_archive``,
+    where cwd must contain ``dsagt_config.yaml`` (the project's
+    single-source-of-truth config written by ``dsagt init``).  No env-var
+    chain, no walking up the tree — if the agent's cwd isn't the project
+    dir, that's the bug to fix, not something to recover from silently.
     """
     if explicit:
         return Path(explicit)
-    from_env = os.environ.get("DSAGT_RECORDS_DIR")
-    if from_env:
-        return Path(from_env)
-    project_dir = os.environ.get("DSAGT_PROJECT_DIR")
-    if project_dir:
-        return Path(project_dir) / "trace_archive"
-    raise ValueError(
-        "No records directory: set --records-dir, $DSAGT_RECORDS_DIR, or $DSAGT_PROJECT_DIR"
-    )
+    cwd = Path.cwd().resolve()
+    if not (cwd / "dsagt_config.yaml").exists():
+        raise ValueError(
+            f"No dsagt_config.yaml in cwd ({cwd}); pass --records-dir or "
+            "run dsagt-run from a project directory."
+        )
+    return cwd / "trace_archive"
 
 
 def _parse_file_list(raw: str | None) -> list[str]:
@@ -268,11 +276,13 @@ def index_execution_record(record: dict, kb: KnowledgeBase) -> dict:
     text = render_execution_text(record)
     metadata = execution_metadata(record)
 
+    # No ``route=`` — fall through to kb's default route so embedding
+    # backend follows the project's ``embedding.backend`` config (BYOA
+    # default = local sentence-transformers, no API call).
     return kb.add_entries(
         texts=[text],
         collection=TOOL_EXECUTIONS_COLLECTION,
         metadatas=[metadata],
-        route=TOOL_EXECUTIONS_ROUTE,
     )
 
 
@@ -319,12 +329,12 @@ def index_trace_archive(
         if record_id:
             indexed_ids.add(record_id)
 
+    # No ``route=`` — see ``index_execution_record`` above.
     if texts:
         kb.add_entries(
             texts=texts,
             collection=TOOL_EXECUTIONS_COLLECTION,
             metadatas=metadatas,
-            route=TOOL_EXECUTIONS_ROUTE,
         )
 
     return {
@@ -502,534 +512,4 @@ def reconstruct_pipeline(
     if fmt == "snakemake":
         return render_snakemake(records, deps)
     return render_bash(records, deps)
-
-
-# ---------------------------------------------------------------------------
-# LLM conversation tracking (LiteLLM callback)
-# ---------------------------------------------------------------------------
-
-SESSION_LOG_FILE = "session_log.jsonl"
-
-
-class ToolRecordStore:
-    """Manages tool execution records and session logging on disk.
-
-    Tracks tool_use blocks from LLM responses, matches them against
-    tool_result blocks in subsequent requests, and writes the combined
-    intent + report record. dsagt-run optionally fills in the execution layer.
-    """
-
-    def __init__(self, records_dir: str | Path, session_id: str | None = None):
-        self.records_dir = Path(records_dir)
-        self.session_id = session_id or os.environ.get("DSAGT_SESSION_ID")
-
-        self._pending: dict[str, dict] = {}
-        self._logged_message_count: int = 0
-        # Cursor for match_tool_results — only the suffix of the messages list
-        # past this index needs to be re-scanned on each call.  Without this,
-        # match_tool_results was O(n²) over the session: every callback
-        # iterated the entire growing message history.
-        self._matched_message_count: int = 0
-        self._extraction_threshold: int = int(
-            os.environ.get("DSAGT_EXTRACTION_THRESHOLD", "0")
-        )
-        self._exchange_count: int = 0
-        self._extracting: bool = False
-        self._last_injected_suggestion_count: int = 0
-
-        # Long-lived session log handle.  Opened lazily on the first write so
-        # ToolRecordStore can be constructed in tests / unusual lifecycles
-        # without hitting the disk.  Keeping a single handle open across the
-        # proxy lifetime saves an open() + close() syscall pair on every LLM
-        # exchange — meaningful because log_exchange runs on the proxy
-        # callback hot path.
-        self._session_log_handle = None
-
-        self.records_dir.mkdir(parents=True, exist_ok=True)
-
-    def track_tool_uses(self, response_data: dict) -> list[dict]:
-        """Extract tool_use/tool_calls from a response and track them."""
-        tracked = []
-        now = datetime.now(timezone.utc).isoformat()
-
-        for choice in response_data.get("choices", []):
-            message = choice.get("message") or {}
-            for tc in message.get("tool_calls") or []:
-                func = tc.get("function", {})
-                entry = {
-                    "tool_use_id": tc.get("id"),
-                    "tool_name": func.get("name"),
-                    "parameters": _parse_arguments(func.get("arguments", "{}")),
-                    "timestamp_requested": now,
-                }
-                self._pending[entry["tool_use_id"]] = entry
-                tracked.append(entry)
-
-        for block in response_data.get("content", []):
-            if block.get("type") == "tool_use":
-                entry = {
-                    "tool_use_id": block["id"],
-                    "tool_name": block["name"],
-                    "parameters": block.get("input", {}),
-                    "timestamp_requested": now,
-                }
-                self._pending[entry["tool_use_id"]] = entry
-                tracked.append(entry)
-
-        for t in tracked:
-            logger.info("Tracking tool_use: %s (%s)", t["tool_name"], t["tool_use_id"][:12])
-
-        return tracked
-
-    def match_tool_results(self, messages: list[dict]) -> list[Path]:
-        """Find tool_result/tool-role messages and write execution records.
-
-        Only iterates the suffix of *messages* past the cursor advanced on
-        the previous call.  Chat history is append-only, so any tool_result
-        not seen yet must live in the new tail.
-        """
-        paths = []
-        new_messages = messages[self._matched_message_count:]
-        self._matched_message_count = len(messages)
-
-        for msg in new_messages:
-            if msg.get("role") == "tool":
-                tool_call_id = msg.get("tool_call_id")
-                if tool_call_id and tool_call_id in self._pending:
-                    intent = self._pending.pop(tool_call_id)
-                    path = self._write_proxy_record(intent, msg.get("content", ""))
-                    paths.append(path)
-                continue
-
-            if msg.get("role") != "user":
-                continue
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if block.get("type") != "tool_result":
-                    continue
-                tool_use_id = block.get("tool_use_id")
-                if tool_use_id and tool_use_id in self._pending:
-                    intent = self._pending.pop(tool_use_id)
-                    result_text = _extract_tool_result_text(block)
-                    path = self._write_proxy_record(intent, result_text)
-                    paths.append(path)
-
-        return paths
-
-    def _write_proxy_record(self, intent: dict, agent_output: str) -> Path:
-        """Write a tool execution record with intent + report layers."""
-        record = {
-            "record_id": intent["tool_use_id"],
-            "tool_name": intent["tool_name"],
-            "session_id": self.session_id,
-            "intent": {
-                "command": intent["tool_name"],
-                "parameters": intent["parameters"],
-                "timestamp_requested": intent["timestamp_requested"],
-                "session_id": self.session_id,
-            },
-            "execution": None,
-            "report": {
-                "agent_output": agent_output,
-                "timestamp_reported": datetime.now(timezone.utc).isoformat(),
-                "wrapper_used": False,
-            },
-        }
-
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        rid = intent["tool_use_id"][:12]
-        filename = f"{intent['tool_name']}_{ts}_{rid}.json"
-        path = self.records_dir / filename
-        path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
-        logger.info("Execution record: %s", filename)
-        return path
-
-    @property
-    def pending_count(self) -> int:
-        return len(self._pending)
-
-    @property
-    def session_log_path(self) -> Path:
-        return self.records_dir / SESSION_LOG_FILE
-
-    def log_exchange(self, kwargs: dict, response_data: dict) -> None:
-        """Append this LLM exchange to the session log."""
-        messages = kwargs.get("messages", [])
-        new_messages = messages[self._logged_message_count:]
-        self._logged_message_count = len(messages)
-
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "call_id": kwargs.get("litellm_call_id", ""),
-            "model": kwargs.get("model", ""),
-            "new_messages": new_messages,
-            "response": _extract_response_content(response_data),
-        }
-
-        # Lazy-open the session log handle on first write.  Line-buffered
-        # so each exchange is durable on disk after the trailing "\n" without
-        # needing an explicit flush.
-        if self._session_log_handle is None:
-            self._session_log_handle = open(
-                self.session_log_path, "a", buffering=1, encoding="utf-8",
-            )
-        self._session_log_handle.write(
-            json.dumps(entry, ensure_ascii=False) + "\n"
-        )
-
-        self._exchange_count += 1
-        if (
-            self._extraction_threshold > 0
-            and self._exchange_count >= self._extraction_threshold
-            and not self._extracting
-        ):
-            self._trigger_extraction()
-
-    def close(self) -> None:
-        """Close the session log handle if it was opened.
-
-        Idempotent and safe to call from atexit hooks or shutdown paths.
-        Line buffering means data is already on disk; this just releases
-        the file descriptor.
-        """
-        if self._session_log_handle is not None:
-            try:
-                self._session_log_handle.close()
-            except Exception as e:
-                logger.debug("ToolRecordStore.close: %s", e)
-            self._session_log_handle = None
-
-    def _trigger_extraction(self) -> None:
-        """Run extraction in a background thread so the proxy isn't blocked."""
-        import threading
-
-        project_name = os.environ.get("DSAGT_PROJECT")
-        if not project_name:
-            logger.warning("DSAGT_PROJECT not set, skipping volume-triggered extraction")
-            return
-
-        self._extracting = True
-        self._exchange_count = 0
-
-        def _run():
-            try:
-                from dsagt.session import run_extraction
-                result = run_extraction(project_name)
-                logger.info("Volume-triggered extraction: %s", result.get("status"))
-            finally:
-                self._extracting = False
-
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-
-    def pending_injection(self) -> str | None:
-        """Check for pending suggestions and return an injection message."""
-        suggestions_path = self.records_dir.parent / "suggestions.json"
-        if not suggestions_path.exists():
-            return None
-
-        suggestions = json.loads(suggestions_path.read_text())
-        if not suggestions or len(suggestions) == self._last_injected_suggestion_count:
-            return None
-
-        self._last_injected_suggestion_count = len(suggestions)
-
-        count = len(suggestions)
-        previews = []
-        for s in suggestions[:3]:
-            previews.append(f"  - [{s.get('category', '')}] {s.get('text', '')[:80]}")
-        preview_text = "\n".join(previews)
-        more = f"\n  ... and {count - 3} more" if count > 3 else ""
-
-        return (
-            f"[DSAgt Memory System] {count} new observation(s) were flagged as "
-            f"potentially important during this session:\n{preview_text}{more}\n"
-            f"Call kb_get_suggestions to review them with the user."
-        )
-
-
-# ---------------------------------------------------------------------------
-# LLM callback helpers
-# ---------------------------------------------------------------------------
-
-def _parse_arguments(raw: str | dict) -> dict:
-    if isinstance(raw, dict):
-        return raw
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return {"_raw": raw}
-
-
-def _extract_tool_result_text(block: dict) -> str:
-    content = block.get("content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
-        return "\n".join(texts)
-    return str(content)
-
-
-def _extract_response_content(response_data: dict) -> list[dict]:
-    if "content" in response_data and isinstance(response_data["content"], list):
-        return response_data["content"]
-
-    for choice in response_data.get("choices", []):
-        msg = choice.get("message") or {}
-        blocks = []
-        if msg.get("content"):
-            blocks.append({"type": "text", "text": msg["content"]})
-        for tc in msg.get("tool_calls") or []:
-            func = tc.get("function", {})
-            blocks.append({
-                "type": "tool_use",
-                "name": func.get("name", ""),
-                "input": _parse_arguments(func.get("arguments", "{}")),
-            })
-        if blocks:
-            return blocks
-
-    return []
-
-
-def _response_to_dict(response_obj) -> dict:
-    if isinstance(response_obj, dict):
-        return response_obj
-    for method in ("model_dump", "dict", "to_dict"):
-        fn = getattr(response_obj, method, None)
-        if fn:
-            return fn()
-    return {"_repr": str(response_obj)}
-
-
-# ---------------------------------------------------------------------------
-# LiteLLM callback factory
-# ---------------------------------------------------------------------------
-
-def create_callback(records_dir: str | Path, session_id: str | None = None):
-    """Create a DSAGT callback instance for LiteLLM.
-
-    Imports litellm lazily so the rest of the module is testable without it.
-    """
-    import atexit
-
-    from litellm.integrations.custom_logger import CustomLogger
-
-    store = ToolRecordStore(records_dir, session_id)
-    # Release the session log file descriptor on proxy shutdown.
-    atexit.register(store.close)
-
-    class DSAGTCallback(CustomLogger):
-        def log_pre_api_call(self, model, messages, kwargs):
-            injection = store.pending_injection()
-            if injection:
-                messages.insert(0, {"role": "system", "content": injection})
-                logger.info("Injected suggestion prompt (%d chars)", len(injection))
-            _inject_cache_breakpoints(messages, kwargs)
-
-        def log_success_event(self, kwargs, response_obj, start_time, end_time):
-            _handle_success(store, kwargs, response_obj, start_time, end_time)
-            _tag_mlflow_session(session_id)
-
-        async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-            _handle_success(store, kwargs, response_obj, start_time, end_time)
-            _tag_mlflow_session(session_id)
-
-        def log_failure_event(self, kwargs, response_obj, start_time, end_time):
-            logger.warning("LLM call failed: model=%s", kwargs.get("model"))
-
-        async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
-            logger.warning("LLM call failed: model=%s", kwargs.get("model"))
-
-    return DSAGTCallback()
-
-
-# Marker LiteLLM forwards through to Anthropic-family providers (Anthropic
-# direct, Bedrock-Claude) as their `cache_control` field on a content block
-# or tool definition.  Providers without prompt caching (current OpenAI
-# automatic caching ignores explicit markers, Cohere/Mistral/etc just drop
-# them) treat the field as a no-op, so this is safe to set unconditionally.
-_CACHE_MARKER = {"type": "ephemeral"}
-
-
-
-def _inject_cache_breakpoints(messages: list, kwargs: dict) -> None:
-    """Mark the largest stable request prefix as cacheable.
-
-    Anthropic prompt caching keys on the prefix UP TO each marked block, so
-    one marker at the end of the tools array caches "system + tools", and a
-    second on the system message itself ensures the system block is cached
-    even on requests with no tools.  Subsequent turns within the 5-minute
-    TTL pay 10% on the cached prefix instead of 100%.
-
-    Mutates ``messages`` and ``kwargs`` in place — the proxy reads the same
-    objects on its way to the upstream call.
-    """
-    # 1) Tools: stamp the last tool definition.  In LiteLLM's OpenAI-shape
-    #    the tool dict carries cache_control as a top-level key and the
-    #    Anthropic translator picks it up.
-    tools = kwargs.get("tools") or []
-    if tools and isinstance(tools[-1], dict):
-        tools[-1]["cache_control"] = _CACHE_MARKER
-
-    # 2) System message: stamp the last text block.  For string content we
-    #    promote to block format because cache_control lives on the block,
-    #    not the message itself.
-    for msg in messages:
-        if msg.get("role") != "system":
-            continue
-        content = msg.get("content")
-        if isinstance(content, str):
-            msg["content"] = [{
-                "type": "text",
-                "text": content,
-                "cache_control": _CACHE_MARKER,
-            }]
-        elif isinstance(content, list) and content:
-            last_block = content[-1]
-            if isinstance(last_block, dict):
-                last_block["cache_control"] = _CACHE_MARKER
-        break
-
-
-def install_mlflow_logger_with_session_tag() -> None:
-    """Inject a MlflowLogger subclass that stamps ``mlflow.trace.session``.
-
-    Why a subclass instead of post-hoc tagging from another callback:
-    LiteLLM's MlflowLogger does the entire trace lifecycle (start_trace →
-    set_attributes → end_trace) inside one ``_handle_success`` call.  By
-    the time any sibling success-callback fires, the trace is already
-    exported and ``mlflow.update_current_trace`` has nothing to update.
-    Subclassing lets us slot the metadata write between trace creation and
-    trace export, where the in-memory trace still exists and is mutable.
-
-    Why register via LiteLLM's ``_in_memory_loggers`` cache: when the
-    proxy resolves the string ``"mlflow"`` from ``success_callback``, it
-    iterates ``_in_memory_loggers`` looking for any ``isinstance(_,
-    MlflowLogger)`` and returns it instead of constructing a fresh one
-    (litellm_logging.py ~line 4111).  A subclass passes the isinstance
-    check, so pre-seeding our subclass means the existing string-based
-    registration in ``success_callback``/``failure_callback`` automatically
-    routes through us — no sync-vs-async dispatch quirks to worry about.
-
-    Idempotent: safe to call more than once.
-    """
-    from litellm.integrations.mlflow import MlflowLogger
-    from litellm.litellm_core_utils import litellm_logging as _ll
-
-    from dsagt.observability import _stamp_metadata_on_trace, extract_cache_stats
-
-    class _DSAGTMlflowLogger(MlflowLogger):
-        def _start_span_or_trace(self, kwargs, start_time):
-            span = super()._start_span_or_trace(kwargs, start_time)
-            # span.request_id is MLflow's trace_id; the trace lives in
-            # InMemoryTraceManager until the parent _handle_success calls
-            # _end_span_or_trace, so we have a window here to mutate
-            # trace_metadata before export.
-            #
-            # Agent-turn LLM calls land here (proxy path).  Stamp:
-            #   mlflow.trace.session — session grouping in the UI
-            #   dsagt.source=agent   — distinguishes from extraction/embedding
-            #   dsagt.agent          — which platform (goose, claude, ...)
-            # Non-agent LLM calls (memory extraction, embeddings) go through
-            # llm_source(...) decorators and never touch this subclass, so
-            # hard-coding source="agent" here is safe.
-            if span is None:
-                return span
-            metadata: dict[str, str] = {"dsagt.source": "agent"}
-            if session_id := os.environ.get("DSAGT_SESSION_ID"):
-                metadata["mlflow.trace.session"] = session_id
-            if agent := os.environ.get("DSAGT_AGENT"):
-                metadata["dsagt.agent"] = agent
-            _stamp_metadata_on_trace(span.request_id, metadata)
-            return span
-
-        def _extract_and_set_chat_attributes(self, span, kwargs, response_obj):
-            # The response is in hand here, and the trace is still open in
-            # InMemoryTraceManager — last window to stamp cache stats before
-            # _end_span_or_trace exports.  A sibling success-callback firing
-            # later (e.g. DSAGTCallback.async_log_success_event) is too late;
-            # mlflow.update_current_trace silently no-ops on an exported trace.
-            super()._extract_and_set_chat_attributes(span, kwargs, response_obj)
-            if span is None:
-                return
-            usage = (_response_to_dict(response_obj) or {}).get("usage") or {}
-            read, write = extract_cache_stats(usage)
-            if not read and not write:
-                return
-            _stamp_metadata_on_trace(span.request_id, {
-                "dsagt.cache.read_tokens": str(read),
-                "dsagt.cache.write_tokens": str(write),
-            })
-
-    # Already installed? Leave it.
-    for cb in _ll._in_memory_loggers:
-        if type(cb).__name__ == "_DSAGTMlflowLogger":
-            return
-    # Drop any vanilla MlflowLogger that beat us to the cache.
-    _ll._in_memory_loggers[:] = [
-        cb for cb in _ll._in_memory_loggers
-        if not (isinstance(cb, MlflowLogger) and type(cb).__name__ != "_DSAGTMlflowLogger")
-    ]
-    _ll._in_memory_loggers.append(_DSAGTMlflowLogger())
-
-
-def _tag_mlflow_session(session_id: str | None) -> None:
-    """Stamp the current MLflow trace with the reserved session key.
-
-    Runs per-LLM-call because ``mlflow.litellm.autolog`` creates one trace per
-    invocation; ``update_current_trace`` only applies to the active trace, so
-    tagging has to happen while that trace is still open (i.e. from the
-    LiteLLM success callback, before the autolog span closes).
-
-    Silently no-ops if MLflow isn't installed or no trace is active — the
-    proxy still works without MLflow.
-    """
-    if not session_id:
-        return
-    try:
-        import mlflow
-        mlflow.update_current_trace(
-            metadata={"mlflow.trace.session": session_id},
-        )
-    except Exception as e:
-        logger.debug("mlflow.trace.session tag failed: %s", e)
-
-
-def _handle_success(store: ToolRecordStore, kwargs, response_obj, start_time, end_time):
-    from dsagt.observability import record_sidechannel_call as _record_sidechannel
-
-    messages = kwargs.get("messages", [])
-    response_data = _response_to_dict(response_obj)
-    store.log_exchange(kwargs, response_data)
-    store.match_tool_results(messages)
-    store.track_tool_uses(response_data)
-    usage = response_data.get("usage") or {}
-    _log_cache_usage(usage)
-    _record_sidechannel(store.records_dir, kwargs)
-
-
-def _log_cache_usage(usage: dict) -> None:
-    """Emit a one-line summary of prompt-cache hits/misses per completion.
-
-    Provider-agnostic: ``extract_cache_stats`` handles every cache-field
-    shape we've seen in practice (Anthropic/Bedrock, OpenAI/Azure, Gemini,
-    DeepSeek).  When the upstream omits all known fields the line shows
-    zeros and the user knows caching either wasn't requested or got
-    stripped at the provider boundary.
-    """
-    if not usage:
-        return
-    from dsagt.observability import extract_cache_stats
-    prompt = usage.get("prompt_tokens", 0)
-    completion = usage.get("completion_tokens", 0)
-    cache_read, cache_write = extract_cache_stats(usage)
-    logger.info(
-        "tokens: prompt=%d completion=%d  cache: read=%d write=%d",
-        prompt, completion, cache_read, cache_write,
-    )
-
 

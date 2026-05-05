@@ -1,19 +1,15 @@
 """
-Tests for outlier detection, suggestion queue, and proxy injection.
+Tests for outlier detection and suggestion queue.
 
 Tests CategoryCentroids (incremental update, cosine distance, persistence),
-SuggestionQueue (add, dismiss, persistence), check_and_queue_outliers
-(threshold behavior, first-in-category skip), and the proxy injection
-mechanism (pending_injection, dedup).
+SuggestionQueue (add, dismiss, persistence), and check_and_queue_outliers
+(threshold behavior, first-in-category skip).
 """
-
-import json
 
 import numpy as np
 import pytest
 
 from dsagt.memory import CategoryCentroids, SuggestionQueue, check_and_queue_outliers
-from dsagt.provenance import ToolRecordStore
 
 
 # ---------------------------------------------------------------------------
@@ -230,67 +226,3 @@ class TestCheckAndQueueOutliers:
         assert (tmp_path / "centroids.json").exists()
 
 
-# ---------------------------------------------------------------------------
-# Proxy injection
-# ---------------------------------------------------------------------------
-
-class TestProxyInjection:
-
-    def test_no_suggestions_returns_none(self, tmp_path):
-        store = ToolRecordStore(records_dir=tmp_path / "trace_archive", session_id="test")
-        assert store.pending_injection() is None
-
-    def test_with_suggestions_returns_message(self, tmp_path):
-        project_dir = tmp_path
-        trace_dir = project_dir / "trace_archive"
-        trace_dir.mkdir(parents=True)
-
-        # Write suggestions
-        suggestions = [{"id": "sug_1", "text": "unusual QC result", "category": "qc", "distance": 0.45}]
-        (project_dir / "suggestions.json").write_text(json.dumps(suggestions))
-
-        store = ToolRecordStore(records_dir=trace_dir, session_id="test")
-        msg = store.pending_injection()
-
-        assert msg is not None
-        assert "DSAgt Memory System" in msg
-        assert "unusual QC result" in msg
-        assert "kb_get_suggestions" in msg
-
-    def test_injection_fires_once(self, tmp_path):
-        """Injection only fires once per suggestion batch."""
-        project_dir = tmp_path
-        trace_dir = project_dir / "trace_archive"
-        trace_dir.mkdir(parents=True)
-
-        suggestions = [{"id": "sug_1", "text": "fact", "category": "qc", "distance": 0.4}]
-        (project_dir / "suggestions.json").write_text(json.dumps(suggestions))
-
-        store = ToolRecordStore(records_dir=trace_dir, session_id="test")
-
-        first = store.pending_injection()
-        assert first is not None
-
-        second = store.pending_injection()
-        assert second is None  # same count, don't inject again
-
-    def test_injection_fires_again_on_new_suggestions(self, tmp_path):
-        """New suggestions trigger a fresh injection."""
-        project_dir = tmp_path
-        trace_dir = project_dir / "trace_archive"
-        trace_dir.mkdir(parents=True)
-
-        # First batch
-        suggestions = [{"id": "sug_1", "text": "fact", "category": "qc", "distance": 0.4}]
-        (project_dir / "suggestions.json").write_text(json.dumps(suggestions))
-
-        store = ToolRecordStore(records_dir=trace_dir, session_id="test")
-        store.pending_injection()  # consume
-
-        # Second batch (more suggestions added)
-        suggestions.append({"id": "sug_2", "text": "another", "category": "config", "distance": 0.5})
-        (project_dir / "suggestions.json").write_text(json.dumps(suggestions))
-
-        msg = store.pending_injection()
-        assert msg is not None
-        assert "2 new observation" in msg

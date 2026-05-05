@@ -23,6 +23,26 @@ sys.path.insert(0, str(Path(__file__).parent))
 _ENV_PATH = Path(__file__).parent.parent / ".env"
 
 
+@pytest.fixture(autouse=True)
+def _stub_mlflow_experiment_lookup(monkeypatch):
+    """Short-circuit ``_resolve_experiment_id`` in unit tests.
+
+    Most tests pass ``mlflow.port=5001`` but don't actually run an MLflow
+    server.  Real ``mlflow.set_experiment`` would block on the unreachable
+    URL until socket timeout (tens of seconds × every test that builds
+    ``agent_env``).  Returning a fake numeric id keeps the env block
+    populated without paying for the lookup.
+
+    Tests that DO run a real MLflow (the integration suite, smoke tests)
+    pass through unchanged because ``mlflow.set_experiment`` is the only
+    thing this stubs — the real network calls happen elsewhere.
+    """
+    monkeypatch.setattr(
+        "dsagt.agents._resolve_experiment_id",
+        lambda mlflow_url, project_name: "1",
+    )
+
+
 def _load_env() -> dict:
     """Parse .env as KEY=VALUE lines.  Fails if the file is missing.
 

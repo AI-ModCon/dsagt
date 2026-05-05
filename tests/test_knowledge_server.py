@@ -532,8 +532,14 @@ class TestSearchErrorHandling:
 
 class TestSetupRuntimeKb:
 
-    def test_symlinks_collections(self, tmp_path):
-        """Symlinks collection directories from base to runtime."""
+    def test_copies_collections(self, tmp_path):
+        """Copies (not symlinks) collection directories from base to runtime.
+
+        Copy semantics pin each project to whatever bundled content was
+        current at first start — different projects on the same machine
+        may run different dsagt versions, and a symlink would let one
+        project's ``setup-kb --rebuild`` mutate every project's view.
+        """
         base = tmp_path / "base_index"
         coll_dir = base / "my_collection"
         coll_dir.mkdir(parents=True)
@@ -545,15 +551,33 @@ class TestSetupRuntimeKb:
         result = setup_runtime_kb(base, runtime)
 
         assert result == runtime / "kb_index"
-        link = result / "my_collection"
-        assert link.exists()
-        assert link.is_symlink()
-        assert (link / "index.faiss").exists()
-        assert (link / "chunks.jsonl").exists()
-        assert (link / "DESCRIPTION.md").exists()
+        copied = result / "my_collection"
+        assert copied.exists()
+        assert not copied.is_symlink()  # copy not symlink
+        assert (copied / "index.faiss").exists()
+        assert (copied / "index.faiss").read_text() == "fake index"
+        assert (copied / "chunks.jsonl").exists()
+        assert (copied / "DESCRIPTION.md").exists()
+
+    def test_copy_is_independent(self, tmp_path):
+        """Mutating the base after copy does not affect the project copy."""
+        base = tmp_path / "base_index"
+        coll = base / "tools"
+        coll.mkdir(parents=True)
+        (coll / "index.faiss").write_text("v1")
+
+        runtime = tmp_path / "runtime"
+        setup_runtime_kb(base, runtime)
+
+        # Mutate the base — simulating ``dsagt setup-kb --rebuild``.
+        (coll / "index.faiss").write_text("v2 newer")
+
+        # Project copy stays at v1.
+        project_copy = runtime / "kb_index" / "tools" / "index.faiss"
+        assert project_copy.read_text() == "v1"
 
     def test_skips_non_collection_dirs(self, tmp_path):
-        """Directories without index.faiss are not symlinked."""
+        """Directories without index.faiss are not copied."""
         base = tmp_path / "base_index"
         (base / "random_dir").mkdir(parents=True)
         (base / "random_dir" / "notes.txt").write_text("not a collection")

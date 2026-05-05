@@ -5,6 +5,7 @@ Tests tool handlers: save_tool_spec, get_registry, search_registry,
 read_file, run_command, install_dependencies.
 """
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +14,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
-from dsagt.registry import ToolRegistry
+from dsagt.registry import SkillRegistry, ToolRegistry
 from dsagt.commands.registry_server import create_registry_server
 from mcp_helpers import call_tool_sync as call_tool
 
@@ -45,14 +46,24 @@ def _write_tool(tools_dir: Path, spec: dict) -> None:
 
 
 def _make_server(tmp_path, tools=None):
-    """Create (server, registry) with optional pre-populated tools."""
+    """Create (server, registry) with optional pre-populated tools.
+
+    Pre-populated tools are written into ``<runtime>/tools/`` (the
+    project layer) so they exercise the agent-saved code path —
+    ``reindex_all`` and most lookups happen here.  The ``source_dir``
+    is still passed as the bundled layer override but left empty;
+    tests that need bundled-layer behavior populate it explicitly.
+    """
     source_dir = tmp_path / "source_skills"
     source_dir.mkdir()
+    runtime_dir = tmp_path / "runtime"
+    project_tools_dir = runtime_dir / "tools"
+    project_tools_dir.mkdir(parents=True, exist_ok=True)
     for spec in (tools or []):
-        _write_tool(source_dir, spec)
+        _write_tool(project_tools_dir, spec)
     reg = ToolRegistry(
         source_tools_dir=str(source_dir),
-        runtime_dir=str(tmp_path / "runtime"),
+        runtime_dir=str(runtime_dir),
     )
     return create_registry_server(reg), reg
 
@@ -139,6 +150,81 @@ class TestSaveToolSpec:
 
         assert "Error" in text
         assert "JSON object" in text
+
+
+# ---------------------------------------------------------------------------
+# save_skill
+# ---------------------------------------------------------------------------
+
+class TestSaveSkill:
+
+    def test_add_new_skill_creates_files_and_indexes(self, tmp_path):
+        """save_skill writes SKILL.md and indexes when KB is configured.
+
+        The skill count includes any bundled skills that ship in the
+        package (see SkillRegistry.list_skills which merges bundled +
+        project layers), so we assert the file was created and the
+        count went up by one rather than equality on a specific number.
+        """
+        server, reg, kb = _make_server_with_kb(tmp_path)
+        from dsagt.registry import SkillRegistry as _SR
+        skill_reg = _SR(runtime_dir=str(tmp_path / "runtime"), kb=kb)
+        before = len(skill_reg.list_skills())
+
+        spec = {
+            "name": "csv_inspector",
+            "description": "Workflow for inspecting CSV columns and quality",
+            "tags": ["data_management", "quality_control"],
+        }
+        body = "# csv_inspector\n\nFirst, run head on the file.  Then check nulls.\n"
+        text = call_tool(server, "save_skill", {"spec": spec, "body": body})
+
+        assert "added" in text
+        skill_md = tmp_path / "runtime" / "skills" / "csv_inspector" / "SKILL.md"
+        assert skill_md.exists()
+        content = skill_md.read_text()
+        assert "csv_inspector" in content
+        assert "First, run head" in content
+        after = len(skill_reg.list_skills())
+        assert after == before + 1
+
+    def test_update_existing_skill_preserves_body_when_omitted(self, tmp_path):
+        """Saving a spec for an existing skill without body keeps the body."""
+        server, reg, kb = _make_server_with_kb(tmp_path)
+        first_body = "# orig\n\nOriginal workflow body.\n"
+        call_tool(server, "save_skill", {
+            "spec": {"name": "wf", "description": "v1"},
+            "body": first_body,
+        })
+        # Update the description only — body should be preserved.
+        text = call_tool(server, "save_skill", {
+            "spec": {"name": "wf", "description": "v2 description"},
+        })
+        assert "updated" in text
+        skill_md = tmp_path / "runtime" / "skills" / "wf" / "SKILL.md"
+        content = skill_md.read_text()
+        assert "v2 description" in content
+        assert "Original workflow body" in content
+
+    def test_save_skill_writes_reference_files(self, tmp_path):
+        """reference_files dict lands as additional files in the skill dir."""
+        server, reg, kb = _make_server_with_kb(tmp_path)
+        text = call_tool(server, "save_skill", {
+            "spec": {"name": "with_template", "description": "Has a template"},
+            "body": "# with_template\n\nUses template.json.\n",
+            "reference_files": {"template.json": '{"foo": "bar"}\n'},
+        })
+        assert "added" in text
+        skill_dir = tmp_path / "runtime" / "skills" / "with_template"
+        assert (skill_dir / "SKILL.md").exists()
+        assert (skill_dir / "template.json").read_text() == '{"foo": "bar"}\n'
+
+    def test_save_skill_string_encoded_spec(self, tmp_path):
+        """MCP clients that JSON-encode nested object args still work."""
+        server, reg, kb = _make_server_with_kb(tmp_path)
+        spec_json = json.dumps({"name": "s1", "description": "d"})
+        text = call_tool(server, "save_skill", {"spec": spec_json, "body": "x"})
+        assert "added" in text
 
 
 # ---------------------------------------------------------------------------
@@ -386,13 +472,20 @@ class TestInstallDependencies:
 # ---------------------------------------------------------------------------
 
 def _make_server_with_kb(tmp_path, tools=None):
-    """Create (server, registry, kb) with a real local-embedding KnowledgeBase."""
+    """Create (server, registry, kb) with a real local-embedding KnowledgeBase.
+
+    Pre-populated tools are written to ``<runtime>/tools/`` so they
+    exercise the agent-saved code path that ``reindex_all`` operates on.
+    """
     from dsagt.knowledge import KnowledgeBase
 
     source_dir = tmp_path / "source_skills"
     source_dir.mkdir()
+    runtime_dir = tmp_path / "runtime"
+    project_tools_dir = runtime_dir / "tools"
+    project_tools_dir.mkdir(parents=True, exist_ok=True)
     for spec in (tools or []):
-        _write_tool(source_dir, spec)
+        _write_tool(project_tools_dir, spec)
 
     kb = KnowledgeBase(
         index_dir=tmp_path / "kb_index",
@@ -401,10 +494,15 @@ def _make_server_with_kb(tmp_path, tools=None):
     )
     reg = ToolRegistry(
         source_tools_dir=str(source_dir),
-        runtime_dir=str(tmp_path / "runtime"),
+        runtime_dir=str(runtime_dir),
         kb=kb,
     )
-    server = create_registry_server(reg, kb)
+    skill_reg = SkillRegistry(
+        source_skills_dir=None,  # use package default (empty bundled is fine)
+        runtime_dir=str(runtime_dir),
+        kb=kb,
+    )
+    server = create_registry_server(reg, kb, skill_reg)
     return server, reg, kb
 
 
