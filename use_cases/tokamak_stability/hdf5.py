@@ -3,6 +3,9 @@
 Functions:
 - ``list_h5_files(directory, recursive=False)``: return list of .h5 files in directory.
 - ``list_h5_variables(file_path)``: return list of dataset paths inside an HDF5 file.
+- ``read_h5_dataset(file_path, dataset_path)``: read one dataset as a NumPy array.
+- ``read_h5_attrs(file_path, group_path="")``: read HDF5 attributes as a plain dict.
+- ``repackage_h5(output_path, sources, ...)``: copy a subset of datasets to a new file.
 
 Example:
 	>>> list_h5_files('data')
@@ -10,13 +13,20 @@ Example:
 
 	>>> list_h5_variables('data/run1.h5')
 	['group1/dset1', 'group2/sub/dset2']
+
+	>>> read_h5_dataset('data/run1.h5', 'scalars/time')
+	array([0., 1., 2., ...])
+
+	>>> read_h5_attrs('data/run1.h5', 'equilibrium')
+	{'version': 45, 'nspace': 2, 'ntimestep': 0, 'time': 0.0}
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 import h5py
+import numpy as np
 
 
 def list_h5_files(directory: str | Path, recursive: bool = False) -> List[str]:
@@ -72,8 +82,59 @@ def list_h5_variables(file_path: str | Path) -> List[str]:
 __all__ = [
 	'list_h5_files',
 	'list_h5_variables',
+	'read_h5_dataset',
+	'read_h5_attrs',
 	'repackage_h5',
 ]
+
+
+def read_h5_dataset(file_path: str | Path, dataset_path: str) -> np.ndarray:
+	"""Read one dataset from an HDF5 file and return it as a NumPy array.
+
+	Args:
+		file_path:    Path to the HDF5 file.
+		dataset_path: Internal HDF5 path to the dataset (e.g. ``"scalars/E_K3"``).
+
+	Returns:
+		NumPy array containing the dataset values.
+
+	Raises:
+		KeyError: If ``dataset_path`` is not found in the file.
+		OSError:  If the file cannot be opened.
+	"""
+	with h5py.File(Path(file_path), 'r') as f:
+		if dataset_path not in f:
+			raise KeyError(f"Dataset '{dataset_path}' not found in {file_path}")
+		return f[dataset_path][()]
+
+
+def read_h5_attrs(file_path: str | Path, group_path: str = "") -> Dict[str, Any]:
+	"""Read HDF5 attributes of a group or dataset as a plain Python dict.
+
+	Args:
+		file_path:  Path to the HDF5 file.
+		group_path: Internal HDF5 path of the group or dataset whose attributes
+		            are to be read. Empty string (default) reads root-level attributes.
+
+	Returns:
+		Dict mapping attribute name to value. NumPy scalar types are cast to
+		Python ``int`` or ``float`` for easy serialisation.
+
+	Raises:
+		KeyError: If ``group_path`` is not empty and is not found in the file.
+		OSError:  If the file cannot be opened.
+	"""
+	result: Dict[str, Any] = {}
+	with h5py.File(Path(file_path), 'r') as f:
+		obj = f[group_path] if group_path else f
+		for key, val in obj.attrs.items():
+			if hasattr(val, 'item'):
+				result[key] = val.item()
+			elif isinstance(val, np.ndarray):
+				result[key] = val.tolist()
+			else:
+				result[key] = val
+	return result
 
 
 def repackage_h5(
