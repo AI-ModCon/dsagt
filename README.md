@@ -2,7 +2,9 @@
 
 **D**ata**S**mith **Ag**en**t** — AI-assisted data pipeline builder.
 
-DSAgt connects an MCP-compatible AI coding agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure. You keep using the agent CLI you already have (Claude Code, Goose, Codex, …); DSAgt provides the data-pipeline scaffolding around it.
+![DSAgt architecture](latex/architecture.png)
+
+DSAgt connects an MCP-compatible AI coding agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure. DSAgt provides data-pipeline scaffolding around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …);
 
 ## Installation
 
@@ -26,7 +28,7 @@ source .venv/bin/activate    # so `dsagt` is on PATH
 
 ## Quick Start
 
-A hands-on first project that exercises every layer (knowledge ingest, tool registration, provenance, explicit memory) using the fixture data shipped in [`tests/smoke_test/`](tests/smoke_test/). Uses `claude`; substitute another agent (`goose` / `codex` / `opencode`) if you prefer — the prompts are agent-agnostic.
+Explore DSAgt knowledge ingest, tool registration, provenance, and explicit memory using the mock project in [`tests/smoke_test/`](tests/smoke_test/). Uses `claude`; substitute another agent (`goose` / `codex` / `opencode`) if you prefer — the prompts are agent-agnostic.
 
 ```bash
 # 1. From the dsagt repo root, point a shell var at the fixture data and create the project.
@@ -34,7 +36,7 @@ export SMOKE_DIR="$(pwd)/tests/smoke_test"
 dsagt init quickstart --agent claude
 ```
 
-`dsagt init` prints (a) the provider env vars **you** need set in your shell — DSAgt does not manage agent credentials — (b) optional OTel export vars to point the agent's native tracing at this project's MLflow, and (c) the exact one-liner to launch your agent.
+`dsagt init` prints (a) the provider env vars **you** need set in your shell — DSAgt does not manage agent credentials — (b) optional OTel export vars to point the agent's native tracing at this project's MLflow, and (c) the exact one-liner to launch your agent with DSAgt tools enabled.
 
 ```bash
 # 2. In one terminal, start MLflow for this project:
@@ -79,10 +81,13 @@ The same flow runs non-interactively via `dsagt smoke-test --agent claude` (or `
 
 ### First-time knowledge base setup
 
-`dsagt setup-kb` builds the shared ChromaDB collections under `~/.dsagt/kb_index/` that every project on this machine reuses:
+`dsagt setup-kb` builds the shared ChromaDB collections under `~/.dsagt/kb_index/` that every project on this machine reuses. Three of the six collections shown in the [architecture diagram](#architecture) are populated here — the other three are per-project and fill in automatically during use (see [Knowledge Base](#knowledge-base) below):
 
-- **`tools` / `skills`** — DSAgt's bundled tool specs and skills, indexed with `source: bundled` metadata so the agent can find them via `search_registry` / `search_skills` from the very first session. Re-run after upgrading DSAgt to pick up new bundled assets (the tools/skills collections are wiped and rebuilt every run).
-- **`nemo_curator` / `aidrin`** — Reference corpora (NVIDIA NeMo Curator, AI Data Readiness Inspector) downloaded and embedded so the agent has data-curation domain knowledge available out of the box.
+- **Tool Specs** — DSAgt's bundled tool specs from `src/dsagt/tools/`, tagged with `source: bundled` so the agent finds them via `search_registry` from the very first session.
+- **Skills** — DSAgt's bundled skill workflows from `src/dsagt/skills/` (e.g. `datacard-generator`), discovered via `search_skills`.
+- **Domain Knowledge** — Reference corpora (NVIDIA NeMo Curator, AI Data Readiness Inspector) downloaded and embedded so the agent has data-curation domain knowledge out of the box.
+
+The Tool Specs and Skills collections are wipe-and-rebuild on every run, so re-run `setup-kb` after upgrading DSAgt to pick up new bundled assets.
 
 ```bash
 dsagt setup-kb                       # all collections (local embedder, no creds)
@@ -133,12 +138,6 @@ Projects are registered in `~/.dsagt/projects.yaml` so `dsagt mlflow <name>` and
   #   cline:    .clinerules/, cline_mcp_settings.json (managed via cline mcp add)
 ```
 
-## Architecture
-
-![DSAgt architecture](latex/architecture.png)
-
-DSAgt provides two MCP servers and a trace collector. Your agent talks to the MCP servers like any other tool; OTel spans from those servers, plus from `dsagt-run` (the tool-execution wrapper), flow into MLflow.
-
 ### MCP Servers
 
 - **Registry** (`dsagt-registry-server`) — Tool registration and dependency installation. Tools are markdown files with YAML frontmatter under `<project>/tools/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`.
@@ -152,12 +151,20 @@ DSAgt provides two MCP servers and a trace collector. Your agent talks to the MC
 
 ### Knowledge Base
 
-Semantic search over indexed document collections. The default embedding backend is local (sentence-transformers, CPU-side, no API needed). Switch to `embedding.backend: api` in `dsagt_config.yaml` to route through a hosted embedder via LiteLLM. Cross-encoder reranking is optional (`knowledge.rerank: true`).
+Six independently-partitioned ChromaDB collections hold everything the agent searches semantically. The first three are global (under `~/.dsagt/kb_index/`, populated by `dsagt setup-kb`); the last three are per-project (under `<project>/kb_index/`, populated automatically during use):
 
-### Memory
+| Collection | Source | Populated by |
+|---|---|---|
+| **Tool Specs** | Bundled CLI tool specs in `src/dsagt/tools/` | `dsagt setup-kb` |
+| **Skills** | Bundled skill workflows in `src/dsagt/skills/` | `dsagt setup-kb` |
+| **Domain Knowledge** | NeMo Curator + AIDRIN reference corpora; user-ingested docs | `dsagt setup-kb` + agent's `kb_ingest` |
+| **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/explicit_memories.yaml`); the agent fetches via `kb_get_memories` on demand — typically when you ask it to recall — not auto-loaded at session start |
+| **Episodic Memory** | Distilled facts from MLflow traces | `dsagt memory --project <name>` (per-category outlier detection via embedding centroids) |
+| **Tool Use Records** | `dsagt-run` execution traces | `dsagt-run` wrapper writes JSON to `<project>/trace_archive/`; indexed into ChromaDB by `dsagt memory` |
 
-- **Episodic** (`dsagt memory`) — distills LLM traces into a ChromaDB collection at end-of-session, with per-category outlier detection via embedding centroids. Future sessions recall via the knowledge MCP server.
-- **Explicit** (`<project>/explicit_memories.yaml`) — user-confirmed facts loaded into agent context at session start. The agent writes these via the `kb_remember` tool when you tell it to remember something.
+The default embedding backend is local (sentence-transformers, CPU-side, no API needed). Switch to `embedding.backend: api` in `dsagt_config.yaml` to route through a hosted embedder via LiteLLM. Cross-encoder reranking is optional (`knowledge.rerank: true`).
+
+The agent searches via `kb_search` (knowledge MCP server) and writes via `kb_ingest` / `kb_remember`. Tool Specs and Skills are queried through specialized routes (`search_registry`, `search_skills`) over the same backend.
 
 ### Observability
 
