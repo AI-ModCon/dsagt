@@ -654,25 +654,23 @@ def main():
     """Entry point for dsagt-registry-server.
 
     All configuration comes from the project directory:
-    - ``DSAGT_PROJECT_DIR`` env var (set by ``dsagt start``) → project path
-    - ``<project>/dsagt_config.yaml`` → project name (for session id)
-    - ``LLM_API_KEY``, ``OPENAI_BASE_URL``, ``EMBEDDING_MODEL`` env vars → embedding credentials
+    - ``./dsagt_config.yaml`` → project path + name
+    - ``LLM_API_KEY``, ``OPENAI_BASE_URL`` env vars → embedding credentials
 
-    No CLI arguments.
+    No CLI arguments.  By contract the agent's launch one-liner is
+    ``cd <pdir> && <agent>``, so cwd is project_dir for the MCP
+    children it spawns.
     """
     import logging as _logging
+    from dsagt.observability import find_project_config
 
-    # The server is launched as a subprocess by ``dsagt start``, which sets
-    # DSAGT_PROJECT_DIR.  Falling back to cwd silently dumps log files and
-    # state into whatever directory the user happened to be in (often the
-    # repo root) — fail fast so the misuse is obvious instead of silent.
-    project_dir_env = os.environ.get("DSAGT_PROJECT_DIR")
-    if not project_dir_env:
+    project_dir, _cfg = find_project_config()
+    if project_dir is None:
         raise RuntimeError(
-            "DSAGT_PROJECT_DIR is not set. dsagt-registry-server is meant "
-            "to be launched by `dsagt start <project>`, not run directly."
+            "dsagt-registry-server: no dsagt_config.yaml in cwd "
+            f"({Path.cwd()}).  Launch the agent from the project "
+            "directory (`cd <pdir> && <agent>`)."
         )
-    project_dir = Path(project_dir_env)
 
     log_file = project_dir / "dsagt_registry_server.log"
     # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  At DEBUG,
@@ -765,7 +763,7 @@ def main():
     )
 
     # Bundled tools/skills are pre-embedded in the shared
-    # ~/.dsagt/kb_index/ by ``dsagt setup-kb`` (or by the auto-bootstrap
+    # ~/dsagt-projects/kb_index/ by ``dsagt setup-kb`` (or by the auto-bootstrap
     # in ``dsagt start``) and COPIED into the project's kb_index by
     # ``setup_runtime_kb`` before either MCP server spawns.  This server
     # does no embedding work for bundled content at startup; agent's

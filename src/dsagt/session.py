@@ -1,8 +1,9 @@
 """
 DSAgt project lifecycle: configuration, initialization, services, and extraction.
 
-Projects are registered in ~/.dsagt/projects.yaml (name → absolute path).
-Default project location is ~/dsagt-projects/<name>/.
+Projects are registered in ~/dsagt-projects/projects.yaml (name → absolute path).
+Default project location is ~/dsagt-projects/<name>/.  Shared bundled-content
+KB lives alongside at ~/dsagt-projects/kb_index/ (built by dsagt setup-kb).
 
 Project directory layout::
 
@@ -46,8 +47,13 @@ VALID_AGENTS = ("claude", "goose", "roo", "cline", "codex", "opencode")
 VALID_MLFLOW_BACKENDS = ("sqlite", "flat-file")
 
 DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
-REGISTRY_DIR = Path.home() / ".dsagt"
+# Registry + shared KB live alongside projects under one visible tree —
+# ``~/dsagt-projects/projects.yaml`` (name → path) and
+# ``~/dsagt-projects/kb_index/`` (shared bundled-content KB built by
+# ``dsagt setup-kb``).  Migrated from ``~/.dsagt/`` on 2026-05-07.
+REGISTRY_DIR = DEFAULT_PROJECTS_BASE
 REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
+RESERVED_PROJECT_NAMES = ("projects.yaml", "kb_index")
 
 DEFAULTS = {
     # ``llm`` block uses ${VAR} placeholders so per-project config
@@ -315,6 +321,12 @@ def init_project(
     """
     if agent not in VALID_AGENTS:
         raise ValueError(f"agent must be one of {VALID_AGENTS}, got '{agent}'")
+    if project_name in RESERVED_PROJECT_NAMES:
+        raise ValueError(
+            f"project name '{project_name}' collides with a reserved entry "
+            f"in {DEFAULT_PROJECTS_BASE} (kb_index/ or projects.yaml).  "
+            f"Pick another name."
+        )
 
     pdir = (location or DEFAULT_PROJECTS_BASE) / project_name
 
@@ -453,7 +465,14 @@ _STOP_GRACE_SECONDS = 5
 
 
 def mlflow_command(pdir: Path, mlflow_config: dict, port: int) -> list[str]:
-    """Build the argv for launching MLflow against a project's store."""
+    """Build the argv for launching MLflow against a project's store.
+
+    ``--workers 1``: dsagt is a single-user dev tool — the agent makes
+    serial LLM calls and MCP-server spans are low-volume.  Default
+    workers=4 each spin up a fresh Python process re-importing MLflow's
+    full surface (fastapi, sqlalchemy, alembic), so dropping to 1
+    shaves ~0.5s off startup with zero observable cost on this load.
+    """
     mlflow_dir = pdir / "mlflow"
     mlflow_dir.mkdir(exist_ok=True)
     backend_uri = (
@@ -467,6 +486,7 @@ def mlflow_command(pdir: Path, mlflow_config: dict, port: int) -> list[str]:
         "--default-artifact-root", str(mlflow_dir / "artifacts"),
         "--host", "0.0.0.0",
         "--port", str(port),
+        "--workers", "1",
     ]
 
 
@@ -566,7 +586,7 @@ def start_services(config: dict) -> dict[str, int]:
     reap_runtime(runtime_file)  # clear leftovers from any prior crashed run
 
     # KB bootstrap is intentionally NOT here.  The contract:
-    #   * ``dsagt setup-kb`` builds shared ~/.dsagt/kb_index/ (one-time
+    #   * ``dsagt setup-kb`` builds shared ~/dsagt-projects/kb_index/ (one-time
     #     per machine, the only place embedding work happens for bundled
     #     content)
     #   * ``dsagt init`` copies the shared collections into the project

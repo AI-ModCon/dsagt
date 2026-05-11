@@ -55,18 +55,26 @@ from .base import (
     _run_simple_script,
 )
 
-
 # Env vars Claude Code reads to gate full LLM-call telemetry.  Without
-# these, the OTel spans only carry counts/cost/duration — tool_use
-# payloads (which memory extraction needs) are absent.  See
+# these, the OTel spans only carry counts/cost/duration.  See
 # https://code.claude.com/docs/en/monitoring-usage.md.
+#
+# OTEL_LOG_RAW_API_BODIES is intentionally omitted here — its value is
+# per-project (a path like ``file:<pdir>/api_bodies``) and gets rendered
+# dynamically by ``_cmd_mlflow``.  The ``=1`` (inline) mode would drop
+# bodies to ``/v1/logs`` which MLflow's OTLP receiver returns 404 for;
+# ``file:<dir>`` writes bodies to disk and stamps a ``body_ref`` on the
+# span event, which travels via ``/v1/traces`` (the path MLflow accepts).
+#
+# OTEL_LOGS_EXPORTER is also dropped — MLflow has no logs endpoint, so
+# pointing the SDK at /v1/logs only generates 404s in mlflow.log.
 _CLAUDE_TELEMETRY_ENV: dict[str, str] = {
     "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
     "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
     "OTEL_LOG_TOOL_DETAILS": "1",
-    "OTEL_LOG_RAW_API_BODIES": "1",
+    # Without this, user prompts show as "[REDACTED]" in span attributes.
+    "OTEL_LOG_USER_PROMPTS": "1",
     "OTEL_TRACES_EXPORTER": "otlp",
-    "OTEL_LOGS_EXPORTER": "otlp",
 }
 
 
@@ -77,7 +85,9 @@ class ClaudeSetup(AgentSetup):
     install_hint = "Install with `npm i -g @anthropic-ai/claude-code`."
     # Anthropic-protocol native; cross-protocol routing requires the proxy.
     credential_env_vars = (
-        "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
     )
     otel_payload_support = "full"
     telemetry_env = _CLAUDE_TELEMETRY_ENV
@@ -112,7 +122,9 @@ class ClaudeSetup(AgentSetup):
         instructions = _load_master_instructions()
         if instructions:
             action = _append_or_write(
-                working_dir / "CLAUDE.md", instructions, _DSAGT_MARKER,
+                working_dir / "CLAUDE.md",
+                instructions,
+                _DSAGT_MARKER,
             )
             if action:
                 actions.append(action)
@@ -125,12 +137,21 @@ class ClaudeSetup(AgentSetup):
         working_dir: Path,
         pdir: Path,
     ) -> list[str]:
-        """Write ``.mcp.json``.  Claude Code reads it from cwd at launch.
+        """Write ``.mcp.json`` and configure ``mlflow autolog claude``.
 
         The env block in ``.mcp.json`` carries DSAGT/MLflow/embedding
         routing for the MCP-server children — claude inherits parent
         env into them, but baking it into the JSON is robust against
         shells that don't have those vars set.
+
+        Also wires MLflow's first-class Claude Code integration via
+        ``.claude/settings.json``: a Stop hook that processes Claude's
+        transcript at session end and creates a rich MLflow trace with
+        full prompts, responses, and tool_use blocks.  This is the only
+        way to get high-fidelity agent-side traces in BYOA mode (without
+        the proxy) — Claude's native OTel emission carries only thin
+        ``api_response_body`` log events that don't roundtrip through
+        memory extraction.
         """
         del env, pdir
         actions: list[str] = []
@@ -146,6 +167,25 @@ class ClaudeSetup(AgentSetup):
         mcp_path = working_dir / ".mcp.json"
         mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
         actions.append(f"Wrote {mcp_path}")
+
+        # Configure mlflow autolog claude — writes .claude/settings.json
+        # with the MLflow Stop hook + tracking env vars.  Idempotent and
+        # preserves any existing keys in settings.json (mlflow's setup
+        # functions do a load → update → save, not a replace).
+        mlflow_port = (config.get("mlflow") or {}).get("port")
+        project_name = config.get("project")
+        if mlflow_port and project_name:
+            from mlflow.claude_code.config import setup_environment_config
+            from mlflow.claude_code.hooks import setup_hooks_config
+
+            settings_file = working_dir / ".claude" / "settings.json"
+            setup_hooks_config(settings_file)
+            setup_environment_config(
+                settings_file,
+                tracking_uri=f"http://localhost:{mlflow_port}",
+                experiment_name=project_name,
+            )
+            actions.append(f"Wrote {settings_file} (mlflow autolog claude)")
         return actions
 
     def run_script(
@@ -175,7 +215,9 @@ class ClaudeSetup(AgentSetup):
             "claude",
             "--dangerously-skip-permissions",
             "--verbose",
-            "--max-thinking-tokens", "4096",
-            "-p", text,
+            "--max-thinking-tokens",
+            "4096",
+            "-p",
+            text,
         ]
         return _run_simple_script(cmd, env, working_dir, self.install_hint)

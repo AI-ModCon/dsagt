@@ -796,23 +796,22 @@ def main():
     """Entry point for dsagt-knowledge-server.
 
     All configuration comes from the project directory:
-    - ``DSAGT_PROJECT_DIR`` env var (set by ``dsagt start``) → project path
-    - ``<project>/dsagt_config.yaml`` → non-secret settings (chunk_size, vector_db, rerank)
-    - ``LLM_API_KEY``, ``OPENAI_BASE_URL``, ``EMBEDDING_MODEL`` env vars → embedding credentials
+    - ``./dsagt_config.yaml`` → project path + non-secret settings
+      (chunk_size, vector_db, rerank)
+    - ``LLM_API_KEY``, ``OPENAI_BASE_URL`` env vars → embedding credentials
 
-    No CLI arguments — the server derives everything from its environment.
+    No CLI arguments — the server derives everything from the YAML.  By
+    contract the agent's launch one-liner is ``cd <pdir> && <agent>``,
+    so cwd is project_dir for the MCP children it spawns.
     """
-    # The server is launched as a subprocess by ``dsagt start``, which sets
-    # DSAGT_PROJECT_DIR.  Falling back to cwd silently dumps log files and
-    # state into whatever directory the user happened to be in (often the
-    # repo root) — fail fast so the misuse is obvious instead of silent.
-    project_dir_env = os.environ.get("DSAGT_PROJECT_DIR")
-    if not project_dir_env:
+    from dsagt.observability import find_project_config
+    project_dir, _ = find_project_config()
+    if project_dir is None:
         raise RuntimeError(
-            "DSAGT_PROJECT_DIR is not set. dsagt-knowledge-server is meant "
-            "to be launched by `dsagt start <project>`, not run directly."
+            "dsagt-knowledge-server: no dsagt_config.yaml in cwd "
+            f"({Path.cwd()}).  Launch the agent from the project "
+            "directory (`cd <pdir> && <agent>`)."
         )
-    project_dir = Path(project_dir_env)
 
     log_file = project_dir / "dsagt_knowledge_server.log"
     # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  See

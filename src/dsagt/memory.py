@@ -4,8 +4,11 @@ Memory management for DSAgt projects.
 Two memory types:
 
 **Explicit memory** (ExplicitMemory class):
-    User-confirmed facts stored in a YAML file. Loaded into agent context
-    at session start. Supports remember, supersede, remove, and retrieval.
+    User-confirmed facts stored in a YAML file and mirrored into the
+    ``explicit_memory`` ChromaDB collection.  Not auto-loaded into the
+    agent's context at session start — the agent retrieves entries on
+    demand via the ``kb_get_memories`` / ``kb_search`` MCP tools.
+    Supports remember, supersede, remove, and retrieval.
 
 **Episodic memory** (extract_session and friends):
     End-of-session LLM extraction of facts, summaries, and insights.

@@ -104,8 +104,6 @@ from .roo import RooSetup
 logger = logging.getLogger(__name__)
 
 
-
-
 # ---------------------------------------------------------------------------
 # Agent registry (string name → setup class)
 # ---------------------------------------------------------------------------
@@ -135,9 +133,7 @@ def _setup_for(agent_name: str, proxy_port: int | None = None) -> AgentSetup:
     """
     cls = AGENTS.get(agent_name)
     if cls is None:
-        raise KeyError(
-            f"Unknown agent {agent_name!r}.  Registered: {sorted(AGENTS)}."
-        )
+        raise KeyError(f"Unknown agent {agent_name!r}.  Registered: {sorted(AGENTS)}.")
     return cls(proxy_port=proxy_port)
 
 
@@ -149,6 +145,7 @@ def _proxy_port_from_config(config: dict) -> int | None:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def agent_env(config: dict) -> dict:
     """Build the environment dict an agent process needs to inherit.
@@ -182,30 +179,38 @@ def agent_env(config: dict) -> dict:
         env["DSAGT_SESSION_ID"] = config["session_id"]
 
     mlflow_port = config.get("mlflow", {}).get("port")
+    proxy_port_for_otel = (config.get("proxy") or {}).get("port")
     if mlflow_port:
         mlflow_url = f"http://localhost:{mlflow_port}"
         env["MLFLOW_TRACKING_URI"] = mlflow_url
-        # OTel endpoint for the agent's native telemetry SDK.  The
-        # x-mlflow-experiment-id header is mandatory for MLflow's OTLP
-        # receiver — resolve to the experiment's numeric id once at
-        # startup; if MLflow can't be reached yet we still write the env
-        # vars so init_tracing can resolve later.
-        env["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"{mlflow_url}/v1/traces"
-        experiment_id = _resolve_experiment_id(mlflow_url, config["project"])
-        if experiment_id:
-            env["OTEL_EXPORTER_OTLP_HEADERS"] = (
-                f"x-mlflow-experiment-id={experiment_id}"
-            )
-        # Resource attributes flow onto every span emitted by the agent's
-        # OTel SDK.  ``session.id`` is what MLflow's OTLP receiver
-        # promotes to ``mlflow.trace.session`` trace_metadata — required
-        # so end-of-session memory extraction can find this run's traces
-        # via search_traces(filter_string="metadata.mlflow.trace.session ='<id>'").
-        # ``service.name`` becomes the bucket dimension in ``dsagt info``.
-        resource_attrs = [f"service.name={agent_name}"]
-        if config.get("session_id"):
-            resource_attrs.append(f"session.id={config['session_id']}")
-        env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(resource_attrs)
+        # Claude in BYOA mode (no proxy) uses ``mlflow autolog claude``
+        # for agent-side traces — its Stop hook produces richer
+        # transcript-based traces than native OTel.  Skip OTel routing
+        # so we don't get duplicate (and inferior) trace shapes.  MCP
+        # servers and dsagt-run still get tracing because their
+        # ``init_tracing`` reads MLflow URL from cwd's ``dsagt_config.yaml``,
+        # not these env vars.
+        skip_otel_for_claude_byoa = agent_name == "claude" and not proxy_port_for_otel
+        if not skip_otel_for_claude_byoa:
+            # OTel endpoint for the agent's native telemetry SDK.  The
+            # x-mlflow-experiment-id header is mandatory for MLflow's OTLP
+            # receiver — resolve to the experiment's numeric id once at
+            # startup; if MLflow can't be reached yet we still write the env
+            # vars so init_tracing can resolve later.
+            env["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"{mlflow_url}/v1/traces"
+            experiment_id = _resolve_experiment_id(mlflow_url, config["project"])
+            if experiment_id:
+                env["OTEL_EXPORTER_OTLP_HEADERS"] = (
+                    f"x-mlflow-experiment-id={experiment_id}"
+                )
+            # Resource attributes flow onto every span emitted by the agent's
+            # OTel SDK.  ``session.id`` is what MLflow's OTLP receiver
+            # promotes to ``mlflow.trace.session`` trace_metadata — required
+            # so end-of-session memory extraction can find this run's traces.
+            resource_attrs = [f"service.name={agent_name}"]
+            if config.get("session_id"):
+                resource_attrs.append(f"session.id={config['session_id']}")
+            env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(resource_attrs)
 
     pre_runtime_env = dict(env)
     # BYOA: only dsagt-owned env (telemetry capture flags, per-project
@@ -253,7 +258,8 @@ def _warn_on_preconfigured_creds(
 
     # What did our env_overrides actually inject?
     injected = {
-        k for k in setup.credential_env_vars
+        k
+        for k in setup.credential_env_vars
         if env.get(k) and env.get(k) != pre_overrides_env.get(k)
     }
     if injected:
@@ -265,14 +271,16 @@ def _warn_on_preconfigured_creds(
         logger.warning(
             "%s: project config has no llm credentials — agent will use "
             "preconfigured env vars: %s",
-            setup.name, ", ".join(from_shell),
+            setup.name,
+            ", ".join(from_shell),
         )
     else:
         logger.warning(
             "%s: project config has no llm credentials and none of %s are "
             "set in the shell — agent may fall back to its own auth flow "
             "(claude.ai subscription, codex login, etc.) or fail at first call.",
-            setup.name, ", ".join(setup.credential_env_vars),
+            setup.name,
+            ", ".join(setup.credential_env_vars),
         )
 
 
@@ -287,6 +295,7 @@ def _resolve_experiment_id(mlflow_url: str, project_name: str) -> str | None:
     """
     try:
         import mlflow
+
         mlflow.set_tracking_uri(mlflow_url)
         return str(mlflow.set_experiment(project_name).experiment_id)
     except Exception as e:
@@ -311,7 +320,9 @@ def agent_otel_support(agent_name: str) -> str:
 
 
 def static_agent_record(
-    config: dict, agent: str, working_dir: str | Path,
+    config: dict,
+    agent: str,
+    working_dir: str | Path,
 ) -> list[str]:
     """Write the agent's static project files: instructions + state dirs.
 
@@ -329,9 +340,12 @@ def static_agent_files_present(agent: str, working_dir: str | Path) -> bool:
 
 
 def dynamic_agent_record(
-    config: dict, env: dict, working_dir: str | Path,
+    config: dict,
+    env: dict,
+    working_dir: str | Path,
 ) -> list[str]:
-    """Write the agent's runtime-dependent files: MCP config + ``.dsagt_env``.
+    """Write the agent's runtime-dependent files: MCP config + ``.dsagt_env``
+    + ``dsagt-launch.sh``.
 
     Caller must have already:
       - Resolved the agent and stored it in ``config["agent"]``
@@ -339,13 +353,21 @@ def dynamic_agent_record(
         actually-bound port
       - Built ``env`` via :func:`agent_env`
     """
+    from .base import _write_launch_shim
+
     setup = _setup_for(config["agent"], proxy_port=_proxy_port_from_config(config))
-    return setup.write_dynamic(
+    actions = setup.write_dynamic(
         config,
         env,
         Path(working_dir),
         Path(config["project_dir"]),
     )
+    # Launch shim is BYOA-only. Skip when proxy mode is active —
+    # ``dsagt start --enable-proxy`` is the only sensible entry point
+    # in that mode (proxy URL must be plumbed through agent env).
+    if not _proxy_port_from_config(config):
+        actions.append(_write_launch_shim(setup, config, Path(working_dir)))
+    return actions
 
 
 def launch_agent(
@@ -361,7 +383,11 @@ def launch_agent(
 
     if script_path is not None:
         return setup.run_script(
-            config, env, working_dir, Path(script_path), max_turns,
+            config,
+            env,
+            working_dir,
+            Path(script_path),
+            max_turns,
         )
 
     cmd = setup.interactive_command(config)

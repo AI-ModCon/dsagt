@@ -227,31 +227,47 @@ class TestRunAndRecord:
         assert data["execution"]["return_code"] == 127
         assert "command not found" in data["execution"]["stderr"]
 
-    def test_session_from_env(self, tmp_path):
-        """Session ID falls back to DSAGT_SESSION_ID env var."""
-        with patch.dict(os.environ, {"DSAGT_SESSION_ID": "env-session"}):
-            run_and_record(
-                tool_name="t",
-                command=["echo"],
-                records_dir=tmp_path,
-                record_id="test-004",
-            )
+    def test_session_from_runtime(self, tmp_path, monkeypatch):
+        """Session ID falls back to <project_dir>/.runtime when not passed.
 
-        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
-        assert data["session_id"] == "env-session"
+        Single source of truth: dsagt mlflow writes session_id into
+        .runtime; services read from there, not from env vars.
+        """
+        (tmp_path / "dsagt_config.yaml").write_text(
+            "project: t\nmlflow: {port: 5000}\n"
+        )
+        (tmp_path / ".runtime").write_text(
+            json.dumps({"session_id": "runtime-session"})
+        )
+        monkeypatch.chdir(tmp_path)
+        run_and_record(
+            tool_name="t",
+            command=["echo"],
+            records_dir=tmp_path,
+            record_id="test-004",
+        )
 
-    def test_explicit_session_overrides_env(self, tmp_path):
-        """Explicit --session takes precedence over env var."""
-        with patch.dict(os.environ, {"DSAGT_SESSION_ID": "env-session"}):
-            run_and_record(
-                tool_name="t",
-                command=["echo"],
-                records_dir=tmp_path,
-                session_id="explicit-session",
-                record_id="test-005",
-            )
+        data = json.loads(list(tmp_path.glob("*_test-004.json"))[0].read_text())
+        assert data["session_id"] == "runtime-session"
 
-        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+    def test_explicit_session_overrides_runtime(self, tmp_path, monkeypatch):
+        """Explicit --session takes precedence over .runtime."""
+        (tmp_path / "dsagt_config.yaml").write_text(
+            "project: t\nmlflow: {port: 5000}\n"
+        )
+        (tmp_path / ".runtime").write_text(
+            json.dumps({"session_id": "runtime-session"})
+        )
+        monkeypatch.chdir(tmp_path)
+        run_and_record(
+            tool_name="t",
+            command=["echo"],
+            records_dir=tmp_path,
+            session_id="explicit-session",
+            record_id="test-005",
+        )
+
+        data = json.loads(list(tmp_path.glob("*_test-005.json"))[0].read_text())
         assert data["session_id"] == "explicit-session"
 
     def test_file_lists_recorded(self, tmp_path):
@@ -305,19 +321,28 @@ class TestMain:
     @pytest.fixture(autouse=True)
     def _mlflow_file_store(self, tmp_path, monkeypatch):
         """Point MLflow tracing at a scratch file-store so init_tracing has a
-        real backend.  dsagt-run is only ever invoked inside a `dsagt start`
-        context in production, where MLFLOW_TRACKING_URI is always set; the
-        tests need to mirror that so init_tracing doesn't (correctly) refuse
-        to silently no-op.
+        real backend.  In production dsagt-run runs with cwd inside the
+        project directory, where ``dsagt_config.yaml`` (project name +
+        mlflow port) and ``.runtime`` (session id) live; tests mirror
+        that by writing both files in tmp_path and chdir-ing into it.
 
         Also stub the OTLPSpanExporter — init_tracing now builds one pointed
-        at <tracking_uri>/v1/traces, and a file:// URL would otherwise emit
-        async export-failure warnings to stderr that confuse test output.
-        We don't assert on what spans were exported here; that's covered
-        by test_observability.py with an InMemorySpanExporter.
+        at the resolved MLflow URL, and a file:// URL would otherwise emit
+        async export-failure warnings to stderr.
         """
-        monkeypatch.setenv("MLFLOW_TRACKING_URI", f"file://{tmp_path}/mlruns")
-        monkeypatch.setenv("DSAGT_PROJECT", "test")
+        # dsagt_config.yaml carries the resolved MLflow URL via a synthetic
+        # port; tests use a file:// store, so monkeypatch the resolver to
+        # return the file:// URI directly.
+        from dsagt import observability as obs_module
+        cfg = {"project": "test", "mlflow": {"port": 5000}}
+        monkeypatch.setattr(
+            obs_module, "find_project_config",
+            lambda: (tmp_path, cfg),
+        )
+        monkeypatch.setattr(
+            obs_module, "_mlflow_url_from_config",
+            lambda c: f"file://{tmp_path}/mlruns",
+        )
 
         class _NoopExporter:
             def __init__(self, *args, **kwargs):

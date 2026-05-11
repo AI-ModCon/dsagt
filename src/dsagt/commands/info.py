@@ -42,20 +42,6 @@ _SECRET_LEAF_KEYS = {"api_key"}
 _CONFIG_SOURCE_SKIP_PREFIXES = ("categories.", "extraction.", "knowledge.")
 
 
-def _read_env_file(path: Path) -> dict[str, str]:
-    """Parse a .env file into a flat dict.  Ignores comments and blanks."""
-    if not path.exists():
-        return {}
-    out: dict[str, str] = {}
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        out[k.strip()] = v.strip()
-    return out
-
-
 def _mask_secret(value: str) -> str:
     """Show first/last 4 chars of a secret, mask the middle."""
     if len(value) <= 12:
@@ -73,17 +59,19 @@ def _flatten(d: dict, prefix: str = ""):
             yield path, v
 
 
-def _config_sources(project_name: str, env_file_path: Path) -> list[dict]:
+def _config_sources(project_name: str) -> list[dict]:
     """Return per-leaf source info for the project's dsagt_config.yaml.
 
     Walks the *raw* YAML (not the env-resolved version) so ${VAR} references
     are visible.  For each leaf, reports where the resolved value came from:
-    ``.env``, ``environment``, ``config`` (literal in YAML), or
-    ``unresolved`` (``${VAR}`` with no value anywhere).
+    ``config`` (literal in YAML), ``shell`` (``${VAR}`` resolved against
+    ``os.environ``), or ``unresolved`` (``${VAR}`` with no value anywhere).
+    No ``.env`` file is read — dsagt-internal env lives in
+    ``dsagt_config.yaml`` + ``.runtime``; user-provided shell exports are
+    the only other source.
     """
     pdir = project_dir(project_name)
     raw = yaml.safe_load((pdir / "dsagt_config.yaml").read_text()) or {}
-    env_file_vars = _read_env_file(env_file_path)
 
     rows: list[dict] = []
     for path, value in _flatten(raw):
@@ -98,11 +86,8 @@ def _config_sources(project_name: str, env_file_path: Path) -> list[dict]:
             continue
 
         var = _ENV_VAR_RE.match(value).group(1)
-        if var in env_file_vars:
-            source = ".env"
-            resolved = env_file_vars[var]
-        elif var in os.environ:
-            source = "environment"
+        if var in os.environ:
+            source = "shell"
             resolved = os.environ[var]
         else:
             source = "unresolved"
@@ -153,12 +138,12 @@ def _print_kb_retrieval(rows: list[dict]) -> None:
     print()
 
 
-def _print_config_sources(rows: list[dict], env_file_path: Path) -> None:
+def _print_config_sources(rows: list[dict]) -> None:
     if not rows:
         return
     path_w = max(len(r["path"]) for r in rows)
     val_w = max(len(str(r["value"])) for r in rows)
-    print(f"Configuration (env file: {env_file_path}):")
+    print("Configuration:")
     for r in rows:
         print(
             f"  {r['path']:<{path_w}}  {str(r['value']):<{val_w}}  "
@@ -185,6 +170,52 @@ def _tokens(metadata: dict) -> tuple[int, int]:
     return int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))
 
 
+def _tokens_from_spans(spans) -> tuple[int, int]:
+    """Sum ``input_tokens`` / ``output_tokens`` across all LLM spans.
+
+    Native claude OTel emission stamps these as span attributes on
+    ``claude_code.llm_request`` spans (string-encoded — MLflow's OTLP
+    receiver JSON-encodes every attribute).  ``mlflow.trace.tokenUsage``
+    is only set by LiteLLM autolog (proxy mode); for BYOA we aggregate
+    from the spans themselves so the totals aren't always zero.
+
+    Returns ``(0, 0)`` for non-LLM traces (kb.search, tool.execute) —
+    those don't carry token attributes.
+    """
+    if spans is None:
+        return 0, 0
+    in_tot = out_tot = 0
+    try:
+        for span in spans:
+            attrs = getattr(span, "attributes", None)
+            if attrs is None and isinstance(span, dict):
+                attrs = span.get("attributes")
+            if not attrs:
+                continue
+            in_tot += _coerce_token_count(attrs.get("input_tokens"))
+            out_tot += _coerce_token_count(attrs.get("output_tokens"))
+    except (TypeError, AttributeError):
+        return 0, 0
+    return in_tot, out_tot
+
+
+def _coerce_token_count(v) -> int:
+    """Token attrs come through as JSON-encoded strings (``'"510"'`` or
+    ``'510'``), int, or None.  Defensive parse — anything unparseable
+    returns 0 rather than crashing the report."""
+    if v is None:
+        return 0
+    if isinstance(v, int):
+        return v
+    if isinstance(v, str):
+        s = v.strip().strip('"')
+        try:
+            return int(s) if s else 0
+        except ValueError:
+            return 0
+    return 0
+
+
 def _fmt_count(n: int) -> str:
     """Compact integer formatter: 1234 -> '1.2k', 1234567 -> '1.2M'."""
     if n < 1000:
@@ -194,16 +225,66 @@ def _fmt_count(n: int) -> str:
     return f"{n / 1_000_000:.1f}M"
 
 
-def _source_from_spans(spans) -> str | None:
-    """Pull ``service.name`` off the root span's resource attributes.
+#: Map root-span name prefix → human-readable source bucket.  Claude's
+#: native OTel emission uses ``claude_code.*``; goose uses ``goose.*`` /
+#: ``dispatch_tool_call``; our internal services use the prefixes their
+#: ``init_tracing`` calls assign.  Used as the canonical bucket because
+#: MLflow's OTLP receiver doesn't surface the ``service.name`` resource
+#: attribute on the span data ``mlflow.search_traces`` returns — the
+#: name-prefix mapping is reliable across MLflow versions and gives the
+#: same answer (which emitting process produced this trace).
+_SPAN_NAME_TO_SOURCE: tuple[tuple[str, str], ...] = (
+    ("claude_code.", "claude"),
+    ("goose.", "goose"),
+    # Goose's Rust runtime emits root spans named after agent/provider
+    # operations (no namespace prefix): ``reply`` (agent turn),
+    # ``complete_with_model`` (provider LLM call), ``dispatch_tool_call``
+    # (tool invocation).  Verified against goose 1.7+ spans in
+    # crates/goose/src/agents/agent.rs and providers/openai.rs.
+    ("dispatch_tool_call", "goose"),
+    ("complete_with_model", "goose"),
+    ("reply", "goose"),
+    # dsagt-proxy spans emitted via LiteLLM autolog.  The proxy receives
+    # the agent's request as ``Received Proxy Server Request`` (LiteLLM's
+    # FastAPI handler span) and forwards via ``litellm_request`` (the
+    # actual upstream call).  Both carry mlflow.spanInputs/Outputs, so
+    # the UI's request/response columns light up.
+    ("Received Proxy Server Request", "dsagt-proxy"),
+    ("litellm_request", "dsagt-proxy"),
+    # LiteLLM emits ``proxy_pre_call`` spans for pre-call hooks (our
+    # DSAGTCallback's cache-breakpoint injection runs here).  These get
+    # their own trace_id but with parent_span_id pointing outside the
+    # trace, so the no-root-span fallback in _source_from_spans needs
+    # this name registered too.
+    ("proxy_pre_call", "dsagt-proxy"),
+    ("kb.", "dsagt-knowledge-server"),
+    ("registry.", "dsagt-registry-server"),
+    ("tool.execute", "dsagt-run"),
+)
 
-    MLflow's OTLP receiver stores the OTel resource attribute
-    ``service.name`` on each span (each trace's root span is the one
-    without a parent).  ``mlflow.search_traces`` returns a ``spans``
-    column whose entries vary in shape across MLflow versions (Span
-    object, dict, or pandas Series of dicts), so we defend against
-    both attribute and item access.  Any malformed shape returns None
-    so the caller falls back to "unknown" rather than crashing the report.
+
+def _bucket_from_span_name(name: str | None) -> str | None:
+    if not name:
+        return None
+    for prefix, bucket in _SPAN_NAME_TO_SOURCE:
+        if name.startswith(prefix):
+            return bucket
+    return None
+
+
+def _source_from_spans(spans) -> str | None:
+    """Bucket a trace by who emitted it.
+
+    Tries ``service.name`` on span attributes / resource first (works for
+    proxy-mode traces and dsagt-internal services that stamp it
+    explicitly), then falls back to mapping the root span's NAME prefix
+    to a source bucket — necessary for native claude / goose OTel because
+    MLflow's OTLP receiver drops the ``service.name`` resource attribute
+    in the data ``mlflow.search_traces`` exposes.
+
+    ``mlflow.search_traces`` returns a ``spans`` column whose entries
+    vary in shape across MLflow versions (Span object, dict, or pandas
+    Series of dicts); we defend against both attribute and item access.
     """
     if spans is None:
         return None
@@ -212,11 +293,8 @@ def _source_from_spans(spans) -> str | None:
             attrs = getattr(span, "attributes", None)
             if attrs is None and isinstance(span, dict):
                 attrs = span.get("attributes")
-            if attrs:
-                # service.name on the span itself (resource attrs flow
-                # through as span attrs in MLflow's OTLP receiver).
-                if "service.name" in attrs:
-                    return attrs["service.name"]
+            if attrs and "service.name" in attrs:
+                return attrs["service.name"]
             resource = getattr(span, "resource", None) or (
                 span.get("resource") if isinstance(span, dict) else None
             )
@@ -227,6 +305,33 @@ def _source_from_spans(spans) -> str | None:
                 )
                 if rattrs and "service.name" in rattrs:
                     return rattrs["service.name"]
+        # No service.name anywhere — fall back to span-name-prefix
+        # bucketing on the root span (the one without a parent) first.
+        for span in spans:
+            parent = (
+                getattr(span, "parent_id", None)
+                or (span.get("parent_id") if isinstance(span, dict) else None)
+                or getattr(span, "parent_span_id", None)
+                or (span.get("parent_span_id") if isinstance(span, dict) else None)
+            )
+            if parent:
+                continue
+            name = getattr(span, "name", None) or (
+                span.get("name") if isinstance(span, dict) else None
+            )
+            bucket = _bucket_from_span_name(name)
+            if bucket:
+                return bucket
+        # No root present (rare — LiteLLM's proxy_pre_call spans have
+        # parent_span_id pointing outside their own trace).  Try any
+        # span whose name we recognize.
+        for span in spans:
+            name = getattr(span, "name", None) or (
+                span.get("name") if isinstance(span, dict) else None
+            )
+            bucket = _bucket_from_span_name(name)
+            if bucket:
+                return bucket
     except (TypeError, AttributeError):
         return None
     return None
@@ -377,14 +482,15 @@ def _report(project_name: str, config: dict, traces) -> dict:
     # column once up front keeps pandas from re-parsing the dict on every
     # groupby.
     md = traces["trace_metadata"].apply(lambda m: m or {})
-    in_toks = md.apply(lambda m: _tokens(m)[0])
-    out_toks = md.apply(lambda m: _tokens(m)[1])
     session = md.apply(lambda m: m.get("mlflow.trace.session") or "(no-session)")
     agent = md.apply(lambda m: m.get("dsagt.agent") or "-")
     errored = traces["state"].apply(_is_error)
 
-    # Source bucket = OTel service.name from the root span.  See
-    # _source_from_spans for shape tolerance across MLflow versions.
+    # Source + tokens both walk the spans column.  Fall back to span data
+    # because MLflow's OTLP receiver doesn't surface ``service.name`` (so
+    # metadata-only bucketing returns "unknown" for everything) and only
+    # LiteLLM-autolog traces carry ``mlflow.trace.tokenUsage`` (so token
+    # totals are zero in BYOA mode without this fallback).
     spans_col = traces["spans"] if "spans" in traces.columns else None
 
     def _row_source(idx: int) -> str:
@@ -392,8 +498,24 @@ def _report(project_name: str, config: dict, traces) -> dict:
             return _source_from_spans(spans_col.iloc[idx]) or "unknown"
         return "unknown"
 
-    source = md.reset_index(drop=True).index.to_series().apply(_row_source)
+    def _row_tokens(idx: int) -> tuple[int, int]:
+        # Trace metadata first (proxy / autolog shape), then aggregate
+        # span attrs (native claude OTel shape).
+        m = md.iloc[idx]
+        i, o = _tokens(m)
+        if i or o:
+            return i, o
+        if spans_col is not None:
+            return _tokens_from_spans(spans_col.iloc[idx])
+        return 0, 0
+
+    indices = md.reset_index(drop=True).index.to_series()
+    source = indices.apply(_row_source)
     source.index = md.index
+    token_pairs = indices.apply(_row_tokens)
+    token_pairs.index = md.index
+    in_toks = token_pairs.apply(lambda p: p[0])
+    out_toks = token_pairs.apply(lambda p: p[1])
 
     df = traces.copy()
     df["_in"] = in_toks
@@ -461,9 +583,8 @@ def _print_text(r: dict) -> None:
     print()
 
     config_sources = r.get("config_sources") or []
-    env_file_path = r.get("env_file_path")
-    if config_sources and env_file_path:
-        _print_config_sources(config_sources, Path(env_file_path))
+    if config_sources:
+        _print_config_sources(config_sources)
 
     _print_kb_collections(r.get("kb_collections") or [])
 
@@ -482,9 +603,10 @@ def _print_text(r: dict) -> None:
     print()
 
     print("By source:")
+    src_w = max((len(row["source"]) for row in r["by_source"]), default=12)
     for row in r["by_source"]:
         print(
-            f"  {row['source']:<12} {row['traces']:>4} traces  "
+            f"  {row['source']:<{src_w}} {row['traces']:>4} traces  "
             f"{_fmt_count(row['input_tokens']):>6} in / "
             f"{_fmt_count(row['output_tokens']):>6} out  "
             f"{row['errors']} error{'s' if row['errors'] != 1 else ''}"
@@ -517,8 +639,7 @@ def run(project: str, as_json: bool) -> int:
     pdir = Path(config["project_dir"])
     mlflow_db = pdir / "mlflow" / "mlflow.db"
 
-    env_file_path = Path.cwd() / ".env"
-    sources = _config_sources(project, env_file_path)
+    sources = _config_sources(project)
     kb_collections = _kb_collections(pdir)
     created = _project_created(pdir)
 
@@ -541,7 +662,6 @@ def run(project: str, as_json: bool) -> int:
             "kb_retrieval": [],
             "kb_collections": kb_collections,
             "config_sources": sources,
-            "env_file_path": str(env_file_path),
         }
         if as_json:
             print(json.dumps(r, indent=2, default=str))
@@ -554,7 +674,6 @@ def run(project: str, as_json: bool) -> int:
     r["created"] = created
     r["kb_collections"] = kb_collections
     r["config_sources"] = sources
-    r["env_file_path"] = str(env_file_path)
 
     if as_json:
         print(json.dumps(r, indent=2, default=str))

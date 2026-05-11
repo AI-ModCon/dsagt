@@ -22,7 +22,6 @@ dependencies = [
     # required by ``litellm.proxy.proxy_cli.run_server``.
     "litellm[proxy]>=1.83.7",  # floor: closes GHSA-r75f / GHSA-v4p8 / GHSA-xqmj — don't downgrade
     "python-dotenv>=1.0",  # transitive via litellm, pinned directly so a fresh venv always has it
-
     # MCP-server / dsagt-run observability emits OTLP HTTP to MLflow's
     # /v1/traces endpoint; floor=3.11.1 so we ship with the latest GenAI
     # semconv support and well past the 3.6.0 protobuf-response bug fixed
@@ -46,6 +45,13 @@ dependencies = [
     # via Reciprocal Rank Fusion in KnowledgeBase.search when the route's
     # ``hybrid`` flag is set (default True).
     "rank-bm25>=0.2.2",
+    # csvkit ships ~14 well-behaved CSV CLI tools (csvcut, csvgrep,
+    # csvstat, csvjson, csvlook, ...).  Used by the README quickstart's
+    # CSV-summary prompts.  Replaces the previous ``csvtool`` dep, which
+    # had inverted exit codes (returned True/False from main(), then
+    # sys.exit(main()) so every successful run exited 1) — that broke
+    # agent error-detection on every csvtool call.
+    "csvkit>=2.2.0",
 ]
 
 [project.scripts]

@@ -43,6 +43,7 @@ def _reset_tracing(monkeypatch):
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     from opentelemetry.util._once import Once
+
     trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
     trace._TRACER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
     trace.set_tracer_provider(provider)
@@ -158,21 +159,25 @@ def test_child_span_nests(_reset_tracing):
     assert child.attributes["phase"] == "embed"
 
 
-def test_session_id_attached(_reset_tracing, monkeypatch):
-    exporter = _reset_tracing
+def test_session_id_stamped_via_metadata(_reset_tracing, monkeypatch):
+    """Session id flows through ``_metadata_stamper`` → MLflow's
+    ``InMemoryTraceManager``, not as a span attribute.  We verify the
+    stamper is invoked with the reserved ``mlflow.trace.session`` key.
+    """
+    del _reset_tracing
+    captured: list[dict] = []
     monkeypatch.setattr(obs_module, "_default_session_id", "proj-xyz")
+    monkeypatch.setattr(obs_module, "_metadata_stamper", captured.append)
 
     @traced("test.op")
     def f():
         pass
 
     f()
-    span = exporter.get_finished_spans()[0]
-    # We stamp the OTel-semconv ``session.id`` key (not MLflow's reserved
-    # ``mlflow.trace.session``) — MLflow's OTLP receiver promotes session.id
-    # into mlflow.trace.session trace_metadata server-side, so the UI's
-    # native session-filter widget keeps working.
-    assert span.attributes["session.id"] == "proj-xyz"
+    # _attach_trace_metadata should have stamped session id (and source,
+    # if a prefix matched — "test.op" doesn't, so just the session).
+    found = [md for md in captured if "mlflow.trace.session" in md]
+    assert any(md["mlflow.trace.session"] == "proj-xyz" for md in found)
 
 
 def test_init_tracing_double_call_only_updates_session(monkeypatch):
@@ -183,22 +188,15 @@ def test_init_tracing_double_call_only_updates_session(monkeypatch):
     assert obs_module._default_session_id == "new"
 
 
-def test_init_tracing_configures_otlp_exporter_with_experiment_header(monkeypatch):
-    """init_tracing must build an OTLPSpanExporter pointed at MLflow's
-    /v1/traces endpoint with the numeric experiment id in the
-    x-mlflow-experiment-id header.  MLflow's OTLP receiver returns 422 if
-    the header is missing, so this is the pin that prevents a regression
-    where we drop or misname it.
+def test_init_tracing_installs_mlflow_provider(monkeypatch):
+    """init_tracing installs MLflow's native tracer provider as the OTel
+    global, so every span flows into MLflow's trace store with full
+    ``mlflow.spanInputs`` / ``mlflow.spanOutputs`` integration.  Pins the
+    set_experiment call (so the project's experiment exists) and verifies
+    the strategy pointers (_metadata_stamper, _llm_context_factory) get
+    bound.
     """
     captured: dict = {}
-
-    class _FakeExporter:
-        def __init__(self, endpoint, headers, **kwargs):
-            captured["endpoint"] = endpoint
-            captured["headers"] = headers
-
-        def shutdown(self):
-            pass
 
     class _FakeExperiment:
         experiment_id = "42"
@@ -210,29 +208,45 @@ def test_init_tracing_configures_otlp_exporter_with_experiment_header(monkeypatc
     def _fake_set_tracking_uri(uri):
         captured["tracking_uri"] = uri
 
+    def _fake_install(mlflow_url, project_name):
+        captured["installed_url"] = mlflow_url
+        captured["installed_project"] = project_name
+
     import mlflow
+
     monkeypatch.setattr(mlflow, "set_experiment", _fake_set_experiment)
     monkeypatch.setattr(mlflow, "set_tracking_uri", _fake_set_tracking_uri)
-    monkeypatch.setattr(
-        "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter",
-        _FakeExporter,
-    )
+    # Stub the actual provider install — it touches OTel internals that
+    # aren't safely mockable in a unit test (Once flag, lazy provider).
+    monkeypatch.setattr(obs_module, "_install_mlflow_provider", _fake_install)
 
     monkeypatch.setattr(obs_module, "_initialized", False)
-    monkeypatch.setattr(obs_module, "_tracer_provider", None)
-    monkeypatch.setenv("DSAGT_PROJECT", "my-project")
-    monkeypatch.delenv("DSAGT_SESSION_ID", raising=False)
+    monkeypatch.setattr(obs_module, "_metadata_stamper", None)
+    monkeypatch.setattr(obs_module, "_llm_context_factory", None)
+    monkeypatch.setattr(
+        obs_module,
+        "find_project_config",
+        lambda: (None, {"project": "my-project"}),
+    )
+    monkeypatch.setattr(
+        obs_module,
+        "_read_session_id_from_runtime",
+        lambda _pdir: None,
+    )
 
+    # Skip autolog wiring — using service_name="dsagt-run" exits the
+    # autolog branch in init_tracing. The strategy pointers and provider
+    # install are what we actually care about here.
     try:
-        init_tracing("dsagt-test", mlflow_url="http://localhost:5000/")
+        init_tracing("dsagt-run", mlflow_url="http://localhost:5000/")
     finally:
-        obs_module._shutdown()
         monkeypatch.setattr(obs_module, "_initialized", False)
 
-    assert captured["tracking_uri"] == "http://localhost:5000/"
-    assert captured["experiment_name"] == "my-project"
-    assert captured["endpoint"] == "http://localhost:5000/v1/traces"
-    assert captured["headers"] == {"x-mlflow-experiment-id": "42"}
+    assert captured["installed_url"] == "http://localhost:5000/"
+    assert captured["installed_project"] == "my-project"
+    # Strategy pointers should be bound to the MLflow-backed implementations.
+    assert obs_module._metadata_stamper is obs_module._stamp_metadata_mlflow
+    assert obs_module._llm_context_factory is obs_module._mlflow_llm_context
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +289,9 @@ def test_shutdown_runs_cleanly_against_real_provider(monkeypatch):
     )
 
     exporter = InMemorySpanExporter()
-    provider = TracerProvider(resource=Resource.create({"service.name": "shutdown-test"}))
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": "shutdown-test"})
+    )
     provider.add_span_processor(SimpleSpanProcessor(exporter))
 
     # Plug it into the module so _shutdown reaches the real object.
@@ -299,7 +315,9 @@ def test_shutdown_runs_cleanly_against_real_provider(monkeypatch):
     obs_module._shutdown()
 
 
-def test_extract_return_failure_logs_at_debug_and_does_not_crash(_reset_tracing, caplog):
+def test_extract_return_failure_logs_at_debug_and_does_not_crash(
+    _reset_tracing, caplog
+):
     """A buggy extract_return lambda must NOT crash the instrumented function,
     must NOT crash the span emission, and must produce a DEBUG log line so
     the developer can spot the silently-missing attribute when running with
@@ -351,6 +369,7 @@ def test_attach_captured_args_happy_path_protects_bind_partial_catch(_reset_trac
     fail because the captured 'a' and 'b' attributes would be missing
     from the emitted span.
     """
+
     @traced("test.signature_capture", capture=["a", "b", "c"])
     def f(a, b, c=42, *, d=None):
         return None
@@ -585,11 +604,13 @@ def test_kb_search_does_not_call_real_litellm(_reset_tracing, tmp_path):
 
 def test_truncate_short_string_unchanged():
     from dsagt.observability import truncate
+
     assert truncate("hello", 256) == "hello"
 
 
 def test_truncate_long_string_appends_suffix():
     from dsagt.observability import truncate
+
     s = "x" * 500
     result = truncate(s, 64)
     assert len(result) < 100  # truncated, not full length
@@ -599,6 +620,7 @@ def test_truncate_long_string_appends_suffix():
 
 def test_truncate_handles_none():
     from dsagt.observability import truncate
+
     assert truncate(None, 256) == ""
 
 
@@ -758,15 +780,19 @@ def test_save_tool_spec_emits_registry_save_span(_reset_tracing, tmp_path):
     assert span.attributes["registry_size"] == 1
 
 
-def test_save_tool_spec_with_deps_nests_install_span(_reset_tracing, tmp_path, monkeypatch):
+def test_save_tool_spec_with_deps_nests_install_span(
+    _reset_tracing, tmp_path, monkeypatch
+):
     """When a spec carries dependencies, save_tool_spec should open a
     nested registry.install_dependencies span as a child."""
     from mcp_helpers import call_tool_sync as call_tool
 
     # Stub the actual uv install so the test doesn't hit the network.
     import dsagt.commands.registry_server as rs_mod
+
     monkeypatch.setattr(
-        rs_mod, "_install_dependencies",
+        rs_mod,
+        "_install_dependencies",
         lambda packages, timeout=120: f"Successfully installed: {', '.join(packages)}",
     )
 
@@ -786,14 +812,18 @@ def test_save_tool_spec_with_deps_nests_install_span(_reset_tracing, tmp_path, m
     assert "numpy" in install_span.attributes["packages_preview"]
 
 
-def test_install_dependencies_failed_records_event(_reset_tracing, tmp_path, monkeypatch):
+def test_install_dependencies_failed_records_event(
+    _reset_tracing, tmp_path, monkeypatch
+):
     """A failing _install_dependencies should set status=failed and emit
     an install_failed event with the error message truncated."""
     from mcp_helpers import call_tool_sync as call_tool
 
     import dsagt.commands.registry_server as rs_mod
+
     monkeypatch.setattr(
-        rs_mod, "_install_dependencies",
+        rs_mod,
+        "_install_dependencies",
         lambda packages, timeout=120: "Installation failed (exit code 1):\nresolution failure",
     )
 
@@ -856,8 +886,10 @@ def test_search_registry_does_not_emit_span(_reset_tracing, tmp_path):
 # doesn't backfill across them.  Lock in the field-name handling so a
 # regression can't silently hide cache hits in `dsagt info`.
 
+
 def test_extract_cache_stats_anthropic_format():
     from dsagt.observability import extract_cache_stats
+
     usage = {
         "prompt_tokens": 5000,
         "completion_tokens": 100,
@@ -869,6 +901,7 @@ def test_extract_cache_stats_anthropic_format():
 
 def test_extract_cache_stats_openai_format():
     from dsagt.observability import extract_cache_stats
+
     # OpenAI/Azure: cached_tokens nested under prompt_tokens_details, no write field
     usage = {
         "prompt_tokens": 5000,
@@ -880,12 +913,14 @@ def test_extract_cache_stats_openai_format():
 
 def test_extract_cache_stats_gemini_format():
     from dsagt.observability import extract_cache_stats
+
     usage = {"prompt_tokens": 1000, "cached_content_token_count": 700}
     assert extract_cache_stats(usage) == (700, 0)
 
 
 def test_extract_cache_stats_deepseek_format():
     from dsagt.observability import extract_cache_stats
+
     # DeepSeek: prompt_cache_hit_tokens is the read; prompt_cache_miss_tokens
     # is the COMPLEMENT (uncached prompt tokens), not a "write" — don't count it.
     usage = {
@@ -898,14 +933,18 @@ def test_extract_cache_stats_deepseek_format():
 
 def test_extract_cache_stats_no_cache_fields():
     from dsagt.observability import extract_cache_stats
-    assert extract_cache_stats({"prompt_tokens": 100, "completion_tokens": 10}) == (0, 0)
+
+    assert extract_cache_stats({"prompt_tokens": 100, "completion_tokens": 10}) == (
+        0,
+        0,
+    )
 
 
 def test_extract_cache_stats_handles_garbage():
     from dsagt.observability import extract_cache_stats
+
     # Real responses occasionally have None or non-dict values where we expect dicts
     assert extract_cache_stats({"prompt_tokens_details": None}) == (0, 0)
     assert extract_cache_stats({"prompt_tokens_details": "garbage"}) == (0, 0)
     assert extract_cache_stats(None) == (0, 0)
     assert extract_cache_stats({}) == (0, 0)
-
