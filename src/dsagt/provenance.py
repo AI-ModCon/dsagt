@@ -52,6 +52,7 @@ TOOL_EXECUTIONS_ROUTE = CollectionRoute(
 # Execution capture (dsagt-run)
 # ---------------------------------------------------------------------------
 
+
 def _resolve_records_dir(explicit: str | None) -> Path:
     """Determine the records directory.
 
@@ -92,7 +93,14 @@ def run_and_record(
     from dsagt.observability import obs, tool_execute_span, truncate
 
     record_id = record_id or uuid.uuid4().hex[:12]
-    session_id = session_id or os.environ.get("DSAGT_SESSION_ID")
+    if session_id is None:
+        from dsagt.observability import (
+            find_project_config,
+            _read_session_id_from_runtime,
+        )
+
+        pdir, _ = find_project_config()
+        session_id = _read_session_id_from_runtime(pdir)
 
     with tool_execute_span(record_id, tool_name):
         timestamp_start = datetime.now(timezone.utc).isoformat()
@@ -122,15 +130,17 @@ def run_and_record(
         # Attach execution summary to the span. Full payload still goes to
         # trace_archive/<record_id>.json; the span only carries truncated
         # summaries that render usefully in the MLflow UI.
-        obs.set_many({
-            "exit_code": return_code,
-            "duration_ms": duration_ms,
-            "n_input_files": len(input_files or []),
-            "n_output_files": len(output_files or []),
-            "command": truncate(" ".join(command), 256),
-            "stdout_len": len(stdout),
-            "stderr_len": len(stderr),
-        })
+        obs.set_many(
+            {
+                "exit_code": return_code,
+                "duration_ms": duration_ms,
+                "n_input_files": len(input_files or []),
+                "n_output_files": len(output_files or []),
+                "command": truncate(" ".join(command), 256),
+                "stdout_len": len(stdout),
+                "stderr_len": len(stderr),
+            }
+        )
         if stderr.strip():
             obs.set("stderr_truncated", truncate(stderr, 256))
         if return_code != 0:
@@ -139,18 +149,22 @@ def run_and_record(
         # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
         # ~4KB per side so big tool results don't bloat the trace store
         # (the full payload is on disk in trace_archive/<record_id>.json).
-        obs.set_inputs({
-            "tool": tool_name,
-            "command": list(command),
-            "input_files": input_files or [],
-        })
-        obs.set_outputs({
-            "exit_code": return_code,
-            "duration_ms": duration_ms,
-            "stdout": truncate(stdout, 4096),
-            "stderr": truncate(stderr, 4096) if stderr else "",
-            "output_files": output_files or [],
-        })
+        obs.set_inputs(
+            {
+                "tool": tool_name,
+                "command": list(command),
+                "input_files": input_files or [],
+            }
+        )
+        obs.set_outputs(
+            {
+                "exit_code": return_code,
+                "duration_ms": duration_ms,
+                "stdout": truncate(stdout, 4096),
+                "stderr": truncate(stderr, 4096) if stderr else "",
+                "output_files": output_files or [],
+            }
+        )
 
     record = {
         "record_id": record_id,
@@ -193,6 +207,7 @@ def _write_record(record: dict, records_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Record indexing (ChromaDB)
 # ---------------------------------------------------------------------------
+
 
 def render_execution_text(record: dict) -> str:
     """Convert a tool execution record into embeddable natural-language text."""
@@ -348,6 +363,7 @@ def index_trace_archive(
 # ---------------------------------------------------------------------------
 # Pipeline reconstruction
 # ---------------------------------------------------------------------------
+
 
 def load_pipeline_records(trace_dir: Path, session_id: str | None = None) -> list[dict]:
     """Load execution records that have the wrapper execution layer.
@@ -513,3 +529,114 @@ def reconstruct_pipeline(
         return render_snakemake(records, deps)
     return render_bash(records, deps)
 
+
+# ---------------------------------------------------------------------------
+# Proxy-mode MLflow logger (LiteLLM callback subclass)
+# ---------------------------------------------------------------------------
+
+
+def install_mlflow_logger_with_session_tag() -> None:
+    """Inject a ``MlflowLogger`` subclass that stamps ``mlflow.trace.session``.
+
+    Why a subclass instead of post-hoc tagging from another callback:
+    LiteLLM's MlflowLogger does the entire trace lifecycle (start_trace →
+    set_attributes → end_trace) inside one ``_handle_success`` call.  By
+    the time any sibling success-callback fires, the trace is already
+    exported and ``mlflow.update_current_trace`` has nothing to update.
+    Subclassing lets us slot the metadata write between trace creation and
+    trace export, where the in-memory trace still exists and is mutable.
+
+    Why register via LiteLLM's ``_in_memory_loggers`` cache: when the
+    proxy resolves the string ``"mlflow"`` from ``success_callback``, it
+    iterates ``_in_memory_loggers`` looking for any
+    ``isinstance(_, MlflowLogger)`` and returns it instead of constructing
+    a fresh one.  A subclass passes the isinstance check, so pre-seeding
+    our subclass means the existing string-based registration in
+    ``success_callback``/``failure_callback`` automatically routes through
+    us — no sync-vs-async dispatch quirks to worry about.
+
+    Idempotent: safe to call more than once.
+    """
+    from litellm.integrations.mlflow import MlflowLogger
+    from litellm.litellm_core_utils import litellm_logging as _ll
+
+    from dsagt.observability import _stamp_metadata_on_trace, extract_cache_stats
+
+    class _DSAGTMlflowLogger(MlflowLogger):
+        def _start_span_or_trace(self, kwargs, start_time):
+            span = super()._start_span_or_trace(kwargs, start_time)
+            # span.request_id is MLflow's trace_id; the trace lives in
+            # InMemoryTraceManager until the parent _handle_success calls
+            # _end_span_or_trace, so we have a window here to mutate
+            # trace_metadata before export.
+            #
+            # Agent-turn LLM calls land here (proxy path).  Stamp:
+            #   mlflow.trace.session — session grouping in the UI
+            #   dsagt.source=agent   — distinguishes from extraction/embedding
+            #   dsagt.agent          — which platform (goose, claude, ...)
+            # Non-agent LLM calls (memory extraction, embeddings) go through
+            # llm_source(...) decorators and never touch this subclass, so
+            # hard-coding source="agent" here is safe.
+            if span is None:
+                return span
+            metadata: dict[str, str] = {"dsagt.source": "agent"}
+            if session_id := os.environ.get("DSAGT_SESSION_ID"):
+                metadata["mlflow.trace.session"] = session_id
+            if agent := os.environ.get("DSAGT_AGENT"):
+                metadata["dsagt.agent"] = agent
+            _stamp_metadata_on_trace(span.request_id, metadata)
+            return span
+
+        def _extract_and_set_chat_attributes(self, span, kwargs, response_obj):
+            # Last window to stamp cache stats before _end_span_or_trace
+            # exports the trace.
+            super()._extract_and_set_chat_attributes(span, kwargs, response_obj)
+            if span is None:
+                return
+            usage = (_response_to_usage(response_obj) or {}).get("usage") or {}
+            read, write = extract_cache_stats(usage)
+            if not read and not write:
+                return
+            _stamp_metadata_on_trace(
+                span.request_id,
+                {
+                    "dsagt.cache.read_tokens": str(read),
+                    "dsagt.cache.write_tokens": str(write),
+                },
+            )
+
+    # Already installed? Leave it.
+    for cb in _ll._in_memory_loggers:
+        if type(cb).__name__ == "_DSAGTMlflowLogger":
+            return
+    # Drop any vanilla MlflowLogger that beat us to the cache.
+    _ll._in_memory_loggers[:] = [
+        cb
+        for cb in _ll._in_memory_loggers
+        if not (
+            isinstance(cb, MlflowLogger) and type(cb).__name__ != "_DSAGTMlflowLogger"
+        )
+    ]
+    _ll._in_memory_loggers.append(_DSAGTMlflowLogger())
+
+
+def _response_to_usage(response_obj) -> dict | None:
+    """Best-effort extraction of the ``usage`` dict from a litellm response.
+
+    LiteLLM responses can be dataclass-like (``model_dump()``), pydantic
+    models (``dict()``), or already plain dicts.  We try each, and fall
+    back to ``None`` if nothing yields a usable shape.
+    """
+    if response_obj is None:
+        return None
+    if isinstance(response_obj, dict):
+        return response_obj
+    for method in ("model_dump", "dict"):
+        if hasattr(response_obj, method):
+            try:
+                d = getattr(response_obj, method)()
+                if isinstance(d, dict):
+                    return d
+            except Exception:
+                continue
+    return None

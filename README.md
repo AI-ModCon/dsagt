@@ -6,8 +6,6 @@
 
 DSAgt connects an MCP-compatible AI coding agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure. DSAgt provides data-pipeline scaffolding around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …);
 
-## Installation
-
 **Prerequisites:** Python 3.10–3.13, [uv](https://github.com/astral-sh/uv), and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
 
 | Agent | Install | Verify |
@@ -19,45 +17,51 @@ DSAgt connects an MCP-compatible AI coding agent to tool registration, a semanti
 | [Roo Code](https://github.com/RooCodeInc/Roo-Code) | `npm i -g @roo-code/cli` | `roo --version` |
 | [Cline](https://github.com/cline/cline) | `npm i -g cline` | `cline --version` |
 
-```bash
-git clone https://github.com/AI-ModCon/BaseData_pipeline_agent.git
-cd BaseData_pipeline_agent
-uv sync                      # add --all-groups for the test suite
-source .venv/bin/activate    # so `dsagt` is on PATH
-```
-
 ## Quick Start
 
 Explore DSAgt knowledge ingest, tool registration, provenance, and explicit memory using the mock project in [`tests/smoke_test/`](tests/smoke_test/). Uses `claude`; substitute another agent (`goose` / `codex` / `opencode`) if you prefer — the prompts are agent-agnostic.
 
 ```bash
-# 1. From the dsagt repo root, point a shell var at the fixture data and create the project.
+# 0. Installation
+git clone https://github.com/AI-ModCon/dsagt.git
+cd dsagt
+uv sync                      # add --all-groups for the test suite
+source .venv/bin/activate    # so `dsagt` is on PATH
+
+# Set convenience folder env variable for quickstart demo (not a normal dsagt step)
 export SMOKE_DIR="$(pwd)/tests/smoke_test"
+
+# 1. Create a new project called quickstart
 dsagt init quickstart --agent claude
-```
 
-`dsagt init` prints (a) the provider env vars **you** need set in your shell — DSAgt does not manage agent credentials — (b) optional OTel export vars to point the agent's native tracing at this project's MLflow, and (c) the exact one-liner to launch your agent with DSAgt tools enabled.
-
-```bash
-# 2. In one terminal, start MLflow for this project:
+# 2. Start MLflow in the background (writes <project>/mlflow.log) and print
+#    the OTel routing exports for this session, including the resolved
+#    experiment id:
 dsagt mlflow quickstart
 
-# 3. In another terminal, launch claude inside the project directory:
+# 3. Paste the export block dsagt mlflow printed into THIS shell, then
+#    launch claude from the project directory:
 cd ~/dsagt-projects/quickstart && claude
 ```
 
 Inside the agent, paste these prompts one at a time (substitute the absolute path you exported as `$SMOKE_DIR` — the chat doesn't expand env vars):
 
 1. > Ingest the docs in `$SMOKE_DIR/knowledge/` into a collection named `knowledge`.
-2. > I have a CSV utility called `csvtool`. Its reference is at `$SMOKE_DIR/knowledge/api_reference.md` — register the `filter` subcommand. Use an underscore in the name.
-3. > Use the `scan_directory` tool from the registry to scan `$SMOKE_DIR/data/`, then summarize `samples.csv` — columns, row count, quality issues.
-4. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns. Then tell me what you remember about the samples dataset.
+2. > Register the csvkit CLI tools `csvcut`, `csvgrep`, `csvstat`, and `csvlook`.
+3. > Use the `scan_directory` tool from the registry to scan `$SMOKE_DIR/data/`.
+4. > Summarize `samples.csv` — columns, row count, quality issues using csvkit tools from the registry.
+5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
+6. > Tell me what you remember about the samples dataset.
 
-Exit the agent (`Ctrl+C` or `/exit`), then distill the session into episodic memory:
+Exit the agent (`Ctrl+C` or `/exit`), then distill the session into episodic memory and stop the MLflow daemon:
 
 ```bash
 # 4. After your session, distill traces into episodic memory:
 dsagt memory --project quickstart
+
+# 5. Stop the MLflow daemon dsagt mlflow started (writes a PID into
+#    <project>/.runtime; this releases the port and the gunicorn workers):
+dsagt stop quickstart
 ```
 
 What this exercised:
@@ -65,7 +69,7 @@ What this exercised:
 | Prompt | Layer |
 |---|---|
 | 1 | Knowledge MCP server (`kb_ingest`) — chunks and indexes docs into ChromaDB |
-| 2 | Registry MCP server (`save_tool_spec`) — writes `tools/csvtool_filter.md` |
+| 2 | Registry MCP server (`save_tool_spec`) — writes `tools/csvcut.md`, `tools/csvgrep.md`, etc. (one per registered tool) |
 | 3 | `dsagt-run` provenance wrapper — records exec layer to `trace_archive/` |
 | 4 | Explicit memory (`kb_remember` → `explicit_memories.yaml`) + KB recall |
 

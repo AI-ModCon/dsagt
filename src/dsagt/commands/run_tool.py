@@ -17,7 +17,8 @@ def _make_parser() -> argparse.ArgumentParser:
         description="Wrap a tool command and capture execution provenance.",
     )
     parser.add_argument("--tool", required=True, help="Name of the tool being executed.")
-    parser.add_argument("--session", default=None, help="Session ID. Defaults to $DSAGT_SESSION_ID.")
+    parser.add_argument("--session", default=None,
+                        help="Session ID. Defaults to session_id from <project>/.runtime.")
     parser.add_argument("--record-id", default=None, help="Pre-assigned record ID.")
     parser.add_argument("--records-dir", default=None, help="Directory for execution records.")
     parser.add_argument("--input-files", default=None, help="Comma-separated input file paths.")

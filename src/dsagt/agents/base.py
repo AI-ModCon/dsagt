@@ -38,14 +38,28 @@ _DSAGT_MARKER = "DSAgt Pipeline Builder"
 # but not here means roo/cline will hang on its first call.
 _DSAGT_MCP_ALWAYS_ALLOW = {
     "registry": [
-        "get_registry", "http_request", "install_dependencies", "read_file",
-        "reconstruct_pipeline", "run_command", "save_skill", "save_tool_spec",
-        "search_registry", "search_skills",
+        "get_registry",
+        "http_request",
+        "install_dependencies",
+        "read_file",
+        "reconstruct_pipeline",
+        "run_command",
+        "save_skill",
+        "save_tool_spec",
+        "search_registry",
+        "search_skills",
     ],
     "knowledge": [
-        "kb_add_vector_db", "kb_append", "kb_dismiss_suggestion",
-        "kb_get_memories", "kb_get_suggestions", "kb_ingest", "kb_job_status",
-        "kb_list_collections", "kb_remember", "kb_search",
+        "kb_add_vector_db",
+        "kb_append",
+        "kb_dismiss_suggestion",
+        "kb_get_memories",
+        "kb_get_suggestions",
+        "kb_ingest",
+        "kb_job_status",
+        "kb_list_collections",
+        "kb_remember",
+        "kb_search",
     ],
 }
 
@@ -116,6 +130,7 @@ def _openai_env(llm: dict) -> dict[str, str]:
 # Functional helpers (provider-agnostic)
 # ---------------------------------------------------------------------------
 
+
 def _mcp_server_args(server: str) -> list[str]:
     """Build the argv tail for ``uv run dsagt-<server>-server``.
 
@@ -128,26 +143,15 @@ def _mcp_server_args(server: str) -> list[str]:
 def _mcp_env_block(config: dict) -> dict[str, str]:
     """Env vars the dsagt MCP server children need at startup.
 
-    Built from the project's internal config — runs deterministically
-    at ``dsagt init`` time without depending on the user's shell env.
-    Includes the MLflow tracking URI derived from the port pinned at
-    init so MCP-server logging lands in the project's MLflow regardless
-    of whether the agent inherits shell env into its MCP children
-    (cline / roo / codex don't; claude / goose do).
-
-    Empty values are dropped — for ``backend: local`` embedding, the
-    EMBEDDING_* keys aren't needed; for ``backend: api`` the user must
-    set ``EMBEDDING_API_KEY`` in their shell env (we don't bake creds
-    into project-on-disk artifacts).
+    Project routing (project name, project_dir, mlflow port) lives in
+    ``dsagt_config.yaml`` and is read by services via cwd-walk — single
+    source of truth, no env duplication.  This block carries only the
+    embedding-backend settings, which the embedding client still reads
+    from env (refactor TBD).  For ``backend: api`` the user must set
+    ``EMBEDDING_API_KEY`` in their shell env (creds never on disk).
     """
     emb = config.get("embedding") or {}
-    mlflow_port = (config.get("mlflow") or {}).get("port")
-    block: dict[str, str] = {
-        "DSAGT_PROJECT": config["project"],
-        "DSAGT_PROJECT_DIR": str(config["project_dir"]),
-    }
-    if mlflow_port:
-        block["MLFLOW_TRACKING_URI"] = f"http://localhost:{mlflow_port}"
+    block: dict[str, str] = {}
     for key, src in (
         ("EMBEDDING_BACKEND", emb.get("backend")),
         ("EMBEDDING_MODEL", emb.get("model")),
@@ -172,16 +176,21 @@ def _format_roomodes(instructions: str) -> str:
     role = parts[0].strip()
     custom = ("## " + parts[1]).strip() if len(parts) > 1 else ""
 
-    return json.dumps({
-        "customModes": [{
-            "slug": "dsagt",
-            "name": "DSAgt Pipeline Builder",
-            "roleDefinition": role,
-            "customInstructions": custom,
-            "groups": ["read", "edit", "browser", "command", "mcp"],
-            "source": "project",
-        }]
-    }, indent=2)
+    return json.dumps(
+        {
+            "customModes": [
+                {
+                    "slug": "dsagt",
+                    "name": "DSAgt Pipeline Builder",
+                    "roleDefinition": role,
+                    "customInstructions": custom,
+                    "groups": ["read", "edit", "browser", "command", "mcp"],
+                    "source": "project",
+                }
+            ]
+        },
+        indent=2,
+    )
 
 
 def _append_or_write(path: Path, content: str, marker: str) -> str | None:
@@ -258,8 +267,117 @@ def _run_simple_script(
 
 
 # ---------------------------------------------------------------------------
+# Launch shim — dsagt-launch.sh
+# ---------------------------------------------------------------------------
+
+
+def _render_launch_shim(setup: AgentSetup, config: dict) -> str:
+    """Render the dsagt-launch.sh shell script for a project.
+
+    The shim is the BYOA "transparency" entry point — users either run it
+    directly (``bash dsagt-launch.sh``), or read it and execute the lines
+    manually.  It does NOT exec the agent — instead it prints how to
+    launch (CLI / VS Code), letting the user pick.
+
+    Steps:
+      1. Start MLflow in the background if not already running.
+      2. Resolve the experiment-id for this project at run time
+         (curl MLflow's REST API).
+      3. Export OTel routing env (skipped for Claude — mlflow autolog
+         claude's ``.claude/settings.json`` handles agent-side traces).
+      4. Export per-agent telemetry verbosity flags.
+      5. Print available agent-launch options.
+    """
+    project = config["project"]
+    mlflow_port = (config.get("mlflow") or {}).get("port")
+    agent_name = setup.name
+    pdir = config.get("project_dir") or "."
+
+    cli_cmd = " ".join(shlex.quote(p) for p in setup.interactive_command({}))
+    vscode_lines = setup.vscode_hint(Path(str(pdir))) or []
+
+    # Claude in BYOA gets agent-side traces via mlflow autolog claude's
+    # Stop hook, so we omit the OTel routing block (would create
+    # duplicate, lower-fidelity traces alongside the rich transcript).
+    skip_otel_routing = agent_name == "claude"
+
+    lines: list[str] = []
+    lines.append("#!/usr/bin/env bash")
+    lines.append("# dsagt-launch.sh — start MLflow, set env, show launch options.")
+    lines.append(
+        "# Generated by `dsagt init`. Re-running `dsagt init` overwrites this file."
+    )
+    lines.append("set -euo pipefail")
+    lines.append('cd "$(dirname "$0")"')
+    lines.append("")
+    lines.append("# 1. Start MLflow in the background if not already running.")
+    lines.append(f"dsagt mlflow {shlex.quote(project)} --background-only")
+    lines.append("")
+
+    if not skip_otel_routing and mlflow_port:
+        lines.append("# 2. Resolve experiment id for OTel routing.")
+        lines.append(
+            f"EXPERIMENT_ID=$(curl -s "
+            f'"http://localhost:{mlflow_port}/api/2.0/mlflow/experiments/get-by-name?experiment_name={project}" '
+            '| python3 -c \'import json,sys; print(json.load(sys.stdin)["experiment"]["experiment_id"])\')'
+        )
+        lines.append("")
+        lines.append(
+            "# 3. OTel routing env (agent's native OTel SDK ships traces to MLflow)."
+        )
+        lines.append(f'export MLFLOW_TRACKING_URI="http://localhost:{mlflow_port}"')
+        lines.append("export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf")
+        lines.append(
+            f'export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://localhost:{mlflow_port}/v1/traces"'
+        )
+        lines.append(
+            'export OTEL_EXPORTER_OTLP_HEADERS="x-mlflow-experiment-id=$EXPERIMENT_ID"'
+        )
+        lines.append(f'export OTEL_RESOURCE_ATTRIBUTES="service.name={agent_name}"')
+        lines.append("")
+    elif mlflow_port:
+        lines.append(
+            "# Claude uses `mlflow autolog claude` (.claude/settings.json) for"
+        )
+        lines.append("# agent-side traces — no OTel routing needed.")
+        lines.append(f'export MLFLOW_TRACKING_URI="http://localhost:{mlflow_port}"')
+        lines.append("")
+
+    if setup.telemetry_env:
+        lines.append("# 4. Agent telemetry verbosity flags.")
+        for k, v in setup.telemetry_env.items():
+            lines.append(f"export {k}={shlex.quote(v)}")
+        lines.append("")
+
+    lines.append("# 5. Show how to launch the agent — pick one.")
+    lines.append('echo ""')
+    lines.append('echo "Environment ready. Launch the agent in one of these ways:"')
+    lines.append('echo ""')
+    lines.append(f'echo "  CLI:       {cli_cmd}"')
+    if vscode_lines:
+        for hint in vscode_lines:
+            lines.append(f'echo "  VS Code:   {hint}"')
+    lines.append('echo ""')
+    lines.append('echo "Run any of the above in this shell."')
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _write_launch_shim(setup: AgentSetup, config: dict, working_dir: Path) -> str:
+    """Write ``dsagt-launch.sh`` to working_dir and chmod it executable.
+
+    Returns a one-line action description for the init output.
+    """
+    shim_path = working_dir / "dsagt-launch.sh"
+    shim_path.write_text(_render_launch_shim(setup, config))
+    shim_path.chmod(0o755)
+    return f"Wrote {shim_path}"
+
+
+# ---------------------------------------------------------------------------
 # AgentSetup ABC
 # ---------------------------------------------------------------------------
+
 
 class AgentSetup(ABC):
     """Per-agent setup contract.

@@ -19,14 +19,14 @@ as a downstream consequence because the data it needs (request +
 response payloads tagged with the session id) lands in MLflow exactly
 because the proxy autologged it.
 
-Architecture: this process is a regular OTel emitter, structurally
-identical to the MCP servers and ``dsagt-run``.  ``init_tracing()``
-installs an OTLPSpanExporter pointed at MLflow with the experiment-id
-header and enables ``mlflow.litellm.autolog()``, which means every
-forwarded LLM call produces an MLflow trace tagged with ``session.id``
-(resource attribute, promoted by MLflow's OTLP receiver to
-``mlflow.trace.session`` trace_metadata) and
-``service.name = "dsagt-proxy"``.
+Architecture: ``init_proxy_tracing()`` installs MLflow's native tracer
+provider as the OTel global and plants ``_DSAGTMlflowLogger`` (a
+MlflowLogger subclass) into LiteLLM's logger cache.  The subclass
+stamps ``mlflow.trace.session``, ``dsagt.source=agent``, and
+``dsagt.agent`` on every proxy-captured trace in the narrow window
+between trace creation and export — giving rich
+``mlflow.spanInputs``/``mlflow.spanOutputs`` traces with full request
+and response payloads.
 
 Routing: requests come in on the local port and LiteLLM forwards them
 to the user's configured upstream (LLM + embedding) using a minimal
@@ -81,7 +81,9 @@ _DROP_PARAMS_YAML = '      additional_drop_params: ["client_metadata"]\n'
 
 
 def _generate_config(
-    llm_model: str, llm_base_url: str, llm_provider: str,
+    llm_model: str,
+    llm_base_url: str,
+    llm_provider: str,
     embedding_model: str | None = None,
     embedding_base_url: str | None = None,
     embedding_provider: str | None = None,
@@ -103,15 +105,12 @@ def _generate_config(
     """
     from dsagt.observability import SIDECHANNEL_WILDCARD_ROUTE_YAML
 
-    aliases_yaml = "".join(
-        f"""  - model_name: {alias}
+    aliases_yaml = "".join(f"""  - model_name: {alias}
     litellm_params:
       model: {llm_provider}/{llm_model}
       api_base: {llm_base_url}
       api_key: os.environ/LLM_API_KEY
-{_DROP_PARAMS_YAML}"""
-        for alias in _AGENT_PRIMARY_ALIASES
-    )
+{_DROP_PARAMS_YAML}""" for alias in _AGENT_PRIMARY_ALIASES)
 
     embedding_yaml = ""
     if embedding_model and embedding_base_url and embedding_provider:
@@ -137,7 +136,10 @@ litellm_settings:
   request_timeout: 300
 """
     tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", prefix="dsagt_litellm_", delete=False,
+        mode="w",
+        suffix=".yaml",
+        prefix="dsagt_litellm_",
+        delete=False,
     )
     tmp.write(body)
     tmp.close()
@@ -148,14 +150,26 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="dsagt-proxy")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--mlflow-url", required=True,
-        help="MLflow server URL the OTLP exporter ships traces to.")
-    parser.add_argument("--project", required=True,
-        help="DSAGT project name (= MLflow experiment name).")
-    parser.add_argument("--session", required=True,
-        help="DSAGT session id stamped on every trace via OTel resource attrs.")
-    parser.add_argument("--records-dir", required=True,
-        help="Project's trace_archive/ — sidechannel.jsonl lands adjacent.")
+    parser.add_argument(
+        "--mlflow-url",
+        required=True,
+        help="MLflow server URL the OTLP exporter ships traces to.",
+    )
+    parser.add_argument(
+        "--project",
+        required=True,
+        help="DSAGT project name (= MLflow experiment name).",
+    )
+    parser.add_argument(
+        "--session",
+        required=True,
+        help="DSAGT session id stamped on every trace via OTel resource attrs.",
+    )
+    parser.add_argument(
+        "--records-dir",
+        required=True,
+        help="Project's trace_archive/ — sidechannel.jsonl lands adjacent.",
+    )
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--provider", required=True)
@@ -182,15 +196,19 @@ def main() -> None:
         args.embedding_model and args.embedding_base_url and args.embedding_provider
     )
     if embedding_routing and not os.environ.get("EMBEDDING_API_KEY"):
-        logger.error("EMBEDDING_API_KEY not set; the proxy needs it to forward embedding requests.")
+        logger.error(
+            "EMBEDDING_API_KEY not set; the proxy needs it to forward embedding requests."
+        )
         sys.exit(1)
 
-    # init_proxy_tracing sets OTEL_EXPORTER_OTLP_* env so litellm.callbacks
-    # = ["otel"] (registered inside) ships standard OTLP spans to MLflow's
-    # /v1/traces tagged with service.name=dsagt-proxy + session.id.  Also
-    # registers the DSAGTCallback for cache-breakpoint injection on
-    # outgoing requests + sidechannel-call detection on incoming responses.
+    # init_proxy_tracing installs MLflow's tracer provider as the OTel
+    # global, plants ``_DSAGTMlflowLogger`` (a MlflowLogger subclass) into
+    # LiteLLM's logger cache to stamp ``mlflow.trace.session`` /
+    # ``dsagt.source=agent`` / ``dsagt.agent`` on every proxy-captured
+    # trace, and registers DSAGTCallback for cache-breakpoint injection +
+    # sidechannel-call detection.
     from dsagt.observability import init_proxy_tracing
+
     init_proxy_tracing(
         mlflow_url=args.mlflow_url,
         project=args.project,
@@ -203,6 +221,7 @@ def main() -> None:
     # project gateways don't expose.  Force the /chat/completions path so
     # any openai-compatible upstream works.
     import litellm
+
     litellm.use_chat_completions_url_for_anthropic_messages = True
 
     # Tell the DSAGT callback what the configured primary model is, so its
@@ -211,8 +230,12 @@ def main() -> None:
     os.environ["DSAGT_PRIMARY_MODEL"] = args.model
 
     config_path = _generate_config(
-        args.model, args.base_url, args.provider,
-        args.embedding_model, args.embedding_base_url, args.embedding_provider,
+        args.model,
+        args.base_url,
+        args.provider,
+        args.embedding_model,
+        args.embedding_base_url,
+        args.embedding_provider,
     )
     logger.info("Generated LiteLLM config at %s", config_path)
     logger.info("Starting LiteLLM proxy on %s:%d", args.host, args.port)
@@ -221,9 +244,17 @@ def main() -> None:
     # raise on errors instead of sys.exit; we still catch SystemExit
     # because Click can raise it on clean shutdown.
     from litellm.proxy.proxy_cli import run_server
+
     try:
         run_server.main(
-            args=["--host", args.host, "--port", str(args.port), "--config", config_path],
+            args=[
+                "--host",
+                args.host,
+                "--port",
+                str(args.port),
+                "--config",
+                config_path,
+            ],
             standalone_mode=False,
         )
     except SystemExit:
