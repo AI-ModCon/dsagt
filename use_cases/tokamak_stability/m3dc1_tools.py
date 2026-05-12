@@ -181,7 +181,7 @@ def read_snapshot_time(
 
     if units in ("s", "mks"):
         try:
-            from m3dc1.get_time_of_slice import get_time_of_slice
+            from m3dc1 import get_time_of_slice
             return float(get_time_of_slice(
                 time_idx,
                 filename=str(case_dir / "C1.h5"),
@@ -582,7 +582,7 @@ def compute_perturbed_fields(
         that fail evaluation are omitted (a warning is printed).
     """
     import fpy
-    from m3dc1.eval_field import eval_field
+    from m3dc1 import eval_field
 
     skip = set(skip_fields) if skip_fields is not None else set(_DEFAULT_SKIP)
 
