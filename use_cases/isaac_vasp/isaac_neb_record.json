@@ -1,0 +1,220 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "01KQ0W1X03ER4AEFRC3D0THJ5J",
+  "record_type": "evidence",
+  "record_domain": "simulation",
+  "source_type": "computation",
+  "timestamps": {
+    "created_utc": "2026-04-24T00:00:00Z",
+    "acquired_start_utc": "2016-09-22T13:56:26Z",
+    "acquired_end_utc": "2016-09-22T17:00:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "BCC iron with vacancy (Fe31 supercell)",
+      "formula": "Fe31",
+      "provenance": "theoretical"
+    },
+    "sample_form": "bulk_supercell"
+  },
+  "system": {
+    "domain": "computational",
+    "technique": "DFT",
+    "instrument": {
+      "instrument_type": "simulation_engine",
+      "instrument_name": "VASP",
+      "vendor_or_project": "VASP"
+    },
+    "configuration": {
+      "code_version": "5.4.1",
+      "compute_architecture": "CPU",
+      "cores": 24
+    }
+  },
+  "context": {
+    "environment": "in_silico",
+    "temperature_K": 0,
+    "simulation_assumptions": {
+      "solvation_model": "none"
+    }
+  },
+  "computation": {
+    "method": {
+      "family": "DFT",
+      "functional_class": "GGA",
+      "functional_name": "PBE",
+      "basis_type": "planewave",
+      "pseudopotential": "PAW",
+      "cutoff_eV": 520.0,
+      "spin_treatment": "collinear",
+      "dispersion": "none",
+      "kpoints": "32 irreducible k-points (pymatgen Monkhorst-Pack grid)",
+      "smearing": {
+        "method": "Gaussian",
+        "width_eV": 0.2
+      },
+      "convergence": {
+        "energy_eV": 0.002,
+        "force_eV_per_A": 0.02
+      }
+    },
+    "output_quantity": {
+      "quantity": "activation_energy_raw",
+      "corrections_applied": {
+        "zero_point_energy": false,
+        "entropy": false,
+        "thermal": false,
+        "solvation": false,
+        "dispersion": false,
+        "grand_canonical": false,
+        "PCET": false
+      }
+    },
+    "transition_state": {
+      "method": "NEB",
+      "images": 3,
+      "reaction": "Fe(lattice) \u2192 Fe(vacancy site)",
+      "n_electrons_transferred": 0
+    }
+  },
+  "measurement": {
+    "series": [
+      {
+        "series_id": "neb_energy_profile",
+        "independent_variables": [
+          {
+            "name": "image_index",
+            "unit": "dimensionless",
+            "values": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ]
+          }
+        ],
+        "channels": [
+          {
+            "name": "total_energy_sigma0",
+            "unit": "eV",
+            "role": "simulated_observable",
+            "values": [
+              -255.979927,
+              -255.842126,
+              -255.654725,
+              -255.84262,
+              -255.980978
+            ]
+          },
+          {
+            "name": "relative_energy",
+            "unit": "eV",
+            "role": "derived_signal",
+            "values": [
+              0.0,
+              0.1378,
+              0.325202,
+              0.137307,
+              -0.001051
+            ]
+          }
+        ]
+      }
+    ],
+    "qc": {
+      "status": "pass",
+      "notes": "All images converged per EDIFF=2e-3 eV; forces below EDIFFG=2e-2 eV/\u00c5; NSW=99 steps"
+    }
+  },
+  "assets": [
+    {
+      "asset_id": "outcar_image_00",
+      "content_role": "raw_data",
+      "uri": "file://neb/00/OUTCAR",
+      "sha256": "6eb7b35b42f3699866312ff566b0acd8558d470e45b84a98c6a395d03d5551ee",
+      "media_type": "text/plain"
+    },
+    {
+      "asset_id": "outcar_image_01",
+      "content_role": "raw_data",
+      "uri": "file://neb/01/OUTCAR",
+      "sha256": "1cf7e47231d14b91515a70a046426199ca092608e3702f57183fbff848dede83",
+      "media_type": "text/plain"
+    },
+    {
+      "asset_id": "outcar_image_02",
+      "content_role": "raw_data",
+      "uri": "file://neb/02/OUTCAR",
+      "sha256": "0dab8255e3932d102aaaa6f35f0664d6d7019f25a8c2c58f5dbc0ec8d9188d9c",
+      "media_type": "text/plain"
+    },
+    {
+      "asset_id": "outcar_image_03",
+      "content_role": "raw_data",
+      "uri": "file://neb/03/OUTCAR",
+      "sha256": "bdf04813f3ea4180f25882d4e008295d7bca11e7e29f35fc64e9b59079983a1a",
+      "media_type": "text/plain"
+    },
+    {
+      "asset_id": "outcar_image_04",
+      "content_role": "raw_data",
+      "uri": "file://neb/04/OUTCAR",
+      "sha256": "a221b302065d5e2b09dc350e18dd0de90785dc4f7b41f377c47f46965ba2534b",
+      "media_type": "text/plain"
+    },
+    {
+      "asset_id": "poscar_image_00",
+      "content_role": "input_structure",
+      "uri": "file://neb/00/POSCAR",
+      "sha256": "0bdd5e6f9c682ece62efabbd292500121084291200d3ba76ee59e93d43593650",
+      "media_type": "text/plain"
+    },
+    {
+      "asset_id": "poscar_image_04",
+      "content_role": "input_structure",
+      "uri": "file://neb/04/POSCAR",
+      "sha256": "5c576e766d3f453d2ca44779ece03d95a2ed50dc637883de3d470502e55315e8",
+      "media_type": "text/plain"
+    }
+  ],
+  "descriptors": {
+    "outputs": [
+      {
+        "label": "neb_barrier_v1",
+        "generated_utc": "2026-04-24T00:00:00Z",
+        "generated_by": {
+          "agent": "pymatgen_outcar_parser",
+          "version": "2024.x"
+        },
+        "descriptors": [
+          {
+            "name": "activation_barrier.Fe_vacancy_migration",
+            "kind": "theoretical_metric",
+            "source": "auto",
+            "value": 0.3252,
+            "unit": "eV",
+            "definition": "Raw DFT NEB activation barrier (energy(sigma->0) difference between TS image 02 and initial state image 00). No ZPE or entropy corrections applied.",
+            "uncertainty": {
+              "sigma": 0.05,
+              "unit": "eV",
+              "notes": "DFT functional systematic error estimate for GGA-PBE migration barriers"
+            }
+          },
+          {
+            "name": "reaction_energy.Fe_vacancy_hop",
+            "kind": "theoretical_metric",
+            "source": "auto",
+            "value": -0.0011,
+            "unit": "eV",
+            "definition": "Raw DFT energy difference between final state (image 04) and initial state (image 00). Near-zero as expected for symmetric vacancy hop in pure BCC Fe.",
+            "uncertainty": {
+              "sigma": 0.01,
+              "unit": "eV"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
