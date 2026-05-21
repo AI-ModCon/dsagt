@@ -1,0 +1,47 @@
+execution_duration_ms: 29964
+request_preview: are you able to use the existing v4 conversion script or will it
+  need updates?
+request_time: '2026-05-15T21:39:52.693Z'
+response_preview: 'v4 needs significant updates — it''s not usable as-is. Here''s
+  the breakdown:
+
+
+  **What''s reusable (the WELL-writing skeleton, ~70 lines):**
+
+  - `_str_attr()` helper for h5py 3.x string attrs
+
+  - The entire WELL file structure creation: groups, datasets, attributes, chunked
+  allocation
+
+  - Step-at-a-time writing loop pattern
+
+  - `argparse` / output path derivation logic
+
+
+  **What must be replaced (everything input-side):**
+
+
+  | v4 assumption | Deep Blue reality |
+
+  |---|---|
+
+  | `info.json` metadata file | No info.json; grid in `BLdns*_grid.h5`, time in `BLdns*_parameters.h5`
+  |
+
+  | Raw `.dat` files via `load_dat()` | HDF5 snapshots (`/u`, `/v`, `/w`) packed inside
+  zip archives |
+
+  | `load_grid_1d()` reads binary `.dat` | Grids are HDF5 datasets — just `f[''/x''][0,:]`
+  etc. |
+
+  | Variables list from `info.json["global"]["variables"]` | Fixed: always `u`, `v`,
+  `w` (velocity only, no scalars) |
+
+  | `dat_path()` builds `data/{varname}_id{sid:04d}.dat` | Need to open zip, find
+  snapshot file by timestep number, open neste'
+state: OK
+trace_id: tr-48231f4f348e3020e550575dda1d643c
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

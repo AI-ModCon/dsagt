@@ -1,0 +1,25 @@
+execution_duration_ms: 185982
+request_preview: can you create a summary report of the development across versions
+  and differences / improvements across each version. Also include an additional paragraph
+  on how we can check results.
+request_time: '2026-04-25T04:33:01.293Z'
+response_preview: 'Report written to `development_summary_report.md`. It covers:
+
+
+  - **Version table** giving a one-line status for each script
+
+  - **Per-version sections** describing exactly what changed and why, with the specific
+  bugs found and their root causes
+
+  - **Key technical findings table** summarising the cross-cutting discoveries (grid
+  vs data storage order mismatch, 1D grid files in 3D datasets, per-snapshot time,
+  mislabeled filenames, `field_names` ordering)
+
+  - **Checking results paragraph** explaining both full and spot-check modes, what
+  each level of the checker tests, and the exact commands to run them'
+state: OK
+trace_id: tr-6c6629966ed56f2664b5e15b599fff00
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

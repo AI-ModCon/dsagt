@@ -1,0 +1,22 @@
+execution_duration_ms: 792350
+request_preview: can you compare this with another conversion output and test results
+request_time: '2026-04-24T22:45:59.008Z'
+response_preview: "Here's the full comparison report:\n\n---\n\n## Comparison Report:
+  `minimal_input` output vs `holdout` reference\n\n### ✅ Matches perfectly\n| Item
+  | Status |\n|---|---|\n| `dimensions/time` (201 steps, 0 to 1e-3 s) | ✓ exact |\n|
+  `dimensions/x` (1600 points, ~0 to 0.025 m) | ✓ exact |\n| `dimensions/y` (2000
+  points, ~-0.015 to … m) | ✓ exact |\n| BC masks `x_open`, `y_open` (endpoint masks)
+  | ✓ identical values |\n| All dataset shapes and overall file structure | ✓ match
+  |\n\n---\n\n### ❌ Differences found\n\n**1. Field data — all wrong (transposition
+  bug)**  \nData `.dat` files are stored in `(Nx=1600, Ny=2000)` C-order (no transpose
+  needed), but the script applied `.reshape(Ny, Nx).T` which incorrectly swaps x and
+  y content. This causes the large numerical errors (e.g. pressure max_abs=381 Pa,
+  temperature max_abs=2322 K, velocity max_abs=163 m/s).  \n**Fix:** change `raw.reshape(Ny,
+  Nx).T` → `raw.reshape(Nx, Ny)`\n\n**2. Species field names — wrong convention**
+  \ \nMy script used `Y_H`, `Y_H2`, `Y_O`, `Y_O2"
+state: OK
+trace_id: tr-85b4b5f2afce4890745920786acddea1
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

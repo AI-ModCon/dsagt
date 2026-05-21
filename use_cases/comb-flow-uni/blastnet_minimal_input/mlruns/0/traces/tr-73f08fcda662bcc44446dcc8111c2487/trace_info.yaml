@@ -1,0 +1,37 @@
+execution_duration_ms: 851040
+request_preview: I want to convert the blastnet data into the specified well format.
+  Read the README and well_format md files. Also look at sample data in turbulent_radiative_layer_2D
+  Then run a conversion from lifted_hydrogen_jet/hydrogen-jet-5000/ into well_data
+  format
+request_time: '2026-04-24T22:30:39.139Z'
+response_preview: 'Everything looks correct. The output is a valid 33.4 GB WELL HDF5
+  file. Here''s a summary of what was done:
+
+
+  **Grid discovery:** The `.dat` files are flat float32 arrays of size `Nx×Ny = 1600×2000`.
+  The grid is stored in `(Ny, Nx)` order (not `(Nx, Ny)`), so data must be `.reshape(2000,
+  1600).T` to align with WELL''s `(n_traj, n_steps, Nx, Ny)` convention. 1D coordinates
+  are extracted as `x = X_m.reshape(Ny, Nx)[0, :]` and `y = Y_m.reshape(Ny, Nx)[:,
+  0]`.
+
+
+  **Output:** `well_output/lifted_hydrogen_jet_traj_5000.hdf5` (33.4 GB)
+
+  - Root attrs: `dataset_name`, `grid_type=cartesian`, `n_spatial_dims=2`, `n_trajectories=1`,
+  `Re_jet=5000`
+
+  - `dimensions/`: `time` (201,), `x` (1600,), `y` (2000,)
+
+  - `boundary_conditions/`: `x_open` and `y_open` (both with endpoint masks)
+
+  - `t0_fields/`: 11 scalar fields — `density`, `pressure`, `temperature`, `Y_H`,
+  `Y_H2`, `Y_O`, `Y_O2`, `Y_OH`, `Y_H2O`, `Y_HO2`, `Y_H2O2` — each shape `(1, 201,
+  1600, 2000)`
+
+  - `t1_fields/velocity`: shape `(1, 201, 1600, 2000, 2)`'
+state: OK
+trace_id: tr-73f08fcda662bcc44446dcc8111c2487
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

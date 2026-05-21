@@ -1,0 +1,56 @@
+execution_duration_ms: 98040
+request_preview: compare convert_to_well_format_v4.py with file in holdout and compare
+  logic and efficiency
+request_time: '2026-04-25T05:35:47.852Z'
+response_preview: 'Now I have both files. Let me compare them systematically.
+
+
+  ---
+
+
+  ## Comparison: `convert_to_well_format_v4.py` vs `holdout/convert_to_well_format.py`
+
+
+  ---
+
+
+  ### Design Philosophy
+
+
+  | Dimension | v4 (ours) | Holdout |
+
+  |---|---|---|
+
+  | Scope | Single trajectory, explicit path arg | Batch: scans all datasets under
+  `blastnet_data/` |
+
+  | Dataset support | 2 datasets | 7 datasets (`BC_MAPPINGS` + `canonical_decaying_hit`
+  special handler) |
+
+  | Interface | `traj_dir` positional arg | `--dataset`, `--base-path`, `--output-path`
+  |
+
+  | Resume/skip | None | Checks if output file exists and is valid before re-running
+  |
+
+  | Filtering | None | `--only-trajectories`, `--only-corrupted-missing` |
+
+
+  ---
+
+
+  ### Logic / Correctness Issues
+
+
+  **1. UX/UY velocity swap — holdout has it, v4 fixed it.**
+
+
+  The holdout reads data file paths from `info.json` local entry filename fields (lines
+  975–1011) for the multi-file time-series case. Since `nonreacting_channel_flow`''s
+  `info.json` has `"UX_ms-1 filename": "./data/UY_ms-1_id'
+state: OK
+trace_id: tr-135e1e4bf5d9c08e7140e2e1e9accb55
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

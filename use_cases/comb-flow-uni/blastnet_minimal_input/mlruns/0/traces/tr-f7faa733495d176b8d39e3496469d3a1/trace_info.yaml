@@ -1,0 +1,12 @@
+execution_duration_ms: 252754
+request_preview: can you re-run the check to make sure it doesn't error
+request_time: '2026-04-24T23:37:28.801Z'
+response_preview: Clean exit (code 0), no errors. Every single check passes — all
+  14 field datasets, 3 dimensions, 2 BC masks, and all 5 root attributes are exact
+  matches against the holdout reference, including the `int8` mask dtype.
+state: OK
+trace_id: tr-f7faa733495d176b8d39e3496469d3a1
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT
