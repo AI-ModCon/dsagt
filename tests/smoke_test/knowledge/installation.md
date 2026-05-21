@@ -1,8 +1,11 @@
-# Installation Guide
+# csvtool Installation
 
-Install the package using pip:
+Install csvtool via pip:
 
-    pip install mypackage
+```bash
+pip install csvtool
+```
 
-Requirements: Python 3.10 or higher, numpy, and pandas.
-On macOS you may need to install Xcode command line tools first.
+Requirements: Python 3.10+, pandas >= 2.0.
+
+csvtool provides CLI commands for filtering, validating, and summarizing CSV files.

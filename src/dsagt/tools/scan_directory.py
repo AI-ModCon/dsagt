@@ -123,7 +123,10 @@ def scan(directory: Path, max_depth: int, top_n: int) -> dict:
     total_files = 0
     total_size = 0
 
-    largest_heap: list[tuple[int, dict]] = []
+    # Heap entries are (size, tiebreaker, entry). The integer tiebreaker keeps
+    # equal-size files orderable so heapq never falls through to comparing dicts.
+    largest_heap: list[tuple[int, int, dict]] = []
+    tiebreaker = 0
 
     for size, rel in file_items:
         total_files += 1
@@ -142,10 +145,11 @@ def scan(directory: Path, max_depth: int, top_n: int) -> dict:
             dir_summary[d]["file_count"] += 1
 
         entry = {"path": rel, "size": size, "size_human": format_size(size)}
+        tiebreaker += 1
         if len(largest_heap) < top_n:
-            heapq.heappush(largest_heap, (size, entry))
+            heapq.heappush(largest_heap, (size, tiebreaker, entry))
         else:
-            heapq.heappushpop(largest_heap, (size, entry))
+            heapq.heappushpop(largest_heap, (size, tiebreaker, entry))
 
     file_types = [
         {
@@ -157,7 +161,7 @@ def scan(directory: Path, max_depth: int, top_n: int) -> dict:
         for k, v in sorted(ext_summary.items(), key=lambda x: x[1]["total_size"], reverse=True)
     ]
 
-    largest_files = [e for _, e in sorted(largest_heap, reverse=True)]
+    largest_files = [e for _, _, e in sorted(largest_heap, key=lambda t: (t[0], t[1]), reverse=True)]
 
     directory_tree = [{
         "directory": ".",

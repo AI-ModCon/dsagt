@@ -1,18 +1,17 @@
 """
-Tests for ToolRegistry.
+Tests for ToolRegistry and SkillRegistry.
 
-Covers tool listing, MCP schema conversion, tool lookup, command execution,
-runtime isolation, and provenance logging.
+Covers tool listing, MCP schema conversion, tool lookup, tool file writing,
+dsagt-run wrapping, runtime isolation, and skill discovery.
 """
-
-import json
-import subprocess
-from unittest.mock import patch, MagicMock
 
 import pytest
 import yaml
 
-from dsagt.registry import ToolRegistry
+from dsagt.registry import (
+    ToolRegistry, SkillRegistry, _wrap_executable, _uv_run_prefix, _parse_frontmatter,
+    render_arguments,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -27,13 +26,13 @@ TOOL_WITH_MIXED_PARAMS = {
         "input_file": {
             "type": "string",
             "required": True,
-            "positional": True,
+            "cli": "positional:0",
             "description": "Path to input file",
         },
         "output_file": {
             "type": "string",
             "required": True,
-            "positional": True,
+            "cli": "positional:1",
             "description": "Path to output file",
         },
         "threshold": {
@@ -53,21 +52,21 @@ TOOL_NO_PARAMS = {
 }
 
 
-def _write_skill(skills_dir, spec: dict) -> None:
+def _write_tool(tools_dir, spec: dict) -> None:
     """Write a minimal skill file for the given spec dict."""
-    path = skills_dir / f"{spec['name']}.md"
+    path = tools_dir / f"{spec['name']}.md"
     frontmatter = yaml.dump(spec, default_flow_style=False, sort_keys=False)
     path.write_text(f"---\n{frontmatter}---\n\n# {spec['name']}\n")
 
 
 def make_registry(tmp_path, tools: list[dict]) -> ToolRegistry:
     """Create a ToolRegistry with the given tool definitions."""
-    skills_dir = tmp_path / "source_skills"
-    skills_dir.mkdir()
+    tools_dir = tmp_path / "source_skills"
+    tools_dir.mkdir()
     for tool in tools:
-        _write_skill(skills_dir, tool)
+        _write_tool(tools_dir, tool)
     return ToolRegistry(
-        source_skills_dir=str(skills_dir),
+        source_tools_dir=str(tools_dir),
         runtime_dir=str(tmp_path / "runtime"),
     )
 
@@ -162,108 +161,55 @@ class TestGetTool:
 
 
 # ---------------------------------------------------------------------------
-# call_tool
-# ---------------------------------------------------------------------------
-
-class TestCallTool:
-
-    def test_unknown_tool(self, registry):
-        """Calling an unknown tool returns an error dict."""
-        result = registry.call_tool("nonexistent", {})
-
-        assert result["success"] is False
-        assert "Unknown tool" in result["error"]
-
-    @patch("dsagt.registry.subprocess.run")
-    def test_success(self, mock_run, registry):
-        """Successful execution returns stdout and no error."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout='{"status": "ok"}',
-            stderr="",
-        )
-
-        result = registry.call_tool("process", {
-            "input_file": "data.csv",
-            "output_file": "out.csv",
-        })
-
-        assert result["success"] is True
-        assert result["output"] == '{"status": "ok"}'
-        assert result["error"] is None
-
-    @patch("dsagt.registry.subprocess.run")
-    def test_failure(self, mock_run, registry):
-        """Failed execution returns stderr as error."""
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="File not found",
-        )
-
-        result = registry.call_tool("process", {
-            "input_file": "missing.csv",
-            "output_file": "out.csv",
-        })
-
-        assert result["success"] is False
-        assert result["error"] == "File not found"
-
-    @patch("dsagt.registry.subprocess.run")
-    def test_command_construction_required_params(self, mock_run, registry):
-        """Positional params are bare, optional use --flag syntax."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        registry.call_tool("process", {
-            "input_file": "in.csv",
-            "output_file": "out.csv",
-            "threshold": 0.8,
-        })
-
-        cmd = mock_run.call_args[0][0]
-        cmd_str = cmd[2] if isinstance(cmd, list) else cmd
-        assert "in.csv" in cmd_str
-        assert "out.csv" in cmd_str
-        assert "--threshold" in cmd_str
-
-    @patch("dsagt.registry.subprocess.run")
-    def test_omitted_optional_params_excluded(self, mock_run, registry):
-        """Optional params omitted by caller are excluded from command."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        registry.call_tool("process", {
-            "input_file": "in.csv",
-            "output_file": "out.csv",
-        })
-
-        cmd = mock_run.call_args[0][0]
-        cmd_str = cmd[2] if isinstance(cmd, list) else cmd
-        assert "--threshold" not in cmd_str
-
-    @patch("dsagt.registry.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300))
-    def test_timeout(self, mock_run, registry):
-        """TimeoutExpired propagates (not caught by call_tool)."""
-        with pytest.raises(subprocess.TimeoutExpired):
-            registry.call_tool("process", {
-                "input_file": "in.csv",
-                "output_file": "out.csv",
-            })
-
-
-# ---------------------------------------------------------------------------
 # save_tool
 # ---------------------------------------------------------------------------
 
 class TestSaveTool:
 
     def test_add_new_tool(self, empty_registry):
-        """Saving a new tool creates a skill file."""
+        """Saving a new tool creates a skill file with dsagt-run wrapping."""
         empty_registry.save_tool(TOOL_NO_PARAMS)
 
         tool = empty_registry.get_tool("ping")
         assert tool is not None
         assert tool["name"] == "ping"
-        assert tool["executable"] == "echo pong"
+        assert tool["executable"] == "dsagt-run --tool ping -- echo pong"
+
+    def test_wraps_executable_with_dsagt_run(self, empty_registry):
+        """save_tool automatically wraps the executable with dsagt-run."""
+        empty_registry.save_tool({"name": "mytool", "description": "test",
+                                   "executable": "python mytool.py", "parameters": {}})
+        tool = empty_registry.get_tool("mytool")
+        assert tool["executable"] == "dsagt-run --tool mytool -- python mytool.py"
+
+    def test_does_not_double_wrap(self, empty_registry):
+        """If executable already has dsagt-run, don't wrap again."""
+        empty_registry.save_tool({"name": "mytool", "description": "test",
+                                   "executable": "dsagt-run --tool mytool -- python mytool.py",
+                                   "parameters": {}})
+        tool = empty_registry.get_tool("mytool")
+        assert tool["executable"].count("dsagt-run") == 1
+
+    def test_python_deps_use_uv_run(self, empty_registry):
+        """Python dependencies are wrapped with uv run --with."""
+        empty_registry.save_tool({
+            "name": "analyzer", "description": "test",
+            "executable": "python analyzer.py",
+            "parameters": {},
+            "dependencies": ["pandas>=2.0", "numpy"],
+        })
+        tool = empty_registry.get_tool("analyzer")
+        assert tool["executable"] == (
+            "dsagt-run --tool analyzer -- uv run --with pandas>=2.0,numpy -- python analyzer.py"
+        )
+
+    def test_no_deps_no_uv_run(self, empty_registry):
+        """Tools without dependencies don't get uv run prefix."""
+        empty_registry.save_tool({"name": "simple", "description": "test",
+                                   "executable": "echo hi", "parameters": {}})
+        tool = empty_registry.get_tool("simple")
+        assert "uv run" not in tool["executable"]
+        assert tool["executable"] == "dsagt-run --tool simple -- echo hi"
 
     def test_add_returns_added(self, empty_registry):
         """save_tool returns 'added' for new tools."""
@@ -276,7 +222,7 @@ class TestSaveTool:
 
     def test_update_preserves_body(self, empty_registry):
         """Updating a tool preserves any hand-edited markdown body."""
-        skill_path = empty_registry.skills_dir / "ping.md"
+        skill_path = empty_registry.tools_dir / "ping.md"
         spec = TOOL_NO_PARAMS
         fm = __import__("yaml").dump(spec, default_flow_style=False, sort_keys=False)
         skill_path.write_text(f"---\n{fm}---\n\n# Custom docs written by hand.\n")
@@ -307,11 +253,11 @@ class TestRuntimeIsolation:
         """Source skills directory is not modified; runtime copy is separate."""
         source_dir = tmp_path / "source_skills"
         source_dir.mkdir()
-        _write_skill(source_dir, TOOL_NO_PARAMS)
+        _write_tool(source_dir, TOOL_NO_PARAMS)
 
         runtime_dir = tmp_path / "runtime"
         reg = ToolRegistry(
-            source_skills_dir=str(source_dir),
+            source_tools_dir=str(source_dir),
             runtime_dir=str(runtime_dir),
         )
 
@@ -328,56 +274,120 @@ class TestRuntimeIsolation:
 
 
 # ---------------------------------------------------------------------------
-# Provenance logging
-# ---------------------------------------------------------------------------
-
-class TestProvenance:
-
-    @patch("dsagt.registry.subprocess.run")
-    def test_call_tool_logs_entry(self, mock_run, registry):
-        """Calling a tool writes a line to the provenance log."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        registry.call_tool("process", {"input_file": "in.csv", "output_file": "out.csv"})
-
-        log_content = registry.provenance_log.read_text()
-        assert "process" in log_content
-        assert "in.csv" in log_content
-
-    def test_session_header(self, registry):
-        """Provenance log starts with a session header."""
-        log_content = registry.provenance_log.read_text()
-        assert "# Session started:" in log_content
-
-
-# ---------------------------------------------------------------------------
 # Default skills
 # ---------------------------------------------------------------------------
 
-class TestDefaultSkills:
-    """Validate the skill files that ship with the package."""
+class TestDefaultTools:
+    """Validate the tool files that ship with the package."""
 
-    def test_skills_directory_exists(self):
-        """The package ships a skills directory."""
-        assert ToolRegistry._PACKAGE_SKILLS_DIR.exists()
-        assert ToolRegistry._PACKAGE_SKILLS_DIR.is_dir()
+    def test_tools_directory_exists(self):
+        """The package ships a tools directory."""
+        assert ToolRegistry._PACKAGE_TOOLS_DIR.exists()
+        assert ToolRegistry._PACKAGE_TOOLS_DIR.is_dir()
 
-    def test_skills_are_valid(self):
-        """Every skill file must parse cleanly and have required fields."""
-        skill_files = list(ToolRegistry._PACKAGE_SKILLS_DIR.glob("*.md"))
-        assert len(skill_files) > 0, "No skill files found in package"
+    def test_tools_are_valid(self):
+        """Every tool file must parse cleanly and have required fields."""
+        tool_files = list(ToolRegistry._PACKAGE_TOOLS_DIR.glob("*.md"))
+        assert len(tool_files) > 0, "No tool files found in package"
 
-        for path in skill_files:
-            tool = ToolRegistry._parse_skill_file(path)
+        for path in tool_files:
+            tool = _parse_frontmatter(path)
             assert tool.get("name"), f"{path.name}: missing 'name'"
             assert tool.get("description"), f"{path.name}: missing 'description'"
             assert tool.get("executable"), f"{path.name}: missing 'executable'"
             assert "parameters" in tool, f"{path.name}: missing 'parameters'"
 
     def test_default_init_fallback(self, tmp_path):
-        """ToolRegistry with no source_skills_dir falls back to package skills."""
-        reg = ToolRegistry(source_skills_dir=None, runtime_dir=str(tmp_path / "rt"))
+        """ToolRegistry with no source_tools_dir falls back to package skills."""
+        reg = ToolRegistry(source_tools_dir=None, runtime_dir=str(tmp_path / "rt"))
         tools = reg.list_tools()
         assert len(tools) > 0
         names = [t["name"] for t in tools]
         assert "scan_directory" in names
+
+
+# ---------------------------------------------------------------------------
+# render_arguments
+# ---------------------------------------------------------------------------
+
+class TestRenderArguments:
+
+    def test_default_cli_is_double_dash_name(self):
+        params = {"foo": {"type": "string"}}
+        assert render_arguments(params, {"foo": "bar"}) == ["--foo", "bar"]
+
+    def test_spaced_long_flag(self):
+        params = {"foo": {"type": "string", "cli": "--foo"}}
+        assert render_arguments(params, {"foo": "bar"}) == ["--foo", "bar"]
+
+    def test_spaced_short_flag(self):
+        params = {"x": {"type": "string", "cli": "-x"}}
+        assert render_arguments(params, {"x": "val"}) == ["-x", "val"]
+
+    def test_glued_long_flag(self):
+        params = {"foo": {"type": "string", "cli": "--foo="}}
+        assert render_arguments(params, {"foo": "bar"}) == ["--foo=bar"]
+
+    def test_glued_short_flag(self):
+        params = {"x": {"type": "string", "cli": "-x="}}
+        assert render_arguments(params, {"x": "val"}) == ["-x=val"]
+
+    def test_keyvalue_style(self):
+        params = {"if_": {"type": "string", "cli": "if="}}
+        assert render_arguments(params, {"if_": "input.dat"}) == ["if=input.dat"]
+
+    def test_single_positional(self):
+        params = {"target": {"type": "string", "cli": "positional"}}
+        assert render_arguments(params, {"target": "/tmp/x"}) == ["/tmp/x"]
+
+    def test_multiple_positionals_respect_order(self):
+        params = {
+            "dest": {"type": "string", "cli": "positional:1"},
+            "src": {"type": "string", "cli": "positional:0"},
+        }
+        assert render_arguments(params, {"src": "a", "dest": "b"}) == ["a", "b"]
+
+    def test_positionals_before_named(self):
+        params = {
+            "verbose": {"type": "boolean", "cli": "--verbose"},
+            "path": {"type": "string", "cli": "positional:0"},
+        }
+        assert render_arguments(params, {"path": "/x", "verbose": True}) == [
+            "/x", "--verbose",
+        ]
+
+    def test_boolean_true_emits_flag(self):
+        params = {"verbose": {"type": "boolean", "cli": "--verbose"}}
+        assert render_arguments(params, {"verbose": True}) == ["--verbose"]
+
+    def test_boolean_false_emits_nothing(self):
+        params = {"verbose": {"type": "boolean", "cli": "--verbose"}}
+        assert render_arguments(params, {"verbose": False}) == []
+
+    def test_boolean_positional_rejected(self):
+        params = {"flag": {"type": "boolean", "cli": "positional"}}
+        with pytest.raises(ValueError, match="boolean"):
+            render_arguments(params, {"flag": True})
+
+    def test_default_applied_when_value_missing(self):
+        params = {"max_depth": {"type": "integer", "cli": "--max-depth", "default": 5}}
+        assert render_arguments(params, {}) == ["--max-depth", "5"]
+
+    def test_optional_missing_skipped(self):
+        params = {"max_depth": {"type": "integer", "cli": "--max-depth"}}
+        assert render_arguments(params, {}) == []
+
+    def test_required_missing_raises(self):
+        params = {"directory": {"type": "string", "cli": "positional", "required": True}}
+        with pytest.raises(ValueError, match="directory"):
+            render_arguments(params, {})
+
+    def test_invalid_cli_value_raises(self):
+        params = {"weird": {"type": "string", "cli": "!!!invalid"}}
+        with pytest.raises(ValueError, match="invalid cli value"):
+            render_arguments(params, {"weird": "x"})
+
+    def test_invalid_position_raises(self):
+        params = {"x": {"type": "string", "cli": "positional:abc"}}
+        with pytest.raises(ValueError, match="integer"):
+            render_arguments(params, {"x": "val"})
