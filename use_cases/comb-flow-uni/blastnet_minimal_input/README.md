@@ -93,6 +93,8 @@ mlflow ui --backend-store-uri ./mlruns --port 5000
 
 Then open http://localhost:5000.
 
+> **Known limitation:** The Trace Metrics dashboard and Datasets tab require a SQL backend and will show 500 errors with the file store. Individual traces are fully browsable. To silence the errors and enable those features, migrate to SQLite: `mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000` (requires [importing existing runs](https://mlflow.org/docs/latest/self-hosting/migrate-from-file-store) first).
+
 ### Navigate to traces
 
 1. Select the **Default** experiment in the left sidebar.
