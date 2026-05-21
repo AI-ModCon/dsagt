@@ -52,6 +52,7 @@ dependencies = [
     # sys.exit(main()) so every successful run exited 1) — that broke
     # agent error-detection on every csvtool call.
     "csvkit>=2.2.0",
+    "h5py>=3.16.0",
 ]
 
 [project.scripts]
@@ -102,5 +103,6 @@ filterwarnings = [
 [tool.uv]
 required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'"
 ]
