@@ -134,7 +134,8 @@ def convert(
     ldaul     = incar.get("LDAUL", [])
     ldauu     = incar.get("LDAUU", [])
     ldauj     = incar.get("LDAUJ", [])
-    functional = "PBE+U" if ldau else "PBE"
+    effective_u = ldau and any(float(u) != 0 for u in ldauu)
+    functional = "PBE+U" if effective_u else "PBE"
 
     # k-point mesh
     kgrid = list(kpts.kpts[0]) if kpts.kpts else None

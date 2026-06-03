@@ -233,7 +233,7 @@ def convert(material_dir: str | Path, output: str | Path | None = None) -> dict:
             "composition":       {el.symbol: int(amt) for el, amt in comp.items()},
             "num_atoms":         struct.num_sites,
             "geometry":          "bulk",
-            "source_database":   "Materials Project",
+            "source_database":   "Materials Project" if meta["mp_id"] else None,
             "source_id":         meta["mp_id"],
             "space_group_symbol": sg_symbol,
             "space_group_number": sg_number,
@@ -268,7 +268,7 @@ def convert(material_dir: str | Path, output: str | Path | None = None) -> dict:
             },
             "hubbard_u":            ldau,
             "hubbard_u_parameters": hub_u,
-            "calculation_type": "single_point",
+            "calculation_type": "ionic_relaxation" if nsw > 0 else "single_point",
             "dos_settings": {
                 "nedos":          nedos,
                 "lorbit":         lorbit,
