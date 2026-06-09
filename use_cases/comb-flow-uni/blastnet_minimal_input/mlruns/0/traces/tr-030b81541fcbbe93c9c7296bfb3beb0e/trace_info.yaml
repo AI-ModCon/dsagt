@@ -1,0 +1,28 @@
+execution_duration_ms: 1693895
+request_preview: convert the last dataset in blastnet/nonreacting_channel_flow - this
+  doesn't have a holdout
+request_time: '2026-04-25T04:39:16.405Z'
+response_preview: 'The `DIFF` items are all expected — p000-020 (time 15..24.2) and
+  p021-041 (time 24.65..33.9) are different simulation windows so their field values
+  naturally differ. What matters is that the schema is fully consistent:
+
+
+  - Root attributes ✅ — identical across both trajectories
+
+  - Structure ✅ — 18 items, same shapes and dtypes
+
+  - All group/dataset attributes ✅
+
+  - `dimensions/x`, `y`, `z` ✅ — exact match (same physical grid)
+
+  - BC masks (`x_periodic`, `y_wall`, `z_periodic`) ✅ — exact match
+
+
+  The output file is at `well_output_v2/nonreacting_channel_flow_channelflow-dns-Re544-eq-p000-020.hdf5`
+  — 21 steps, time window [15 .. 24.2], same pressure + 3D velocity schema as p021-041.'
+state: OK
+trace_id: tr-030b81541fcbbe93c9c7296bfb3beb0e
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

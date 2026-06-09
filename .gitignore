@@ -125,12 +125,26 @@ docs/_build/
 docs/_static/
 docs/_templates/
 
-# UV lock file (optional - uncomment if you don't want to track it)
-# uv.lock
+# UV lock file
+uv.lock
+
+# Claude Code
+.claude/
+.mcp.json
 
 # Local configuration overrides
 config.local.yaml
 .goosehints.local
+
+# Generated agent artifacts (created by dsagt start)
+.mcp.json
+.dsagt_env
+goose.yaml
+.goosehints
+.roomodes
+.roo/mcp.json
+cline_mcp.json
+.clinerules/
 
 # Temporary files
 *.tmp

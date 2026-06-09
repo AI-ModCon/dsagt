@@ -1,0 +1,19 @@
+execution_duration_ms: 2517855
+request_preview: write this out to a report and come up with a next version of the
+  conversion
+request_time: '2026-04-25T03:47:17.933Z'
+response_preview: 'Both pass. Report written to `channelflow_conversion_report.md`,
+  v4 script at `convert_to_well_format_v4.py`.
+
+
+  **Summary of v4:** single change from v3 — constructs file paths as `data/{varname}_id{id:04d}.dat`
+  instead of reading from `info.json` filename fields. This fixes the UX/UY swap in
+  `nonreacting_channel_flow` and is a no-op for `lifted_hydrogen_jet` (where the JSON
+  labels were correct). Both datasets now produce exact matches against their holdout
+  references.'
+state: OK
+trace_id: tr-d256e4dadba26de35326bb73b80d0bb4
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

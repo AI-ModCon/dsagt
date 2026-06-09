@@ -1,0 +1,55 @@
+execution_duration_ms: 6922714
+request_preview: now run conversion on blastnet_data/nonreacting_channel_flow/channelflow-dns-Re544-eq-p021-041/
+request_time: '2026-04-25T01:38:29.426Z'
+response_preview: 'Here''s the full findings report before any changes:
+
+
+  ---
+
+
+  ## Channel Flow Conversion — Findings
+
+
+  **Pressure:** exact match against holdout reference.
+
+
+  **Velocity: 1 failure — UX/UY filename swap in info.json**
+
+
+  The `info.json` for `channelflow-dns-Re544-eq-p021-041` has swapped filenames for
+  UX and UY:
+
+  ```json
+
+  "UX_ms-1 filename": "./data/UY_ms-1_id0021.dat",  ← UY file labeled as UX
+
+  "UY_ms-1 filename": "./data/UX_ms-1_id0021.dat",  ← UX file labeled as UY
+
+  ```
+
+
+  Our script reads through the JSON labels, so velocity index 0 gets UY data and index
+  1 gets UX data — they''re transposed.
+
+
+  The holdout reference was verified to match the actual filenames:
+
+  | Velocity index | Reference value at `[0,0,10,5,7,:]` | File it came from |
+
+  |---|---|---|
+
+  | 0 (UX) | `7.768e-03` | `UX_ms-1_id0021.dat` |
+
+  | 1 (UY) | `5.657e-06` | `UY_ms-1_id0021.dat` |
+
+  | 2 (UZ) | `-2.032e-04` | `UZ_ms-1_id0021.dat` |
+
+
+  The reference ignores the swapped JSON labels and constructs file paths directly
+  from the variable name + sna'
+state: OK
+trace_id: tr-df17e897848a06eedbe0734c8aaa708f
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

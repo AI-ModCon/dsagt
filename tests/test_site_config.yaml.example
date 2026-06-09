@@ -1,0 +1,27 @@
+# Test site configuration — mirrors runtime dsagt_config.yaml structure.
+#
+# Copy to tests/test_site_config.yaml and fill in your institution's values.
+# Integration tests FAIL if this file is missing or values are incomplete.
+#
+# DO NOT commit test_site_config.yaml — it contains API keys and endpoints
+# specific to your institution.
+
+project: test-integration
+agent: claude
+
+llm:
+  model: claude-sonnet-4-20250514          # LLM model the proxy routes to
+  base_url: https://api.example.com        # LLM API endpoint (Anthropic-compatible)
+  api_key: your-llm-api-key               # API key for LLM service
+
+embedding:
+  model: text-embedding-3-small            # embedding model at your endpoint
+  base_url: https://api.example.com/v1     # OpenAI-compatible embeddings URL
+  api_key: your-embedding-api-key          # API key for embedding service
+
+proxy:
+  port: 14000                              # test proxy port (offset to avoid conflicts)
+
+mlflow:
+  port: 15001                              # test MLflow port
+  backend: sqlite

@@ -1,0 +1,25 @@
+execution_duration_ms: 2319513
+request_preview: create comparison checker script
+request_time: '2026-04-24T23:41:54.783Z'
+response_preview: 'Clean pass, exit code 0. The checker is at `check_well_output.py`
+  and takes two positional arguments:
+
+
+  ```bash
+
+  python3 check_well_output.py <candidate.hdf5> <reference.hdf5> [--rtol 1e-5] [--atol
+  1e-8]
+
+  ```
+
+
+  It checks four things in order: root attributes, structure (groups/datasets/shapes/dtypes),
+  per-item attributes (with `field_names`/`spatial_dims` compared as unordered sets),
+  and numerical values (reporting max_abs, mean_abs, mean_rel for any mismatches).
+  Exits 0 on a full pass, 1 if anything differs.'
+state: OK
+trace_id: tr-39a8b07dca30dd75829b9959f17d8e00
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

@@ -1,0 +1,12 @@
+execution_duration_ms: 649988
+request_preview: now run conversion on blastnet_data/lifted_hydrogen_jet/nonreacting-hydrogen-jet-5000/
+request_time: '2026-04-25T00:21:18.431Z'
+response_preview: Clean pass. The nonreacting trajectory converts correctly — 5 scalar
+  fields (`density`, `pressure`, `temperature`, `mass_fraction_h2`, `mass_fraction_o2`)
+  plus velocity, all exact matches against the holdout reference.
+state: OK
+trace_id: tr-ca1c3128f40d59e4655eded98927606e
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

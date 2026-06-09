@@ -1,404 +1,198 @@
-# DSAGT
+# DSAgt
 
-**D**ata **S**cience **A**gent **T**oolkit — AI-assisted data pipeline builder.
+**D**ata**S**mith **Ag**en**t** — AI-assisted data pipeline builder.
 
-DSAGT connects an MCP-compatible AI agent to three servers for building scientific data pipelines:
+![DSAgt architecture](latex/architecture.png)
 
-1. **Pipeline Server** — Runs registered tools, logs provenance. Supports general-purpose processing and American Science Cloud targets; extendable to domain-specific workflows.
-2. **Registry Builder** — Analyzes CLI tools, documentation, and APIs to generate and store tool specifications.
-3. **Knowledge Base** — Semantic search over indexed document collections (FAISS + optional cross-encoder reranking).
+DSAgt connects an MCP-compatible AI coding agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure. DSAgt provides data-pipeline scaffolding around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …);
 
-The servers are platform-agnostic and communicate over MCP stdio.
+**Prerequisites:** Python 3.10–3.13, [uv](https://github.com/astral-sh/uv), and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
 
-## Installation
+| Agent | Install | Verify |
+|-------|---------|--------|
+| [Claude Code](https://github.com/anthropics/claude-code) | `npm i -g @anthropic-ai/claude-code` | `claude --version` |
+| [Goose](https://github.com/block/goose) | See [Goose docs](https://github.com/block/goose#installation) | `goose --version` |
+| [Codex](https://github.com/openai/codex) | `npm i -g @openai/codex` (or `brew install --cask codex`) | `codex --version` |
+| [opencode](https://github.com/sst/opencode) | See [opencode docs](https://opencode.ai/docs/) | `opencode --version` |
+| [Roo Code](https://github.com/RooCodeInc/Roo-Code) | `npm i -g @roo-code/cli` | `roo --version` |
+| [Cline](https://github.com/cline/cline) | `npm i -g cline` | `cline --version` |
 
-### Prerequisites
+## Quick Start
 
-- Python 3.10–3.13
-- [uv](https://github.com/astral-sh/uv) — required for portable MCP server configs across agent platforms
-- An MCP-compatible agent (see [Agent Setup](#agent-setup))
-
-### Install
+Explore DSAgt knowledge ingest, tool registration, provenance, and explicit memory using the mock project in [`tests/smoke_test/`](tests/smoke_test/). Uses `claude`; substitute another agent (`goose` / `codex` / `opencode`) if you prefer — the prompts are agent-agnostic.
 
 ```bash
-git clone <repository-url>
+# 0. Installation
+git clone https://github.com/AI-ModCon/dsagt.git
 cd dsagt
-uv sync --all-groups
+uv sync                      # add --all-groups for the test suite
+source .venv/bin/activate    # so `dsagt` is on PATH
+
+# Set convenience folder env variable for quickstart demo (not a normal dsagt step)
+export SMOKE_DIR="$(pwd)/tests/smoke_test"
+
+# 1. Create a new project called quickstart
+dsagt init quickstart --agent claude
+
+# 2. Start MLflow in the background (writes <project>/mlflow.log) and print
+#    the OTel routing exports for this session, including the resolved
+#    experiment id:
+dsagt mlflow quickstart
+
+# 3. Paste the export block dsagt mlflow printed into THIS shell, then
+#    launch claude from the project directory:
+cd ~/dsagt-projects/quickstart && claude
 ```
 
-This installs three CLI entry points:
+Inside the agent, paste these prompts one at a time (substitute the absolute path you exported as `$SMOKE_DIR` — the chat doesn't expand env vars):
 
-- `dsagt-pipeline-server`
-- `dsagt-registry-server`
-- `dsagt-knowledge-server`
+1. > Ingest the docs in `$SMOKE_DIR/knowledge/` into a collection named `knowledge`.
+2. > Register the csvkit CLI tools `csvcut`, `csvgrep`, `csvstat`, and `csvlook`.
+3. > Use the `scan_directory` tool from the registry to scan `$SMOKE_DIR/data/`.
+4. > Summarize `samples.csv` — columns, row count, quality issues using csvkit tools from the registry.
+5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
+6. > Tell me what you remember about the samples dataset.
 
-## How It Works
+Exit the agent (`Ctrl+C` or `/exit`), then distill the session into episodic memory and stop the MLflow daemon:
 
-### Tool Registration
+```bash
+# 4. After your session, distill traces into episodic memory:
+dsagt memory --project quickstart
 
-The default registry ships with general-purpose data tools. To register additional tools, use the registry server through your agent:
+# 5. Stop the MLflow daemon dsagt mlflow started (writes a PID into
+#    <project>/.runtime; this releases the port and the gunicorn workers):
+dsagt stop quickstart
+```
 
-1. Point the agent at a CLI tool, its `--help` output, or documentation
-2. The agent uses the registry builder to analyze the interface (it can read files, fetch URLs, and run commands)
-3. The agent proposes a tool spec and saves it via `save_tool_spec`
-4. The tool is immediately available through the pipeline server
+What this exercised:
 
-Registry builder tools exposed to the agent:
+| Prompt | Layer |
+|---|---|
+| 1 | Knowledge MCP server (`kb_ingest`) — chunks and indexes docs into ChromaDB |
+| 2 | Registry MCP server (`save_tool_spec`) — writes `tools/csvcut.md`, `tools/csvgrep.md`, etc. (one per registered tool) |
+| 3 | `dsagt-run` provenance wrapper — records exec layer to `trace_archive/` |
+| 4 | Explicit memory (`kb_remember` → `explicit_memories.yaml`) + KB recall |
 
-- `read_file` — Read local files
-- `http_request` — Fetch URLs
-- `run_command` — Execute commands (e.g., `tool --help`)
-- `save_tool_spec` — Save a tool specification to the registry
-- `get_registry` — List all registered tools
-- `search_registry` — Search tools by name or description
+Verify the artifacts and view traces in the MLflow UI (URL printed by `dsagt mlflow`):
 
-### Pipeline Execution
+```bash
+dsagt info quickstart
+ls ~/dsagt-projects/quickstart/{tools,trace_archive}
+cat ~/dsagt-projects/quickstart/explicit_memories.yaml
+```
 
-1. The pipeline server copies the base `registry.yaml` to `runtime/registry.yaml` at startup
-2. The agent runs tools from the session registry
-3. Each execution is logged to a provenance file
+The same flow runs non-interactively via `dsagt smoke-test --agent claude` (or `goose` / `codex` / `opencode`), which asserts each artifact is present.
+
+### First-time knowledge base setup
+
+`dsagt setup-kb` builds the shared ChromaDB collections under `~/.dsagt/kb_index/` that every project on this machine reuses. Three of the six collections shown in the [architecture diagram](#architecture) are populated here — the other three are per-project and fill in automatically during use (see [Knowledge Base](#knowledge-base) below):
+
+- **Tool Specs** — DSAgt's bundled tool specs from `src/dsagt/tools/`, tagged with `source: bundled` so the agent finds them via `search_registry` from the very first session.
+- **Skills** — DSAgt's bundled skill workflows from `src/dsagt/skills/` (e.g. `datacard-generator`), discovered via `search_skills`.
+- **Domain Knowledge** — Reference corpora (NVIDIA NeMo Curator, AI Data Readiness Inspector) downloaded and embedded so the agent has data-curation domain knowledge out of the box.
+
+The Tool Specs and Skills collections are wipe-and-rebuild on every run, so re-run `setup-kb` after upgrading DSAgt to pick up new bundled assets.
+
+```bash
+dsagt setup-kb                       # all collections (local embedder, no creds)
+dsagt setup-kb --collection nemo_curator
+dsagt setup-kb --embedding-backend api --embedding-base-url ... --embedding-api-key ...
+```
+
+The default embedder is a local sentence-transformers model (~130 MB of weights downloaded on first run, CPU-side, no API key). Pass `--embedding-backend api` to route through a hosted embedder via LiteLLM (15–30 minutes typical for the reference corpora, depending on rate limits).
+
+## Use Case Examples
+
+End-to-end walkthroughs for representative scientific domains live in [`use_cases/`](use_cases/). Each one covers data acquisition, tool registration, pipeline construction, and agent-driven execution against a real dataset.
+
+| Use case | Domain | Guide |
+|----------|--------|-------|
+| Microbial isolate processing | Genomics — short-read QC and assembly with `fastp` + `megahit` | [isolate_demo.md](use_cases/microbial_isolates/isolate_demo.md) |
+| Cryo-EM data curation | Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP | [cryoem_demo.md](use_cases/cryoem/cryoem_demo.md) |
+| ISAAC / VASP workflows | Materials science — DFT input/output handling with VASP | [use_cases/isaac_vasp/](use_cases/isaac_vasp/) |
+
+## Project Directory
+
+Default location: `~/dsagt-projects/<name>/`. Override with `--location`:
+
+```bash
+dsagt init my-project --agent claude --location /data/runs   # /data/runs/my-project/
+dsagt init my-project --agent claude --location .            # ./my-project/
+```
+
+Projects are registered in `~/.dsagt/projects.yaml` so `dsagt mlflow <name>` and `dsagt info <name>` work from any directory. The data layer (knowledge base, MLflow store, registered tools, skills, audit records) is agent-agnostic, so re-running `dsagt init <same-name> --agent <other>` switches platforms while preserving everything you've accumulated.
+
+```
+~/dsagt-projects/cheese-metagenome/
+  dsagt_config.yaml             # project configuration
+  tools/                        # registered CLI tool specs (markdown + YAML frontmatter)
+  tools/code/                   # agent-written tool scripts
+  skills/                       # agent skills (SKILL.md + reference docs)
+  trace_archive/                # tool execution records (JSON, from dsagt-run)
+  mlflow/                       # MLflow traces, metrics, artifacts
+  kb_index/                     # knowledge base vector collections
+  explicit_memories.yaml        # user-confirmed facts loaded at session start
+
+  # Per-agent runtime config (one of, generated by dsagt init):
+  #   claude:   CLAUDE.md, .mcp.json
+  #   goose:    goose.yaml, .goosehints
+  #   codex:    AGENTS.md, .codex-data/config.toml
+  #   opencode: AGENTS.md, opencode.json
+  #   roo:      .roomodes, .roo/mcp.json
+  #   cline:    .clinerules/, cline_mcp_settings.json (managed via cline mcp add)
+```
+
+### MCP Servers
+
+- **Registry** (`dsagt-registry-server`) — Tool registration and dependency installation. Tools are markdown files with YAML frontmatter under `<project>/tools/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`.
+- **Knowledge** (`dsagt-knowledge-server`) — Semantic search over indexed document collections (FAISS / ChromaDB). Background jobs handle long ingest operations. The agent searches via `kb_search`, ingests via `kb_ingest`, and saves user-confirmed facts via `kb_remember`.
+
+### Tools and Skills
+
+**Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. The agent registers new tools via the registry MCP server's `save_tool_spec`.
+
+**Skills** are instruction-based agent workflows in `<project>/skills/`. Each skill is a directory containing a `SKILL.md` and optional reference docs. DSAgt ships with a bundled `datacard-generator` skill. The agent discovers skills via `search_skills`.
 
 ### Knowledge Base
 
-The knowledge base provides semantic search over indexed document collections using FAISS, with optional cross-encoder reranking.
-
-To set up the core collections (NeMo Curator, AIDRIN):
-
-```bash
-export LLM_API_KEY="your-api-key"
-uv run python scripts/setup_core_kb.py
-```
-
-This clones repos, downloads papers, chunks content, and builds FAISS indexes in `kb_index/`. Run `python scripts/setup_core_kb.py --help` for options.
-
-## Running the Servers
-
-### Pipeline Server
-
-```bash
-# Default bundled registry
-uv run dsagt-pipeline-server
-
-# Custom registry from a previous session
-uv run dsagt-pipeline-server --registry my_registry.yaml
-
-# Specify registry file and runtime directory
-uv run dsagt-pipeline-server --registry path/to/registry.yaml --runtime-dir ./my_session
-```
-
-### Registry Builder Server
-
-```bash
-# Default: writes to ./runtime/registry.yaml
-uv run dsagt-registry-server
-
-# Custom registry path
-uv run dsagt-registry-server --registry path/to/registry.yaml
-```
-
-### Knowledge Base Server
-
-```bash
-# Defaults: base=./kb_index, runtime=./runtime
-uv run dsagt-knowledge-server
-
-# Custom directories, with reranking
-uv run dsagt-knowledge-server --base-index-dir path/to/kb_index --runtime-dir ./runtime --rerank
-```
-
-## Agent Setup
-
-DSAGT works with any MCP-compatible agent. The servers are identical across platforms; only the agent configuration format differs.
-
-Platform-specific configs and quickstart guides live in `agents/`:
-
-- **Goose**: [`agents/goose/README.md`](agents/goose/README.md)
-- **Roo Code** (VS Code): [`agents/roo/README.md`](agents/roo/README.md)
-- **Claude Code**: [`agents/claude-code/README.md`](agents/claude-code/README.md)
-- **Cline** (VS Code): [`agents/cline/README.md`](agents/cline/README.md)
-
-### Path Considerations
-
-Servers use relative paths by default (`--runtime-dir ./runtime`, `--base-index-dir ./kb_index`), resolved from the agent's working directory. This works as long as the agent launches from the DSAGT project root.
-
-If your agent launches from elsewhere, use absolute paths:
-
-```bash
-uv run dsagt-knowledge-server --base-index-dir /absolute/path/to/kb_index
-```
-
-### Example Session
-
-```
-User: I have a script at scripts/preprocess.py that cleans CSV files.
-      Register it as a pipeline tool.
-
-Agent: [reads the file, runs --help, proposes a spec]
-       Registered "preprocess" with parameters for input_file,
-       output_file, and --drop-nulls. Want to try it?
-
-User: Run it on data/raw.csv
-
-Agent: [executes via pipeline server]
-       Output written to data/cleaned.csv. 142 rows processed,
-       3 null rows dropped.
-```
-
-## Smoke Test
-
-`tests/smoke_test/` contains fixtures for verifying all three servers end-to-end. Knowledge base steps require an embedding API key; skip them if you don't have one.
-
-```
-tests/smoke_test/
-├── greet.py                  # Simple CLI tool to register and execute
-└── knowledge/                # Documents for KB ingestion
-    ├── DESCRIPTION.md
-    ├── installation.md
-    ├── api_reference.md
-    └── troubleshooting.md
-```
-
-### 1. Verify the test script
-
-```bash
-uv run python tests/smoke_test/greet.py World
-```
-
-Expected output: `{"message": "Hello, World!", "status": "ok"}`
-
-### 2. Start a session with all three servers
-
-Follow `agents/<platform>/README.md` to launch a session. The knowledge server runs without reranking by default; add `--rerank` to enable cross-encoder reranking (triggers model download on first use).
-
-Without an embedding API key, omit the knowledge server and skip steps 5–6.
-
-### 3. Register a tool
-
-```
-Register tests/smoke_test/greet.py as a pipeline tool.
-Run "python tests/smoke_test/greet.py --help" to see its interface.
-```
-
-The agent should run `--help` via the registry builder, then call `save_tool_spec`.
-
-### 4. Execute the tool
-
-```
-Run the greet tool with name "World" and greeting "Hi".
-```
-
-Expected: JSON output with `"message": "Hi, World!"`.
-
-### 5. Ingest documents
-
-```
-Ingest the folder tests/smoke_test/knowledge into the knowledge base.
-```
-
-The agent should call `kb_ingest` and report file/chunk counts.
-
-### 6. Search the knowledge base
-
-```
-Search the knowledge collection for "how to handle large files".
-```
-
-Top results should come from `troubleshooting.md` (lazy loading, OOM errors).
-
-```
-List all knowledge base collections.
-```
-
-Should show `knowledge` with the description from `DESCRIPTION.md`.
-
-### 7. Verify artifacts
-
-After the session, check from the project root:
-
-**Registry** (should contain default tools plus `greet`):
-```bash
-cat runtime/registry.yaml
-```
-
-**Provenance log** (timestamped entry with tool name, args, full command):
-```bash
-cat runtime/provenance.log
-```
-
-**Knowledge base index**:
-```bash
-ls runtime/kb_index/knowledge/
-# Expected: index.faiss, chunks.jsonl, DESCRIPTION.md
-```
-
-**Chunk format** (JSON objects with `id`, `text`, `metadata`):
-```bash
-head -3 runtime/kb_index/knowledge/chunks.jsonl
-```
-
-### Cleanup
-
-```bash
-rm -rf runtime
-```
-
-## Tool Registry Format
-
-Tools are defined in YAML:
-
-```yaml
-tools:
-  - name: tool_name
-    description: What the tool does
-    executable: command to run (e.g., "python script.py")
-    dependencies:                        # optional
-      - pandas>=2.0
-      - scikit-learn
-    parameters:
-      param_name:
-        type: string|integer|number|boolean|array|object
-        required: true|false
-        description: Parameter description
-        default: optional_default_value
-```
-
-Required parameters are passed as positional arguments. Optional parameters use `--flag value` syntax.
-
-When a tool spec includes `dependencies`, the registry server automatically installs them via `uv pip install` at registration time. Dependencies are stored in the registry YAML for reproducibility. Use `install_dependencies` to reinstall all deps from an existing registry (e.g., after setting up a fresh environment).
-
-## Demo Folder
-
-`demo/` contains a complete microbial isolate demonstration package:
-
-- `demo/isolate_demo.md` — End-to-end demo instructions (asset collection, setup, prompts, and validation)
-- `demo/isolate_session.txt` — Prompt script used to drive the demo interaction
-- `demo/genomics.md` — Pipeline context document for knowledge ingestion
-- `demo/fastp_megahit_best_practices.md` — Fastp/Megahit best-practices reference
-- `demo/demoplan.md` — Short demo plan outline
-
-Run the isolate demo by following `demo/isolate_demo.md` from the DSAGT project root.
-
-## Project Structure
-
-```
-├── demo/
-│   ├── isolate_demo.md            # Microbial isolate demo runbook
-│   ├── isolate_session.txt        # Prompt sequence
-│   ├── genomics.md                # Domain context doc
-│   ├── fastp_megahit_best_practices.md
-│   └── demoplan.md
-├── src/dsagt/
-│   ├── __init__.py
-│   ├── mcp_utils.py                # Shared MCP server utilities
-│   ├── registry.py                 # Tool registry management
-│   ├── registry.yaml               # Default tool registry (bundled)
-│   ├── knowledge.py                # Semantic search over document collections
-│   ├── pipeline_server.py          # MCP server: tool execution
-│   ├── registry_server.py          # MCP server: tool registration
-│   └── knowledge_server.py         # MCP server: knowledge base search
-├── agents/
-│   ├── goose/                      # Goose agent config and quickstart
-│   ├── roo/                        # Roo Code (VS Code) config and quickstart
-│   └── claude-code/                # Claude Code config and quickstart
-├── tests/
-│   ├── test_registry.py
-│   ├── test_registry_server.py
-│   ├── test_knowledge_base.py
-│   ├── test_knowledge_server.py
-│   ├── test_knowledge_integration.py   # Requires API key
-│   └── smoke_test/
-│       ├── greet.py
-│       └── knowledge/
-├── scripts/
-│   └── setup_core_kb.py
-├── pyproject.toml
-└── README.md
-```
-
-## Tests
-
-```bash
-uv run pytest
-```
-
-Run specific tests:
-
-```bash
-uv run pytest tests/test_registry.py
-uv run pytest tests/test_registry_server.py
-uv run pytest tests/test_knowledge_server.py
-uv run pytest tests/test_knowledge_base.py
-uv run pytest tests/test_registry.py::TestCallTool::test_success -v
-```
-
-Registry tests mock `subprocess.run`. Server tests invoke MCP handlers directly (no stdio transport, no network). Knowledge base tests mock the embedding API and use FAISS on temp files. Knowledge server tests use async helpers for background ingest/append jobs.
-
-## Troubleshooting
-
-### MCP Server Not Found
-
-```bash
-uv run which dsagt-pipeline-server
-uv run which dsagt-registry-server
-uv run which dsagt-knowledge-server
-
-# Reinstall if needed
-uv sync --reinstall
-```
-
-### Tools Not Executing
-
-Check what command was run:
-
-```bash
-cat runtime/provenance.log
-```
-
-Verify the executable path and that any interpreter (python, Rscript, etc.) is in your PATH.
-
-### Registry File Not Found
-
-Use absolute paths in configuration:
-
-```yaml
-args:
-  - --registry
-  - /full/path/to/registry.yaml
-```
-
-# DSAGT Development Plan
-
-## Motivation
-
-DSAGT currently shows high run-to-run variance (even at temperature 0). The root issue appears to be limited structure in tool description, invocation, and management. This plan focuses on improving reliability, reproducibility, and observability.
-
-## Track 1: Structured Tool Execution
-
-- **Goal:** Reduce stochastic behavior with stronger execution structure.
-- **Problem:** Routing through the MCP pipeline server adds indirection and limits direct access to Unix return codes/process signals. Registry entries are too sparse for consistent tool selection and invocation.
-- **Plan:**
-  - Extend the registry so each tool is paired with a skill (usage patterns, expected I/O, invocation examples).
-  - Use an agent-driven skill builder (in progress by Jean-Luca) to generate/refine tool skills as tools are registered.
-  - Move tool execution to direct shell invocation so the agent can use return codes, stderr, and standard Unix process controls.
-
-## Track 2: Container-Based Package Management
-
-- **Goal:** Improve reproducibility and isolation of tool execution environments.
-- **Problem:** Ad hoc dependency handling creates conflicts and weak cross-machine reproducibility.
-- **Plan:**
-  - Build a container-builder skill to generate Dockerized tool runtimes (dependencies, data paths, runtime config).
-  - Evaluate the Docker Agent tool shared by Shreyas (assessment led by Andrew) for reuse or adaptation.
-
-## Track 3: Observability and Logging
-
-- **Goal:** Add structured telemetry for debugging, evaluation, and cost tracking.
-- **Problem:** No consistent logs for agent decisions, tool calls, or token usage, which blocks diagnosis and improvement tracking.
-- **Plan:**
-  - Integrate OpenTelemetry for standards-based tracing/logging.
-  - Add MLflow wrappers for experiment tracking and token-usage monitoring.
-
-## Track 4: Resource management
-
-- **Goal:** Add skills that estimate compute needs and prevent resource overcommit during pipeline execution.
-- **Plan:**
-  - Create a resource-assessment skill that probes tool behavior, learns feasible operating ranges under current constraints, and recommends alternatives when resources are insufficient.
+Six independently-partitioned ChromaDB collections hold everything the agent searches semantically. The first three are global (under `~/.dsagt/kb_index/`, populated by `dsagt setup-kb`); the last three are per-project (under `<project>/kb_index/`, populated automatically during use):
+
+| Collection | Source | Populated by |
+|---|---|---|
+| **Tool Specs** | Bundled CLI tool specs in `src/dsagt/tools/` | `dsagt setup-kb` |
+| **Skills** | Bundled skill workflows in `src/dsagt/skills/` | `dsagt setup-kb` |
+| **Domain Knowledge** | NeMo Curator + AIDRIN reference corpora; user-ingested docs | `dsagt setup-kb` + agent's `kb_ingest` |
+| **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/explicit_memories.yaml`); the agent fetches via `kb_get_memories` on demand — typically when you ask it to recall — not auto-loaded at session start |
+| **Episodic Memory** | Distilled facts from MLflow traces | `dsagt memory --project <name>` (per-category outlier detection via embedding centroids) |
+| **Tool Use Records** | `dsagt-run` execution traces | `dsagt-run` wrapper writes JSON to `<project>/trace_archive/`; indexed into ChromaDB by `dsagt memory` |
+
+The default embedding backend is local (sentence-transformers, CPU-side, no API needed). Switch to `embedding.backend: api` in `dsagt_config.yaml` to route through a hosted embedder via LiteLLM. Cross-encoder reranking is optional (`knowledge.rerank: true`).
+
+The agent searches via `kb_search` (knowledge MCP server) and writes via `kb_ingest` / `kb_remember`. Tool Specs and Skills are queried through specialized routes (`search_registry`, `search_skills`) over the same backend.
+
+### Observability
+
+MLflow runs at `http://localhost:<mlflow_port>` (pinned at init time, listed by `dsagt info`). The trace view shows:
+
+- **Knowledge base operations** — `kb.search` / `kb.embed` / `kb.index_search` / `kb.rerank` span trees with per-phase timing.
+- **Tool executions** — `tool.execute` spans with exit code, duration, file counts, truncated stderr. Full payload in `trace_archive/<record_id>.json`.
+- **Registry events** — `save_tool_spec`, `install_dependencies`, `reconstruct_pipeline` spans.
+- **Native agent OTel** *(optional)* — when you export `MLFLOW_TRACKING_URI` and `OTEL_EXPORTER_OTLP_ENDPOINT` (printed by `dsagt init`), the agent's own LLM-call traces land in the same MLflow store. Trace coverage varies by agent: claude / goose emit full payloads, codex emits token counts + tool names, opencode emits nothing natively.
+
+Every span carries the project's `session.id` for filtering. Tool execution records on disk provide the canonical provenance chain — the agent calls `reconstruct_pipeline` to render the trace archive as a reproducible bash script or Snakemake workflow.
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `dsagt init <name> --agent <platform> [--location <path>] [--mlflow-port N]` | Create a project; write per-agent MCP config; print launch one-liner |
+| `dsagt mlflow <name>` | Run MLflow in the foreground against a project's store (port pinned at init time) |
+| `dsagt memory --project <name>` | Distill new traces from this project's MLflow into episodic memory |
+| `dsagt info <name> [--json]` | Resolved config (with source per value) and a session/error summary |
+| `dsagt setup-kb [--collection <name>]` | Build the shared core knowledge base collections |
+| `dsagt list` | List all projects with agent, status, and path |
+| `dsagt mv <name> <new-location>` | Move a project to a new location |
+| `dsagt rm <name> [-y] [--keep-files]` | Unregister a project (and optionally delete its directory) |
+| `dsagt smoke-test [--agent claude\|goose\|codex\|opencode]` | End-to-end install verification |
+
+For tests, proxy mode, troubleshooting, and other developer-facing material, see [developer.md](developer.md).

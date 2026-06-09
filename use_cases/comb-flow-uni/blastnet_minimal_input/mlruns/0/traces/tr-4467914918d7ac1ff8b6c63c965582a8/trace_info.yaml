@@ -1,0 +1,13 @@
+execution_duration_ms: 111600
+request_preview: write this out to a report
+request_time: '2026-04-24T23:00:00.571Z'
+response_preview: 'Report written to `conversion_comparison_report.md`. It covers
+  the four differences found: the critical transpose bug (root cause explained, per-field
+  error magnitudes tabulated), the species naming convention, the extra root attributes,
+  and the minor mask dtype mismatch — plus the exact code changes needed to fix each.'
+state: OK
+trace_id: tr-4467914918d7ac1ff8b6c63c965582a8
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

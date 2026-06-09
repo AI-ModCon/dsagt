@@ -19,22 +19,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import mcp.types as types
 
-from dsagt.knowledge_server import create_knowledge_server, setup_runtime_kb
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def call_tool(server, name: str, arguments: dict) -> dict:
-    """Invoke a tool handler and return the parsed JSON response."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = asyncio.run(handler(req))
-    return json.loads(result.root.content[0].text)
+from dsagt.commands.knowledge_server import create_knowledge_server, setup_runtime_kb
+from mcp_helpers import call_tool_json as call_tool
 
 
 async def _call_tool_async(server, name: str, arguments: dict) -> dict:
@@ -90,6 +76,7 @@ def mock_kb(tmp_path):
     kb = MagicMock()
     kb.index_dir = tmp_path / "kb_index"
     kb.index_dir.mkdir()
+    kb.default_rerank = True
     kb.list_collections.return_value = [
         {"name": "docs", "description": "Project documentation"},
         {"name": "papers", "description": "Research papers"},
@@ -105,8 +92,8 @@ def mock_kb(tmp_path):
 
 @pytest.fixture
 def server(mock_kb):
-    """Knowledge server with mocked KB and reranking enabled."""
-    return create_knowledge_server(mock_kb, use_rerank=True)
+    """Knowledge server with mocked KB (reranking enabled via mock_kb.default_rerank)."""
+    return create_knowledge_server(mock_kb)
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +115,7 @@ class TestListCollections:
     def test_empty_collections(self, mock_kb):
         """Empty knowledge base returns zero count."""
         mock_kb.list_collections.return_value = []
-        server = create_knowledge_server(mock_kb, use_rerank=True)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_list_collections", {})
 
@@ -188,7 +175,7 @@ class TestSearch:
             query="test",
             collection="docs",
             top_k=5,
-            rerank=True,  # server was created with use_rerank=True
+            rerank=None,  # agent didn't specify → kb.default_rerank resolves it
         )
 
     def test_search_nonexistent_collection(self, server, mock_kb):
@@ -263,8 +250,9 @@ class TestIngest:
                     "file_types": ["md", "txt"],
                 }
             )
+            # New server always passes collection_name to kb.ingest
             mock_kb.ingest.assert_called_once_with(
-                folder, file_types=["md", "txt"],
+                folder, collection_name="docs2", file_types=["md", "txt"],
             )
 
         asyncio.run(run())
@@ -310,8 +298,14 @@ class TestIngest:
         folder = tmp_path / "docs"
         folder.mkdir()
 
-        # Simulate "docs" already exists in the index dir
-        (mock_kb.index_dir / "docs").mkdir()
+        # Simulate "docs" already exists with a FAISS index from a different source.
+        # _collection_exists() requires a marker file, and deconflict only triggers
+        # when source.txt records a different folder than the one being ingested.
+        existing = mock_kb.index_dir / "docs"
+        existing.mkdir()
+        (existing / "index.faiss").write_bytes(b"fake")
+        (existing / "source.txt").write_text("/some/other/folder")
+
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
 
         result = call_tool(server, "kb_ingest", {
@@ -320,7 +314,7 @@ class TestIngest:
 
         assert result["status"] == "started"
         assert result["collection"] == "docs1"
-        assert result["warning"] is not None
+        assert "warning" in result
         assert "docs1" in result["warning"]
 
     def test_ingest_deconflicts_symlinked_collection(self, server, mock_kb, tmp_path):
@@ -328,9 +322,12 @@ class TestIngest:
         folder = tmp_path / "docs"
         folder.mkdir()
 
-        # Simulate "docs" is a symlink to a base collection
+        # Simulate "docs" is a symlink to a base collection with index
         base_dir = tmp_path / "base_docs"
         base_dir.mkdir()
+        (base_dir / "index.faiss").write_bytes(b"fake")
+        (base_dir / "source.txt").write_text("/some/other/folder")
+
         (mock_kb.index_dir / "docs").symlink_to(base_dir)
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
 
@@ -339,6 +336,8 @@ class TestIngest:
         })
 
         assert result["status"] == "started"
+        assert result["collection"] == "docs1"
+        assert "warning" in result
         assert "docs1" in result["warning"]
         # Base symlink should still exist untouched
         assert (mock_kb.index_dir / "docs").is_symlink()
@@ -445,7 +444,7 @@ class TestSearchErrorHandling:
         """Network unreachable during search returns error, not crash."""
         import httpx
         mock_kb.search.side_effect = httpx.ConnectError("Connection refused")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -458,7 +457,7 @@ class TestSearchErrorHandling:
         """Embedding API timeout during search returns error, not crash."""
         import httpx
         mock_kb.search.side_effect = httpx.ReadTimeout("Read timed out")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -475,7 +474,7 @@ class TestSearchErrorHandling:
         mock_kb.search.side_effect = httpx.HTTPStatusError(
             "401 Unauthorized", request=MagicMock(), response=mock_resp,
         )
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -492,7 +491,7 @@ class TestSearchErrorHandling:
         mock_kb.search.side_effect = httpx.HTTPStatusError(
             "500 Internal Server Error", request=MagicMock(), response=mock_resp,
         )
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -504,7 +503,7 @@ class TestSearchErrorHandling:
     def test_search_runtime_error(self, mock_kb):
         """Unexpected RuntimeError during search returns error, not crash."""
         mock_kb.search.side_effect = RuntimeError("FAISS segfault simulation")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -516,7 +515,7 @@ class TestSearchErrorHandling:
     def test_search_os_error(self, mock_kb):
         """OS-level error (disk, permissions) returns error, not crash."""
         mock_kb.search.side_effect = OSError("Permission denied: index.faiss")
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+        server = create_knowledge_server(mock_kb)
 
         result = call_tool(server, "kb_search", {
             "query": "test", "collection": "docs",
@@ -527,27 +526,20 @@ class TestSearchErrorHandling:
 
 
 # ---------------------------------------------------------------------------
-# Unknown tool
-# ---------------------------------------------------------------------------
-
-class TestUnknownTool:
-
-    def test_unknown_tool(self, server):
-        """Calling an unregistered tool returns an error."""
-        result = call_tool(server, "nonexistent_tool", {})
-
-        assert result["status"] == "error"
-        assert "Unknown tool" in result["error"]
-
-
 # ---------------------------------------------------------------------------
 # setup_runtime_kb
 # ---------------------------------------------------------------------------
 
 class TestSetupRuntimeKb:
 
-    def test_symlinks_collections(self, tmp_path):
-        """Symlinks collection directories from base to runtime."""
+    def test_copies_collections(self, tmp_path):
+        """Copies (not symlinks) collection directories from base to runtime.
+
+        Copy semantics pin each project to whatever bundled content was
+        current at first start — different projects on the same machine
+        may run different dsagt versions, and a symlink would let one
+        project's ``setup-kb --rebuild`` mutate every project's view.
+        """
         base = tmp_path / "base_index"
         coll_dir = base / "my_collection"
         coll_dir.mkdir(parents=True)
@@ -559,15 +551,33 @@ class TestSetupRuntimeKb:
         result = setup_runtime_kb(base, runtime)
 
         assert result == runtime / "kb_index"
-        link = result / "my_collection"
-        assert link.exists()
-        assert link.is_symlink()
-        assert (link / "index.faiss").exists()
-        assert (link / "chunks.jsonl").exists()
-        assert (link / "DESCRIPTION.md").exists()
+        copied = result / "my_collection"
+        assert copied.exists()
+        assert not copied.is_symlink()  # copy not symlink
+        assert (copied / "index.faiss").exists()
+        assert (copied / "index.faiss").read_text() == "fake index"
+        assert (copied / "chunks.jsonl").exists()
+        assert (copied / "DESCRIPTION.md").exists()
+
+    def test_copy_is_independent(self, tmp_path):
+        """Mutating the base after copy does not affect the project copy."""
+        base = tmp_path / "base_index"
+        coll = base / "tools"
+        coll.mkdir(parents=True)
+        (coll / "index.faiss").write_text("v1")
+
+        runtime = tmp_path / "runtime"
+        setup_runtime_kb(base, runtime)
+
+        # Mutate the base — simulating ``dsagt setup-kb --rebuild``.
+        (coll / "index.faiss").write_text("v2 newer")
+
+        # Project copy stays at v1.
+        project_copy = runtime / "kb_index" / "tools" / "index.faiss"
+        assert project_copy.read_text() == "v1"
 
     def test_skips_non_collection_dirs(self, tmp_path):
-        """Directories without index.faiss are not symlinked."""
+        """Directories without index.faiss are not copied."""
         base = tmp_path / "base_index"
         (base / "random_dir").mkdir(parents=True)
         (base / "random_dir" / "notes.txt").write_text("not a collection")
@@ -609,13 +619,15 @@ class TestSetupRuntimeKb:
 class TestOpenMPWorkaround:
     """Importing knowledge_server must set KMP_DUPLICATE_LIB_OK to prevent
     a fatal OpenMP crash when FAISS and sentence-transformers (PyTorch)
-    both bundle libomp. Without this, kb_search with rerank=true kills
+    both bundle libomp.
+
+    Without this, kb_search with rerank=true kills
     the server process, producing 'transport closed' in MCP clients."""
 
     def test_kmp_duplicate_lib_ok_is_set(self):
         """KMP_DUPLICATE_LIB_OK is set after importing the knowledge server."""
         import os
-        import dsagt.knowledge_server  # noqa: F401
+        import dsagt.commands.knowledge_server  # noqa: F401
 
         assert os.environ.get("KMP_DUPLICATE_LIB_OK") == "TRUE"
 
@@ -639,19 +651,20 @@ class TestRerankSchemaDefault:
                 return tool.inputSchema["properties"]["rerank"]["default"]
         raise AssertionError("kb_search tool not found")
 
-    def test_rerank_default_false_when_disabled(self, mock_kb):
-        """Schema advertises rerank default=false when server has rerank off."""
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+    def test_rerank_default_from_kb(self, mock_kb):
+        """Schema advertises rerank default matching kb.default_rerank."""
+        mock_kb.default_rerank = False
+        server = create_knowledge_server(mock_kb)
         assert self._get_rerank_default(server) is False
 
-    def test_rerank_default_true_when_enabled(self, mock_kb):
-        """Schema advertises rerank default=true when server has rerank on."""
-        server = create_knowledge_server(mock_kb, use_rerank=True)
+        mock_kb.default_rerank = True
+        server = create_knowledge_server(mock_kb)
         assert self._get_rerank_default(server) is True
 
-    def test_search_defaults_rerank_false_when_disabled(self, mock_kb):
-        """With use_rerank=False, omitting rerank passes rerank=False to KB."""
-        server = create_knowledge_server(mock_kb, use_rerank=False)
+    def test_search_omitted_rerank_passes_none(self, mock_kb):
+        """Omitting rerank passes None to kb.search, which resolves to
+        kb.default_rerank internally."""
+        server = create_knowledge_server(mock_kb)
         call_tool(server, "kb_search", {
             "query": "test",
             "collection": "docs",
@@ -660,5 +673,5 @@ class TestRerankSchemaDefault:
             query="test",
             collection="docs",
             top_k=5,
-            rerank=False,
+            rerank=None,
         )

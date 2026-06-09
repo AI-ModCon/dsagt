@@ -1,0 +1,28 @@
+execution_duration_ms: 3773314
+request_preview: Can you update the checker to have a spot check mode where it does
+  the overall structure and format, but only picks 5 datapoints to compare.
+request_time: '2026-04-25T00:34:04.748Z'
+response_preview: 'Clean integer coordinates. The script is ready. Usage:
+
+
+  ```bash
+
+  # Full check (loads entire arrays)
+
+  python3 check_well_output.py <candidate.hdf5> <reference.hdf5>
+
+
+  # Spot check (structure + 5 sampled points per dataset — fast)
+
+  python3 check_well_output.py <candidate.hdf5> <reference.hdf5> --spot-check
+
+
+  # Options: --n-points N, --seed N, --rtol, --atol
+
+  ```'
+state: OK
+trace_id: tr-03c1b4122017741c5928ccfbc7c81b29
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT

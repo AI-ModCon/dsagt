@@ -1,0 +1,9 @@
+id,name,status,score,timestamp
+1,alpha,active,87.5,2024-01-15
+2,beta,inactive,92.1,2024-01-16
+3,gamma,active,76.3,2024-01-17
+4,delta,,88.9,2024-01-18
+5,epsilon,active,91.0,2024-01-19
+6,zeta,inactive,65.2,
+7,eta,active,78.4,2024-01-21
+8,theta,active,84.7,2024-01-22
