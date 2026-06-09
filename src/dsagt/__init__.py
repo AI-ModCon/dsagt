@@ -22,6 +22,20 @@ _os.environ.setdefault("MKL_NUM_THREADS", _default_threads)
 # sentence-transformers' tokenizer is used after a fork (e.g. under
 # pytest-xdist or DataLoader workers).
 _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# uv bundles its own OpenSSL that does not read the macOS Security keychain.
+# On networks with an SSL-intercepting proxy (e.g. Zscaler), the corporate
+# root CA lives only in the keychain, so HTTPS downloads (HuggingFace model
+# weights, arXiv PDFs) fail with "unable to get local issuer certificate".
+# truststore patches ssl.SSLContext to use the OS-native trust store
+# (macOS Security framework / Windows Certificate Store), making the
+# installed corporate CA visible to httpx, requests, and urllib3.
+# inject_into_ssl() must run before any ssl.SSLContext is constructed.
+try:
+    import truststore as _truststore
+    _truststore.inject_into_ssl()
+    del _truststore
+except ImportError:
+    pass
 del _os, _default_threads
 
 from dsagt.registry import ToolRegistry

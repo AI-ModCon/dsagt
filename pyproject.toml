@@ -53,6 +53,7 @@ dependencies = [
     # agent error-detection on every csvtool call.
     "csvkit>=2.2.0",
     "h5py>=3.16.0",
+    "truststore>=0.10.4",
 ]
 
 [project.scripts]
