@@ -37,7 +37,8 @@ dependencies = [
     "tree-sitter-language-pack>=0.2",
     "chromadb>=1.5.1",
     "faiss-cpu>=1.8",
-    "sentence-transformers>=3.0",
+    "sentence-transformers==5.4.0",
+    "transformers==4.47.0",
     "llama-index-readers-file>=0.1",
     # Sparse keyword retrieval for hybrid search.  rank_bm25 is pure Python
     # (~10 KB), no native deps; the corpus and IDF stats live in memory and
@@ -105,4 +106,9 @@ required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'"
+]
+# torch 2.2.2 (latest available for Intel Mac) was compiled against NumPy 1.x
+# and fails to import with NumPy 2.x. Cap numpy on that platform only.
+constraint-dependencies = [
+    "numpy<2.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
