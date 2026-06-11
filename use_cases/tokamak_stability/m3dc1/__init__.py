@@ -714,13 +714,23 @@ def plot_mesh(filename, time=0, boundary=False, save=False, savedir="./",
     import matplotlib.pyplot as plt  # noqa: PLC0415
     import matplotlib.tri as tri  # noqa: PLC0415
 
-    sim = _require_sim(filename, time)
-    mesh_obj = sim.get_mesh(quiet=True)
-    el = mesh_obj.elements
-    R = el[:, 4]
-    Z = el[:, 5]
-    # Element connectivity: columns 0-2 are node indices
-    triang = tri.Triangulation(R, Z, el[:, :3].astype(int))
+    # Read mesh geometry directly from HDF5; no fpy needed for vertex positions.
+    # Columns 0-2 of mesh/elements are not integer node indices (they are
+    # floating-point values), so connectivity cannot be derived from them.
+    # Instead, deduplicate per-element (R, Z) from columns 4-5 to get unique
+    # vertices and let matplotlib compute a Delaunay triangulation.
+    with h5py.File(filename, "r") as _f:
+        if "equilibrium/mesh/elements" in _f:
+            _el = _f["equilibrium/mesh/elements"][:]
+        elif "mesh/elements" in _f:
+            _el = _f["mesh/elements"][:]
+        else:
+            raise KeyError(f"No mesh/elements group found in {filename}")
+
+    _rz = np.unique(np.column_stack([_el[:, 4], _el[:, 5]]), axis=0)
+    R = _rz[:, 0].astype(float)
+    Z = _rz[:, 1].astype(float)
+    triang = tri.Triangulation(R, Z)
 
     fig, ax = plt.subplots()
     ax.triplot(triang, lw=0.3, color="k")

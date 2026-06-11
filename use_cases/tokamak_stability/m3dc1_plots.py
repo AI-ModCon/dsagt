@@ -53,6 +53,7 @@ from pathlib import Path
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 import numpy as np
 
 from m3dc1_tools import (
@@ -353,7 +354,7 @@ def plot_safety_factor(
     for q_ref in (1, 2, 3):
         ax.axhline(q_ref, color="gray", lw=0.8, ls="--", alpha=0.7)
         ax.text(0.99, q_ref + 0.05, f"q={q_ref}", ha="right", va="bottom",
-                fontsize=8, color="gray", transform=ax.get_xaxis_transform())
+                fontsize=8, color="gray")
     if math.isfinite(q95):
         ax.axvline(0.95, color="C1", lw=0.8, ls=":", alpha=0.8)
         ax.annotate(
@@ -374,6 +375,21 @@ def plot_safety_factor(
     return output_path
 
 
+def _norm_and_m_max(
+    m_modes: np.ndarray, spectrum: np.ndarray, min_amplitude: float
+) -> tuple[np.ndarray, int]:
+    """Normalize spectrum to its peak and return (norm_spec, m_max).
+
+    m_max is the outermost |m| where any psi_norm value exceeds min_amplitude,
+    giving a symmetric mode range [-m_max, m_max] that contains all visible structure.
+    """
+    peak = float(np.nanmax(spectrum))
+    norm_spec = spectrum / peak if peak > 0 else spectrum.copy()
+    visible = norm_spec.max(axis=1) >= min_amplitude
+    m_max = int(np.max(np.abs(m_modes[visible]))) if visible.any() else int(np.max(np.abs(m_modes)))
+    return norm_spec, m_max
+
+
 def plot_poloidal_spectrum(
     case_dir: str | Path,
     time_idx: int,
@@ -382,10 +398,15 @@ def plot_poloidal_spectrum(
     coord: str = "scalar",
     fcoords: str = "pest",
     points: int = 200,
-    n_modes: int = 20,
+    min_amplitude: float = 1e-5,
     dpi: int = 150,
 ) -> Path:
-    """2-D heatmap of poloidal mode spectrum: amplitude[m, ψ_norm].
+    """2-D heatmap of poloidal mode spectrum: normalized amplitude[m, ψ_norm].
+
+    The mode range is chosen automatically: all modes where the normalized
+    amplitude exceeds ``min_amplitude`` at any ψ_norm value are shown, with the
+    range kept symmetric around m=0.  Color scale is logarithmic from
+    ``min_amplitude`` to 1.
 
     Requires m3dc1 + fpy.
 
@@ -397,7 +418,8 @@ def plot_poloidal_spectrum(
         coord: Field component (``"scalar"`` for scalars; ``"R"``, ``"Z"``, ``"phi"`` for vectors).
         fcoords: Flux coordinate system.
         points: Radial grid resolution.
-        n_modes: Show ±n_modes poloidal harmonics around m=0.
+        min_amplitude: Normalized amplitude threshold; modes below this at all ψ_norm
+            values are excluded, and it sets the colorbar minimum.
         dpi: Figure resolution.
 
     Returns:
@@ -407,17 +429,18 @@ def plot_poloidal_spectrum(
         case_dir, time_idx, field, coord=coord, fcoords=fcoords, points=points
     )
 
-    center = len(m_modes) // 2
-    lo = max(0, center - n_modes)
-    hi = min(len(m_modes), center + n_modes + 1)
-    m_slice = m_modes[lo:hi]
-    spec_slice = spectrum[lo:hi, :]
+    norm_spec, m_max = _norm_and_m_max(m_modes, spectrum, min_amplitude)
+    mask = (m_modes >= -m_max) & (m_modes <= m_max)
 
     fig, ax = plt.subplots(figsize=(7, 5))
-    im = ax.pcolormesh(psi_norm, m_slice, spec_slice, cmap="viridis", shading="auto")
-    fig.colorbar(im, ax=ax, label="amplitude")
+    im = ax.pcolormesh(
+        psi_norm, m_modes[mask], norm_spec[mask, :],
+        cmap="viridis", shading="auto",
+        norm=LogNorm(vmin=min_amplitude, vmax=1),
+    )
+    fig.colorbar(im, ax=ax, label="Normalized Amplitude")
     ax.set_xlabel("ψ_norm")
-    ax.set_ylabel("poloidal mode number m")
+    ax.set_ylabel("poloidal mode $m$")
     ax.set_title(f"Poloidal spectrum — {field} (t={time_idx}) — {Path(case_dir).name}")
     fig.tight_layout()
 
@@ -433,10 +456,15 @@ def plot_standard_spectra(
     output_path: str | Path,
     fcoords: str = "pest",
     points: int = 200,
-    n_modes: int = 20,
+    min_amplitude: float = 1e-5,
     dpi: int = 150,
 ) -> Path:
     """2×2 panel figure: poloidal spectra for p, B_R, B_Z, B_φ.
+
+    All panels share the same mode range, determined by the widest visible range
+    across all four fields (modes where normalized amplitude >= ``min_amplitude``
+    at any ψ_norm).  Color scale is logarithmic from ``min_amplitude`` to 1,
+    independently normalized per panel.
 
     Requires m3dc1 + fpy.
 
@@ -446,7 +474,8 @@ def plot_standard_spectra(
         output_path: Destination PNG file.
         fcoords: Flux coordinate system.
         points: Radial grid resolution.
-        n_modes: Show ±n_modes harmonics around m=0 in each panel.
+        min_amplitude: Normalized amplitude threshold; modes below this at all ψ_norm
+            values are excluded, and it sets the colorbar minimum for all panels.
         dpi: Figure resolution.
 
     Returns:
@@ -462,20 +491,29 @@ def plot_standard_spectra(
     ncols = min(n, 2)
     nrows = math.ceil(n / ncols)
 
+    # First pass: normalize each panel and find the widest visible mode range.
+    prepped: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+    m_max_global = 0
+    for key in keys:
+        m_modes, psi_norm, spectrum = spectra[key]
+        norm_spec, m_max = _norm_and_m_max(m_modes, spectrum, min_amplitude)
+        m_max_global = max(m_max_global, m_max)
+        prepped[key] = (m_modes, psi_norm, norm_spec)
+
+    # Second pass: draw all panels with the shared mode range.
     fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4 * nrows), squeeze=False)
 
     for ax, key in zip(axes.flat, keys):
-        m_modes, psi_norm, spectrum = spectra[key]
-        center = len(m_modes) // 2
-        lo = max(0, center - n_modes)
-        hi = min(len(m_modes), center + n_modes + 1)
+        m_modes, psi_norm, norm_spec = prepped[key]
+        mask = (m_modes >= -m_max_global) & (m_modes <= m_max_global)
         im = ax.pcolormesh(
-            psi_norm, m_modes[lo:hi], spectrum[lo:hi, :],
+            psi_norm, m_modes[mask], norm_spec[mask, :],
             cmap="viridis", shading="auto",
+            norm=LogNorm(vmin=min_amplitude, vmax=1),
         )
-        fig.colorbar(im, ax=ax, label="amplitude")
+        fig.colorbar(im, ax=ax, label="Normalized Amplitude")
         ax.set_xlabel("ψ_norm")
-        ax.set_ylabel("m")
+        ax.set_ylabel("poloidal mode $m$")
         ax.set_title(_panel_labels.get(key, key))
 
     for ax in list(axes.flat)[n:]:
