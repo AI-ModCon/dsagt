@@ -335,3 +335,49 @@ Returns `dict` with keys `"p"`, `"br"`, `"bz"`, `"bphi"`. Each value is a
 spectra = compute_standard_spectra("sparc_1425", 1, points=200)
 m, psi, spec_p = spectra["p"]
 ```
+
+---
+
+## CLI Tools (`clitools/`)
+
+Standalone scripts in `clitools/` wrap the m3dc1-dependent functions for use in an
+agentic pipeline. All scripts accept `--output-json FILE` to write JSON output to
+a file rather than stdout. This is required when using the real m3dc1/fpy libraries,
+which emit diagnostic messages to C/Fortran-level stdout that would otherwise
+contaminate a shell-captured JSON stream.
+
+| Script | Required positional args | Key options |
+|--------|--------------------------|-------------|
+| `compute_flux_average_profiles.py` | `case_dir` | `--fields`, `--fcoords`, `--points`, `--output-json` |
+| `compute_miller_geometry.py` | `case_dir` | `--res`, `--output-json` |
+| `compute_q95.py` | `case_dir` | `--fcoords`, `--points`, `--output-json` |
+| `compute_poloidal_spectrum.py` | `case_dir time_idx field` | `--coord`, `--fcoords`, `--points`, `--full-fft`, `--output-json` |
+| `compute_standard_spectra.py` | `case_dir time_idx` | `--fcoords`, `--points`, `--full-fft`, `--output-json` |
+| `compute_perturbed_fields.py` | `case_dir time_idx` | `--fields`, `--mode`, `--grid-res`, `--phi`, `--output-json`, `--output-npz` |
+
+### Example usage
+
+```bash
+# Write equilibrium profiles to a file; fpy diagnostic noise stays on stdout only
+python clitools/compute_flux_average_profiles.py sparc_1425 --output-json profiles.json
+
+# Read q95 from the resulting file
+python clitools/compute_q95.py sparc_1425 --output-json q95.json
+
+# Poloidal spectrum of pressure at snapshot 1
+python clitools/compute_poloidal_spectrum.py sparc_1425 1 p --output-json spec_p.json
+
+# Perturbed fields: JSON summary to file, full arrays to .npz
+python clitools/compute_perturbed_fields.py sparc_1425 1 \
+    --output-json fields_summary.json --output-npz fields.npz
+```
+
+`compute_q95.py` internally calls `compute_flux_average_profiles` to obtain the q
+profile; there is no need to pre-compute and pass the profile separately.
+
+`compute_perturbed_fields.py` internally calls `read_mesh_vertices` +
+`make_evaluation_grid` to build the evaluation grid; pass `--mode grid --grid-res N`
+for a regular Cartesian grid or leave the default `--mode mesh` for the mesh vertices.
+Full field arrays (one value per mesh point per field) are saved to `.npz` via
+`--output-npz`; the JSON summary contains only statistics (min, max, rms) and field
+names.

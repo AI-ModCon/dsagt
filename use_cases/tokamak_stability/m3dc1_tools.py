@@ -35,6 +35,29 @@ Perturbed fields (requires m3dc1 + fpy):
 Spectral analysis (requires m3dc1 + fpy):
     compute_poloidal_spectrum   Poloidal m-spectrum of a single field
     compute_standard_spectra    Spectra for p, B_R, B_Z, B_phi
+
+IMPORTANT NOTE FOR AGENTS GENERATING NEW TOOLS
+-----------------------------------------------
+The functions marked "requires m3dc1 + fpy" above call into compiled
+C/Fortran code that writes diagnostic messages (e.g. "deleting simulation
+object", "period = 6.28318") directly to the OS-level stdout file descriptor.
+This output bypasses Python's sys.stdout entirely and cannot be suppressed or
+redirected from Python.
+
+Consequence: any CLI tool that (1) calls one of these functions and (2) prints
+its JSON result to stdout will produce contaminated output that cannot be parsed
+as JSON when captured via shell redirect.
+
+Required pattern for any new CLI tool wrapping these functions:
+    - Accept an --output-json FILE argument.
+    - Write the JSON result to that file instead of printing to stdout.
+    - Document in the tool spec that the agent MUST use --output-json and read
+      from the file rather than capturing stdout.
+
+Functions NOT affected (h5py / numpy only — no compiled stdout writes):
+    read_c1input, list_time_snapshots, read_snapshot_time, read_scalar_traces,
+    read_case_metadata, read_mesh_vertices, make_evaluation_grid,
+    compute_ke_growth_trace, compute_growth_rate, compute_q95
 """
 from __future__ import annotations
 
