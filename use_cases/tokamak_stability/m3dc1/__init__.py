@@ -600,7 +600,8 @@ def eigenfunction(sim=None, field="p", coord="scalar", fcoords="pest",
             ax.set_title(f"Eigenfunction: {field} ({coord})")
             ax.legend(fontsize="small", ncol=2)
             plt.tight_layout()
-            plt.show()
+            if plt.isinteractive():
+                plt.show()
         except Exception as exc:
             if not quiet:
                 warnings.warn(f"eigenfunction makeplot failed: {exc}", stacklevel=2)
@@ -675,7 +676,8 @@ def plot_field(field, filename, time=0, coord="scalar", phi=0.0, points=250,
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"{field}_{time:03d}.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_shape(filename, time=0, points=200, save=False, savedir="./",
@@ -702,7 +704,8 @@ def plot_shape(filename, time=0, points=200, save=False, savedir="./",
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"shape_{time:03d}.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_mesh(filename, time=0, boundary=False, save=False, savedir="./",
@@ -728,7 +731,8 @@ def plot_mesh(filename, time=0, boundary=False, save=False, savedir="./",
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / "mesh.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_diagnostics(filename, save=False, savedir="./", quiet=True):
@@ -761,7 +765,8 @@ def plot_diagnostics(filename, save=False, savedir="./", quiet=True):
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / "diagnostics.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_signal(filename, signame, save=False, savedir="./", quiet=True):
@@ -779,7 +784,8 @@ def plot_signal(filename, signame, save=False, savedir="./", quiet=True):
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"signal_{signame}.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_time_trace_fast(trace, filename, units="m3dc1", save=False,
@@ -799,7 +805,8 @@ def plot_time_trace_fast(trace, filename, units="m3dc1", save=False,
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"timetrace_{trace}.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_flux_average(field, filename, time=0, fcoords="pest", points=200,
@@ -817,7 +824,8 @@ def plot_flux_average(field, filename, time=0, fcoords="pest", points=200,
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"fsa_{field}_{time:03d}.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_line(field, filename, time=0, angle=0.0, Zoff=0.0, coord="scalar",
@@ -855,7 +863,8 @@ def plot_line(field, filename, time=0, angle=0.0, Zoff=0.0, coord="scalar",
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"line_{field}_{time:03d}.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_field_vs_phi(field, filename, time=0, R=None, Z=None, phi_res=64,
@@ -882,7 +891,8 @@ def plot_field_vs_phi(field, filename, time=0, R=None, Z=None, phi_res=64,
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"vs_phi_{field}_{time:03d}.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def tpf(field, sim, filename, units="m3dc1", res=64):
@@ -943,7 +953,8 @@ def plot_poincare(poincare_file="poincare.dat", save=False, savedir="./"):
     plt.tight_layout()
     if save:
         plt.savefig(Path(savedir) / "poincare.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def poincare_movie(filename, time_indices=None, nparticles=500, nsteps=300,
@@ -988,7 +999,8 @@ def plot_mag_probes(filename, save=False, savedir="./", quiet=True):
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / "mag_probes.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def _parse_geqdsk_grid(filename):
@@ -1060,7 +1072,8 @@ def plot_gfile(gfile_path, save=False, savedir="./", quiet=True):
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / "gfile.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()
 
 
 def plot_vector_field(field, filename, time=0, points=30, phi=0.0,

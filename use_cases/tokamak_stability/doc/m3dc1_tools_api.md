@@ -1,5 +1,8 @@
 # m3dc1_tools — API Reference
 
+For plotting functions that consume the outputs of these tools, see
+[m3dc1_plots_api.md](m3dc1_plots_api.md).
+
 All functions live in `m3dc1_tools.py` in the `use_cases/tokamak_stability/`
 directory. Import them directly:
 
