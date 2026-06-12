@@ -53,7 +53,7 @@ DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
 # ``dsagt setup-kb``).  Migrated from ``~/.dsagt/`` on 2026-05-07.
 REGISTRY_DIR = DEFAULT_PROJECTS_BASE
 REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
-RESERVED_PROJECT_NAMES = ("projects.yaml", "kb_index")
+RESERVED_PROJECT_NAMES = ("projects.yaml", "kb_index", ".skill_sources")
 
 DEFAULTS = {
     # ``llm`` block uses ${VAR} placeholders so per-project config
@@ -103,6 +103,24 @@ DEFAULTS = {
         "vector_db": "chroma",
         "rerank": False,
     },
+    # External agent-skill catalogs.  ``sources`` are GitHub repos whose
+    # SKILL.md skills get indexed into per-source catalog collections for
+    # ``search_skills`` (searchable but NOT loaded into agent context).
+    # The agent installs a chosen one via the ``install_skill`` MCP tool;
+    # the agent setup then mirrors installed + bundled skills into the
+    # platform's native skill dir (e.g. ``.claude/skills/``).
+    "skills": {
+        "sources": [
+            {
+                "name": "scientific",
+                "url": "https://github.com/K-Dense-AI/scientific-agent-skills",
+                "branch": "main",
+                "subdir": "skills",
+            },
+        ],
+        "populate_catalog": True,  # index sources into the catalog at setup-kb
+        "populate_native": True,  # mirror installed+bundled into .claude/skills
+    },
 }
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
@@ -111,6 +129,7 @@ _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
 # ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------
+
 
 def resolve_env_vars(value):
     """Replace ${VAR_NAME} references with environment variable values."""
@@ -157,6 +176,7 @@ def default_config_content(
         "knowledge": DEFAULTS["knowledge"],
         "categories": DEFAULTS["categories"],
         "extraction": DEFAULTS["extraction"],
+        "skills": DEFAULTS["skills"],
     }
     return yaml.dump(body, default_flow_style=False, sort_keys=False)
 
@@ -164,6 +184,7 @@ def default_config_content(
 # ---------------------------------------------------------------------------
 # Project registry
 # ---------------------------------------------------------------------------
+
 
 def _load_registry() -> dict[str, str]:
     """Load the project registry. Returns empty dict if no registry exists."""
@@ -190,6 +211,34 @@ def list_projects() -> dict[str, str]:
     return _load_registry()
 
 
+def kb_from_config(config: dict, index_dir: Path | None = None) -> "KnowledgeBase":
+    """Build a KnowledgeBase from a resolved project config.
+
+    Mirrors the embedding-backend resolution used by ``extract_session`` so
+    callers (CLI ``skills`` group, catalog sync) get a KB wired to the same
+    embedder the project uses.  Defaults to ``<project_dir>/kb_index``.
+    """
+    pdir = Path(config["project_dir"])
+    emb = config.get("embedding", {})
+    backend = emb.get("backend", "local")
+    if backend == "local":
+        model = emb.get("model")
+        if model and "/" not in str(model):
+            model = None
+        embedder_kwargs = {"model": model}
+    else:
+        embedder_kwargs = {
+            "model": emb.get("model"),
+            "base_url": emb.get("base_url"),
+            "api_key": os.environ.get("EMBEDDING_API_KEY", ""),
+        }
+    return KnowledgeBase(
+        index_dir=index_dir or (pdir / "kb_index"),
+        default_embedder=backend,
+        embedder_kwargs=embedder_kwargs,
+    )
+
+
 def project_dir(name: str) -> Path:
     """Resolve a project name to its directory via the registry."""
     registry = _load_registry()
@@ -206,6 +255,7 @@ def project_dir(name: str) -> Path:
 # ---------------------------------------------------------------------------
 # Config loading
 # ---------------------------------------------------------------------------
+
 
 def load_config(project_name: str) -> dict:
     """Load and validate a project config by name.
@@ -242,12 +292,15 @@ def _validate(config: dict) -> None:
 
     backend = config.get("mlflow", {}).get("backend")
     if backend and backend not in VALID_MLFLOW_BACKENDS:
-        raise ValueError(f"'mlflow.backend' must be one of {VALID_MLFLOW_BACKENDS}, got '{backend}'")
+        raise ValueError(
+            f"'mlflow.backend' must be one of {VALID_MLFLOW_BACKENDS}, got '{backend}'"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Project initialization
 # ---------------------------------------------------------------------------
+
 
 def _collection_exists(path: Path) -> bool:
     """Return True if *path* looks like a persisted KB collection directory.
@@ -256,14 +309,11 @@ def _collection_exists(path: Path) -> bool:
     collections, and bare ChromaDB sqlite files (as produced by
     ``dsagt setup-kb`` for description-only collections).
     """
-    return (
-        path.is_dir()
-        and (
-            (path / "index.faiss").exists()
-            or (path / "chroma_ids.json").exists()
-            or (path / "route.json").exists()
-            or (path / "chroma.sqlite3").exists()
-        )
+    return path.is_dir() and (
+        (path / "index.faiss").exists()
+        or (path / "chroma_ids.json").exists()
+        or (path / "route.json").exists()
+        or (path / "chroma.sqlite3").exists()
     )
 
 
@@ -390,7 +440,9 @@ def persist_agent_choice(project_name: str, agent: str) -> None:
         "#   ollama, mistral, groq, deepseek.\n"
         "#   Full list: https://docs.litellm.ai/docs/providers\n"
     )
-    yaml_path.write_text(header + yaml.dump(raw, default_flow_style=False, sort_keys=False))
+    yaml_path.write_text(
+        header + yaml.dump(raw, default_flow_style=False, sort_keys=False)
+    )
 
 
 def move_project(project_name: str, new_location: Path) -> Path:
@@ -433,6 +485,7 @@ def remove_project(project_name: str, keep_files: bool = False) -> Path:
 # ---------------------------------------------------------------------------
 # Service start / stop
 # ---------------------------------------------------------------------------
+
 
 def _embedding_provider(config: dict) -> str:
     """Resolve embedding provider with a fallback for two cases:
@@ -481,12 +534,20 @@ def mlflow_command(pdir: Path, mlflow_config: dict, port: int) -> list[str]:
         else str(mlflow_dir)
     )
     return [
-        sys.executable, "-m", "mlflow", "server",
-        "--backend-store-uri", backend_uri,
-        "--default-artifact-root", str(mlflow_dir / "artifacts"),
-        "--host", "0.0.0.0",
-        "--port", str(port),
-        "--workers", "1",
+        sys.executable,
+        "-m",
+        "mlflow",
+        "server",
+        "--backend-store-uri",
+        backend_uri,
+        "--default-artifact-root",
+        str(mlflow_dir / "artifacts"),
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(port),
+        "--workers",
+        "1",
     ]
 
 
@@ -508,7 +569,10 @@ def _process_command(pid: int) -> str:
     try:
         result = subprocess.run(
             ["ps", "-p", str(pid), "-o", "command="],
-            capture_output=True, text=True, check=False, timeout=2.0,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2.0,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return ""
@@ -555,7 +619,9 @@ def reap_runtime(runtime_file: Path) -> list[str]:
     for name, (pid, pgid) in pending.items():
         try:
             os.killpg(pgid, signal.SIGKILL)
-            stopped.append(f"Stopped {name} (pid {pid}, SIGKILL after {_STOP_GRACE_SECONDS}s)")
+            stopped.append(
+                f"Stopped {name} (pid {pid}, SIGKILL after {_STOP_GRACE_SECONDS}s)"
+            )
         except ProcessLookupError:
             stopped.append(f"Stopped {name} (pid {pid})")
 
@@ -619,7 +685,8 @@ def start_services(config: dict) -> dict[str, int]:
     )
     logger.info(
         "MLflow started (pid %d) → http://localhost:%d",
-        mlflow_proc.pid, mlflow_port,
+        mlflow_proc.pid,
+        mlflow_port,
     )
 
     pids = {"mlflow": mlflow_proc.pid}
@@ -635,11 +702,17 @@ def start_services(config: dict) -> dict[str, int]:
         pids["proxy"] = proxy_proc.pid
         ports["proxy"] = proxy_port
 
-    runtime_file.write_text(json.dumps({
-        "pids": pids,
-        "ports": ports,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }, indent=2) + "\n")
+    runtime_file.write_text(
+        json.dumps(
+            {
+                "pids": pids,
+                "ports": ports,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
     if not proxy_requested:
         _wait_for_mlflow(mlflow_port, mlflow_proc, mlflow_log, timeout=30.0)
@@ -650,7 +723,11 @@ def start_services(config: dict) -> dict[str, int]:
 
 
 def _start_proxy(
-    config: dict, pdir: Path, mlflow_port: int, proxy_port: int, session_id: str,
+    config: dict,
+    pdir: Path,
+    mlflow_port: int,
+    proxy_port: int,
+    session_id: str,
 ) -> subprocess.Popen:
     """Spawn the dsagt-proxy subprocess.
 
@@ -671,15 +748,25 @@ def _start_proxy(
             )
 
     cmd = [
-        sys.executable, "-m", "dsagt.commands.proxy_server",
-        "--port", str(proxy_port),
-        "--mlflow-url", f"http://localhost:{mlflow_port}",
-        "--project", config["project"],
-        "--session", session_id,
-        "--records-dir", str(pdir / "trace_archive"),
-        "--model", llm["model"],
-        "--base-url", llm["base_url"],
-        "--provider", llm["provider"],
+        sys.executable,
+        "-m",
+        "dsagt.commands.proxy_server",
+        "--port",
+        str(proxy_port),
+        "--mlflow-url",
+        f"http://localhost:{mlflow_port}",
+        "--project",
+        config["project"],
+        "--session",
+        session_id,
+        "--records-dir",
+        str(pdir / "trace_archive"),
+        "--model",
+        llm["model"],
+        "--base-url",
+        llm["base_url"],
+        "--provider",
+        llm["provider"],
     ]
     # Embedding routing through the proxy is only relevant when the
     # project's embedding backend is ``api`` — in ``local`` mode the
@@ -693,11 +780,16 @@ def _start_proxy(
                     f"--enable-proxy with embedding.backend=api needs "
                     f"config.embedding.{required} (got {emb.get(required)!r})"
                 )
-        cmd.extend([
-            "--embedding-model", emb["model"],
-            "--embedding-base-url", emb["base_url"],
-            "--embedding-provider", emb["provider"],
-        ])
+        cmd.extend(
+            [
+                "--embedding-model",
+                emb["model"],
+                "--embedding-base-url",
+                emb["base_url"],
+                "--embedding-provider",
+                emb["provider"],
+            ]
+        )
     proxy_log = pdir / "proxy.log"
     # The proxy needs the *real* upstream credentials in env (not the
     # sentinel agents see).  os.environ already has them from the user's
@@ -719,13 +811,17 @@ def _start_proxy(
     )
     logger.info(
         "Proxy started (pid %d) → http://localhost:%d",
-        proxy_proc.pid, proxy_port,
+        proxy_proc.pid,
+        proxy_port,
     )
     return proxy_proc
 
 
 def _wait_for_proxy(
-    port: int, proc: subprocess.Popen, log_path: Path, timeout: float = 45.0,
+    port: int,
+    proc: subprocess.Popen,
+    log_path: Path,
+    timeout: float = 45.0,
 ) -> None:
     """Poll *port* until the proxy answers, the subprocess dies, or we time out.
 
@@ -755,7 +851,10 @@ def _wait_for_proxy(
 
 
 def _wait_for_mlflow(
-    port: int, proc: subprocess.Popen, log_path: Path, timeout: float = 30.0,
+    port: int,
+    proc: subprocess.Popen,
+    log_path: Path,
+    timeout: float = 30.0,
 ) -> None:
     """Poll *port* until MLflow answers, the subprocess dies, or we time out.
 
@@ -787,10 +886,10 @@ def stop_services(project_name: str) -> list[str]:
     return reap_runtime(project_dir(project_name) / ".runtime")
 
 
-
 # ---------------------------------------------------------------------------
 # Memory extraction orchestration
 # ---------------------------------------------------------------------------
+
 
 def run_extraction(project_name: str) -> dict:
     """Two-phase post-session work, both best-effort.
@@ -857,7 +956,8 @@ def run_extraction(project_name: str) -> dict:
 
     mlflow_port = config.get("mlflow", {}).get("port")
     mlflow_uri = (
-        f"http://localhost:{mlflow_port}" if mlflow_port
+        f"http://localhost:{mlflow_port}"
+        if mlflow_port
         else os.environ.get("MLFLOW_TRACKING_URI")
     )
     try:

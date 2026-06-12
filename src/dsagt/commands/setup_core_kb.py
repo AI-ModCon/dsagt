@@ -22,7 +22,6 @@ import argparse
 import os
 import shutil
 import subprocess
-import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -135,7 +134,9 @@ readiness evaluation for ML pipelines.
 }
 
 
-def clone_github(url: str, dest: Path, branch: str = "main", include: list[str] | None = None):
+def clone_github(
+    url: str, dest: Path, branch: str = "main", include: list[str] | None = None
+):
     """Clone a GitHub repo, optionally keeping only specific directories.
 
     When *include* is set, the named subdirectories are copied AND any
@@ -175,7 +176,7 @@ def clone_github(url: str, dest: Path, branch: str = "main", include: list[str] 
 def download_arxiv(paper_id: str, dest: Path):
     """Download arXiv paper (source if available, else PDF)."""
     client = httpx.Client(timeout=60.0, follow_redirects=True)
-    
+
     try:
         # Try source tarball first
         response = client.get(f"https://arxiv.org/e-print/{paper_id}")
@@ -190,7 +191,7 @@ def download_arxiv(paper_id: str, dest: Path):
                 return
             except tarfile.ReadError:
                 tar_path.unlink()
-        
+
         # Fall back to PDF
         response = client.get(f"https://arxiv.org/pdf/{paper_id}.pdf")
         response.raise_for_status()
@@ -248,6 +249,7 @@ def setup_collection(
         owned_kb = kb is None
         if owned_kb:
             from dsagt.knowledge import KnowledgeBase
+
             kb = KnowledgeBase(
                 index_dir=index_dir,
                 default_embedder=embedding_backend,
@@ -257,7 +259,8 @@ def setup_collection(
         try:
             result = kb.ingest(
                 download_dir,
-                exclude_patterns=config.get("exclude_patterns") or DEFAULT_EXCLUDE_PATTERNS,
+                exclude_patterns=config.get("exclude_patterns")
+                or DEFAULT_EXCLUDE_PATTERNS,
             )
             skipped = result.get("skipped_files", 0)
             miss_msg = f", {skipped} file misses" if skipped else ""
@@ -275,6 +278,7 @@ def _current_dsagt_version() -> str:
     """Return the installed dsagt package version, or ``"unknown"`` if absent."""
     try:
         from importlib.metadata import version
+
         return version("dsagt")
     except Exception:
         return "unknown"
@@ -310,15 +314,18 @@ def add_setup_kb_args(parser):
         ),
     )
     parser.add_argument(
-        "--embedding-model", default=None,
+        "--embedding-model",
+        default=None,
         help="Embedding model name (falls back to EMBEDDING_MODEL env var)",
     )
     parser.add_argument(
-        "--embedding-base-url", default=None,
+        "--embedding-base-url",
+        default=None,
         help="Embedding API base URL (falls back to OPENAI_BASE_URL env var)",
     )
     parser.add_argument(
-        "--embedding-api-key", default=None,
+        "--embedding-api-key",
+        default=None,
         help="Embedding API key (falls back to LLM_API_KEY / OPENAI_API_KEY env var)",
     )
     parser.add_argument(
@@ -332,6 +339,12 @@ def add_setup_kb_args(parser):
         action="store_true",
         help="Re-ingest collections that already exist in the index directory "
         "(default: skip existing).",
+    )
+    parser.add_argument(
+        "--no-skill-catalog",
+        action="store_true",
+        help="Skip cloning + indexing the default external skill catalog "
+        "(the K-Dense scientific skills repo).",
     )
 
 
@@ -352,6 +365,7 @@ def run_setup_kb(args):
     # ``force``, the second basicConfig is a no-op because the root
     # logger already has handlers, and the INFO-level chatter survives.
     import logging as _logging
+
     _logging.basicConfig(
         level=_logging.WARNING,
         format="%(levelname)s: %(message)s",
@@ -368,10 +382,18 @@ def run_setup_kb(args):
     # clear error up front rather than 5 minutes into the first ingest.
     embedder_kwargs: dict = {}
     if args.embedding_backend == "api":
-        api_key = args.embedding_api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+        api_key = (
+            args.embedding_api_key
+            or os.getenv("LLM_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+        )
         base_url = args.embedding_base_url or os.getenv("OPENAI_BASE_URL")
         model = args.embedding_model or os.getenv("EMBEDDING_MODEL")
-        missing = [n for n, v in [("api key", api_key), ("base URL", base_url), ("model", model)] if not v]
+        missing = [
+            n
+            for n, v in [("api key", api_key), ("base URL", base_url), ("model", model)]
+            if not v
+        ]
         if missing:
             raise ValueError(
                 "API embedding backend requires "
@@ -388,6 +410,7 @@ def run_setup_kb(args):
     # to, so we skip init_tracing entirely.  @traced decorators inside
     # KnowledgeBase see no backend and short-circuit cleanly.
     from dsagt.observability import configure_litellm_retries
+
     configure_litellm_retries()
 
     # One KnowledgeBase per setup-kb invocation.  The embedder cache
@@ -399,9 +422,13 @@ def run_setup_kb(args):
     args.index_dir.mkdir(parents=True, exist_ok=True)
     from dsagt.knowledge import KnowledgeBase
     from dsagt.registry import (
-        SKILLS_COLLECTION, TOOLS_COLLECTION,
-        ToolRegistry, SkillRegistry, _parse_frontmatter,
+        SKILLS_COLLECTION,
+        TOOLS_COLLECTION,
+        ToolRegistry,
+        SkillRegistry,
+        _parse_frontmatter,
     )
+
     shared_kb = KnowledgeBase(
         index_dir=args.index_dir,
         default_embedder=args.embedding_backend,
@@ -415,11 +442,13 @@ def run_setup_kb(args):
         current_version = _current_dsagt_version()
 
         tool_paths = [
-            p for p in sorted(ToolRegistry._PACKAGE_TOOLS_DIR.glob("*.md"))
+            p
+            for p in sorted(ToolRegistry._PACKAGE_TOOLS_DIR.glob("*.md"))
             if _parse_frontmatter(p).get("name")
         ]
         skill_dirs = [
-            d for d in sorted(SkillRegistry._PACKAGE_SKILLS_DIR.iterdir())
+            d
+            for d in sorted(SkillRegistry._PACKAGE_SKILLS_DIR.iterdir())
             if d.is_dir()
             and (d / "SKILL.md").exists()
             and _parse_frontmatter(d / "SKILL.md").get("name")
@@ -435,14 +464,17 @@ def run_setup_kb(args):
             shared_kb.add_entries(
                 texts=[p.read_text() for p in tool_paths],
                 collection=TOOLS_COLLECTION,
-                metadatas=[{
-                    "tool_name": s["name"],
-                    "tags": ",".join(s.get("tags", [])),
-                    "executable": s.get("executable", ""),
-                    "has_dependencies": str(bool(s.get("dependencies"))),
-                    "source": "bundled",
-                    "dsagt_version": current_version,
-                } for s in tool_specs],
+                metadatas=[
+                    {
+                        "tool_name": s["name"],
+                        "tags": ",".join(s.get("tags", [])),
+                        "executable": s.get("executable", ""),
+                        "has_dependencies": str(bool(s.get("dependencies"))),
+                        "source": "bundled",
+                        "dsagt_version": current_version,
+                    }
+                    for s in tool_specs
+                ],
             )
 
         if skill_dirs:
@@ -450,28 +482,60 @@ def run_setup_kb(args):
             shared_kb.add_entries(
                 texts=[(d / "SKILL.md").read_text() for d in skill_dirs],
                 collection=SKILLS_COLLECTION,
-                metadatas=[{
-                    "skill_name": s["name"],
-                    "tags": ",".join(s.get("tags", [])),
-                    "source": "bundled",
-                    "dsagt_version": current_version,
-                } for s in skill_specs],
+                metadatas=[
+                    {
+                        "skill_name": s["name"],
+                        "tags": ",".join(s.get("tags", [])),
+                        "source": "bundled",
+                        "dsagt_version": current_version,
+                    }
+                    for s in skill_specs
+                ],
             )
 
         print("  bundled tools + skills: indexed", flush=True)
 
-        collections = {args.collection: COLLECTIONS[args.collection]} if args.collection else COLLECTIONS
+        # External skill catalog: clone + index the default source(s) so
+        # ``search_skills`` can browse installable skills out of the box.
+        # Best-effort — a clone failure (offline, repo moved) warns and
+        # continues rather than aborting the whole KB build.
+        if not getattr(args, "no_skill_catalog", False):
+            from dsagt.commands.skills_catalog import sync_source
+            from dsagt.session import DEFAULTS
+
+            for src in DEFAULTS["skills"]["sources"]:
+                try:
+                    stats = sync_source(src, kb=shared_kb, force=args.rebuild)
+                    print(
+                        f"  skill catalog {stats['slug']}: {stats['indexed']} indexed",
+                        flush=True,
+                    )
+                except Exception as e:  # noqa: BLE001 — best-effort, keep going
+                    print(
+                        f"  skill catalog {src.get('url', src)}: skipped ({e})",
+                        flush=True,
+                    )
+
+        collections = (
+            {args.collection: COLLECTIONS[args.collection]}
+            if args.collection
+            else COLLECTIONS
+        )
 
         for name, config in collections.items():
             target_dir = args.index_dir / name
             if _collection_exists(target_dir):
                 if not args.rebuild:
-                    print(f"  {name}: already indexed (use --rebuild to force)",
-                          flush=True)
+                    print(
+                        f"  {name}: already indexed (use --rebuild to force)",
+                        flush=True,
+                    )
                     continue
                 shutil.rmtree(target_dir)
             setup_collection(
-                name, config, args.index_dir,
+                name,
+                config,
+                args.index_dir,
                 embedder_kwargs=embedder_kwargs,
                 embedding_backend=args.embedding_backend,
                 vector_db=args.vector_db,

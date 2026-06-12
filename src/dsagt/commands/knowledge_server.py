@@ -38,10 +38,19 @@ import yaml
 from mcp.server.lowlevel import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 
-from dsagt.knowledge import EMBEDDER_REGISTRY, VECTORINDEX_REGISTRY, CollectionRoute, KnowledgeBase
+from dsagt.knowledge import (
+    EMBEDDER_REGISTRY,
+    VECTORINDEX_REGISTRY,
+    CollectionRoute,
+    KnowledgeBase,
+)
 from dsagt.memory import SuggestionQueue
 from dsagt.memory import ExplicitMemory
-from dsagt.session import REGISTRY_DIR, _collection_exists, setup_runtime_kb  # noqa: F401
+from dsagt.session import (
+    REGISTRY_DIR,
+    _collection_exists,
+    setup_runtime_kb,
+)  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +58,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # MCP server helpers
 # ---------------------------------------------------------------------------
+
 
 async def _run_stdio(server: Server, name: str) -> None:
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
@@ -64,8 +74,6 @@ async def _run_stdio(server: Server, name: str) -> None:
                 ),
             ),
         )
-
-
 
 
 # _collection_exists and setup_runtime_kb live in dsagt.session (imported above).
@@ -120,11 +128,10 @@ def _register_external_collection(
     kb.register_route(collection_name, route)
 
 
-
-
 # ---------------------------------------------------------------------------
 # Background job tracker
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _JobTracker:
@@ -157,6 +164,7 @@ class _JobTracker:
                 tracker.jobs[job_id]["message"] = "Done."
             except Exception as e:
                 import traceback
+
                 tb = traceback.format_exc()
                 tracker.jobs[job_id]["status"] = "error"
                 tracker.jobs[job_id]["error"] = f"{type(e).__name__}: {e}"
@@ -179,13 +187,16 @@ class _JobTracker:
 # return a result dict; the outer call_tool wrapper JSON-serializes it.
 # ---------------------------------------------------------------------------
 
+
 async def _handle_kb_list_collections(arguments: dict, *, kb: KnowledgeBase) -> dict:
     collections = await asyncio.to_thread(kb.list_collections)
     return {"status": "ok", "collections": collections, "count": len(collections)}
 
 
 async def _handle_kb_search(
-    arguments: dict, *, kb: KnowledgeBase,
+    arguments: dict,
+    *,
+    kb: KnowledgeBase,
 ) -> dict:
     query = arguments["query"]
     top_k = arguments.get("top_k", 5)
@@ -217,7 +228,9 @@ async def _handle_kb_search(
 
     for coll_name in target_collections:
         try:
-            search_kwargs = dict(query=query, collection=coll_name, top_k=top_k, rerank=rerank)
+            search_kwargs = dict(
+                query=query, collection=coll_name, top_k=top_k, rerank=rerank
+            )
             if where:
                 search_kwargs["where"] = where
             coll_results = await asyncio.to_thread(kb.search, **search_kwargs)
@@ -229,7 +242,10 @@ async def _handle_kb_search(
     if search_errors and not all_results:
         if len(target_collections) == 1:
             return {"status": "error", "error": search_errors[0]}
-        return {"status": "error", "error": f"All collections failed: {'; '.join(search_errors)}"}
+        return {
+            "status": "error",
+            "error": f"All collections failed: {'; '.join(search_errors)}",
+        }
 
     score_key = "rerank_score" if rerank else "score"
     all_results.sort(key=lambda r: r.get(score_key, r["score"]), reverse=True)
@@ -248,8 +264,10 @@ async def _handle_kb_search(
                 "source_file": r["chunk"]["metadata"].get("source_file", ""),
                 "chunk_index": r["chunk"]["metadata"].get("chunk_index", 0),
                 "metadata": {
-                    k: v for k, v in r["chunk"]["metadata"].items()
-                    if k not in ("source_file", "chunk_index", "collection", "file_type")
+                    k: v
+                    for k, v in r["chunk"]["metadata"].items()
+                    if k
+                    not in ("source_file", "chunk_index", "collection", "file_type")
                 },
             }
             for r in all_results
@@ -261,7 +279,10 @@ async def _handle_kb_search(
 
 
 async def _handle_kb_ingest(
-    arguments: dict, *, kb: KnowledgeBase, job_tracker: _JobTracker,
+    arguments: dict,
+    *,
+    kb: KnowledgeBase,
+    job_tracker: _JobTracker,
 ) -> dict:
     folder_path = Path(arguments["folder_path"])
     collection_name = arguments.get("collection_name")
@@ -289,7 +310,9 @@ async def _handle_kb_ingest(
 
     if _collection_exists(kb.index_dir / target_name):
         source_path = kb.index_dir / target_name / "source.txt"
-        existing_source = source_path.read_text().strip() if source_path.exists() else None
+        existing_source = (
+            source_path.read_text().strip() if source_path.exists() else None
+        )
         same_source = (
             existing_source is None
             or Path(existing_source).resolve() == folder_path.resolve()
@@ -326,8 +349,13 @@ async def _handle_kb_ingest(
 
     async def _ingest_with_logging():
         import traceback as _tb
-        logger.info("Ingest starting: collection=%s folder=%s kwargs=%s",
-                     target_name, folder_path, ingest_kwargs)
+
+        logger.info(
+            "Ingest starting: collection=%s folder=%s kwargs=%s",
+            target_name,
+            folder_path,
+            ingest_kwargs,
+        )
         try:
             result = await asyncio.to_thread(kb.ingest, folder_path, **ingest_kwargs)
             logger.info("Ingest complete: %s", result)
@@ -354,7 +382,10 @@ async def _handle_kb_ingest(
 
 
 async def _handle_kb_append(
-    arguments: dict, *, kb: KnowledgeBase, job_tracker: _JobTracker,
+    arguments: dict,
+    *,
+    kb: KnowledgeBase,
+    job_tracker: _JobTracker,
 ) -> dict:
     collection = arguments["collection"]
     paths = arguments["paths"]
@@ -399,8 +430,12 @@ async def _handle_kb_add_vector_db(arguments: dict, *, kb: KnowledgeBase) -> dic
 
     await asyncio.to_thread(
         _register_external_collection,
-        kb, collection_name, vector_db,
-        connection_params, embedding_model, description,
+        kb,
+        collection_name,
+        vector_db,
+        connection_params,
+        embedding_model,
+        description,
     )
     return {
         "status": "ok",
@@ -472,11 +507,13 @@ async def _handle_kb_remember(
         kb.add_entries,
         texts=[text],
         collection="session_memory",
-        metadatas=[{
-            "source_type": "explicit_memory",
-            "category": category,
-            "session_id": session_id,
-        }],
+        metadatas=[
+            {
+                "source_type": "explicit_memory",
+                "category": category,
+                "session_id": session_id,
+            }
+        ],
     )
 
     if promoted_from:
@@ -492,7 +529,10 @@ async def _handle_kb_remember(
 
 
 async def _handle_kb_get_memories(
-    arguments: dict, *, memory: ExplicitMemory, suggestions: SuggestionQueue,
+    arguments: dict,
+    *,
+    memory: ExplicitMemory,
+    suggestions: SuggestionQueue,
 ) -> dict:
     entries = await asyncio.to_thread(memory.get_all)
     pending = suggestions.get_all()
@@ -504,14 +544,18 @@ async def _handle_kb_get_memories(
 
 
 async def _handle_kb_get_suggestions(
-    arguments: dict, *, suggestions: SuggestionQueue,
+    arguments: dict,
+    *,
+    suggestions: SuggestionQueue,
 ) -> dict:
     pending = suggestions.get_all()
     return {"status": "ok", "count": len(pending), "suggestions": pending}
 
 
 async def _handle_kb_dismiss_suggestion(
-    arguments: dict, *, suggestions: SuggestionQueue,
+    arguments: dict,
+    *,
+    suggestions: SuggestionQueue,
 ) -> dict:
     suggestion_id = arguments["suggestion_id"]
     dismissed = suggestions.dismiss(suggestion_id)
@@ -523,6 +567,74 @@ async def _handle_kb_dismiss_suggestion(
 # ---------------------------------------------------------------------------
 # Server factory (thin wiring — used by main() and tests)
 # ---------------------------------------------------------------------------
+
+
+def _persist_skill_source(runtime_dir: Path, spec: dict) -> None:
+    """Append a resolved source to ``skills.sources`` in the project config.
+
+    Dedupes by URL.  No-op if the config file is missing (e.g. tests with a
+    bare runtime dir) — the catalog is still indexed either way.
+    """
+    cfg_path = runtime_dir / "dsagt_config.yaml"
+    if not cfg_path.exists():
+        return
+    cfg = yaml.safe_load(cfg_path.read_text()) or {}
+    skills = cfg.setdefault("skills", {})
+    sources = skills.setdefault("sources", [])
+    if not any(s.get("url") == spec.get("url") for s in sources):
+        sources.append(
+            {k: spec[k] for k in ("name", "url", "branch", "subdir") if k in spec}
+        )
+        cfg_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
+
+
+async def _handle_add_skill_source(
+    arguments: dict,
+    *,
+    kb: KnowledgeBase,
+    runtime_dir: Path,
+) -> dict:
+    """Enable a skill source (known name or GitHub URL): clone + index the catalog."""
+    from dsagt.commands.skills_catalog import KNOWN_SOURCES, resolve_source, sync_source
+
+    source = arguments.get("source")
+    if not source:
+        return {
+            "error": "add_skill_source requires 'source' (known name or GitHub URL)."
+        }
+    try:
+        spec = resolve_source(source)
+        if isinstance(source, str) and source in KNOWN_SOURCES:
+            spec.setdefault("name", source)
+        stats = await asyncio.to_thread(sync_source, source, kb=kb)
+    except (ValueError, RuntimeError) as e:
+        return {"error": str(e)}
+    _persist_skill_source(
+        runtime_dir, {"name": spec.get("name", stats["slug"]), **spec}
+    )
+    return {
+        "source": spec["url"],
+        "slug": stats["slug"],
+        "skills_indexed": stats["indexed"],
+        "note": "Searchable via search_skills; install one with install_skill.",
+    }
+
+
+async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> dict:
+    """List known + synced skill sources and their indexed counts."""
+    from dsagt.commands.skills_catalog import KNOWN_SOURCES
+    from dsagt.registry import CATALOG_COLLECTION_PREFIX
+
+    synced = {c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)}
+    return {
+        "known_sources": {
+            name: {"url": s["url"], "description": s.get("description", "")}
+            for name, s in KNOWN_SOURCES.items()
+        },
+        "synced_collections": sorted(synced),
+        "note": "add_skill_source <name|url> to enable; search_skills to browse.",
+    }
+
 
 def create_knowledge_server(
     kb: KnowledgeBase,
@@ -545,21 +657,57 @@ def create_knowledge_server(
     job_tracker = _JobTracker()
 
     handlers = {
+        "add_skill_source": partial(
+            _handle_add_skill_source, kb=kb, runtime_dir=mem_dir
+        ),
+        "list_skill_sources": partial(_handle_list_skill_sources, kb=kb),
         "kb_list_collections": partial(_handle_kb_list_collections, kb=kb),
         "kb_search": partial(_handle_kb_search, kb=kb),
         "kb_ingest": partial(_handle_kb_ingest, kb=kb, job_tracker=job_tracker),
         "kb_append": partial(_handle_kb_append, kb=kb, job_tracker=job_tracker),
         "kb_add_vector_db": partial(_handle_kb_add_vector_db, kb=kb),
         "kb_job_status": partial(_handle_kb_job_status, job_tracker=job_tracker),
-        "kb_remember": partial(_handle_kb_remember, kb=kb, memory=memory, suggestions=suggestions),
-        "kb_get_memories": partial(_handle_kb_get_memories, memory=memory, suggestions=suggestions),
-        "kb_get_suggestions": partial(_handle_kb_get_suggestions, suggestions=suggestions),
-        "kb_dismiss_suggestion": partial(_handle_kb_dismiss_suggestion, suggestions=suggestions),
+        "kb_remember": partial(
+            _handle_kb_remember, kb=kb, memory=memory, suggestions=suggestions
+        ),
+        "kb_get_memories": partial(
+            _handle_kb_get_memories, memory=memory, suggestions=suggestions
+        ),
+        "kb_get_suggestions": partial(
+            _handle_kb_get_suggestions, suggestions=suggestions
+        ),
+        "kb_dismiss_suggestion": partial(
+            _handle_kb_dismiss_suggestion, suggestions=suggestions
+        ),
     }
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
         return [
+            types.Tool(
+                name="add_skill_source",
+                description=(
+                    "Enable an external agent-skill source (a known name like "
+                    "'scientific'/'anthropic'/'antigravity'/'composio', or a GitHub URL). "
+                    "Clones it and indexes its skills into the searchable catalog "
+                    "(search_skills). Does NOT load them into context."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "source": {
+                            "type": "string",
+                            "description": "Known source name or GitHub repo URL / owner/repo",
+                        },
+                    },
+                    "required": ["source"],
+                },
+            ),
+            types.Tool(
+                name="list_skill_sources",
+                description="List known + synced external skill sources and their indexed catalogs.",
+                inputSchema={"type": "object", "properties": {}},
+            ),
             types.Tool(
                 name="kb_list_collections",
                 description=(
@@ -706,13 +854,34 @@ def create_knowledge_server(
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "collection_name": {"type": "string", "description": "Unique name for this collection"},
-                        "vector_db": {"type": "string", "enum": ["chroma", "lancedb", "qdrant"], "description": "Vector store backend type"},
-                        "connection_params": {"type": "object", "description": "Backend-specific connection parameters."},
-                        "embedding_model": {"type": "string", "description": "The API model used to build this index"},
-                        "description": {"type": "string", "description": "Human-readable description for agent discovery"},
+                        "collection_name": {
+                            "type": "string",
+                            "description": "Unique name for this collection",
+                        },
+                        "vector_db": {
+                            "type": "string",
+                            "enum": ["chroma", "lancedb", "qdrant"],
+                            "description": "Vector store backend type",
+                        },
+                        "connection_params": {
+                            "type": "object",
+                            "description": "Backend-specific connection parameters.",
+                        },
+                        "embedding_model": {
+                            "type": "string",
+                            "description": "The API model used to build this index",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Human-readable description for agent discovery",
+                        },
                     },
-                    "required": ["collection_name", "vector_db", "connection_params", "embedding_model"],
+                    "required": [
+                        "collection_name",
+                        "vector_db",
+                        "connection_params",
+                        "embedding_model",
+                    ],
                 },
             ),
             types.Tool(
@@ -721,7 +890,10 @@ def create_knowledge_server(
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "job_id": {"type": "string", "description": "Job ID returned by kb_ingest or kb_append"},
+                        "job_id": {
+                            "type": "string",
+                            "description": "Job ID returned by kb_ingest or kb_append",
+                        },
                     },
                     "required": ["job_id"],
                 },
@@ -735,11 +907,26 @@ def create_knowledge_server(
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "text": {"type": "string", "description": "The fact to remember"},
-                        "category": {"type": "string", "description": "Classification tag"},
-                        "session_id": {"type": "string", "description": "Current session identifier"},
-                        "supersedes": {"type": "string", "description": "entry_id of an existing memory this replaces"},
-                        "promoted_from": {"type": "string", "description": "suggestion_id if promoted from outlier suggestion"},
+                        "text": {
+                            "type": "string",
+                            "description": "The fact to remember",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "Classification tag",
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Current session identifier",
+                        },
+                        "supersedes": {
+                            "type": "string",
+                            "description": "entry_id of an existing memory this replaces",
+                        },
+                        "promoted_from": {
+                            "type": "string",
+                            "description": "suggestion_id if promoted from outlier suggestion",
+                        },
                     },
                     "required": ["text"],
                 },
@@ -766,7 +953,10 @@ def create_knowledge_server(
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "suggestion_id": {"type": "string", "description": "ID of the suggestion to dismiss"},
+                        "suggestion_id": {
+                            "type": "string",
+                            "description": "ID of the suggestion to dismiss",
+                        },
                     },
                     "required": ["suggestion_id"],
                 },
@@ -783,7 +973,9 @@ def create_knowledge_server(
         except Exception as e:
             logger.exception("Unexpected error in tool '%s'", name)
             result = {"status": "error", "error": f"Unexpected error: {e}"}
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+        return [
+            types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))
+        ]
 
     return server
 
@@ -791,6 +983,7 @@ def create_knowledge_server(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main():
     """Entry point for dsagt-knowledge-server.
@@ -805,6 +998,7 @@ def main():
     so cwd is project_dir for the MCP children it spawns.
     """
     from dsagt.observability import find_project_config
+
     project_dir, _ = find_project_config()
     if project_dir is None:
         raise RuntimeError(
@@ -835,6 +1029,7 @@ def main():
     # the config is broken and the server fails fast.
     config_path = project_dir / "dsagt_config.yaml"
     from dsagt.session import resolve_env_vars
+
     config = resolve_env_vars(yaml.safe_load(config_path.read_text()))
 
     kb_config = config["knowledge"]
@@ -894,7 +1089,10 @@ def main():
         embedder_kwargs.update({"base_url": base_url, "api_key": api_key})
 
     from dsagt.observability import init_tracing, configure_litellm_retries
-    init_tracing("dsagt-knowledge-server")  # session_id picked up from DSAGT_SESSION_ID env
+
+    init_tracing(
+        "dsagt-knowledge-server"
+    )  # session_id picked up from DSAGT_SESSION_ID env
     configure_litellm_retries()
 
     runtime_kb_dir = setup_runtime_kb(REGISTRY_DIR / "kb_index", project_dir)

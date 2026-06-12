@@ -1,0 +1,18 @@
+# MOCK INCAR — slab ionic relaxation (NSW > 0 marks this as a slab calc)
+SYSTEM = IrO2(110) mock slab
+ISTART = 0
+ICHARG = 2
+ENCUT  = 520
+ISMEAR = 0
+SIGMA  = 0.05
+IBRION = 2
+NSW    = 50
+ISIF   = 2
+EDIFF  = 1E-5
+EDIFFG = -0.02
+ISPIN  = 2
+LDAU   = .TRUE.
+LDAUTYPE = 2
+LDAUL  = 2 -1
+LDAUU  = 4.0 0.0
+GGA    = PE

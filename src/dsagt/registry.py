@@ -34,6 +34,19 @@ logger = logging.getLogger(__name__)
 TOOLS_COLLECTION = "tools"
 SKILLS_COLLECTION = "skills"
 
+#: External skill catalogs (fetched from GitHub repos) live in their own
+#: per-source collections named ``skills_catalog__<slug>``.  Keeping each
+#: source in its own collection lets a re-sync drop+rebuild one source's
+#: directory without disturbing bundled/registered skills (the ``skills``
+#: collection) or other catalogs — no delete-by-metadata primitive needed.
+CATALOG_COLLECTION_PREFIX = "skills_catalog__"
+
+
+def catalog_collection(slug: str) -> str:
+    """KB collection name holding the indexed catalog for source *slug*."""
+    return f"{CATALOG_COLLECTION_PREFIX}{slug}"
+
+
 #: Backwards-compat aliases — kept so external code that imported the
 #: previous names still resolves.  New code should use the names above.
 TOOL_REGISTRY_COLLECTION = TOOLS_COLLECTION
@@ -43,6 +56,7 @@ SKILL_REGISTRY_COLLECTION = SKILLS_COLLECTION
 # ---------------------------------------------------------------------------
 # Helpers (tools only)
 # ---------------------------------------------------------------------------
+
 
 def _uv_run_prefix(deps: list[str]) -> str:
     """Build a 'uv run --with dep1,dep2 --' prefix for Python dependencies."""
@@ -77,7 +91,9 @@ def _generate_tool_body(spec: dict) -> str:
         for name, p in params.items():
             req = "yes" if p.get("required") else "no"
             default = p.get("default", "—")
-            lines.append(f"| `{name}` | {req} | {default} | {p.get('description', '')} |\n")
+            lines.append(
+                f"| `{name}` | {req} | {default} | {p.get('description', '')} |\n"
+            )
     return "".join(lines)
 
 
@@ -114,6 +130,7 @@ def _parse_frontmatter(path: Path) -> dict:
 # agent was guessing before this field existed; avoids breaking old specs).
 # Parameters with `type: boolean` render as a bare flag when truthy and emit
 # nothing when falsy; positional booleans are not supported.
+
 
 def _parse_cli(cli: str, param_name: str) -> dict:
     """Classify a cli string into a rendering descriptor. Fails fast on invalid input."""
@@ -186,6 +203,7 @@ def render_arguments(parameters: dict, values: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 # Tool Registry
 # ---------------------------------------------------------------------------
+
 
 class ToolRegistry:
     """
@@ -283,15 +301,17 @@ class ToolRegistry:
                     properties[param_name]["default"] = param_def["default"]
                 if param_def.get("required", False):
                     required.append(param_name)
-            tools.append({
-                "name": tool["name"],
-                "description": tool["description"],
-                "inputSchema": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                },
-            })
+            tools.append(
+                {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                }
+            )
         return tools
 
     def get_tool(self, name: str) -> dict | None:
@@ -322,7 +342,9 @@ class ToolRegistry:
 
         spec = dict(spec)
         spec["executable"] = _wrap_executable(
-            spec["name"], spec["executable"], spec.get("dependencies"),
+            spec["name"],
+            spec["executable"],
+            spec.get("dependencies"),
         )
 
         # Preserve existing body when updating so hand-edited docs survive
@@ -389,6 +411,7 @@ class ToolRegistry:
 # Skill Registry
 # ---------------------------------------------------------------------------
 
+
 class SkillRegistry:
     """
     Manages instruction-based agent skills and optional KB indexing.
@@ -435,14 +458,16 @@ class SkillRegistry:
         if not self._bundled_dir.exists():
             return []
         return [
-            d for d in sorted(self._bundled_dir.iterdir())
+            d
+            for d in sorted(self._bundled_dir.iterdir())
             if d.is_dir() and (d / "SKILL.md").exists()
         ]
 
     def _project_skill_dirs(self) -> list[Path]:
         """Return skill directories the agent has saved into this project."""
         return [
-            d for d in sorted(self.skills_dir.iterdir())
+            d
+            for d in sorted(self.skills_dir.iterdir())
             if d.is_dir() and (d / "SKILL.md").exists()
         ]
 
