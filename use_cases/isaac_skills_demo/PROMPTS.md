@@ -13,12 +13,26 @@ The project `isaac-skills-demo` is already set up from the first pass:
 - `pymatgen` already installed and mirrored into `.claude/skills/`,
 - `mock_data/` copied into the project.
 
-To start fresh instead, delete and rebuild:
+To start fresh instead, delete and rebuild — **including the catalog sync**
+(a fresh `init` only copies the *shared* KB; the external catalog is
+project-scoped, so it must be synced after init or the catalog will be empty
+and prompt 2 finds nothing):
 
 ```bash
 dsagt rm isaac-skills-demo -y
 dsagt init isaac-skills-demo --agent claude
 cp -r use_cases/isaac_skills_demo/mock_data ~/dsagt-projects/isaac-skills-demo/mock_data
+dsagt skills sync isaac-skills-demo      # REQUIRED: populate the catalog (146 skills)
+```
+
+> Alternatively, run the global `dsagt setup-kb` once (it syncs the default
+> catalog into the *shared* KB, which every new `init` then copies in). The
+> per-project `dsagt skills sync` above is the lighter, self-contained path.
+
+Confirm the catalog is present before launching:
+
+```bash
+dsagt skills list isaac-skills-demo --catalog   # expect a skills_catalog__* collection
 ```
 
 Launch the agent:
