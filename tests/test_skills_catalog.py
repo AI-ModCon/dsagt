@@ -34,6 +34,22 @@ def test_repo_slug_is_collection_safe():
     assert sc._repo_slug("git@github.com:Foo/Bar.git") == "foo-bar"
 
 
+def test_persist_source_to_config_appends_and_dedupes(tmp_path):
+    import yaml
+
+    cfg = tmp_path / "dsagt_config.yaml"
+    cfg.write_text(yaml.dump({"project": "p", "skills": {"sources": []}}))
+    spec = {"name": "anthropic", "url": "https://github.com/anthropics/skills", "branch": "main"}
+    assert sc.persist_source_to_config(tmp_path, spec) is True
+    sources = yaml.safe_load(cfg.read_text())["skills"]["sources"]
+    assert sources[-1]["name"] == "anthropic"
+    # Idempotent: same URL is not appended twice.
+    assert sc.persist_source_to_config(tmp_path, spec) is False
+    assert len(yaml.safe_load(cfg.read_text())["skills"]["sources"]) == 1
+    # No config file → no-op, no crash.
+    assert sc.persist_source_to_config(tmp_path / "nope", spec) is False
+
+
 def test_resolve_source_known_url_and_shorthand():
     assert (
         sc.resolve_source("scientific")["url"] == sc.KNOWN_SOURCES["scientific"]["url"]

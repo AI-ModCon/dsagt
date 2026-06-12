@@ -98,6 +98,31 @@ def resolve_source(source: str | dict) -> dict:
     )
 
 
+def persist_source_to_config(project_dir: str | Path, spec: dict) -> bool:
+    """Append a resolved source to ``skills.sources`` in the project config.
+
+    Dedupes by URL.  Returns True if the config was updated.  No-op (returns
+    False) if the config file is missing — the catalog is still indexed
+    either way.  Used by both the ``add_skill_source`` MCP tool and the
+    ``dsagt skills add`` CLI so a CLI-added source is re-synced by a later
+    config-driven ``dsagt skills sync``.
+    """
+    import yaml
+
+    cfg_path = Path(project_dir) / "dsagt_config.yaml"
+    if not cfg_path.exists():
+        return False
+    cfg = yaml.safe_load(cfg_path.read_text()) or {}
+    sources = cfg.setdefault("skills", {}).setdefault("sources", [])
+    if any(s.get("url") == spec.get("url") for s in sources):
+        return False
+    sources.append(
+        {k: spec[k] for k in ("name", "url", "branch", "subdir") if k in spec}
+    )
+    cfg_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
+    return True
+
+
 def _repo_slug(url: str) -> str:
     """Stable, collection-name-safe slug from a GitHub URL (``owner-repo``)."""
     s = url.rstrip("/")

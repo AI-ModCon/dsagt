@@ -569,25 +569,6 @@ async def _handle_kb_dismiss_suggestion(
 # ---------------------------------------------------------------------------
 
 
-def _persist_skill_source(runtime_dir: Path, spec: dict) -> None:
-    """Append a resolved source to ``skills.sources`` in the project config.
-
-    Dedupes by URL.  No-op if the config file is missing (e.g. tests with a
-    bare runtime dir) — the catalog is still indexed either way.
-    """
-    cfg_path = runtime_dir / "dsagt_config.yaml"
-    if not cfg_path.exists():
-        return
-    cfg = yaml.safe_load(cfg_path.read_text()) or {}
-    skills = cfg.setdefault("skills", {})
-    sources = skills.setdefault("sources", [])
-    if not any(s.get("url") == spec.get("url") for s in sources):
-        sources.append(
-            {k: spec[k] for k in ("name", "url", "branch", "subdir") if k in spec}
-        )
-        cfg_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
-
-
 async def _handle_add_skill_source(
     arguments: dict,
     *,
@@ -595,7 +576,12 @@ async def _handle_add_skill_source(
     runtime_dir: Path,
 ) -> dict:
     """Enable a skill source (known name or GitHub URL): clone + index the catalog."""
-    from dsagt.commands.skills_catalog import KNOWN_SOURCES, resolve_source, sync_source
+    from dsagt.commands.skills_catalog import (
+        KNOWN_SOURCES,
+        persist_source_to_config,
+        resolve_source,
+        sync_source,
+    )
 
     source = arguments.get("source")
     if not source:
@@ -609,7 +595,7 @@ async def _handle_add_skill_source(
         stats = await asyncio.to_thread(sync_source, source, kb=kb)
     except (ValueError, RuntimeError) as e:
         return {"error": str(e)}
-    _persist_skill_source(
+    persist_source_to_config(
         runtime_dir, {"name": spec.get("name", stats["slug"]), **spec}
     )
     return {
