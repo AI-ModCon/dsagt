@@ -35,16 +35,26 @@ def plot_field_mesh(field, filename, time=0, coord="scalar", phi=0.0,
     sim = sim_data(filename=str(filename), time=time)
     mesh_obj = sim.get_mesh(quiet=True)
     el = mesh_obj.elements
-    R_verts = el[:, 4]
-    Z_verts = el[:, 5]
-    phi_verts = np.full_like(R_verts, phi)
 
-    f_verts = eval_field(field, R_verts, phi_verts, Z_verts,
-                         coord=coord, sim=sim, time=time, quiet=quiet)
+    # Columns 0-2 of mesh/elements are floating-point values, not integer node
+    # indices, so they cannot be used as triangle connectivity.  Evaluate the
+    # field at all per-element (R, Z) positions, then deduplicate to obtain
+    # unique vertices and a valid Delaunay triangulation.
+    R_all = el[:, 4].astype(float)
+    Z_all = el[:, 5].astype(float)
+    phi_all = np.full_like(R_all, phi)
 
-    triang = tri.Triangulation(R_verts, Z_verts, el[:, :3].astype(int))
-    fig, ax = plt.subplots()
-    tcf = ax.tripcolor(triang, f_verts, shading="flat")
+    f_all = eval_field(field, R_all, phi_all, Z_all,
+                       coord=coord, sim=sim, time=time, quiet=quiet)
+
+    _, idx = np.unique(np.column_stack([R_all, Z_all]), axis=0, return_index=True)
+    R_unique = R_all[idx]
+    Z_unique = Z_all[idx]
+    f_unique = f_all[idx]
+
+    triang = tri.Triangulation(R_unique, Z_unique)
+    fig, ax = plt.subplots(figsize=(5, 7))
+    tcf = ax.tripcolor(triang, f_unique, shading="gouraud")
     plt.colorbar(tcf, ax=ax, label=label.get(field, field))
     ax.set_xlabel("R (m)")
     ax.set_ylabel("Z (m)")
@@ -53,4 +63,5 @@ def plot_field_mesh(field, filename, time=0, coord="scalar", phi=0.0,
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"mesh_{field}_{time:03d}.png", dpi=150)
-    plt.show()
+    if plt.isinteractive():
+        plt.show()

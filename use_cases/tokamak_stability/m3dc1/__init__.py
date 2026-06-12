@@ -656,7 +656,7 @@ def plot_field(field, filename, time=0, coord="scalar", phi=0.0, points=250,
         f_2d = eval_field(field, R_2d, np.full_like(R_2d, phi), Z_2d,
                           coord=coord, sim=sim, time=time, quiet=True)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(5, 7))
     pcm = ax.pcolormesh(R_2d, Z_2d, f_2d, shading="auto")
     plt.colorbar(pcm, ax=ax, label=field)
     ax.set_xlabel("R (m)")
@@ -695,7 +695,7 @@ def plot_shape(filename, time=0, points=200, save=False, savedir="./",
     psi_2d = eval_field("psi", R_2d, np.zeros_like(R_2d), Z_2d,
                         coord="scalar", sim=sim, time=time, quiet=True)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(5, 7))
     ax.contour(R_2d, Z_2d, psi_2d, levels=20)
     ax.set_xlabel("R (m)")
     ax.set_ylabel("Z (m)")
@@ -741,40 +741,6 @@ def plot_mesh(filename, time=0, boundary=False, save=False, savedir="./",
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / "mesh.png", dpi=150)
-    if plt.isinteractive():
-        plt.show()
-
-
-def plot_diagnostics(filename, save=False, savedir="./", quiet=True):
-    """Plot M3D-C1 iteration counts and timing diagnostics."""
-    import matplotlib.pyplot as plt  # noqa: PLC0415
-
-    sim = _require_sim(filename, 0)
-    try:
-        diag_iter = sim.get_diagnostic("iterations")
-        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-        axes[0].bar(diag_iter.x_axis, diag_iter.diagnostic[:, 0])
-        axes[0].set_xlabel("Step")
-        axes[0].set_ylabel("Iterations")
-        axes[0].set_title("GMRES iterations")
-    except Exception:
-        fig, axes = plt.subplots(1, 1)
-        axes = [axes]
-
-    try:
-        diag_time = sim.get_diagnostic("timings")
-        total = diag_time.diagnostic.get("t_onestep", np.array([]))
-        if len(total):
-            axes[-1].plot(diag_time.x_axis, total)
-            axes[-1].set_xlabel("Step")
-            axes[-1].set_ylabel("Wall time (s)")
-            axes[-1].set_title("Step timing")
-    except Exception:
-        pass
-
-    plt.tight_layout()
-    if save:
-        fig.savefig(Path(savedir) / "diagnostics.png", dpi=150)
     if plt.isinteractive():
         plt.show()
 

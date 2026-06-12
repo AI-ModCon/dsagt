@@ -29,7 +29,6 @@ Category B — m3dc1 library wrappers (figure capture / tempdir pattern):
     plot_line                    Field along a line via m3.plot_line
     plot_eigenfunction           Eigenfunction via m3.eigenfunction
     plot_poincare                Poincaré plot via m3.plot_poincare
-    plot_diagnostics             Diagnostic timing via m3.plot_diagnostics
     plot_signal                  Diagnostic signal via m3.plot_signal
     plot_time_trace              Time trace via m3.plot_time_trace_fast
 
@@ -889,11 +888,7 @@ def plot_flux_surface_shape(
     case_dir: str | Path,
     time_idx: int,
     output_path: str | Path,
-    phi: float = 0.0,
-    points: int = 250,
-    mesh: bool = False,
-    bound: bool = False,
-    lcfs: bool = False,
+    points: int = 200,
     dpi: int = 150,
 ) -> Path:
     """Flux surface shape on the R,Z plane via m3dc1.plot_shape.
@@ -902,11 +897,7 @@ def plot_flux_surface_shape(
         case_dir: M3D-C1 case directory.
         time_idx: Snapshot index.
         output_path: Destination PNG file.
-        phi: Toroidal angle in radians.
-        points: Resolution used to trace flux surfaces.
-        mesh: Overlay mesh triangulation.
-        bound: Overlay boundary.
-        lcfs: Overlay last closed flux surface.
+        points: Grid resolution for psi evaluation.
         dpi: Figure resolution.
 
     Returns:
@@ -918,15 +909,7 @@ def plot_flux_surface_shape(
     output_path = Path(output_path)
 
     before = set(plt.get_fignums())
-    m3.plot_shape(
-        filename=c1h5,
-        time=time_idx,
-        phi=phi,
-        res=points,
-        mesh=mesh,
-        bound=bound,
-        lcfs=lcfs,
-    )
+    m3.plot_shape(filename=c1h5, time=time_idx, points=points)
     _save_first_new_fig(before, output_path, dpi)
     return output_path
 
@@ -944,7 +927,7 @@ def plot_field_basic(
     mesh: bool = False,
     dpi: int = 150,
 ) -> Path:
-    """2-D field plot via m3dc1.plot_field_basic.
+    """2-D filled-contour field plot via m3dc1.plot_field.
 
     Args:
         case_dir: M3D-C1 case directory.
@@ -953,7 +936,7 @@ def plot_field_basic(
         output_path: Destination PNG file.
         coord: Field component.
         phi: Toroidal angle in radians.
-        points: R/Z resolution.
+        points: R/Z grid resolution.
         tor_av: Toroidal average planes.
         units: Unit system.
         mesh: Overlay mesh.
@@ -962,28 +945,23 @@ def plot_field_basic(
     Returns:
         Path to the saved figure.
     """
-    import importlib
-    m3 = _import_m3dc1()  # ensure m3dc1 is available before submodule import
-    pfb = importlib.import_module("m3dc1.plot_field_basic")
-    pfb.shortlbl = False
-
+    m3 = _import_m3dc1()
     case_dir = Path(case_dir)
     c1h5 = str(case_dir / "C1.h5")
     output_path = Path(output_path)
 
     before = set(plt.get_fignums())
-    pfb.plot_field_basic(
+    m3.plot_field(
         field=field,
         coord=coord,
         filename=c1h5,
         time=time_idx,
         phi=phi,
         mesh=mesh,
-        linear=False,
-        diff=False,
         tor_av=tor_av,
         units=units,
-        res=points,
+        points=points,
+        save=False,
     )
     _save_first_new_fig(before, output_path, dpi)
     return output_path
@@ -996,10 +974,6 @@ def plot_field_mesh(
     output_path: str | Path,
     coord: str = "scalar",
     phi: float = 0.0,
-    tor_av: int = 1,
-    units: str = "mks",
-    mesh: bool = False,
-    mesh_res: int = 0,
     dpi: int = 150,
 ) -> Path:
     """Field plotted on the mesh triangulation via m3dc1.plot_field_mesh.
@@ -1011,38 +985,21 @@ def plot_field_mesh(
         output_path: Destination PNG file.
         coord: Field component.
         phi: Toroidal angle in radians.
-        tor_av: Toroidal average planes.
-        units: Unit system.
-        mesh: Overlay mesh edges.
-        mesh_res: Mesh refinement level (0 = native resolution).
         dpi: Figure resolution.
 
     Returns:
         Path to the saved figure.
     """
     import importlib
-    m3 = _import_m3dc1()
+    _import_m3dc1()
     pfm = importlib.import_module("m3dc1.plot_field_mesh")
-    pfm.shortlbl = False
 
     case_dir = Path(case_dir)
     c1h5 = str(case_dir / "C1.h5")
     output_path = Path(output_path)
 
     before = set(plt.get_fignums())
-    pfm.plot_field_mesh(
-        field=field,
-        coord=coord,
-        filename=c1h5,
-        time=time_idx,
-        phi=phi,
-        mesh=mesh,
-        linear=False,
-        diff=False,
-        tor_av=tor_av,
-        units=units,
-        res=mesh_res,
-    )
+    pfm.plot_field_mesh(field=field, filename=c1h5, time=time_idx, coord=coord, phi=phi)
     _save_first_new_fig(before, output_path, dpi)
     return output_path
 
@@ -1052,41 +1009,30 @@ def plot_field_vs_phi(
     time_idx: int,
     field: str,
     output_path: str | Path,
-    cutr: float | None = None,
-    cutz: float | None = None,
+    R: float | None = None,
+    Z: float | None = None,
     coord: str = "scalar",
-    phi_res: int = 100,
-    points: int = 250,
-    mesh: bool = False,
-    bound: bool = False,
-    units: str = "mks",
+    phi_res: int = 64,
     dpi: int = 150,
 ) -> Path:
-    """Field amplitude vs toroidal angle φ at a fixed R or Z cut.
+    """Field vs toroidal angle φ at a fixed (R, Z) point.
 
-    Exactly one of cutr or cutz must be supplied.
+    R and Z default to the magnetic axis when not supplied.
 
     Args:
         case_dir: M3D-C1 case directory.
         time_idx: Snapshot index.
         field: Field name.
         output_path: Destination PNG file.
-        cutr: Fixed R value (metres) for the cut; mutually exclusive with cutz.
-        cutz: Fixed Z value (metres) for the cut; mutually exclusive with cutr.
+        R: Radial coordinate in metres (None → magnetic axis R).
+        Z: Vertical coordinate in metres (None → magnetic axis Z).
         coord: Field component.
         phi_res: Number of toroidal angle points.
-        points: Poloidal resolution.
-        mesh: Overlay mesh.
-        bound: Overlay boundary.
-        units: Unit system.
         dpi: Figure resolution.
 
     Returns:
         Path to the saved figure.
     """
-    if (cutr is None) == (cutz is None):
-        raise ValueError("Exactly one of cutr or cutz must be provided.")
-
     m3 = _import_m3dc1()
     case_dir = Path(case_dir)
     c1h5 = str(case_dir / "C1.h5")
@@ -1095,16 +1041,12 @@ def plot_field_vs_phi(
     before = set(plt.get_fignums())
     m3.plot_field_vs_phi(
         field=field,
-        cutr=cutr,
-        cutz=cutz,
-        coord=coord,
         filename=c1h5,
         time=time_idx,
+        R=R,
+        Z=Z,
+        coord=coord,
         phi_res=phi_res,
-        res=points,
-        mesh=mesh,
-        bound=bound,
-        units=units,
         save=False,
     )
     _save_first_new_fig(before, output_path, dpi)
@@ -1116,9 +1058,8 @@ def plot_flux_average_m3(
     time_idx: int,
     field: str,
     output_path: str | Path,
-    coord: str = "scalar",
     fcoords: str = "pest",
-    units: str = "mks",
+    points: int = 200,
     dpi: int = 150,
 ) -> Path:
     """Flux-averaged profile via m3dc1.plot_flux_average.
@@ -1131,9 +1072,8 @@ def plot_flux_average_m3(
         time_idx: Snapshot index.
         field: Field name, e.g. ``"p"``.
         output_path: Destination PNG file.
-        coord: Field component.
         fcoords: Flux coordinate system.
-        units: Unit system.
+        points: Radial grid resolution.
         dpi: Figure resolution.
 
     Returns:
@@ -1145,14 +1085,7 @@ def plot_flux_average_m3(
     output_path = Path(output_path)
 
     before = set(plt.get_fignums())
-    m3.plot_flux_average(
-        field=field,
-        coord=coord,
-        fcoords=fcoords,
-        filename=c1h5,
-        time=time_idx,
-        units=units,
-    )
+    m3.plot_flux_average(field=field, filename=c1h5, time=time_idx, fcoords=fcoords, points=points)
     _save_first_new_fig(before, output_path, dpi)
     return output_path
 
@@ -1165,13 +1098,10 @@ def plot_line(
     coord: str = "scalar",
     angle: float = 0.0,
     zoff: float = 0.0,
-    phi: float = 0.0,
-    tor_av: int = 1,
-    units: str = "mks",
     dist_from_magax: bool = False,
     dpi: int = 150,
 ) -> Path:
-    """Field profile along a poloidal line via m3dc1.plot_line.
+    """Field profile along a radial line at fixed phi=0 via m3dc1.plot_line.
 
     Args:
         case_dir: M3D-C1 case directory.
@@ -1181,9 +1111,6 @@ def plot_line(
         coord: Field component.
         angle: Poloidal angle of the line in degrees.
         zoff: Z offset of the line origin (metres).
-        phi: Toroidal angle in radians.
-        tor_av: Toroidal average planes.
-        units: Unit system.
         dist_from_magax: If True, use distance from magnetic axis as x-axis.
         dpi: Figure resolution.
 
@@ -1204,9 +1131,6 @@ def plot_line(
         dist_from_magax=dist_from_magax,
         filename=c1h5,
         time=time_idx,
-        phi=phi,
-        tor_av=tor_av,
-        units=units,
     )
     _save_first_new_fig(before, output_path, dpi)
     return output_path
@@ -1219,25 +1143,25 @@ def plot_eigenfunction(
     output_path: str | Path,
     coord: str = "scalar",
     phit: float = 0.0,
-    fcoords: str | None = None,
+    fcoords: str = "pest",
     points: int = 200,
-    units: str = "mks",
     dpi: int = 150,
 ) -> Path:
     """Eigenfunction and poloidal spectrum via m3dc1.eigenfunction.
 
-    Must be called from case_dir (handled internally).
+    Builds the [flux_coords_result, linear_sim] pair that m3dc1.eigenfunction
+    requires: runs flux_coordinates on the equilibrium (time=0) and opens a
+    second sim object for the requested time snapshot.
 
     Args:
         case_dir: M3D-C1 case directory.
-        time_idx: Snapshot index.
+        time_idx: Snapshot index for the perturbed state.
         field: Field name, e.g. ``"p"``.
         output_path: Destination PNG file.
         coord: Field component.
-        phit: Toroidal angle in radians.
-        fcoords: Flux coordinate system (None uses m3dc1 default).
-        points: Grid resolution.
-        units: Unit system.
+        phit: Toroidal angle in radians for the poloidal cross-section.
+        fcoords: Flux coordinate system.
+        points: Radial grid resolution.
         dpi: Figure resolution.
 
     Returns:
@@ -1250,17 +1174,16 @@ def plot_eigenfunction(
 
     before = set(plt.get_fignums())
     with _in_case_dir(case_dir):
+        eq_sim = m3._require_sim(c1h5, 0)
+        fc_result = m3.flux_coordinates(sim=eq_sim, fcoords=fcoords, phit=phit, points=points)
+        lin_sim = m3._require_sim(c1h5, time_idx)
         m3.eigenfunction(
+            sim=[fc_result, lin_sim],
             field=field,
             coord=coord,
-            filename=c1h5,
-            time=time_idx,
-            phit=phit,
             fcoords=fcoords,
             points=points,
-            units=units,
             makeplot=True,
-            save=False,
         )
     _save_first_new_fig(before, output_path, dpi)
     return output_path
@@ -1306,32 +1229,6 @@ def plot_poincare(
             raise RuntimeError("m3.plot_poincare produced no output file.")
         shutil.copy2(new_files[0], output_path)
 
-    return output_path
-
-
-def plot_diagnostics(
-    case_dir: str | Path,
-    output_path: str | Path,
-    dpi: int = 150,
-) -> Path:
-    """Diagnostic timing and iteration history via m3dc1.plot_diagnostics.
-
-    Args:
-        case_dir: M3D-C1 case directory.
-        output_path: Destination PNG file.
-        dpi: Figure resolution.
-
-    Returns:
-        Path to the saved figure.
-    """
-    m3 = _import_m3dc1()
-    case_dir = Path(case_dir)
-    c1h5 = str(case_dir / "C1.h5")
-    output_path = Path(output_path)
-
-    before = set(plt.get_fignums())
-    m3.plot_diagnostics(filename=c1h5)
-    _save_first_new_fig(before, output_path, dpi)
     return output_path
 
 
