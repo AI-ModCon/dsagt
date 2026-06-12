@@ -387,6 +387,8 @@ def _cmd_skills(args):
     from dsagt.commands.skills_catalog import (
         KNOWN_SOURCES,
         install_into_project,
+        persist_source_to_config,
+        resolve_source,
         sync_source,
     )
     from dsagt.registry import (
@@ -434,11 +436,17 @@ def _cmd_skills(args):
             or target.count("/") == 1
         )
         if is_source:
+            spec = resolve_source(target)
+            if target in KNOWN_SOURCES:
+                spec.setdefault("name", target)
             kb = kb_from_config(config)
             try:
                 stats = sync_source(target, kb=kb)
             finally:
                 kb.close()
+            persist_source_to_config(
+                pdir, {"name": spec.get("name", stats["slug"]), **spec}
+            )
             print(f"Added source {stats['url']}: {stats['indexed']} skill(s) indexed.")
             print(
                 "Run 'dsagt start' to mirror an installed skill natively, or "
