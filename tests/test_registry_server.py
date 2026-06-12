@@ -19,8 +19,12 @@ from dsagt.commands.registry_server import create_registry_server
 from mcp_helpers import call_tool_sync as call_tool
 
 
-def make_spec(name="test_tool", description="A test tool", executable="echo hello",
-              dependencies=None):
+def make_spec(
+    name="test_tool",
+    description="A test tool",
+    executable="echo hello",
+    dependencies=None,
+):
     """Create a minimal valid tool spec."""
     spec = {
         "name": name,
@@ -59,7 +63,7 @@ def _make_server(tmp_path, tools=None):
     runtime_dir = tmp_path / "runtime"
     project_tools_dir = runtime_dir / "tools"
     project_tools_dir.mkdir(parents=True, exist_ok=True)
-    for spec in (tools or []):
+    for spec in tools or []:
         _write_tool(project_tools_dir, spec)
     reg = ToolRegistry(
         source_tools_dir=str(source_dir),
@@ -71,6 +75,7 @@ def _make_server(tmp_path, tools=None):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def server_and_registry(tmp_path):
@@ -89,10 +94,13 @@ def registry(server_and_registry):
 
 @pytest.fixture
 def populated(tmp_path):
-    server, reg = _make_server(tmp_path, tools=[
-        make_spec("tool_alpha", "Alpha tool", "python alpha.py"),
-        make_spec("tool_beta", "Beta data processor", "python beta.py"),
-    ])
+    server, reg = _make_server(
+        tmp_path,
+        tools=[
+            make_spec("tool_alpha", "Alpha tool", "python alpha.py"),
+            make_spec("tool_beta", "Beta data processor", "python beta.py"),
+        ],
+    )
     return server, reg
 
 
@@ -104,6 +112,7 @@ def populated_server(populated):
 # ---------------------------------------------------------------------------
 # save_tool_spec
 # ---------------------------------------------------------------------------
+
 
 class TestSaveToolSpec:
 
@@ -118,8 +127,16 @@ class TestSaveToolSpec:
 
     def test_update_existing_tool(self, server, registry):
         """Saving a spec with the same name updates rather than duplicates."""
-        call_tool(server, "save_tool_spec", {"spec": make_spec("my_tool", description="Version 1")})
-        text = call_tool(server, "save_tool_spec", {"spec": make_spec("my_tool", description="Version 2")})
+        call_tool(
+            server,
+            "save_tool_spec",
+            {"spec": make_spec("my_tool", description="Version 1")},
+        )
+        text = call_tool(
+            server,
+            "save_tool_spec",
+            {"spec": make_spec("my_tool", description="Version 2")},
+        )
 
         assert "updated" in text
         assert "1 tools" in text
@@ -138,6 +155,7 @@ class TestSaveToolSpec:
         """Some MCP clients (Claude Sonnet/Haiku 4.x) send nested-object args as
         JSON strings.  The handler must accept both shapes."""
         import json
+
         spec = make_spec("stringy_tool")
         text = call_tool(server, "save_tool_spec", {"spec": json.dumps(spec)})
 
@@ -153,8 +171,27 @@ class TestSaveToolSpec:
 
 
 # ---------------------------------------------------------------------------
+# install_skill
+# ---------------------------------------------------------------------------
+
+
+class TestInstallSkill:
+
+    def test_install_skill_routes_and_reports_missing(self, server):
+        """install_skill is registered and reports a clean error when the
+        named skill isn't in any synced catalog."""
+        text = call_tool(
+            server,
+            "install_skill",
+            {"skill_name": "zzz-definitely-not-a-real-skill-xyz"},
+        )
+        assert "No catalog skill" in text
+
+
+# ---------------------------------------------------------------------------
 # save_skill
 # ---------------------------------------------------------------------------
+
 
 class TestSaveSkill:
 
@@ -168,6 +205,7 @@ class TestSaveSkill:
         """
         server, reg, kb = _make_server_with_kb(tmp_path)
         from dsagt.registry import SkillRegistry as _SR
+
         skill_reg = _SR(runtime_dir=str(tmp_path / "runtime"), kb=kb)
         before = len(skill_reg.list_skills())
 
@@ -192,14 +230,22 @@ class TestSaveSkill:
         """Saving a spec for an existing skill without body keeps the body."""
         server, reg, kb = _make_server_with_kb(tmp_path)
         first_body = "# orig\n\nOriginal workflow body.\n"
-        call_tool(server, "save_skill", {
-            "spec": {"name": "wf", "description": "v1"},
-            "body": first_body,
-        })
+        call_tool(
+            server,
+            "save_skill",
+            {
+                "spec": {"name": "wf", "description": "v1"},
+                "body": first_body,
+            },
+        )
         # Update the description only — body should be preserved.
-        text = call_tool(server, "save_skill", {
-            "spec": {"name": "wf", "description": "v2 description"},
-        })
+        text = call_tool(
+            server,
+            "save_skill",
+            {
+                "spec": {"name": "wf", "description": "v2 description"},
+            },
+        )
         assert "updated" in text
         skill_md = tmp_path / "runtime" / "skills" / "wf" / "SKILL.md"
         content = skill_md.read_text()
@@ -209,11 +255,15 @@ class TestSaveSkill:
     def test_save_skill_writes_reference_files(self, tmp_path):
         """reference_files dict lands as additional files in the skill dir."""
         server, reg, kb = _make_server_with_kb(tmp_path)
-        text = call_tool(server, "save_skill", {
-            "spec": {"name": "with_template", "description": "Has a template"},
-            "body": "# with_template\n\nUses template.json.\n",
-            "reference_files": {"template.json": '{"foo": "bar"}\n'},
-        })
+        text = call_tool(
+            server,
+            "save_skill",
+            {
+                "spec": {"name": "with_template", "description": "Has a template"},
+                "body": "# with_template\n\nUses template.json.\n",
+                "reference_files": {"template.json": '{"foo": "bar"}\n'},
+            },
+        )
         assert "added" in text
         skill_dir = tmp_path / "runtime" / "skills" / "with_template"
         assert (skill_dir / "SKILL.md").exists()
@@ -230,6 +280,7 @@ class TestSaveSkill:
 # ---------------------------------------------------------------------------
 # get_registry
 # ---------------------------------------------------------------------------
+
 
 class TestGetRegistry:
 
@@ -253,6 +304,7 @@ class TestGetRegistry:
 # search_registry
 # ---------------------------------------------------------------------------
 
+
 class TestSearchRegistryNoKB:
     """search_registry with no KB configured.
 
@@ -266,12 +318,16 @@ class TestSearchRegistryNoKB:
 
     def test_exact_name_lookup_works_without_kb(self, populated_server):
         """tool_name lookup is KB-free and must keep working."""
-        text = call_tool(populated_server, "search_registry", {"tool_name": "tool_alpha"})
+        text = call_tool(
+            populated_server, "search_registry", {"tool_name": "tool_alpha"}
+        )
         assert "tool_alpha" in text
 
     def test_exact_name_miss_without_kb(self, populated_server):
         """tool_name with a non-existent name returns a clean 'no tool' message."""
-        text = call_tool(populated_server, "search_registry", {"tool_name": "nonexistent"})
+        text = call_tool(
+            populated_server, "search_registry", {"tool_name": "nonexistent"}
+        )
         assert "No tool named 'nonexistent'" in text
 
     def test_query_search_without_kb_returns_helpful_error(self, populated_server):
@@ -290,6 +346,7 @@ class TestSearchRegistryNoKB:
 # ---------------------------------------------------------------------------
 # read_file
 # ---------------------------------------------------------------------------
+
 
 class TestReadFile:
 
@@ -311,37 +368,51 @@ class TestReadFile:
 # run_command
 # ---------------------------------------------------------------------------
 
+
 class TestRunCommand:
 
     def test_success(self, server):
         """Running a valid command returns its output."""
-        text = call_tool(server, "run_command", {
-            "command": "echo",
-            "args": ["hello"],
-        })
+        text = call_tool(
+            server,
+            "run_command",
+            {
+                "command": "echo",
+                "args": ["hello"],
+            },
+        )
         assert "hello" in text
         assert "Return code: 0" in text
 
     def test_command_not_found(self, server):
         """Running a nonexistent command returns not found error."""
-        text = call_tool(server, "run_command", {
-            "command": "nonexistent_command_xyz",
-        })
+        text = call_tool(
+            server,
+            "run_command",
+            {
+                "command": "nonexistent_command_xyz",
+            },
+        )
         assert "not found" in text
 
     def test_timeout(self, server):
         """A command that exceeds the timeout reports timeout."""
-        text = call_tool(server, "run_command", {
-            "command": "sleep",
-            "args": ["30"],
-            "timeout": 0.1,
-        })
+        text = call_tool(
+            server,
+            "run_command",
+            {
+                "command": "sleep",
+                "args": ["30"],
+                "timeout": 0.1,
+            },
+        )
         assert "timed out" in text
 
 
 # ---------------------------------------------------------------------------
 # save_tool_spec — dependency installation
 # ---------------------------------------------------------------------------
+
 
 class TestSaveToolSpecDependencies:
 
@@ -358,8 +429,15 @@ class TestSaveToolSpecDependencies:
         assert "Successfully installed" in text
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
-        assert cmd == ["uv", "pip", "install", "--python", sys.executable,
-                        "pandas>=2.0", "numpy"]
+        assert cmd == [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            "pandas>=2.0",
+            "numpy",
+        ]
 
     @patch("dsagt.commands.registry_server.subprocess.run")
     def test_deps_failure_still_saves_spec(self, mock_run, server, registry):
@@ -419,15 +497,19 @@ class TestSaveToolSpecDependencies:
 # install_dependencies
 # ---------------------------------------------------------------------------
 
+
 class TestInstallDependencies:
 
     @patch("dsagt.commands.registry_server.subprocess.run")
     def test_install_all(self, mock_run, tmp_path):
         """install_dependencies with no tool_name installs all unique deps."""
-        server, reg = _make_server(tmp_path, tools=[
-            make_spec("tool_a", dependencies=["pandas", "numpy"]),
-            make_spec("tool_b", dependencies=["numpy", "scipy"]),
-        ])
+        server, reg = _make_server(
+            tmp_path,
+            tools=[
+                make_spec("tool_a", dependencies=["pandas", "numpy"]),
+                make_spec("tool_b", dependencies=["numpy", "scipy"]),
+            ],
+        )
 
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         text = call_tool(server, "install_dependencies", {})
@@ -435,16 +517,27 @@ class TestInstallDependencies:
         assert "tool_a" in text
         assert "tool_b" in text
         cmd = mock_run.call_args[0][0]
-        assert cmd == ["uv", "pip", "install", "--python", sys.executable,
-                        "pandas", "numpy", "scipy"]
+        assert cmd == [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            "pandas",
+            "numpy",
+            "scipy",
+        ]
 
     @patch("dsagt.commands.registry_server.subprocess.run")
     def test_install_single_tool(self, mock_run, tmp_path):
         """install_dependencies with tool_name targets only that tool."""
-        server, reg = _make_server(tmp_path, tools=[
-            make_spec("tool_a", dependencies=["pandas"]),
-            make_spec("tool_b", dependencies=["scipy"]),
-        ])
+        server, reg = _make_server(
+            tmp_path,
+            tools=[
+                make_spec("tool_a", dependencies=["pandas"]),
+                make_spec("tool_b", dependencies=["scipy"]),
+            ],
+        )
 
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         text = call_tool(server, "install_dependencies", {"tool_name": "tool_b"})
@@ -471,6 +564,7 @@ class TestInstallDependencies:
 # KB-backed tool indexing and search
 # ---------------------------------------------------------------------------
 
+
 def _make_server_with_kb(tmp_path, tools=None):
     """Create (server, registry, kb) with a real local-embedding KnowledgeBase.
 
@@ -484,7 +578,7 @@ def _make_server_with_kb(tmp_path, tools=None):
     runtime_dir = tmp_path / "runtime"
     project_tools_dir = runtime_dir / "tools"
     project_tools_dir.mkdir(parents=True, exist_ok=True)
-    for spec in (tools or []):
+    for spec in tools or []:
         _write_tool(project_tools_dir, spec)
 
     kb = KnowledgeBase(
@@ -515,10 +609,16 @@ class TestToolIndexing:
 
         server, reg, kb = _make_server_with_kb(tmp_path)
 
-        call_tool(server, "save_tool_spec", {"spec": make_spec(
-            name="csv_filter",
-            description="Filter CSV rows by column value",
-        )})
+        call_tool(
+            server,
+            "save_tool_spec",
+            {
+                "spec": make_spec(
+                    name="csv_filter",
+                    description="Filter CSV rows by column value",
+                )
+            },
+        )
 
         results = kb.search("filter", collection=TOOL_REGISTRY_COLLECTION)
         assert len(results) > 0
@@ -542,12 +642,20 @@ class TestToolIndexing:
     def test_search_registry_semantic(self, tmp_path):
         """Semantic search finds tools by description similarity."""
         server, reg, kb = _make_server_with_kb(tmp_path)
-        call_tool(server, "save_tool_spec", {"spec": make_spec(
-            name="csv_filter",
-            description="Filter and remove rows from a CSV spreadsheet based on column values",
-        )})
+        call_tool(
+            server,
+            "save_tool_spec",
+            {
+                "spec": make_spec(
+                    name="csv_filter",
+                    description="Filter and remove rows from a CSV spreadsheet based on column values",
+                )
+            },
+        )
 
-        text = call_tool(server, "search_registry", {"query": "delete rows from tabular data"})
+        text = call_tool(
+            server, "search_registry", {"query": "delete rows from tabular data"}
+        )
         assert "csv_filter" in text
 
     def test_search_registry_by_tag(self, tmp_path):
@@ -562,7 +670,9 @@ class TestToolIndexing:
         spec_other["tags"] = ["data_processing"]
         call_tool(server, "save_tool_spec", {"spec": spec_other})
 
-        text = call_tool(server, "search_registry", {"query": "tool", "tag": "genomics"})
+        text = call_tool(
+            server, "search_registry", {"query": "tool", "tag": "genomics"}
+        )
         assert "fastp" in text
 
     def test_reindex_all(self, tmp_path):
@@ -571,7 +681,9 @@ class TestToolIndexing:
 
         server, reg, kb = _make_server_with_kb(
             tmp_path,
-            tools=[make_spec(name="preexisting", description="Already registered tool")],
+            tools=[
+                make_spec(name="preexisting", description="Already registered tool")
+            ],
         )
 
         # Skills were copied to runtime on init but not indexed (KB was empty)
@@ -592,9 +704,12 @@ class TestToolIndexing:
         and produced dramatically worse search results without telling
         anyone.
         """
-        server, reg = _make_server(tmp_path, tools=[
-            make_spec(name="csv_filter", description="Filter CSV rows"),
-        ])
+        server, reg = _make_server(
+            tmp_path,
+            tools=[
+                make_spec(name="csv_filter", description="Filter CSV rows"),
+            ],
+        )
 
         text = call_tool(server, "search_registry", {"query": "csv"})
         assert "csv_filter" not in text  # the substring match must NOT happen

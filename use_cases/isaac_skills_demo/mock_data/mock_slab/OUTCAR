@@ -1,0 +1,42 @@
+ MOCK OUTCAR — heavily truncated stub for the skills demo. NOT real VASP output.
+ Only the few lines a converter typically greps for are kept; the SCF/eigenvalue
+ blocks that make a real OUTCAR ~250k lines are omitted on purpose.
+
+ vasp.6.3.2 mock build
+ executed on             LinuxIFC date 2026.06.01  10:00:00
+
+ INCAR:
+   ENCUT  =  520.0
+   ISPIN  =      2
+   NSW    =     50
+   LDAUU  =    4.000   0.000
+
+   energy  without entropy=     -123.45678901  energy(sigma->0) =     -123.40000000
+   ...
+   FREE ENERGIE OF THE ION-ELECTRON SYSTEM (eV)
+   ---------------------------------------------------
+   free  energy   TOTEN  =      -132.10000000 eV   (ionic step 1)
+
+   energy  without entropy=     -131.98000000  energy(sigma->0) =     -131.99000000
+
+   FREE ENERGIE OF THE ION-ELECTRON SYSTEM (eV)
+   ---------------------------------------------------
+   free  energy   TOTEN  =      -132.84210000 eV   (ionic step 50, converged)
+
+   energy  without entropy=     -132.80000000  energy(sigma->0) =     -132.84210000
+
+ POSITION                                       TOTAL-FORCE (eV/Angst)
+ -----------------------------------------------------------------------------------
+      0.00000   0.00000   7.04000        0.000000   0.000000  -0.004000
+      3.19250   3.24900   7.04000        0.000000   0.000000   0.003000
+      0.00000   0.00000   9.90000        0.000000   0.000000   0.011000
+ -----------------------------------------------------------------------------------
+
+ magnetization (x)
+ number of electron     192.0000000 magnetization       8.0123000
+
+ General timing and accounting informations for this job:
+ ========================================================
+                  Total CPU time used (sec):      4210.123
+                       Elapsed time (sec):         1130.456
+ reached required accuracy - stopping structural energy minimisation

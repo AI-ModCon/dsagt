@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import shlex
+import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -41,6 +42,7 @@ _DSAGT_MCP_ALWAYS_ALLOW = {
         "get_registry",
         "http_request",
         "install_dependencies",
+        "install_skill",
         "read_file",
         "reconstruct_pipeline",
         "run_command",
@@ -50,6 +52,7 @@ _DSAGT_MCP_ALWAYS_ALLOW = {
         "search_skills",
     ],
     "knowledge": [
+        "add_skill_source",
         "kb_add_vector_db",
         "kb_append",
         "kb_dismiss_suggestion",
@@ -60,6 +63,7 @@ _DSAGT_MCP_ALWAYS_ALLOW = {
         "kb_list_collections",
         "kb_remember",
         "kb_search",
+        "list_skill_sources",
     ],
 }
 
@@ -210,6 +214,83 @@ def _append_or_write(path: Path, content: str, marker: str) -> str | None:
         return f"Appended DSAgt instructions to {path}"
     path.write_text(content)
     return f"Wrote {path}"
+
+
+#: Claude Code caps a skill's frontmatter description (combined with
+#: when_to_use) at this many characters; longer ones are rejected.  We
+#: truncate the *mirrored* copy only, never the project source.
+_NATIVE_DESCRIPTION_CAP = 1536
+
+#: Manifest filename inside a native skills dir listing the skill names
+#: dsagt placed there, so the mirror can reap its own stale entries on
+#: re-run without ever touching user-authored skills.
+_SKILL_MANIFEST = ".dsagt-managed.json"
+
+
+def _truncate_native_description(skill_md: Path) -> None:
+    """If the mirrored SKILL.md's description exceeds the native cap, trim it."""
+    import yaml
+
+    text = skill_md.read_text()
+    if not text.startswith("---"):
+        return
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return
+    try:
+        front = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        return
+    desc = front.get("description")
+    if isinstance(desc, str) and len(desc) > _NATIVE_DESCRIPTION_CAP:
+        front["description"] = desc[: _NATIVE_DESCRIPTION_CAP - 1].rstrip() + "…"
+        new_front = yaml.dump(front, default_flow_style=False, sort_keys=False)
+        skill_md.write_text(f"---\n{new_front}---{parts[2]}")
+
+
+def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
+    """Idempotently mirror *skill_dirs* into *target_dir* (e.g. .claude/skills).
+
+    Copies each skill directory (SKILL.md + scripts/ + references/) under
+    ``target_dir/<dir-name>/``.  A manifest tracks the names dsagt owns so a
+    later run reaps skills that were removed upstream **without ever
+    touching user-authored skills** that dsagt didn't place.  ``skill_dirs``
+    should list bundled dirs before project dirs so a project skill wins a
+    name collision (copied last).
+    """
+    actions: list[str] = []
+    manifest_path = target_dir / _SKILL_MANIFEST
+    previously: list[str] = []
+    if manifest_path.exists():
+        try:
+            previously = json.loads(manifest_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            previously = []
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    managed: list[str] = []
+    for src in skill_dirs:
+        if not (src / "SKILL.md").exists():
+            continue
+        name = src.name
+        dest = target_dir / name
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(src, dest)
+        _truncate_native_description(dest / "SKILL.md")
+        if name not in managed:
+            managed.append(name)
+
+    # Reap skills dsagt placed previously that are gone from the source set.
+    for stale in set(previously) - set(managed):
+        stale_dir = target_dir / stale
+        if stale_dir.is_dir():
+            shutil.rmtree(stale_dir, ignore_errors=True)
+
+    manifest_path.write_text(json.dumps(sorted(managed), indent=2) + "\n")
+    if managed:
+        actions.append(f"Mirrored {len(managed)} skill(s) into {target_dir}")
+    return actions
 
 
 def _build_mcp_servers_dict(env_block: dict | None) -> dict:

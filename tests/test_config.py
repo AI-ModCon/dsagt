@@ -164,6 +164,20 @@ class TestLoadConfig:
         with pytest.raises(ValueError, match="project"):
             load_config(name)
 
+    def test_skills_block_backfilled_for_old_config(self, tmp_path):
+        """A config written before the skills block still gets the default."""
+        name = self._write_config(
+            tmp_path,
+            "myproject",
+            {"project": "myproject", "agent": "claude", "llm": {"provider": "openai"}},
+        )
+        config = load_config(name)
+        sources = config["skills"]["sources"]
+        assert sources[0]["name"] == "scientific"
+        assert "K-Dense-AI" in sources[0]["url"]
+        assert config["skills"]["populate_native"] is True
+        assert config["skills"]["populate_catalog"] is True
+
     def test_missing_agent_raises(self, tmp_path):
         name = self._write_config(tmp_path, "myproject", {"project": "myproject"})
         with pytest.raises(ValueError, match="agent"):
@@ -192,6 +206,18 @@ class TestLoadConfig:
         )
         config = load_config(name)
         assert config["project_dir"] == str(tmp_path / "myproject")
+
+
+class TestSkillsDefaults:
+
+    def test_defaults_has_skills(self):
+        from dsagt.session import DEFAULTS
+
+        assert DEFAULTS["skills"]["sources"][0]["name"] == "scientific"
+
+    def test_default_config_content_includes_skills(self):
+        body = yaml.safe_load(default_config_content("p", "claude", 5001))
+        assert body["skills"]["sources"][0]["name"] == "scientific"
 
 
 # ---------------------------------------------------------------------------

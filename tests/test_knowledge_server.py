@@ -34,7 +34,9 @@ async def _call_tool_async(server, name: str, arguments: dict) -> dict:
     return json.loads(result.root.content[0].text)
 
 
-async def call_tool_and_await_job(server, name: str, arguments: dict) -> tuple[dict, dict]:
+async def call_tool_and_await_job(
+    server, name: str, arguments: dict
+) -> tuple[dict, dict]:
     """Call a tool that starts a background job, wait for it, return (initial, final)."""
     initial = await _call_tool_async(server, name, arguments)
     assert initial["status"] == "started"
@@ -50,7 +52,9 @@ async def call_tool_and_await_job(server, name: str, arguments: dict) -> tuple[d
     raise TimeoutError(f"Job {job_id} did not complete")
 
 
-def make_search_result(text: str, source_file: str, chunk_index: int = 0, score: float = 0.9):
+def make_search_result(
+    text: str, source_file: str, chunk_index: int = 0, score: float = 0.9
+):
     """Create a search result in the format KnowledgeBase.search returns."""
     return {
         "chunk": {
@@ -70,6 +74,7 @@ def make_search_result(text: str, source_file: str, chunk_index: int = 0, score:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_kb(tmp_path):
     """A mocked KnowledgeBase with default behaviors."""
@@ -86,7 +91,12 @@ def mock_kb(tmp_path):
         make_search_result("Second result text", "/path/to/file2.md", 1, 0.80),
     ]
     kb.ingest.return_value = {"collection": "new_docs", "files": 5, "chunks": 42}
-    kb.append.return_value = {"collection": "docs", "files": 2, "chunks_added": 10, "total_chunks": 50}
+    kb.append.return_value = {
+        "collection": "docs",
+        "files": 2,
+        "chunks_added": 10,
+        "total_chunks": 50,
+    }
     return kb
 
 
@@ -99,6 +109,25 @@ def server(mock_kb):
 # ---------------------------------------------------------------------------
 # kb_list_collections
 # ---------------------------------------------------------------------------
+
+
+class TestSkillSources:
+
+    def test_list_skill_sources_returns_known(self, mock_kb):
+        mock_kb.collections = []
+        server = create_knowledge_server(mock_kb)
+        result = call_tool(server, "list_skill_sources", {})
+        assert "scientific" in result["known_sources"]
+        assert result["synced_collections"] == []
+
+    def test_add_skill_source_bad_source_errors(self, mock_kb):
+        mock_kb.collections = []
+        server = create_knowledge_server(mock_kb)
+        result = call_tool(
+            server, "add_skill_source", {"source": "not-a-real-known-name"}
+        )
+        assert "error" in result
+
 
 class TestListCollections:
 
@@ -128,14 +157,19 @@ class TestListCollections:
 # kb_search
 # ---------------------------------------------------------------------------
 
+
 class TestSearch:
 
     def test_search_success(self, server, mock_kb):
         """Successful search returns formatted results."""
-        result = call_tool(server, "kb_search", {
-            "query": "how to install",
-            "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "how to install",
+                "collection": "docs",
+            },
+        )
 
         assert result["status"] == "ok"
         assert result["query"] == "how to install"
@@ -150,12 +184,16 @@ class TestSearch:
 
     def test_search_passes_parameters(self, server, mock_kb):
         """Search forwards top_k and rerank to the knowledge base."""
-        call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "docs",
-            "top_k": 10,
-            "rerank": False,
-        })
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+                "top_k": 10,
+                "rerank": False,
+            },
+        )
 
         mock_kb.search.assert_called_once_with(
             query="test",
@@ -166,10 +204,14 @@ class TestSearch:
 
     def test_search_defaults(self, server, mock_kb):
         """Search uses default top_k=5 and server's use_rerank setting."""
-        call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "docs",
-        })
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         mock_kb.search.assert_called_once_with(
             query="test",
@@ -182,10 +224,14 @@ class TestSearch:
         """Searching a missing collection returns an error."""
         mock_kb.search.side_effect = ValueError("Collection 'missing' not found")
 
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "missing",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "missing",
+            },
+        )
 
         assert result["status"] == "error"
         assert "not found" in result["error"]
@@ -196,10 +242,14 @@ class TestSearch:
             {**make_search_result("text", "file.md"), "rerank_score": 0.99},
         ]
 
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         assert result["results"][0]["rerank_score"] == 0.99
 
@@ -208,6 +258,7 @@ class TestSearch:
 # kb_ingest (background job pattern)
 # ---------------------------------------------------------------------------
 
+
 class TestIngest:
 
     def test_ingest_returns_started(self, server, mock_kb, tmp_path):
@@ -215,9 +266,13 @@ class TestIngest:
         folder = tmp_path / "new_docs"
         folder.mkdir()
 
-        result = call_tool(server, "kb_ingest", {
-            "folder_path": str(folder),
-        })
+        result = call_tool(
+            server,
+            "kb_ingest",
+            {
+                "folder_path": str(folder),
+            },
+        )
 
         assert result["status"] == "started"
         assert "job_id" in result
@@ -245,23 +300,31 @@ class TestIngest:
 
         async def run():
             await call_tool_and_await_job(
-                server, "kb_ingest", {
+                server,
+                "kb_ingest",
+                {
                     "folder_path": str(folder),
                     "file_types": ["md", "txt"],
-                }
+                },
             )
             # New server always passes collection_name to kb.ingest
             mock_kb.ingest.assert_called_once_with(
-                folder, collection_name="docs2", file_types=["md", "txt"],
+                folder,
+                collection_name="docs2",
+                file_types=["md", "txt"],
             )
 
         asyncio.run(run())
 
     def test_ingest_folder_not_found(self, server):
         """Ingesting a nonexistent folder returns an error immediately."""
-        result = call_tool(server, "kb_ingest", {
-            "folder_path": "/nonexistent/folder",
-        })
+        result = call_tool(
+            server,
+            "kb_ingest",
+            {
+                "folder_path": "/nonexistent/folder",
+            },
+        )
 
         assert result["status"] == "error"
         assert "not found" in result["error"].lower()
@@ -271,9 +334,13 @@ class TestIngest:
         file_path = tmp_path / "not_a_dir.txt"
         file_path.write_text("I'm a file")
 
-        result = call_tool(server, "kb_ingest", {
-            "folder_path": str(file_path),
-        })
+        result = call_tool(
+            server,
+            "kb_ingest",
+            {
+                "folder_path": str(file_path),
+            },
+        )
 
         assert result["status"] == "error"
         assert "Not a directory" in result["error"]
@@ -308,9 +375,13 @@ class TestIngest:
 
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
 
-        result = call_tool(server, "kb_ingest", {
-            "folder_path": str(folder),
-        })
+        result = call_tool(
+            server,
+            "kb_ingest",
+            {
+                "folder_path": str(folder),
+            },
+        )
 
         assert result["status"] == "started"
         assert result["collection"] == "docs1"
@@ -331,9 +402,13 @@ class TestIngest:
         (mock_kb.index_dir / "docs").symlink_to(base_dir)
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
 
-        result = call_tool(server, "kb_ingest", {
-            "folder_path": str(folder),
-        })
+        result = call_tool(
+            server,
+            "kb_ingest",
+            {
+                "folder_path": str(folder),
+            },
+        )
 
         assert result["status"] == "started"
         assert result["collection"] == "docs1"
@@ -346,6 +421,7 @@ class TestIngest:
 # ---------------------------------------------------------------------------
 # kb_job_status
 # ---------------------------------------------------------------------------
+
 
 class TestJobStatus:
 
@@ -365,12 +441,17 @@ class TestJobStatus:
         def blocking_ingest(*args, **kwargs):
             time.sleep(10)
             return {"collection": "slow_docs", "files": 1, "chunks": 5}
+
         mock_kb.ingest.side_effect = blocking_ingest
 
         async def run():
-            initial = await _call_tool_async(server, "kb_ingest", {
-                "folder_path": str(folder),
-            })
+            initial = await _call_tool_async(
+                server,
+                "kb_ingest",
+                {
+                    "folder_path": str(folder),
+                },
+            )
             assert initial["status"] == "started"
             job_id = initial["job_id"]
 
@@ -385,6 +466,7 @@ class TestJobStatus:
 # kb_append (background job pattern)
 # ---------------------------------------------------------------------------
 
+
 class TestAppend:
 
     def test_append_returns_started(self, server, mock_kb, tmp_path):
@@ -394,10 +476,14 @@ class TestAppend:
         coll_dir.mkdir(exist_ok=True)
         (coll_dir / "index.faiss").write_text("fake")
 
-        result = call_tool(server, "kb_append", {
-            "collection": "docs",
-            "paths": [str(tmp_path)],
-        })
+        result = call_tool(
+            server,
+            "kb_append",
+            {
+                "collection": "docs",
+                "paths": [str(tmp_path)],
+            },
+        )
 
         assert result["status"] == "started"
         assert "job_id" in result
@@ -411,10 +497,12 @@ class TestAppend:
 
         async def run():
             initial, final = await call_tool_and_await_job(
-                server, "kb_append", {
+                server,
+                "kb_append",
+                {
                     "collection": "docs",
                     "paths": [str(tmp_path)],
-                }
+                },
             )
             assert final["status"] == "complete"
             assert final["result"]["chunks_added"] == 10
@@ -423,10 +511,14 @@ class TestAppend:
 
     def test_append_collection_not_found(self, server, mock_kb):
         """Appending to a nonexistent collection returns an error immediately."""
-        result = call_tool(server, "kb_append", {
-            "collection": "nonexistent",
-            "paths": ["/some/path"],
-        })
+        result = call_tool(
+            server,
+            "kb_append",
+            {
+                "collection": "nonexistent",
+                "paths": ["/some/path"],
+            },
+        )
 
         assert result["status"] == "error"
         assert "not found" in result["error"].lower()
@@ -436,6 +528,7 @@ class TestAppend:
 # kb_search — error handling (transport-closed diagnostics)
 # ---------------------------------------------------------------------------
 
+
 class TestSearchErrorHandling:
     """Verify the server returns error responses (not crashes) for common
     failure modes that would otherwise cause 'transport closed'."""
@@ -443,12 +536,18 @@ class TestSearchErrorHandling:
     def test_search_httpx_connect_error(self, mock_kb):
         """Network unreachable during search returns error, not crash."""
         import httpx
+
         mock_kb.search.side_effect = httpx.ConnectError("Connection refused")
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test", "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         assert result["status"] == "error"
         assert "Connection refused" in result["error"]
@@ -456,12 +555,18 @@ class TestSearchErrorHandling:
     def test_search_httpx_timeout(self, mock_kb):
         """Embedding API timeout during search returns error, not crash."""
         import httpx
+
         mock_kb.search.side_effect = httpx.ReadTimeout("Read timed out")
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test", "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         assert result["status"] == "error"
         assert "timed out" in result["error"].lower()
@@ -469,16 +574,24 @@ class TestSearchErrorHandling:
     def test_search_httpx_401(self, mock_kb):
         """Expired/invalid API key during search returns error, not crash."""
         import httpx
+
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_kb.search.side_effect = httpx.HTTPStatusError(
-            "401 Unauthorized", request=MagicMock(), response=mock_resp,
+            "401 Unauthorized",
+            request=MagicMock(),
+            response=mock_resp,
         )
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test", "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         assert result["status"] == "error"
         assert "401" in result["error"]
@@ -486,16 +599,24 @@ class TestSearchErrorHandling:
     def test_search_httpx_500(self, mock_kb):
         """Embedding API server error returns error, not crash."""
         import httpx
+
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_kb.search.side_effect = httpx.HTTPStatusError(
-            "500 Internal Server Error", request=MagicMock(), response=mock_resp,
+            "500 Internal Server Error",
+            request=MagicMock(),
+            response=mock_resp,
         )
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test", "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         assert result["status"] == "error"
         assert "500" in result["error"]
@@ -505,9 +626,14 @@ class TestSearchErrorHandling:
         mock_kb.search.side_effect = RuntimeError("FAISS segfault simulation")
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test", "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         assert result["status"] == "error"
         assert "FAISS segfault" in result["error"]
@@ -517,9 +643,14 @@ class TestSearchErrorHandling:
         mock_kb.search.side_effect = OSError("Permission denied: index.faiss")
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test", "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         assert result["status"] == "error"
         assert "Permission denied" in result["error"]
@@ -529,6 +660,7 @@ class TestSearchErrorHandling:
 # ---------------------------------------------------------------------------
 # setup_runtime_kb
 # ---------------------------------------------------------------------------
+
 
 class TestSetupRuntimeKb:
 
@@ -616,6 +748,7 @@ class TestSetupRuntimeKb:
 # Regression: OpenMP duplicate library crash (transport closed)
 # ---------------------------------------------------------------------------
 
+
 class TestOpenMPWorkaround:
     """Importing knowledge_server must set KMP_DUPLICATE_LIB_OK to prevent
     a fatal OpenMP crash when FAISS and sentence-transformers (PyTorch)
@@ -635,6 +768,7 @@ class TestOpenMPWorkaround:
 # ---------------------------------------------------------------------------
 # Regression: rerank schema default must match server config
 # ---------------------------------------------------------------------------
+
 
 class TestRerankSchemaDefault:
     """The kb_search schema previously hardcoded 'default': True for the
@@ -665,10 +799,14 @@ class TestRerankSchemaDefault:
         """Omitting rerank passes None to kb.search, which resolves to
         kb.default_rerank internally."""
         server = create_knowledge_server(mock_kb)
-        call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "docs",
-        })
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
         mock_kb.search.assert_called_once_with(
             query="test",
             collection="docs",

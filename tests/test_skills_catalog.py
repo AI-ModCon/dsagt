@@ -1,0 +1,196 @@
+"""Unit tests for the external skill catalog (fetch / index / install) and
+the native-skill mirror.  No network: ``clone_github`` is monkeypatched and
+the KB is a lightweight fake that records ``add_entries`` calls."""
+
+import json
+
+import pytest
+
+from dsagt.agents.base import (
+    _NATIVE_DESCRIPTION_CAP,
+    _SKILL_MANIFEST,
+    _mirror_skills_to,
+)
+from dsagt.commands import skills_catalog as sc
+from dsagt.registry import CATALOG_COLLECTION_PREFIX, catalog_collection
+
+
+def _mkskill(d, name, desc="a short description"):
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {desc}\n---\n# {name}\nbody\n"
+    )
+    return d
+
+
+# ---------------------------------------------------------------------------
+# slug + source resolution
+# ---------------------------------------------------------------------------
+
+
+def test_repo_slug_is_collection_safe():
+    slug = sc._repo_slug("https://github.com/K-Dense-AI/scientific-agent-skills")
+    assert slug == "k-dense-ai-scientific-agent-skills"
+    assert sc._repo_slug("git@github.com:Foo/Bar.git") == "foo-bar"
+
+
+def test_resolve_source_known_url_and_shorthand():
+    assert (
+        sc.resolve_source("scientific")["url"] == sc.KNOWN_SOURCES["scientific"]["url"]
+    )
+    assert (
+        sc.resolve_source("https://github.com/a/b")["url"] == "https://github.com/a/b"
+    )
+    assert sc.resolve_source("a/b")["url"] == "https://github.com/a/b"
+    with pytest.raises(ValueError):
+        sc.resolve_source("not-a-known-name")
+
+
+# ---------------------------------------------------------------------------
+# discovery
+# ---------------------------------------------------------------------------
+
+
+def test_discover_skill_dirs_flat_and_nested(tmp_path):
+    root = tmp_path / "skills"
+    _mkskill(root / "flat", "flat")
+    _mkskill(root / "domain" / "nested", "nested")
+    # A dir whose SKILL.md has no name is ignored.
+    bad = root / "noname"
+    bad.mkdir(parents=True)
+    (bad / "SKILL.md").write_text("---\ndescription: x\n---\nbody")
+    names = sorted(p.name for p in sc._discover_skill_dirs(tmp_path))
+    assert names == ["flat", "nested"]
+
+
+# ---------------------------------------------------------------------------
+# find + install
+# ---------------------------------------------------------------------------
+
+
+def test_find_catalog_skill_and_ambiguity(tmp_path):
+    cache = tmp_path / "cache"
+    _mkskill(cache / "srcA" / "skills" / "alpha", "alpha")
+    found = sc.find_catalog_skill("alpha", cache_dir=cache)
+    assert found.name == "alpha"
+    with pytest.raises(LookupError):
+        sc.find_catalog_skill("missing", cache_dir=cache)
+    # Same skill name in a second source → ambiguous.
+    _mkskill(cache / "srcB" / "skills" / "alpha", "alpha")
+    with pytest.raises(LookupError):
+        sc.find_catalog_skill("alpha", cache_dir=cache)
+
+
+def test_install_into_project_copies_subdirs(tmp_path):
+    cache = tmp_path / "cache"
+    skill = _mkskill(cache / "src" / "vasp-to-isaac", "vasp-to-isaac")
+    (skill / "scripts").mkdir()
+    (skill / "scripts" / "run.py").write_text("print(1)")
+    (skill / "references").mkdir()
+    (skill / "references" / "spec.md").write_text("# spec")
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    info = sc.install_into_project("vasp-to-isaac", proj, cache_dir=cache)
+    dest = proj / "skills" / "vasp-to-isaac"
+    assert info["action"] == "added"
+    assert (dest / "SKILL.md").exists()
+    assert (dest / "scripts" / "run.py").exists()
+    assert (dest / "references" / "spec.md").exists()
+    # Re-install reports "updated".
+    assert (
+        sc.install_into_project("vasp-to-isaac", proj, cache_dir=cache)["action"]
+        == "updated"
+    )
+
+
+# ---------------------------------------------------------------------------
+# sync_source (mocked clone + fake KB)
+# ---------------------------------------------------------------------------
+
+
+class _FakeKB:
+    def __init__(self, index_dir):
+        self.index_dir = index_dir
+        self.collections = []
+        self.adds = []  # (collection, metadatas)
+
+    def add_entries(self, texts, collection, metadatas=None):
+        self.adds.append((collection, metadatas))
+        if collection not in self.collections:
+            self.collections.append(collection)
+        return {"collection": collection, "entries_added": len(texts)}
+
+
+def test_sync_source_indexes_per_source_collection(tmp_path, monkeypatch):
+    # Fake clone: populate dest/<subdir> with two skills.
+    def fake_clone(url, dest, branch="main", include=None):
+        sub = include[0] if include else ""
+        base = dest / sub if sub else dest
+        _mkskill(base / "s1", "s1")
+        _mkskill(base / "s2", "s2")
+
+    monkeypatch.setattr("dsagt.commands.setup_core_kb.clone_github", fake_clone)
+
+    kb = _FakeKB(tmp_path / "kb_index")
+    cache = tmp_path / "cache"
+    stats = sc.sync_source(
+        {"url": "https://github.com/x/y", "branch": "main", "subdir": "skills"},
+        kb=kb,
+        cache_dir=cache,
+    )
+    slug = sc._repo_slug("https://github.com/x/y")
+    coll = catalog_collection(slug)
+    assert stats["discovered"] == 2 and stats["indexed"] == 2
+    assert coll.startswith(CATALOG_COLLECTION_PREFIX)
+    added_coll, metas = kb.adds[-1]
+    assert added_coll == coll
+    assert all(m["source"] == f"catalog:{slug}" for m in metas)
+    assert {m["skill_name"] for m in metas} == {"s1", "s2"}
+
+
+# ---------------------------------------------------------------------------
+# native mirror
+# ---------------------------------------------------------------------------
+
+
+def test_mirror_manifest_preserves_user_skills_and_reaps(tmp_path):
+    target = tmp_path / ".claude" / "skills"
+    target.mkdir(parents=True)
+    # A user-authored skill dsagt must never touch.
+    _mkskill(target / "user-skill", "user-skill")
+
+    bundled = _mkskill(tmp_path / "bundled" / "skill-creator", "skill-creator")
+    proj = _mkskill(tmp_path / "proj" / "alpha", "alpha")
+
+    _mirror_skills_to(target, [bundled, proj])
+    assert sorted(p.name for p in target.iterdir() if p.is_dir()) == [
+        "alpha",
+        "skill-creator",
+        "user-skill",
+    ]
+    manifest = json.loads((target / _SKILL_MANIFEST).read_text())
+    assert manifest == ["alpha", "skill-creator"]
+    assert "user-skill" not in manifest
+
+    # Re-run with skill-creator gone → reaped; user-skill preserved.
+    _mirror_skills_to(target, [proj])
+    assert sorted(p.name for p in target.iterdir() if p.is_dir()) == [
+        "alpha",
+        "user-skill",
+    ]
+
+
+def test_mirror_truncates_long_description(tmp_path):
+    long_desc = "x" * (_NATIVE_DESCRIPTION_CAP + 500)
+    src = _mkskill(tmp_path / "src" / "big", "big", desc=long_desc)
+    target = tmp_path / ".claude" / "skills"
+    _mirror_skills_to(target, [src])
+
+    import yaml
+
+    mirrored = (target / "big" / "SKILL.md").read_text()
+    front = yaml.safe_load(mirrored.split("---", 2)[1])
+    assert len(front["description"]) <= _NATIVE_DESCRIPTION_CAP
+    # Source untouched.
+    assert len((src / "SKILL.md").read_text()) > _NATIVE_DESCRIPTION_CAP

@@ -52,6 +52,7 @@ from .base import (
     _load_master_instructions,
     _mcp_env_block,
     _mcp_server_args,
+    _mirror_skills_to,
     _run_simple_script,
 )
 
@@ -167,6 +168,18 @@ class ClaudeSetup(AgentSetup):
         mcp_path = working_dir / ".mcp.json"
         mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
         actions.append(f"Wrote {mcp_path}")
+
+        # Mirror installed (project) + bundled skills into Claude Code's
+        # native skill dir so it discovers/auto-invokes them without an MCP
+        # round-trip.  Bundled first, project last → project wins collisions.
+        # A newly-created .claude/skills/ is only picked up on Claude restart,
+        # which is fine: this runs at init/start, before the agent launches.
+        if (config.get("skills") or {}).get("populate_native", True):
+            from dsagt.registry import SkillRegistry
+
+            reg = SkillRegistry(runtime_dir=working_dir, kb=None)
+            src_dirs = reg._bundled_skill_dirs() + reg._project_skill_dirs()
+            actions += _mirror_skills_to(working_dir / ".claude" / "skills", src_dirs)
 
         # Configure mlflow autolog claude — writes .claude/settings.json
         # with the MLflow Stop hook + tracking env vars.  Idempotent and

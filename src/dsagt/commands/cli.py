@@ -382,6 +382,129 @@ def _cmd_setup_kb(args):
     run_setup_kb(args)
 
 
+def _cmd_skills(args):
+    """Manage external skill catalogs and project skill installs."""
+    from dsagt.commands.skills_catalog import (
+        KNOWN_SOURCES,
+        install_into_project,
+        sync_source,
+    )
+    from dsagt.registry import (
+        CATALOG_COLLECTION_PREFIX,
+        SKILLS_COLLECTION,
+        SkillRegistry,
+    )
+    from dsagt.session import kb_from_config, load_config
+
+    action = getattr(args, "skills_action", None)
+    if not action:
+        print(
+            "Usage: dsagt skills <sync|add|list|search> <project> ...", file=sys.stderr
+        )
+        return 1
+
+    config = load_config(args.project)
+    pdir = Path(config["project_dir"])
+
+    if action == "sync":
+        kb = kb_from_config(config)
+        try:
+            sources = (
+                [args.source]
+                if args.source
+                else config.get("skills", {}).get("sources", [])
+            )
+            if not sources:
+                print("No skill sources configured.")
+                return 0
+            for src in sources:
+                stats = sync_source(src, kb=kb, force=args.force)
+                print(
+                    f"  {stats['url']}: {stats['indexed']} skill(s) indexed (slug {stats['slug']})"
+                )
+        finally:
+            kb.close()
+        return 0
+
+    if action == "add":
+        target = args.target
+        is_source = (
+            target in KNOWN_SOURCES
+            or target.startswith(("http://", "https://", "git@"))
+            or target.count("/") == 1
+        )
+        if is_source:
+            kb = kb_from_config(config)
+            try:
+                stats = sync_source(target, kb=kb)
+            finally:
+                kb.close()
+            print(f"Added source {stats['url']}: {stats['indexed']} skill(s) indexed.")
+            print(
+                "Run 'dsagt start' to mirror an installed skill natively, or "
+                f"'dsagt skills add {args.project} <skill-name>' to install one."
+            )
+        else:
+            info = install_into_project(target, pdir)
+            print(
+                f"{info['action'].capitalize()} skill '{info['name']}' at {info['dest_dir']}."
+            )
+            print("It becomes natively discoverable on the next 'dsagt start'.")
+        return 0
+
+    if action == "list":
+        if args.catalog:
+            kb = kb_from_config(config)
+            try:
+                cats = [
+                    c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)
+                ]
+            finally:
+                kb.close()
+            print(
+                "Catalog collections:"
+                if cats
+                else "No catalog synced. Run 'dsagt skills sync'."
+            )
+            for c in sorted(cats):
+                print(f"  {c}")
+        else:
+            reg = SkillRegistry(runtime_dir=pdir, kb=None)
+            skills = reg.list_skills()
+            print(f"Installed/bundled skills ({len(skills)}):")
+            for s in skills:
+                print(f"  {s.get('name')} — {(s.get('description') or '')[:80]}")
+        return 0
+
+    if action == "search":
+        kb = kb_from_config(config)
+        try:
+            collections = [SKILLS_COLLECTION] + [
+                c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)
+            ]
+            hits = []
+            for coll in collections:
+                try:
+                    hits.extend(kb.search(query=args.query, collection=coll, top_k=10))
+                except (FileNotFoundError, KeyError, ValueError):
+                    continue
+            hits.sort(key=lambda r: r.get("score", 0), reverse=True)
+            for r in hits[:10]:
+                meta = r.get("chunk", {}).get("metadata", {})
+                print(
+                    f"  {meta.get('skill_name', '?')} ({r.get('score', 0):.2f}) "
+                    f"[{meta.get('source', '')}]"
+                )
+            if not hits:
+                print("No skills found.")
+        finally:
+            kb.close()
+        return 0
+
+    print(f"Unknown skills action: {action}", file=sys.stderr)
+    return 1
+
+
 def _cmd_mlflow(args):
     """Run MLflow in the foreground.
 
@@ -1032,6 +1155,40 @@ def main(argv=None):
 
     add_setup_kb_args(p_setup_kb)
 
+    p_skills = sub.add_parser(
+        "skills", help="Manage external skill catalogs and project installs"
+    )
+    skills_sub = p_skills.add_subparsers(dest="skills_action")
+    sp_sync = skills_sub.add_parser(
+        "sync", help="Clone + index skill source(s) into the catalog"
+    )
+    sp_sync.add_argument("project", help="Project name")
+    sp_sync.add_argument(
+        "--source", help="Known source name or GitHub URL (default: all configured)"
+    )
+    sp_sync.add_argument(
+        "--force", action="store_true", help="Re-clone sources from scratch"
+    )
+    sp_add = skills_sub.add_parser(
+        "add", help="Install a catalog skill, or add+sync a new source"
+    )
+    sp_add.add_argument("project", help="Project name")
+    sp_add.add_argument(
+        "target", help="Skill name to install, or source name/URL to add"
+    )
+    sp_list = skills_sub.add_parser(
+        "list", help="List installed skills (or --catalog collections)"
+    )
+    sp_list.add_argument("project", help="Project name")
+    sp_list.add_argument(
+        "--catalog", action="store_true", help="List synced catalog collections"
+    )
+    sp_search = skills_sub.add_parser(
+        "search", help="Search installed + catalog skills"
+    )
+    sp_search.add_argument("project", help="Project name")
+    sp_search.add_argument("query", help="Search query")
+
     sub.add_parser("list", help="List all registered projects and their status")
 
     p_mv = sub.add_parser("mv", help="Move a project to a new location")
@@ -1077,6 +1234,7 @@ def main(argv=None):
         "stop": _cmd_stop,
         "smoke-test": _cmd_smoke_test,
         "setup-kb": _cmd_setup_kb,
+        "skills": _cmd_skills,
         "list": _cmd_list,
         "mv": _cmd_mv,
         "rm": _cmd_rm,

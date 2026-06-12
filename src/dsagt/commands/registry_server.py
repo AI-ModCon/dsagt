@@ -40,10 +40,12 @@ from dsagt.observability import (
 )
 from dsagt.provenance import reconstruct_pipeline
 from dsagt.registry import (
+    CATALOG_COLLECTION_PREFIX,
     SKILLS_COLLECTION,
     TOOLS_COLLECTION,
     SkillRegistry,
     ToolRegistry,
+    _parse_frontmatter,
 )
 
 os.environ["PYTHONUNBUFFERED"] = "1"
@@ -55,12 +57,15 @@ logger = logging.getLogger(__name__)
 # MCP server helpers
 # ---------------------------------------------------------------------------
 
+
 async def _run_stdio(server: Server, name: str):
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
-            read_stream, write_stream,
+            read_stream,
+            write_stream,
             InitializationOptions(
-                server_name=name, server_version="0.1.0",
+                server_name=name,
+                server_version="0.1.0",
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},
@@ -85,19 +90,27 @@ def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
     except subprocess.TimeoutExpired:
         return f"Installation timed out after {timeout}s for: {', '.join(packages)}"
     except FileNotFoundError:
-        return "Error: 'uv' command not found. Install uv: https://github.com/astral-sh/uv"
+        return (
+            "Error: 'uv' command not found. Install uv: https://github.com/astral-sh/uv"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Per-tool handlers (module-level, explicit dependencies)
 # ---------------------------------------------------------------------------
 
+
 async def _handle_read_file(arguments: dict) -> str:
     path = Path(arguments["path"])
     try:
         return path.read_text()
-    except (FileNotFoundError, PermissionError, IsADirectoryError,
-            OSError, UnicodeDecodeError) as e:
+    except (
+        FileNotFoundError,
+        PermissionError,
+        IsADirectoryError,
+        OSError,
+        UnicodeDecodeError,
+    ) as e:
         return f"Error reading file: {e}"
 
 
@@ -108,7 +121,10 @@ async def _handle_http_request(arguments: dict) -> str:
     try:
         async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.request(
-                method=method, url=url, headers=headers, timeout=30.0,
+                method=method,
+                url=url,
+                headers=headers,
+                timeout=30.0,
             )
             return f"Status: {response.status_code}\n\n{response.text}"
     except (httpx.HTTPError, httpx.InvalidURL) as e:
@@ -122,7 +138,9 @@ async def _handle_run_command(arguments: dict) -> str:
     try:
         result = subprocess.run(
             [command] + args,
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return f"Command timed out after {timeout} seconds"
@@ -139,7 +157,9 @@ async def _handle_run_command(arguments: dict) -> str:
 
 
 async def _handle_save_tool_spec(
-    arguments: dict, *, registry: ToolRegistry,
+    arguments: dict,
+    *,
+    registry: ToolRegistry,
 ) -> str:
     spec = arguments["spec"]
     # Some MCP clients (notably Claude Sonnet/Haiku 4.x) serialize nested
@@ -180,7 +200,9 @@ async def _handle_save_tool_spec(
 
 
 async def _handle_save_skill(
-    arguments: dict, *, skill_registry: SkillRegistry,
+    arguments: dict,
+    *,
+    skill_registry: SkillRegistry,
 ) -> str:
     """Register a skill (workflow / agent instructions) for later reuse.
 
@@ -202,7 +224,9 @@ async def _handle_save_skill(
         except json.JSONDecodeError as e:
             return f"Error: reference_files must be a JSON object: {e}"
     try:
-        action = skill_registry.save_skill(spec, body=body, reference_files=reference_files)
+        action = skill_registry.save_skill(
+            spec, body=body, reference_files=reference_files
+        )
     except (KeyError, ValueError, OSError) as e:
         return f"Error saving skill: {e}"
     skill_count = len(skill_registry.list_skills())
@@ -213,7 +237,9 @@ async def _handle_save_skill(
 
 
 async def _handle_get_registry(
-    arguments: dict, *, registry: ToolRegistry,
+    arguments: dict,
+    *,
+    registry: ToolRegistry,
 ) -> str:
     tools = registry.list_tools_raw()
     if not tools:
@@ -222,7 +248,10 @@ async def _handle_get_registry(
 
 
 async def _handle_search_registry(
-    arguments: dict, *, registry: ToolRegistry, kb: KnowledgeBase | None,
+    arguments: dict,
+    *,
+    registry: ToolRegistry,
+    kb: KnowledgeBase | None,
 ) -> str:
     tool_name = arguments.get("tool_name")
     query = arguments.get("query", "")
@@ -232,9 +261,8 @@ async def _handle_search_registry(
     if tool_name:
         tool = registry.get_tool(tool_name)
         if tool:
-            return (
-                f"Found tool '{tool_name}':\n\n"
-                + yaml.dump(tool, default_flow_style=False, sort_keys=False)
+            return f"Found tool '{tool_name}':\n\n" + yaml.dump(
+                tool, default_flow_style=False, sort_keys=False
             )
         return f"No tool named '{tool_name}'."
 
@@ -255,7 +283,8 @@ async def _handle_search_registry(
     )
     if tag and results:
         results = [
-            r for r in results
+            r
+            for r in results
             if tag in r.get("chunk", {}).get("metadata", {}).get("tags", "")
         ][:top_k]
     if not results:
@@ -287,9 +316,8 @@ async def _handle_search_skills(
     if skill_name and skill_registry:
         skill = skill_registry.get_skill(skill_name)
         if skill:
-            return (
-                f"Found skill '{skill_name}':\n\n"
-                + yaml.dump(skill, default_flow_style=False, sort_keys=False)
+            return f"Found skill '{skill_name}':\n\n" + yaml.dump(
+                skill, default_flow_style=False, sort_keys=False
             )
         return f"No skill named '{skill_name}'."
 
@@ -301,17 +329,30 @@ async def _handle_search_skills(
             "skill_name for KB-free lookups."
         )
 
-    # Single ``skills`` collection — bundled and registered entries.
-    results = kb.search(
-        query=query or "skill",
-        collection=SKILLS_COLLECTION,
-        top_k=top_k * 3 if tag else top_k,
-    )
-    if tag and results:
+    # Search the installed/bundled ``skills`` collection AND every external
+    # ``skills_catalog__<slug>`` collection, then merge by score.  Installed
+    # skills are also natively discovered by the agent; the catalog is the
+    # part native discovery can't do (it isn't loaded into context).
+    collections = [SKILLS_COLLECTION] + [
+        c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)
+    ]
+    fetch_k = top_k * 3 if tag else top_k
+    results: list[dict] = []
+    for coll in collections:
+        try:
+            results.extend(
+                kb.search(query=query or "skill", collection=coll, top_k=fetch_k)
+            )
+        except (FileNotFoundError, KeyError, ValueError):
+            continue  # collection absent/empty on this KB — skip
+    if tag:
         results = [
-            r for r in results
+            r
+            for r in results
             if tag in r.get("chunk", {}).get("metadata", {}).get("tags", "")
-        ][:top_k]
+        ]
+    results.sort(key=lambda r: r.get("score", 0), reverse=True)
+    results = results[:top_k]
     if not results:
         return "No skills found matching the query."
 
@@ -319,16 +360,65 @@ async def _handle_search_skills(
     for r in results:
         chunk = r.get("chunk", {})
         meta = chunk.get("metadata", {})
+        src = meta.get("source", "")
+        where = (
+            " [installed]"
+            if src in ("bundled", "registered")
+            else (
+                " [catalog · install_skill to add]"
+                if src.startswith("catalog:")
+                else ""
+            )
+        )
         summaries.append(
-            f"- **{meta.get('skill_name', 'unknown')}** "
+            f"- **{meta.get('skill_name', 'unknown')}**{where} "
             f"(score: {r.get('score', 0):.2f})\n"
             f"  {chunk.get('text', '')[:200]}"
         )
     return f"Found {len(results)} skill(s):\n\n" + "\n\n".join(summaries)
 
 
+async def _handle_install_skill(
+    arguments: dict,
+    *,
+    skill_registry: SkillRegistry | None,
+    runtime_dir: Path,
+) -> str:
+    """Install a catalog skill into ``<project>/skills/<name>/``.
+
+    The skill becomes natively discoverable after the next ``dsagt start``
+    (which mirrors installed skills into ``.claude/skills/`` before launch).
+    """
+    from dsagt.commands.skills_catalog import install_into_project
+
+    name = arguments.get("skill_name")
+    if not name:
+        return "install_skill requires 'skill_name'."
+    try:
+        info = install_into_project(name, runtime_dir)
+    except LookupError as e:
+        return f"Error: {e}"
+
+    # Index the now-installed skill as a project ('registered') skill too, so
+    # non-native agents can still find it via search_skills after install.
+    if skill_registry is not None and skill_registry._kb is not None:
+        skill_md = Path(info["dest_dir"]) / "SKILL.md"
+        spec = _parse_frontmatter(skill_md)
+        if spec.get("name"):
+            skill_registry._index_skill(spec, skill_md)
+
+    return (
+        f"{info['action'].capitalize()} skill '{info['name']}' at "
+        f"{info['dest_dir']}.\n\nIt will be available to the agent natively "
+        f"(.claude/skills/) on the next `dsagt start`; restart the agent to "
+        f"pick it up."
+    )
+
+
 async def _handle_reconstruct_pipeline(
-    arguments: dict, *, runtime_dir: Path,
+    arguments: dict,
+    *,
+    runtime_dir: Path,
 ) -> str:
     fmt = arguments.get("format", "bash")
     trace_dir = runtime_dir / "trace_archive"
@@ -343,7 +433,9 @@ async def _handle_reconstruct_pipeline(
 
 
 async def _handle_install_dependencies(
-    arguments: dict, *, registry: ToolRegistry,
+    arguments: dict,
+    *,
+    registry: ToolRegistry,
 ) -> str:
     tool_name = arguments.get("tool_name")
     tools = registry.list_tools_raw()
@@ -383,6 +475,7 @@ async def _handle_install_dependencies(
 # Server factory (thin wiring — used by main() and tests)
 # ---------------------------------------------------------------------------
 
+
 def create_registry_server(
     registry: ToolRegistry,
     kb: KnowledgeBase | None = None,
@@ -407,9 +500,20 @@ def create_registry_server(
         "save_skill": partial(_handle_save_skill, skill_registry=skill_registry),
         "get_registry": partial(_handle_get_registry, registry=registry),
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
-        "search_skills": partial(_handle_search_skills, kb=kb, skill_registry=skill_registry),
-        "reconstruct_pipeline": partial(_handle_reconstruct_pipeline, runtime_dir=runtime_dir),
-        "install_dependencies": partial(_handle_install_dependencies, registry=registry),
+        "search_skills": partial(
+            _handle_search_skills, kb=kb, skill_registry=skill_registry
+        ),
+        "install_skill": partial(
+            _handle_install_skill,
+            skill_registry=skill_registry,
+            runtime_dir=runtime_dir,
+        ),
+        "reconstruct_pipeline": partial(
+            _handle_reconstruct_pipeline, runtime_dir=runtime_dir
+        ),
+        "install_dependencies": partial(
+            _handle_install_dependencies, registry=registry
+        ),
     }
 
     @server.list_tools()
@@ -421,7 +525,10 @@ def create_registry_server(
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Path to the file to read"},
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to read",
+                        },
                     },
                     "required": ["path"],
                 },
@@ -433,8 +540,15 @@ def create_registry_server(
                     "type": "object",
                     "properties": {
                         "url": {"type": "string", "description": "URL to request"},
-                        "method": {"type": "string", "description": "HTTP method", "default": "GET"},
-                        "headers": {"type": "object", "description": "Optional headers"},
+                        "method": {
+                            "type": "string",
+                            "description": "HTTP method",
+                            "default": "GET",
+                        },
+                        "headers": {
+                            "type": "object",
+                            "description": "Optional headers",
+                        },
                     },
                     "required": ["url"],
                 },
@@ -445,7 +559,10 @@ def create_registry_server(
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "Command to execute"},
+                        "command": {
+                            "type": "string",
+                            "description": "Command to execute",
+                        },
                         "args": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -474,19 +591,33 @@ def create_registry_server(
                                 {
                                     "type": "object",
                                     "properties": {
-                                        "name": {"type": "string", "description": "Unique tool identifier"},
-                                        "description": {"type": "string", "description": "What the tool does"},
-                                        "executable": {"type": "string", "description": "Command to execute"},
+                                        "name": {
+                                            "type": "string",
+                                            "description": "Unique tool identifier",
+                                        },
+                                        "description": {
+                                            "type": "string",
+                                            "description": "What the tool does",
+                                        },
+                                        "executable": {
+                                            "type": "string",
+                                            "description": "Command to execute",
+                                        },
                                         "parameters": {
                                             "type": "object",
                                             "description": "Parameter definitions",
                                             "additionalProperties": {
                                                 "type": "object",
                                                 "properties": {
-                                                    "type": {"type": "string", "description": "Parameter type"},
+                                                    "type": {
+                                                        "type": "string",
+                                                        "description": "Parameter type",
+                                                    },
                                                     "required": {"type": "boolean"},
                                                     "description": {"type": "string"},
-                                                    "default": {"description": "Default value"},
+                                                    "default": {
+                                                        "description": "Default value"
+                                                    },
                                                     "cli": {
                                                         "type": "string",
                                                         "description": (
@@ -512,7 +643,12 @@ def create_registry_server(
                                             "description": "Tags for categorizing the tool",
                                         },
                                     },
-                                    "required": ["name", "description", "executable", "parameters"],
+                                    "required": [
+                                        "name",
+                                        "description",
+                                        "executable",
+                                        "parameters",
+                                    ],
                                 },
                                 {"type": "string"},
                             ],
@@ -543,8 +679,14 @@ def create_registry_server(
                                 {
                                     "type": "object",
                                     "properties": {
-                                        "name": {"type": "string", "description": "Unique skill identifier (becomes the directory name)"},
-                                        "description": {"type": "string", "description": "What the skill does / when to use it"},
+                                        "name": {
+                                            "type": "string",
+                                            "description": "Unique skill identifier (becomes the directory name)",
+                                        },
+                                        "description": {
+                                            "type": "string",
+                                            "description": "What the skill does / when to use it",
+                                        },
                                         "tags": {
                                             "type": "array",
                                             "items": {"type": "string"},
@@ -572,7 +714,10 @@ def create_registry_server(
                                 "path -> file contents, or JSON-encoded string."
                             ),
                             "anyOf": [
-                                {"type": "object", "additionalProperties": {"type": "string"}},
+                                {
+                                    "type": "object",
+                                    "additionalProperties": {"type": "string"},
+                                },
                                 {"type": "string"},
                             ],
                         },
@@ -593,22 +738,50 @@ def create_registry_server(
                     "properties": {
                         "query": {"type": "string", "description": "Search query"},
                         "tag": {"type": "string", "description": "Filter by tag"},
-                        "tool_name": {"type": "string", "description": "Exact tool name lookup"},
+                        "tool_name": {
+                            "type": "string",
+                            "description": "Exact tool name lookup",
+                        },
                         "top_k": {"type": "integer", "default": 10},
                     },
                 },
             ),
             types.Tool(
                 name="search_skills",
-                description="Search for agent skills (workflows, templates) by name, tag, or description.",
+                description=(
+                    "Search agent skills by name, tag, or description. Spans installed "
+                    "skills and the external installable catalog. Catalog hits are marked "
+                    "'[catalog]' — use install_skill to add one to this project."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "Search query"},
                         "tag": {"type": "string", "description": "Filter by tag"},
-                        "skill_name": {"type": "string", "description": "Exact skill name lookup"},
+                        "skill_name": {
+                            "type": "string",
+                            "description": "Exact skill name lookup",
+                        },
                         "top_k": {"type": "integer", "default": 10},
                     },
+                },
+            ),
+            types.Tool(
+                name="install_skill",
+                description=(
+                    "Install a skill from the external catalog (found via search_skills) "
+                    "into this project so the agent can use it natively. Copies SKILL.md "
+                    "+ scripts/references; available natively after the next restart."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "skill_name": {
+                            "type": "string",
+                            "description": "Catalog skill name to install",
+                        },
+                    },
+                    "required": ["skill_name"],
                 },
             ),
             types.Tool(
@@ -631,7 +804,10 @@ def create_registry_server(
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "tool_name": {"type": "string", "description": "Install deps for a specific tool (omit for all)"},
+                        "tool_name": {
+                            "type": "string",
+                            "description": "Install deps for a specific tool (omit for all)",
+                        },
                     },
                 },
             ),
@@ -649,6 +825,7 @@ def create_registry_server(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main():
     """Entry point for dsagt-registry-server.
@@ -693,12 +870,16 @@ def main():
 
     config_path = project_dir / "dsagt_config.yaml"
     from dsagt.session import resolve_env_vars
+
     config = resolve_env_vars(yaml.safe_load(config_path.read_text()))
 
     emb_config = config["embedding"]
 
     from dsagt.observability import init_tracing, configure_litellm_retries
-    init_tracing("dsagt-registry-server")  # session_id picked up from DSAGT_SESSION_ID env
+
+    init_tracing(
+        "dsagt-registry-server"
+    )  # session_id picked up from DSAGT_SESSION_ID env
     configure_litellm_retries()
 
     # The KB is optional for the registry server — most tools (save_tool_spec,
@@ -729,13 +910,14 @@ def main():
     else:  # backend == "api"
         api_key = emb_config.get("api_key") or ""
         kb_available = (
-            api_key and not api_key.startswith("${")
-            and emb_config.get("base_url")
+            api_key and not api_key.startswith("${") and emb_config.get("base_url")
         )
-        embedder_kwargs.update({
-            "base_url": emb_config.get("base_url") or "",
-            "api_key": api_key,
-        })
+        embedder_kwargs.update(
+            {
+                "base_url": emb_config.get("base_url") or "",
+                "api_key": api_key,
+            }
+        )
 
     kb = None
     if kb_available:

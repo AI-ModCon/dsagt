@@ -25,6 +25,8 @@ Before implementing anything, search for existing capabilities:
 - `search_skills(query)` — find agent skills (workflows, templates, procedures)
 - `get_registry()` — list all registered tools
 
+**Skills come in two tiers.** *Installed* skills (in this project) are discovered **natively** by your platform — their names/descriptions are already in your context and you auto-invoke them; you do NOT need `search_skills` to find those. Use `search_skills` to browse the much larger *external catalog* of installable skills (entries marked `[catalog]`), which are NOT loaded into context. To add a catalog skill to the project, call `install_skill(skill_name=...)`; it becomes natively available after the next session restart. To enable another catalog source (a known name like `scientific`/`anthropic`, or a GitHub URL), call `add_skill_source(source=...)`. To author a brand-new skill, use the bundled `skill-creator` skill.
+
 **When the user indicates they want a specific tool used** — phrasings like "use tool `foo`", "use `foo` from the registry", "run `foo`", or similar — look it up first (`search_registry(tool_name=...)` for exact match, `get_registry()` to browse). Read the returned spec's `executable` field and each parameter's `cli` field, then invoke via your shell. Do not substitute your own file/shell tools for a task a registered tool can do. (See section 1b for the verbatim-`executable` rule.)
 
 **Rendering parameters**: each parameter's `cli` field pins exactly how its value goes on the command line. Emit positional args first (in position order), then named args. Skip optional parameters whose value is absent; use the `default` when present.
