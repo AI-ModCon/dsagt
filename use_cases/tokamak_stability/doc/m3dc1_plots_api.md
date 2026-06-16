@@ -28,9 +28,9 @@ one of two patterns to redirect output to a caller-supplied path:
 - **Figure-capture pattern** (most functions): records `plt.get_fignums()`
   before and after the m3dc1 call, saves the first new figure to `output_path`,
   closes all new figures.
-- **Tempdir pattern** (`plot_field`, `plot_poincare`): calls the m3dc1 function
-  with its own save mechanism directed to a temporary directory, then moves the
-  resulting file to `output_path`.
+- **Tempdir pattern** (`plot_poincare`): calls the m3dc1 function with its own
+  save mechanism directed to a temporary directory, then moves the resulting
+  file to `output_path`.
 
 All Category B functions raise `ImportError` with a helpful message if `m3dc1`
 is not importable.
@@ -212,8 +212,8 @@ plot_field(
 ) -> Path
 ```
 
-2-D field contour on the R,Z plane via `m3.plot_field`.  Uses the tempdir
-pattern (m3dc1 saves the file; this function moves it to `output_path`).
+2-D filled-contour field plot on the R,Z plane via `m3.plot_field`.  Uses the
+figure-capture pattern.
 
 ---
 
@@ -237,20 +237,6 @@ plot_flux_surface_shape(
 ```
 
 Flux surface psi contours on the R,Z plane via `m3.plot_shape`.
-
----
-
-### `plot_field_basic`
-
-```python
-plot_field_basic(
-    case_dir, time_idx, field, output_path,
-    coord="scalar", phi=0.0, points=250, tor_av=1,
-    units="mks", mesh=False, dpi=150
-) -> Path
-```
-
-2-D filled-contour field plot via `m3.plot_field`.
 
 ---
 

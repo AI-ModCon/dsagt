@@ -19,10 +19,9 @@ Category A — pure matplotlib, data via m3dc1_tools.py (no m3dc1 plotting):
     plot_tpf_vs_time             Total poloidal flux trace over time snapshots
 
 Category B — m3dc1 library wrappers (figure capture / tempdir pattern):
-    plot_field                   2-D field contour via m3.plot_field
+    plot_field                   2-D field contour on R,Z plane via m3.plot_field
     plot_mesh                    Triangular mesh via m3.plot_mesh
     plot_flux_surface_shape      Flux surface shape via m3.plot_shape
-    plot_field_basic             Field via m3dc1.plot_field_basic
     plot_field_mesh              Field on mesh via m3dc1.plot_field_mesh
     plot_field_vs_phi            Field vs φ at fixed R or Z
     plot_flux_average_m3         Flux average via m3.plot_flux_average
@@ -801,9 +800,6 @@ def plot_field(
 ) -> Path:
     """2-D field contour on the R,Z plane via m3dc1.plot_field.
 
-    m3dc1 saves the figure internally; this function redirects that save to a
-    temporary directory then moves the result to output_path.
-
     Args:
         case_dir: M3D-C1 case directory.
         time_idx: Snapshot index.
@@ -817,8 +813,7 @@ def plot_field(
         mesh: Overlay mesh triangulation.
         bound: Overlay boundary only (no full mesh).
         lcfs: Overlay last closed flux surface.
-        dpi: Figure resolution (applied when moving the saved file; m3.plot_field
-             controls its own dpi internally).
+        dpi: Figure resolution.
 
     Returns:
         Path to the saved figure.
@@ -828,31 +823,22 @@ def plot_field(
     c1h5 = str(case_dir / "C1.h5")
     output_path = Path(output_path)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir_path = Path(tmpdir)
-        before_files = set(tmpdir_path.iterdir())
-        m3.plot_field(
-            field=field,
-            filename=c1h5,
-            time=time_idx,
-            coord=coord,
-            phi=phi,
-            points=points,
-            tor_av=tor_av,
-            units=units,
-            mesh=mesh,
-            bound=bound,
-            lcfs=lcfs,
-            save=True,
-            savedir=str(tmpdir_path) + os.sep,
-            quiet=True,
-        )
-        plt.close("all")
-        new_files = sorted(set(tmpdir_path.iterdir()) - before_files)
-        if not new_files:
-            raise RuntimeError("m3.plot_field produced no output file in tmpdir.")
-        shutil.copy2(new_files[0], output_path)
-
+    before = set(plt.get_fignums())
+    m3.plot_field(
+        field=field,
+        filename=c1h5,
+        time=time_idx,
+        coord=coord,
+        phi=phi,
+        points=points,
+        tor_av=tor_av,
+        units=units,
+        mesh=mesh,
+        bound=bound,
+        lcfs=lcfs,
+        save=False,
+    )
+    _save_first_new_fig(before, output_path, dpi)
     return output_path
 
 
@@ -910,59 +896,6 @@ def plot_flux_surface_shape(
 
     before = set(plt.get_fignums())
     m3.plot_shape(filename=c1h5, time=time_idx, points=points)
-    _save_first_new_fig(before, output_path, dpi)
-    return output_path
-
-
-def plot_field_basic(
-    case_dir: str | Path,
-    time_idx: int,
-    field: str,
-    output_path: str | Path,
-    coord: str = "scalar",
-    phi: float = 0.0,
-    points: int = 250,
-    tor_av: int = 1,
-    units: str = "mks",
-    mesh: bool = False,
-    dpi: int = 150,
-) -> Path:
-    """2-D filled-contour field plot via m3dc1.plot_field.
-
-    Args:
-        case_dir: M3D-C1 case directory.
-        time_idx: Snapshot index.
-        field: Field name.
-        output_path: Destination PNG file.
-        coord: Field component.
-        phi: Toroidal angle in radians.
-        points: R/Z grid resolution.
-        tor_av: Toroidal average planes.
-        units: Unit system.
-        mesh: Overlay mesh.
-        dpi: Figure resolution.
-
-    Returns:
-        Path to the saved figure.
-    """
-    m3 = _import_m3dc1()
-    case_dir = Path(case_dir)
-    c1h5 = str(case_dir / "C1.h5")
-    output_path = Path(output_path)
-
-    before = set(plt.get_fignums())
-    m3.plot_field(
-        field=field,
-        coord=coord,
-        filename=c1h5,
-        time=time_idx,
-        phi=phi,
-        mesh=mesh,
-        tor_av=tor_av,
-        units=units,
-        points=points,
-        save=False,
-    )
     _save_first_new_fig(before, output_path, dpi)
     return output_path
 

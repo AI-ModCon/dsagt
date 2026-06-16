@@ -11,7 +11,7 @@ flux_coordinates(sim=..., fcoords="pest", phit=0.0, points=200)
 eigenfunction(sim=[fc_obj, sim_lin], field="p", coord="scalar", ...)
 
 Plotting (Priority 2) — require matplotlib:
-plot_field, plot_shape, plot_mesh, plot_diagnostics, plot_signal,
+plot_field, plot_shape, plot_mesh, plot_signal,
 plot_time_trace_fast, plot_flux_average, plot_line, plot_field_vs_phi,
 plot_mag_probes, plot_gfile, tpf, run_trace, plot_poincare, poincare_movie
 
@@ -1082,7 +1082,6 @@ __all__ = [
     "plot_field",
     "plot_shape",
     "plot_mesh",
-    "plot_diagnostics",
     "plot_signal",
     "plot_time_trace_fast",
     "plot_flux_average",
