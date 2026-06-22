@@ -48,6 +48,26 @@ _NEO_FSA_FIELDS = {
 # Mapping from typedict short name to ftype for fields we know about
 _VECTOR_FIELDS = {"j", "v", "B", "A", "E", "gradA"}
 
+_FIELD_LATEX = {
+    "j": "J", "B": "B", "A": "A", "E": "E", "v": "v", "gradA": r"\nabla A",
+    "p": "p", "psi": r"\psi", "ne": "n_e", "te": "T_e", "ni": "n_i", "ti": "T_i",
+    "q": "q",
+}
+_COORD_SUB = {"R": "R", "phi": r"\phi", "Z": "Z"}
+
+
+def _field_label(field_name, coord, ftype):
+    """Return a LaTeX colorbar label for a field/coord combination."""
+    base = _FIELD_LATEX.get(field_name)
+    if base is None:
+        return field_name
+    sub = _COORD_SUB.get(coord)
+    if sub is not None:
+        return rf"${base}_{{{sub}}}$"
+    if ftype == "vector":
+        return rf"$|{base}|$"
+    return rf"${base}$"
+
 
 def _ftype_of(field_name, sim):
     """Return 'vector' or 'scalar' for a field name."""
@@ -123,8 +143,12 @@ def eval_field(field_name, R, phi, Z, coord="scalar", sim=None, time=None,
         comp_map = {"R": 0, "phi": 1, "Z": 2}
         if coord in comp_map:
             return out[comp_map[coord]].reshape(shape)
-        # coord == 'scalar' for a vector field → return magnitude
-        return np.sqrt(np.nansum(out ** 2, axis=0)).reshape(shape)
+        # coord == 'scalar' for a vector field → return magnitude.
+        # Use nansum for the sum but restore NaN where ALL components are NaN
+        # (out-of-domain points), so pcolormesh autoscale excludes them.
+        mag = np.sqrt(np.nansum(out ** 2, axis=0))
+        mag[np.all(np.isnan(out), axis=0)] = np.nan
+        return mag.reshape(shape)
 
     else:
         out = np.full(n, np.nan)
@@ -628,7 +652,7 @@ def _require_sim(filename, time, filetype="m3dc1"):
 
 
 def plot_field(field, filename, time=0, coord="scalar", phi=0.0, points=250,
-               tor_av=1, units="mks", mesh=False, bound=False, lcfs=False,
+               tor_av=1, units="mks", cmap="inferno", mesh=False, bound=False, lcfs=False,
                coils=False, save=False, savedir="./", quiet=True):
     """Plot a field on a regular (R, Z) grid as a filled contour map.
 
@@ -656,9 +680,21 @@ def plot_field(field, filename, time=0, coord="scalar", phi=0.0, points=250,
         f_2d = eval_field(field, R_2d, np.full_like(R_2d, phi), Z_2d,
                           coord=coord, sim=sim, time=time, quiet=True)
 
+    pos_extreme = max(float(np.nanmax(f_2d)), 0.0)
+    neg_extreme = abs(min(float(np.nanmin(f_2d)), 0.0))
+    larger = max(pos_extreme, neg_extreme)
+    smaller = min(pos_extreme, neg_extreme)
+    if larger > 0 and smaller / larger > 0.05:
+        pcm_kwargs = dict(cmap="RdBu_r", vmin=-larger, vmax=larger, shading="auto")
+    else:
+        pcm_kwargs = dict(cmap=cmap, shading="auto")
+
+    ftype = _ftype_of(field, sim)
+    label = _field_label(field, coord, ftype)
+
     fig, ax = plt.subplots(figsize=(5, 7))
-    pcm = ax.pcolormesh(R_2d, Z_2d, f_2d, shading="auto")
-    plt.colorbar(pcm, ax=ax, label=field)
+    pcm = ax.pcolormesh(R_2d, Z_2d, f_2d, **pcm_kwargs)
+    plt.colorbar(pcm, ax=ax, label=label)
     ax.set_xlabel("R (m)")
     ax.set_ylabel("Z (m)")
     ax.set_aspect("equal")
@@ -672,7 +708,7 @@ def plot_field(field, filename, time=0, coord="scalar", phi=0.0, points=250,
         except Exception:
             pass
 
-    ax.set_title(f"{field}  t={time}")
+    ax.set_title(f"{label}  t={time}")
     plt.tight_layout()
     if save:
         fig.savefig(Path(savedir) / f"{field}_{time:03d}.png", dpi=150)

@@ -433,13 +433,13 @@ def plot_poloidal_spectrum(
     fig, ax = plt.subplots(figsize=(7, 5))
     im = ax.pcolormesh(
         psi_norm, m_modes[mask], norm_spec[mask, :],
-        cmap="viridis", shading="auto",
+        cmap="inferno", shading="auto",
         norm=LogNorm(vmin=min_amplitude, vmax=1),
     )
     fig.colorbar(im, ax=ax, label="Normalized Amplitude")
-    ax.set_xlabel("ψ_norm")
+    ax.set_xlabel(r"$\psi_{\rm{norm}}$")
     ax.set_ylabel("poloidal mode $m$")
-    ax.set_title(f"Poloidal spectrum — {field} (t={time_idx}) — {Path(case_dir).name}")
+    ax.set_title(f"Poloidal Spectrum — {field} (t={time_idx}) — {Path(case_dir).name}")
     fig.tight_layout()
 
     output_path = Path(output_path)
@@ -483,7 +483,7 @@ def plot_standard_spectra(
     if not spectra:
         raise ValueError("No spectra computed; check case_dir and time_idx.")
 
-    _panel_labels = {"p": "Pressure (p)", "br": "B_R", "bz": "B_Z", "bphi": "B_φ"}
+    _panel_labels = {"p": r"Pressure ($p$)", "br": r"$B_R$", "bz": r"$B_Z$", "bphi": r"$B_\phi$"}
     keys = [k for k in ("p", "br", "bz", "bphi") if k in spectra]
     n = len(keys)
     ncols = min(n, 2)
@@ -506,18 +506,18 @@ def plot_standard_spectra(
         mask = (m_modes >= -m_max_global) & (m_modes <= m_max_global)
         im = ax.pcolormesh(
             psi_norm, m_modes[mask], norm_spec[mask, :],
-            cmap="viridis", shading="auto",
+            cmap="inferno", shading="auto",
             norm=LogNorm(vmin=min_amplitude, vmax=1),
         )
         fig.colorbar(im, ax=ax, label="Normalized Amplitude")
-        ax.set_xlabel("ψ_norm")
+        ax.set_xlabel(r"$\psi_{\rm{norm}}$")
         ax.set_ylabel("poloidal mode $m$")
         ax.set_title(_panel_labels.get(key, key))
 
     for ax in list(axes.flat)[n:]:
         ax.set_visible(False)
 
-    fig.suptitle(f"Poloidal spectra — t={time_idx} — {Path(case_dir).name}")
+    fig.suptitle(f"Poloidal Spectra — t={time_idx} — {Path(case_dir).name}")
     fig.tight_layout()
 
     output_path = Path(output_path)
@@ -793,6 +793,7 @@ def plot_field(
     points: int = 250,
     tor_av: int = 1,
     units: str = "mks",
+    cmap: str = "inferno",
     mesh: bool = False,
     bound: bool = False,
     lcfs: bool = False,
@@ -833,6 +834,7 @@ def plot_field(
         points=points,
         tor_av=tor_av,
         units=units,
+        cmap=cmap,
         mesh=mesh,
         bound=bound,
         lcfs=lcfs,
