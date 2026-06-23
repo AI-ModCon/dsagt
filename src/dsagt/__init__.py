@@ -4,7 +4,9 @@ DSAgt — DataSmith Agent.
 AI-assisted data pipeline builder for MCP-compatible agents.
 """
 
-__version__ = "0.1.0"
+# Single source of truth for the package version: pyproject.toml reads this
+# via `[tool.setuptools.dynamic] version = {attr = "dsagt.__version__"}`.
+__version__ = "0.2.0"
 
 # Cap CPU thread count for embedding / tokenization libraries before any
 # heavy imports happen.  Without this, PyTorch / sentence-transformers /

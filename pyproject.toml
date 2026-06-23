@@ -1,6 +1,6 @@
 [project]
 name = "dsagt"
-version = "0.1.0"
+dynamic = ["version"]
 description = "DataSmith Agent - AI-assisted data pipeline builder"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -80,6 +80,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.setuptools.dynamic]
+version = {attr = "dsagt.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
