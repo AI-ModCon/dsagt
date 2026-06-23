@@ -13,8 +13,7 @@ the job completed use an async helper that lets the event loop tick.
 import asyncio
 import json
 import time
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import mcp.types as types
@@ -117,8 +116,12 @@ class TestSkillSources:
         mock_kb.collections = []
         server = create_knowledge_server(mock_kb)
         result = call_tool(server, "list_skill_sources", {})
-        assert "scientific" in result["known_sources"]
-        assert result["synced_collections"] == []
+        assert "scientific" in result["sources"]
+        # Nothing synced → every known source flagged available, not synced.
+        assert result["sources"]["scientific"]["synced"] is False
+        assert result["sources"]["scientific"]["indexed"] == 0
+        assert result["other_synced_collections"] == []
+        assert "scientific" in result["note"]
 
     def test_add_skill_source_bad_source_errors(self, mock_kb):
         mock_kb.collections = []

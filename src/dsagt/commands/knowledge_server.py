@@ -607,18 +607,57 @@ async def _handle_add_skill_source(
 
 
 async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> dict:
-    """List known + synced skill sources and their indexed counts."""
-    from dsagt.commands.skills_catalog import KNOWN_SOURCES
-    from dsagt.registry import CATALOG_COLLECTION_PREFIX
+    """List known skill sources, each flagged synced/available with its count.
+
+    A source is ``synced`` (searchable via ``search_skills``) only after an
+    ``add_skill_source`` call has cloned + indexed it; otherwise it is
+    ``available`` (known name + URL, nothing indexed yet).  Reporting the
+    flag + ``indexed`` count inline means the agent doesn't have to cross-
+    reference a separate ``synced_collections`` list to tell the difference.
+    """
+    import json
+
+    from dsagt.commands.skills_catalog import KNOWN_SOURCES, _repo_slug
+    from dsagt.registry import CATALOG_COLLECTION_PREFIX, catalog_collection
 
     synced = {c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)}
+
+    def _indexed_count(collection: str) -> int:
+        ids = Path(kb.index_dir) / collection / "chroma_ids.json"
+        try:
+            return len(json.loads(ids.read_text()))
+        except (FileNotFoundError, ValueError):
+            return 0
+
+    sources = {}
+    for name, s in KNOWN_SOURCES.items():
+        coll = catalog_collection(_repo_slug(s["url"]))
+        is_synced = coll in synced
+        sources[name] = {
+            "url": s["url"],
+            "description": s.get("description", ""),
+            "synced": is_synced,
+            "indexed": _indexed_count(coll) if is_synced else 0,
+        }
+
+    # Surface any synced catalog whose source isn't in KNOWN_SOURCES (added
+    # by raw GitHub URL) so the count is never silently dropped.
+    known_colls = {
+        catalog_collection(_repo_slug(s["url"])) for s in KNOWN_SOURCES.values()
+    }
+    extra = sorted(synced - known_colls)
+
+    any_synced = any(v["synced"] for v in sources.values()) or bool(extra)
     return {
-        "known_sources": {
-            name: {"url": s["url"], "description": s.get("description", "")}
-            for name, s in KNOWN_SOURCES.items()
-        },
-        "synced_collections": sorted(synced),
-        "note": "add_skill_source <name|url> to enable; search_skills to browse.",
+        "sources": sources,
+        "other_synced_collections": extra,
+        "note": (
+            "add_skill_source <name|url> to sync a source whose synced=false; "
+            "then search_skills to browse. search_skills only sees synced sources."
+            if any_synced
+            else "No catalog synced yet — add_skill_source <name|url> "
+            "(e.g. 'scientific') to enable one, then search_skills to browse."
+        ),
     }
 
 
