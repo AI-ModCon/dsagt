@@ -31,6 +31,10 @@ theme:
     - content.code.copy
     - content.code.annotate
 
+plugins:
+  - search
+  - include-markdown
+
 markdown_extensions:
   - admonition
   - pymdownx.details

@@ -6,21 +6,33 @@ DSAgt connects an MCP-compatible AI coding agent to tool registration, a semanti
 
 ## Supported Agents
 
-| Agent | Install | Verify |
-|-------|---------|--------|
-| [Claude Code](https://github.com/anthropics/claude-code) | `npm i -g @anthropic-ai/claude-code` | `claude --version` |
-| [Goose](https://github.com/block/goose) | See [Goose docs](https://github.com/block/goose#installation) | `goose --version` |
-| [Codex](https://github.com/openai/codex) | `npm i -g @openai/codex` | `codex --version` |
-| [opencode](https://github.com/sst/opencode) | See [opencode docs](https://opencode.ai/docs/) | `opencode --version` |
-| [Roo Code](https://github.com/RooCodeInc/Roo-Code) | `npm i -g @roo-code/cli` | `roo --version` |
-| [Cline](https://github.com/cline/cline) | `npm i -g cline` | `cline --version` |
+<!-- Shared with README.md — edit there, not here. -->
+{%
+   include-markdown "../README.md"
+   start="<!-- md-shared:agents:start -->"
+   end="<!-- md-shared:agents:end -->"
+%}
 
 ## Prerequisites
 
-- Python 3.12–3.13
+- Python 3.12 or 3.13
 - One of the supported agent platforms above, installed and authenticated against your LLM provider
+- [uv](https://github.com/astral-sh/uv) — only for the development install
 
 ## Installation
+
+### For use (no development)
+
+<!-- Shared with README.md — edit there, not here. -->
+{%
+   include-markdown "../README.md"
+   start="<!-- md-shared:install:start -->"
+   end="<!-- md-shared:install:end -->"
+%}
+
+### For development
+
+Clone the repo and use `uv` (editable install; add `--all-groups` for the test suite):
 
 ```bash
 pip install https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip

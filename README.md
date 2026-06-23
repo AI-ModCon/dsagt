@@ -6,8 +6,9 @@
 
 DSAgt connects an MCP-compatible AI coding agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure. DSAgt provides data-pipeline scaffolding around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …);
 
-**Prerequisites:** Python 3.10–3.13, [uv](https://github.com/astral-sh/uv), and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
+**Prerequisites:** Python 3.12 or 3.13, and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use. ([uv](https://github.com/astral-sh/uv) is only needed for the development install.)
 
+<!-- md-shared:agents:start -->
 | Agent | Install | Verify |
 |-------|---------|--------|
 | [Claude Code](https://github.com/anthropics/claude-code) | `npm i -g @anthropic-ai/claude-code` | `claude --version` |
@@ -16,6 +17,44 @@ DSAgt connects an MCP-compatible AI coding agent to tool registration, a semanti
 | [opencode](https://github.com/sst/opencode) | See [opencode docs](https://opencode.ai/docs/) | `opencode --version` |
 | [Roo Code](https://github.com/RooCodeInc/Roo-Code) | `npm i -g @roo-code/cli` | `roo --version` |
 | [Cline](https://github.com/cline/cline) | `npm i -g cline` | `cline --version` |
+<!-- md-shared:agents:end -->
+
+## Installation
+
+### For use (no development)
+
+<!-- md-shared:install:start -->
+If you just want to *run* DSAgt against your own data and agent — no repo checkout, no `uv` — install it straight from GitHub into a virtual environment. Any Python 3.12/3.13 environment works (`venv`, conda, etc.); only the `pip install git+…` step is officially supported.
+
+```bash
+python3.12 -m venv ~/.venvs/dsagt          # or: conda create -n dsagt python=3.12 && conda activate dsagt
+source ~/.venvs/dsagt/bin/activate         # (Windows venv: ~\.venvs\dsagt\Scripts\activate)
+pip install "git+https://github.com/AI-ModCon/dsagt.git"
+dsagt --version                            # 0.2.0
+```
+
+This puts the `dsagt` CLI (and the `dsagt-run` / `dsagt-*-server` helpers) on your PATH. Then build the shared knowledge base once and create your first project:
+
+```bash
+dsagt setup-kb                             # bundled tools + skills + reference corpora
+                                           # (downloads a ~130 MB local embedder on first run)
+dsagt init my-project --agent claude       # or: goose / codex / opencode / roo / cline
+dsagt start my-project
+```
+
+To upgrade later, reinstall and re-run `setup-kb` to pick up new bundled tools/skills:
+
+```bash
+pip install --upgrade "git+https://github.com/AI-ModCon/dsagt.git"
+dsagt setup-kb
+```
+
+> Pin to a specific release once tags are published, e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@v0.2.0"`.
+<!-- md-shared:install:end -->
+
+### For development
+
+Clone the repo and use `uv` (editable install with the full test suite) — see [Quick Start](#quick-start) below.
 
 ## Quick Start
 

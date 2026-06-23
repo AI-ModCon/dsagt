@@ -1,6 +1,6 @@
 # CLI Reference
 
-All commands are available after installing DSAgt.
+All commands are available after [installation](index.md#installation) and activating your virtual environment.
 
 ## Project Management
 
