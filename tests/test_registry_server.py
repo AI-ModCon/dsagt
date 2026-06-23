@@ -624,6 +624,16 @@ class TestToolIndexing:
         assert len(results) > 0
         assert any("csv_filter" in r["chunk"].get("text", "") for r in results)
 
+    def test_search_skills_empty_catalog_hints_to_sync(self, tmp_path):
+        """With no catalog synced, search_skills explains how to enable one
+        instead of returning a bare 'no match' the agent reads as exhausted."""
+        server, reg, kb = _make_server_with_kb(tmp_path)
+
+        text = call_tool(server, "search_skills", {"query": "vasp pymatgen dft"})
+        assert "No skills found" in text
+        assert "no external skill catalog is synced" in text.lower()
+        assert "add_skill_source" in text
+
     def test_search_registry_by_name(self, tmp_path):
         """Exact tool_name lookup returns the tool."""
         server, reg, kb = _make_server_with_kb(tmp_path)

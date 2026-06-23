@@ -333,9 +333,10 @@ async def _handle_search_skills(
     # ``skills_catalog__<slug>`` collection, then merge by score.  Installed
     # skills are also natively discovered by the agent; the catalog is the
     # part native discovery can't do (it isn't loaded into context).
-    collections = [SKILLS_COLLECTION] + [
+    catalog_collections = [
         c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)
     ]
+    collections = [SKILLS_COLLECTION] + catalog_collections
     fetch_k = top_k * 3 if tag else top_k
     results: list[dict] = []
     for coll in collections:
@@ -354,6 +355,14 @@ async def _handle_search_skills(
     results.sort(key=lambda r: r.get("score", 0), reverse=True)
     results = results[:top_k]
     if not results:
+        if not catalog_collections:
+            return (
+                "No skills found matching the query. Note: no external skill "
+                "catalog is synced yet, so only installed skills were searched. "
+                "Call list_skill_sources() to see available sources, then "
+                "add_skill_source(source=...) (e.g. 'scientific' for "
+                "materials/chem/bio) to sync one before searching again."
+            )
         return "No skills found matching the query."
 
     summaries = []
@@ -386,8 +395,10 @@ async def _handle_install_skill(
 ) -> str:
     """Install a catalog skill into ``<project>/skills/<name>/``.
 
-    The skill becomes natively discoverable after the next ``dsagt start``
-    (which mirrors installed skills into ``.claude/skills/`` before launch).
+    The skill's files land on disk immediately, so the agent can use it in the
+    current session by reading its SKILL.md.  *Native* auto-invocation requires
+    the next ``dsagt start`` (which mirrors installed skills into
+    ``.claude/skills/`` before launch) plus an agent restart.
     """
     from dsagt.commands.skills_catalog import install_into_project
 
@@ -409,9 +420,13 @@ async def _handle_install_skill(
 
     return (
         f"{info['action'].capitalize()} skill '{info['name']}' at "
-        f"{info['dest_dir']}.\n\nIt will be available to the agent natively "
-        f"(.claude/skills/) on the next `dsagt start`; restart the agent to "
-        f"pick it up."
+        f"{info['dest_dir']}.\n\n"
+        f"Usable now — its SKILL.md and any scripts/references are already on "
+        f"disk in this project. To use it this session, read "
+        f"{info['dest_dir']}/SKILL.md and follow it; you don't need to restart.\n"
+        f"Restart is only for hands-free auto-invocation: the next `dsagt start` "
+        f"mirrors it into the platform's native skill dir (.claude/skills/), and "
+        f"after relaunch the agent discovers and auto-invokes it without this tool."
     )
 
 

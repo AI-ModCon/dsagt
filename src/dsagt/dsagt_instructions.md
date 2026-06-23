@@ -25,7 +25,16 @@ Before implementing anything, search for existing capabilities:
 - `search_skills(query)` — find agent skills (workflows, templates, procedures)
 - `get_registry()` — list all registered tools
 
-**Skills come in two tiers.** *Installed* skills (in this project) are discovered **natively** by your platform — their names/descriptions are already in your context and you auto-invoke them; you do NOT need `search_skills` to find those. Use `search_skills` to browse the much larger *external catalog* of installable skills (entries marked `[catalog]`), which are NOT loaded into context. To add a catalog skill to the project, call `install_skill(skill_name=...)`; it becomes natively available after the next session restart. To enable another catalog source (a known name like `scientific`/`anthropic`, or a GitHub URL), call `add_skill_source(source=...)`. To author a brand-new skill, use the bundled `skill-creator` skill.
+**Skills come in two tiers.** *Installed* skills (in this project) are discovered **natively** by your platform — their names/descriptions are already in your context and you auto-invoke them; you do NOT need `search_skills` to find those. Separately there is a much larger *external catalog* of installable skills (entries marked `[catalog]`), NOT loaded into context.
+
+**The external catalog is opt-in and starts empty — sources must be synced before `search_skills` can see them.** A blank/weak `search_skills` result usually means the relevant source isn't synced yet, NOT that no such skill exists. So before concluding the catalog has nothing, call `list_skill_sources()` — it reports each known source with its `synced` flag and `indexed` count. The flow:
+
+1. `list_skill_sources()` — see which sources are already synced vs only `available` (known name + URL, not yet indexed). For materials/chem/bio/DFT skills, the `scientific` source (K-Dense) is the one to enable.
+2. `add_skill_source(source=...)` — sync a source (a known name like `scientific`/`anthropic`, or a GitHub URL). Read-only indexing step; nothing is installed into the project. Only needed for sources whose `synced` is false.
+3. `search_skills(query)` — now browse the synced catalog. Entries marked `[catalog]` are installable.
+4. `install_skill(skill_name=...)` — copy a catalog skill into the project. Its SKILL.md + scripts land on disk immediately, so you can **use it this session** by reading `skills/<name>/SKILL.md` and following it. A restart (next `dsagt start`) is only needed for hands-free *native* auto-invocation, not for use.
+
+To author a brand-new skill instead of installing one, use the bundled `skill-creator` skill.
 
 **When the user indicates they want a specific tool used** — phrasings like "use tool `foo`", "use `foo` from the registry", "run `foo`", or similar — look it up first (`search_registry(tool_name=...)` for exact match, `get_registry()` to browse). Read the returned spec's `executable` field and each parameter's `cli` field, then invoke via your shell. Do not substitute your own file/shell tools for a task a registered tool can do. (See section 1b for the verbatim-`executable` rule.)
 
