@@ -30,7 +30,7 @@ If you just want to *run* DSAgt against your own data and agent — no repo chec
 python3.12 -m venv ~/.venvs/dsagt          # or: conda create -n dsagt python=3.12 && conda activate dsagt
 source ~/.venvs/dsagt/bin/activate         # (Windows venv: ~\.venvs\dsagt\Scripts\activate)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
-dsagt --version                            # 0.2.0
+dsagt --version                            # 0.3.0
 ```
 
 This puts the `dsagt` CLI (and the `dsagt-run` / `dsagt-*-server` helpers) on your PATH. Then build the shared knowledge base once and create your first project:
@@ -49,7 +49,7 @@ pip install --upgrade "git+https://github.com/AI-ModCon/dsagt.git"
 dsagt setup-kb
 ```
 
-> Pin to a specific release once tags are published, e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@v0.2.0"`.
+> Pin to a specific release once tags are published, e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@v0.3.0"`.
 <!-- md-shared:install:end -->
 
 ### For development
