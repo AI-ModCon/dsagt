@@ -1,0 +1,9 @@
+sample_id,composition,calcination_temp_C,bet_surface_area_m2_g,co2_conversion_pct,ch4_selectivity_pct,test_date,operator
+CAT-001,Ni/Al2O3,500,142.3,38.5,91.2,2026-03-02,jlee
+CAT-002,Ni-Ce/Al2O3,500,138.7,46.1,93.8,2026-03-02,jlee
+CAT-003,Ni-Ce/Al2O3,650,121.4,52.7,95.1,2026-03-03,jlee
+CAT-004,Ru/TiO2,400,88.6,29.3,88.4,2026-03-03,akumar
+CAT-005,Ru-K/TiO2,400,85.1,34.8,90.7,2026-03-04,akumar
+CAT-006,Co/SiO2,550,210.9,41.2,84.6,2026-03-04,akumar
+CAT-007,Co-Mn/SiO2,550,198.3,49.5,87.9,2026-03-05,jlee
+CAT-008,Fe/ZrO2,600,76.2,33.1,79.5,2026-03-05,akumar
