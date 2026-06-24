@@ -4,7 +4,7 @@
 
 ![DSAgt architecture](latex/architecture.png)
 
-DSAgt connects an MCP-compatible AI coding agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure. DSAgt provides data-pipeline scaffolding around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …);
+DSAgt connects an MCP-compatible AI coding agent to tool registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. DSAgt provides data-pipeline scaffolding around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …);
 
 **Prerequisites:** Python 3.12 or 3.13, and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use. ([uv](https://github.com/astral-sh/uv) is only needed for the development install.)
 
