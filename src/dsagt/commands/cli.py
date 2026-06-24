@@ -433,8 +433,17 @@ def _cmd_skills(args):
         return 0
 
     if action == "add":
+        from dsagt.commands.skills_catalog import SKILL_SOURCES_DIR
+
         target = args.target
-        is_source = (
+        # A "<synced-slug>/<skill>" target is a source-qualified *install*, not
+        # a new "owner/repo" source to clone — both have one '/', so distinguish
+        # by whether the prefix is an already-synced source's cache dir.
+        qualified_install = (
+            target.count("/") == 1
+            and (SKILL_SOURCES_DIR / target.split("/", 1)[0]).is_dir()
+        )
+        is_source = not qualified_install and (
             target in KNOWN_SOURCES
             or target.startswith(("http://", "https://", "git@"))
             or target.count("/") == 1
@@ -457,7 +466,11 @@ def _cmd_skills(args):
                 f"'dsagt skills add {args.project} <skill-name>' to install one."
             )
         else:
-            info = install_into_project(target, pdir)
+            try:
+                info = install_into_project(target, pdir)
+            except LookupError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 1
             print(
                 f"{info['action'].capitalize()} skill '{info['name']}' at {info['dest_dir']}."
             )
@@ -1019,9 +1032,7 @@ def main(argv=None):
         prog="dsagt", description="DSAgt project and session management."
     )
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument(
-        "--version", action="version", version=f"dsagt {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"dsagt {__version__}")
 
     sub = parser.add_subparsers(dest="command")
 

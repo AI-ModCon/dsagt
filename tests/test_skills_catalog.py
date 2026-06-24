@@ -116,8 +116,40 @@ def test_find_catalog_skill_and_ambiguity(tmp_path):
         sc.find_catalog_skill("missing", cache_dir=cache)
     # Same skill name in a second source → ambiguous.
     _mkskill(cache / "srcB" / "skills" / "alpha", "alpha")
-    with pytest.raises(LookupError):
+    with pytest.raises(LookupError, match="multiple sources"):
         sc.find_catalog_skill("alpha", cache_dir=cache)
+
+
+def test_find_catalog_skill_source_qualified(tmp_path):
+    cache = tmp_path / "cache"
+    _mkskill(cache / "srcA" / "skills" / "alpha", "alpha")
+    _mkskill(cache / "srcB" / "skills" / "alpha", "alpha")
+
+    # A "<slug>/<name>" qualifier disambiguates which source to install from.
+    a = sc.find_catalog_skill("srcA/alpha", cache_dir=cache)
+    b = sc.find_catalog_skill("srcB/alpha", cache_dir=cache)
+    assert a.relative_to(cache).parts[0] == "srcA"
+    assert b.relative_to(cache).parts[0] == "srcB"
+    assert a.name == b.name == "alpha"
+
+    # Qualifying with a source that lacks the skill is a clear, source-scoped miss.
+    with pytest.raises(LookupError, match="in source 'srcA'"):
+        sc.find_catalog_skill("srcA/missing", cache_dir=cache)
+
+
+def test_install_into_project_source_qualified(tmp_path):
+    cache = tmp_path / "cache"
+    _mkskill(cache / "srcA" / "skills" / "dup", "dup", desc="from A")
+    _mkskill(cache / "srcB" / "skills" / "dup", "dup", desc="from B")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+
+    # Bare ambiguous name refuses; the source-qualified form installs srcB's copy.
+    with pytest.raises(LookupError, match="multiple sources"):
+        sc.install_into_project("dup", proj, cache_dir=cache)
+    info = sc.install_into_project("srcB/dup", proj, cache_dir=cache)
+    assert info["name"] == "dup"
+    assert (proj / "skills" / "dup" / "SKILL.md").read_text().count("from B") == 1
 
 
 def test_install_into_project_copies_subdirs(tmp_path):

@@ -289,29 +289,43 @@ def index_catalog(skill_dirs: list[Path], slug: str, url: str, kb) -> int:
 def find_catalog_skill(name: str, *, cache_dir: Path = SKILL_SOURCES_DIR) -> Path:
     """Locate a cached catalog skill dir by name across all synced sources.
 
-    Matches on frontmatter ``name`` first, then directory name.  Raises on
-    no match, or on an ambiguous match spanning more than one source repo.
+    Matches on frontmatter ``name`` first, then directory name.  A bare name
+    must be unique across the machine-global clone cache; when the same name
+    exists in more than one synced source, pass a **source-qualified**
+    ``<slug>/<name>`` (the slug is the per-source cache dir / catalog-collection
+    suffix, as shown by ``list_skill_sources`` / ``dsagt skills list
+    --catalog``) to pick one.  Raises on no match or on a still-ambiguous bare
+    name.
     """
+    source_filter: str | None = None
+    skill = name
+    if "/" in name:
+        # Skill names never contain '/', so a slash means "<source>/<skill>".
+        source_filter, skill = name.split("/", 1)
+
     matches: list[Path] = []
     if cache_dir.exists():
         for slug_dir in sorted(p for p in cache_dir.iterdir() if p.is_dir()):
+            if source_filter is not None and slug_dir.name != source_filter:
+                continue
             for d in _discover_skill_dirs(slug_dir):
                 spec = _parse_frontmatter(d / "SKILL.md")
-                if spec.get("name") == name or d.name == name:
+                if spec.get("name") == skill or d.name == skill:
                     matches.append(d)
     if not matches:
+        where = f" in source '{source_filter}'" if source_filter else ""
         raise LookupError(
-            f"No catalog skill named '{name}'. Run 'dsagt skills sync' or "
-            f"add_skill_source first, then search_skills to find one."
+            f"No catalog skill named '{skill}'{where}. Run 'dsagt skills sync' "
+            f"or add_skill_source first, then search_skills to find one."
         )
     # Collapse matches that point at the same source repo (slug = first path
     # part under cache_dir); ambiguity only matters across different sources.
     by_source = {p.relative_to(cache_dir).parts[0]: p for p in matches}
     if len(by_source) > 1:
+        sources = sorted(by_source)
         raise LookupError(
-            f"Skill '{name}' exists in multiple sources "
-            f"({', '.join(sorted(by_source))}); install by source with "
-            f"'dsagt skills add <source>/{name}'."
+            f"Skill '{skill}' exists in multiple sources ({', '.join(sources)}); "
+            f"reinstall with a source-qualified name, e.g. '{sources[0]}/{skill}'."
         )
     return next(iter(by_source.values()))
 
