@@ -51,6 +51,7 @@ class GooseSetup(AgentSetup):
     name = "goose"
     base_command = ["goose", "session"]
     static_marker = ".goosehints"
+    native_skills_dir = ".agents/skills"  # cross-agent standard goose discovers
     install_hint = "See https://github.com/block/goose for installation."
     otel_payload_support = "full"
     # Multi-protocol; goose's runtime reads provider-specific creds plus
@@ -62,21 +63,32 @@ class GooseSetup(AgentSetup):
     # Without HOST set, goose ignores BASE_URL and hits the provider's
     # default endpoint — silently for users with a lab gateway.
     credential_env_vars = (
-        "GOOSE_PROVIDER", "GOOSE_MODEL",
-        "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_HOST",
+        "GOOSE_PROVIDER",
+        "GOOSE_MODEL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_HOST",
         "ANTHROPIC_MODEL",
-        "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_HOST",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_HOST",
     )
     # Goose's Rust client emits OTel automatically when
     # OTEL_EXPORTER_OTLP_ENDPOINT is set — no per-platform flags needed.
     telemetry_env = {}
     credential_hints = (
-        ("GOOSE_PROVIDER", "anthropic, openai, etc. (skip if global ~/.config/goose configured)"),
+        (
+            "GOOSE_PROVIDER",
+            "anthropic, openai, etc. (skip if global ~/.config/goose configured)",
+        ),
         ("GOOSE_MODEL", "the model name your provider serves"),
         ("ANTHROPIC_API_KEY", "if GOOSE_PROVIDER=anthropic"),
         ("ANTHROPIC_HOST", "if GOOSE_PROVIDER=anthropic and on a gateway / proxy"),
         ("OPENAI_API_KEY", "if GOOSE_PROVIDER=openai"),
-        ("OPENAI_HOST", "if GOOSE_PROVIDER=openai and on a gateway / proxy (NOT OPENAI_BASE_URL — goose ignores that)"),
+        (
+            "OPENAI_HOST",
+            "if GOOSE_PROVIDER=openai and on a gateway / proxy (NOT OPENAI_BASE_URL — goose ignores that)",
+        ),
     )
 
     def write_static(self, working_dir: Path) -> list[str]:
@@ -84,7 +96,9 @@ class GooseSetup(AgentSetup):
         instructions = _load_master_instructions()
         if instructions:
             action = _append_or_write(
-                working_dir / ".goosehints", instructions, _DSAGT_MARKER,
+                working_dir / ".goosehints",
+                instructions,
+                _DSAGT_MARKER,
             )
             if action:
                 actions.append(action)
@@ -103,16 +117,18 @@ class GooseSetup(AgentSetup):
         del config, env, pdir
         actions: list[str] = []
 
-        goose_config: dict = {"extensions": {}}
-        for server in ("registry", "knowledge"):
-            args = _mcp_server_args(server)
-            goose_config["extensions"][server] = {
-                "enabled": True,
-                "name": server,
-                "type": "stdio",
-                "cmd": "uv " + " ".join(args),
-                "timeout": 300,
+        args = _mcp_server_args()
+        goose_config: dict = {
+            "extensions": {
+                "dsagt": {
+                    "enabled": True,
+                    "name": "dsagt",
+                    "type": "stdio",
+                    "cmd": "uv " + " ".join(args),
+                    "timeout": 300,
+                }
             }
+        }
 
         goose_path = working_dir / "goose.yaml"
         goose_path.write_text(
@@ -160,8 +176,7 @@ class GooseSetup(AgentSetup):
         """
         del config
         cmd = list(self.base_command)
-        for server in ("registry", "knowledge"):
-            cmd.extend(["--with-extension", f"uv run dsagt-{server}-server"])
+        cmd.extend(["--with-extension", "uv run dsagt-server"])
         return cmd
 
     def run_script(
@@ -175,8 +190,13 @@ class GooseSetup(AgentSetup):
         """Single ``goose run`` call — goose's instructions file IS multi-turn."""
         del config
         env["GOOSE_MODE"] = "auto"
-        cmd = ["goose", "run", "--instructions", str(script_path),
-               "--max-turns", str(max_turns)]
-        for server in ("registry", "knowledge"):
-            cmd.extend(["--with-extension", f"uv run dsagt-{server}-server"])
+        cmd = [
+            "goose",
+            "run",
+            "--instructions",
+            str(script_path),
+            "--max-turns",
+            str(max_turns),
+        ]
+        cmd.extend(["--with-extension", "uv run dsagt-server"])
         return _run_simple_script(cmd, env, working_dir, self.install_hint)

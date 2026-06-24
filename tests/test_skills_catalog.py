@@ -34,12 +34,35 @@ def test_repo_slug_is_collection_safe():
     assert sc._repo_slug("git@github.com:Foo/Bar.git") == "foo-bar"
 
 
+def test_repo_slug_is_host_agnostic():
+    # Non-GitHub hosts (GitLab, etc.) reduce to owner-repo, scheme/host dropped.
+    assert sc._repo_slug("https://gitlab.osti.gov/genesis/genesis-skills") == (
+        "genesis-genesis-skills"
+    )
+    assert sc._repo_slug("git@gitlab.osti.gov:genesis/genesis-skills.git") == (
+        "genesis-genesis-skills"
+    )
+
+
+def test_known_source_genesis_covers_whole_skills_tree():
+    spec = sc.resolve_source("genesis")
+    assert spec["url"] == "https://gitlab.osti.gov/genesis/genesis-skills"
+    # subdir scopes the recursive SKILL.md walk to the whole skills/ tree so
+    # every category (hpc, huggingface, langchain, …) is discoverable.
+    assert spec["subdir"] == "skills"
+    assert spec["branch"] == "main"
+
+
 def test_persist_source_to_config_appends_and_dedupes(tmp_path):
     import yaml
 
     cfg = tmp_path / "dsagt_config.yaml"
     cfg.write_text(yaml.dump({"project": "p", "skills": {"sources": []}}))
-    spec = {"name": "anthropic", "url": "https://github.com/anthropics/skills", "branch": "main"}
+    spec = {
+        "name": "anthropic",
+        "url": "https://github.com/anthropics/skills",
+        "branch": "main",
+    }
     assert sc.persist_source_to_config(tmp_path, spec) is True
     sources = yaml.safe_load(cfg.read_text())["skills"]["sources"]
     assert sources[-1]["name"] == "anthropic"
@@ -210,3 +233,119 @@ def test_mirror_truncates_long_description(tmp_path):
     assert len(front["description"]) <= _NATIVE_DESCRIPTION_CAP
     # Source untouched.
     assert len((src / "SKILL.md").read_text()) > _NATIVE_DESCRIPTION_CAP
+
+
+# ---------------------------------------------------------------------------
+# AgentSetup.setup_skills — per-agent native-dir mirror
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "agent,subdir",
+    [
+        ("claude", ".claude/skills"),
+        ("goose", ".agents/skills"),
+        ("cline", ".cline/skills"),
+        ("roo", ".roo/skills"),
+        ("codex", ".agents/skills"),
+    ],
+)
+def test_setup_skills_mirrors_into_native_dir(tmp_path, agent, subdir):
+    from dsagt.agents import AGENTS
+
+    _mkskill(tmp_path / "skills" / "myskill", "myskill")  # a project skill
+    actions = AGENTS[agent]().setup_skills(tmp_path, {})
+    target = tmp_path
+    for part in subdir.split("/"):
+        target = target / part
+    assert (target / "myskill" / "SKILL.md").exists()
+    assert any("kill" in a for a in actions)  # reported a mirror action
+
+
+def test_setup_skills_respects_populate_native_false(tmp_path):
+    from dsagt.agents import AGENTS
+
+    _mkskill(tmp_path / "skills" / "myskill", "myskill")
+    actions = AGENTS["claude"]().setup_skills(
+        tmp_path, {"skills": {"populate_native": False}}
+    )
+    assert actions == []
+    assert not (tmp_path / ".claude" / "skills").exists()
+
+
+# ---------------------------------------------------------------------------
+# install_into_project — license / attribution capture
+# ---------------------------------------------------------------------------
+
+
+def test_install_captures_ancestor_attribution(tmp_path):
+    cache = tmp_path / "cache"
+    repo = cache / "srcrepo"
+    repo.mkdir(parents=True)
+    (repo / "LICENSE").write_text("Apache-2.0")  # repo-root license
+    cat = repo / "skills" / "modcon"
+    cat.mkdir(parents=True)
+    (cat / "ATTRIBUTION.md").write_text("upstream credits")  # per-subtree
+    _mkskill(cat / "myskill", "myskill")
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    info = sc.install_into_project("myskill", proj, cache_dir=cache)
+    dest = proj / "skills" / "myskill"
+    assert (dest / "SKILL.md").exists()
+    assert (dest / "ATTRIBUTION.md").read_text() == "upstream credits"
+    assert (dest / "LICENSE").read_text() == "Apache-2.0"
+    prov = (dest / "PROVENANCE.txt").read_text()
+    assert "srcrepo" in prov and "skills/modcon/myskill" in prov
+    assert set(info["attribution"]) == {"ATTRIBUTION.md", "LICENSE"}
+
+
+def test_install_skill_local_license_wins(tmp_path):
+    cache = tmp_path / "cache"
+    repo = cache / "srcrepo"
+    repo.mkdir(parents=True)
+    (repo / "LICENSE").write_text("ROOT")  # repo-root license
+    skill = _mkskill(repo / "myskill", "myskill")
+    (skill / "LICENSE").write_text("SKILL-LOCAL")  # skill bundles its own
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    info = sc.install_into_project("myskill", proj, cache_dir=cache)
+    dest = proj / "skills" / "myskill"
+    # The skill's own LICENSE (copied by copytree) must not be overwritten.
+    assert (dest / "LICENSE").read_text() == "SKILL-LOCAL"
+    assert "LICENSE" not in info["attribution"]
+
+
+# ---------------------------------------------------------------------------
+# index_catalog — frontmatter-only embedding (progressive disclosure)
+# ---------------------------------------------------------------------------
+
+
+def test_index_catalog_embeds_frontmatter_not_body(tmp_path):
+    captured = {}
+
+    class _KB:
+        index_dir = tmp_path / "idx"
+        collections: list = []
+
+        def add_entries(self, texts, collection, metadatas=None):
+            captured["texts"] = texts
+            captured["metas"] = metadatas
+            return {}
+
+    skill = tmp_path / "myskill"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: myskill\ndescription: does a thing\ntags: [hpc, slurm]\n---\n"
+        "# Body\nSECRET_BODY_MARKER should not be embedded.\n"
+    )
+    dirs = sc._discover_skill_dirs(tmp_path)
+    sc.index_catalog(dirs, "slug", "http://x", _KB())
+
+    joined = " ".join(captured["texts"])
+    assert "myskill" in joined and "does a thing" in joined  # frontmatter embedded
+    assert "hpc" in joined and "slurm" in joined  # tags embedded
+    assert "SECRET_BODY_MARKER" not in joined  # body NOT embedded
+    # description is also carried in metadata for the search summary.
+    assert captured["metas"][0]["description"] == "does a thing"

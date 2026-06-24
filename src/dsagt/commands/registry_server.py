@@ -10,11 +10,12 @@ and indexed into a ChromaDB collection for semantic search.
 Server configuration (embedding credentials) flows through env vars
 (LLM_API_KEY, OPENAI_BASE_URL, EMBEDDING_MODEL) set by dsagt start.
 
-Usage:
-    dsagt-registry-server --runtime-dir ./my_session
+These tool definitions + handlers run inside the merged ``dsagt-server``
+(see ``dsagt.commands.dsagt_server``).  There is no standalone registry-server
+entry point; ``create_registry_server`` is retained only as a test-facing
+constructor.
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -40,12 +41,9 @@ from dsagt.observability import (
 )
 from dsagt.provenance import reconstruct_pipeline
 from dsagt.registry import (
-    CATALOG_COLLECTION_PREFIX,
-    SKILLS_COLLECTION,
     TOOLS_COLLECTION,
     SkillRegistry,
     ToolRegistry,
-    _parse_frontmatter,
 )
 
 os.environ["PYTHONUNBUFFERED"] = "1"
@@ -206,9 +204,10 @@ async def _handle_save_skill(
 ) -> str:
     """Register a skill (workflow / agent instructions) for later reuse.
 
-    Symmetric with save_tool_spec — writes SKILL.md to
-    ``<project>/skills/<name>/`` and indexes it into
-    ``registered_skills`` so future ``search_skills`` calls find it.
+    Writes SKILL.md to ``<project>/skills/<name>/``, where every supported
+    agent natively auto-discovers it (after the next ``dsagt start`` mirror).
+    No KB indexing — ``search_skills`` covers only the not-yet-installed
+    *catalog* tier, since installed skills are already natively discoverable.
     """
     spec = arguments["spec"]
     if isinstance(spec, str):
@@ -308,89 +307,23 @@ async def _handle_search_skills(
     kb: KnowledgeBase | None,
     skill_registry: SkillRegistry | None,
 ) -> str:
-    skill_name = arguments.get("skill_name")
-    query = arguments.get("query", "")
-    tag = arguments.get("tag")
-    top_k = arguments.get("top_k", 10)
+    if skill_registry is None:
+        return "search_skills is unavailable (no skill registry configured)."
 
-    if skill_name and skill_registry:
-        skill = skill_registry.get_skill(skill_name)
-        if skill:
-            return f"Found skill '{skill_name}':\n\n" + yaml.dump(
-                skill, default_flow_style=False, sort_keys=False
-            )
-        return f"No skill named '{skill_name}'."
+    from dsagt.skill_discovery import SkillRouter
 
-    if kb is None:
-        return (
-            "search_skills requires a configured knowledge base "
-            "(set embedding.api_key + embedding.base_url + embedding.model "
-            "in dsagt_config.yaml).  Use search_skills with an exact "
-            "skill_name for KB-free lookups."
-        )
-
-    # Search the installed/bundled ``skills`` collection AND every external
-    # ``skills_catalog__<slug>`` collection, then merge by score.  Installed
-    # skills are also natively discovered by the agent; the catalog is the
-    # part native discovery can't do (it isn't loaded into context).
-    catalog_collections = [
-        c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)
-    ]
-    collections = [SKILLS_COLLECTION] + catalog_collections
-    fetch_k = top_k * 3 if tag else top_k
-    results: list[dict] = []
-    for coll in collections:
-        try:
-            results.extend(
-                kb.search(query=query or "skill", collection=coll, top_k=fetch_k)
-            )
-        except (FileNotFoundError, KeyError, ValueError):
-            continue  # collection absent/empty on this KB — skip
-    if tag:
-        results = [
-            r
-            for r in results
-            if tag in r.get("chunk", {}).get("metadata", {}).get("tags", "")
-        ]
-    results.sort(key=lambda r: r.get("score", 0), reverse=True)
-    results = results[:top_k]
-    if not results:
-        if not catalog_collections:
-            return (
-                "No skills found matching the query. Note: no external skill "
-                "catalog is synced yet, so only installed skills were searched. "
-                "Call list_skill_sources() to see available sources, then "
-                "add_skill_source(source=...) (e.g. 'scientific' for "
-                "materials/chem/bio) to sync one before searching again."
-            )
-        return "No skills found matching the query."
-
-    summaries = []
-    for r in results:
-        chunk = r.get("chunk", {})
-        meta = chunk.get("metadata", {})
-        src = meta.get("source", "")
-        where = (
-            " [installed]"
-            if src in ("bundled", "registered")
-            else (
-                " [catalog · install_skill to add]"
-                if src.startswith("catalog:")
-                else ""
-            )
-        )
-        summaries.append(
-            f"- **{meta.get('skill_name', 'unknown')}**{where} "
-            f"(score: {r.get('score', 0):.2f})\n"
-            f"  {chunk.get('text', '')[:200]}"
-        )
-    return f"Found {len(results)} skill(s):\n\n" + "\n\n".join(summaries)
+    router = SkillRouter(skill_registry=skill_registry, kb=kb)
+    return router.search(
+        arguments.get("query", ""),
+        top_k=arguments.get("top_k", 10),
+        tag=arguments.get("tag"),
+        skill_name=arguments.get("skill_name"),
+    )
 
 
 async def _handle_install_skill(
     arguments: dict,
     *,
-    skill_registry: SkillRegistry | None,
     runtime_dir: Path,
 ) -> str:
     """Install a catalog skill into ``<project>/skills/<name>/``.
@@ -400,23 +333,26 @@ async def _handle_install_skill(
     the next ``dsagt start`` (which mirrors installed skills into
     ``.claude/skills/`` before launch) plus an agent restart.
     """
-    from dsagt.commands.skills_catalog import install_into_project
+    from dsagt.skill_discovery import SkillRouter
 
     name = arguments.get("skill_name")
     if not name:
         return "install_skill requires 'skill_name'."
     try:
-        info = install_into_project(name, runtime_dir)
+        info = SkillRouter().install(name, runtime_dir)
     except LookupError as e:
         return f"Error: {e}"
 
-    # Index the now-installed skill as a project ('registered') skill too, so
-    # non-native agents can still find it via search_skills after install.
-    if skill_registry is not None and skill_registry._kb is not None:
-        skill_md = Path(info["dest_dir"]) / "SKILL.md"
-        spec = _parse_frontmatter(skill_md)
-        if spec.get("name"):
-            skill_registry._index_skill(spec, skill_md)
+    # No KB re-index: the installed skill now lives in <project>/skills/ where
+    # the agent natively auto-discovers it (after the next `dsagt start` mirror).
+    # search_skills covers only the not-yet-installed catalog tier.
+    attribution = info.get("attribution") or []
+    attribution_note = (
+        f"\nPreserved upstream license/attribution ({', '.join(attribution)}) "
+        f"+ PROVENANCE.txt."
+        if attribution
+        else "\nWrote PROVENANCE.txt recording the source."
+    )
 
     return (
         f"{info['action'].capitalize()} skill '{info['name']}' at "
@@ -427,6 +363,7 @@ async def _handle_install_skill(
         f"Restart is only for hands-free auto-invocation: the next `dsagt start` "
         f"mirrors it into the platform's native skill dir (.claude/skills/), and "
         f"after relaunch the agent discovers and auto-invokes it without this tool."
+        f"{attribution_note}"
     )
 
 
@@ -491,18 +428,17 @@ async def _handle_install_dependencies(
 # ---------------------------------------------------------------------------
 
 
-def create_registry_server(
+def _registry_tools_and_handlers(
     registry: ToolRegistry,
     kb: KnowledgeBase | None = None,
     skill_registry: SkillRegistry | None = None,
 ):
-    """Create and configure the MCP registry server.
+    """Build the registry server's ``(tool defs, handler map)``.
 
-    Test-facing API: tests call with a mock registry and get back a server
-    they can drive via call_tool_sync().  main() constructs the registry
-    and KB from config before calling this.
+    Split out from :func:`create_registry_server` so the merged
+    ``dsagt-server`` can combine these with the knowledge server's tools
+    under one MCP ``Server`` without re-declaring them.
     """
-    server = Server("registry")
     runtime_dir = Path(registry.runtime_dir)
 
     # Dispatch table — maps MCP tool names to handler functions with
@@ -520,7 +456,6 @@ def create_registry_server(
         ),
         "install_skill": partial(
             _handle_install_skill,
-            skill_registry=skill_registry,
             runtime_dir=runtime_dir,
         ),
         "reconstruct_pipeline": partial(
@@ -531,302 +466,320 @@ def create_registry_server(
         ),
     }
 
+    tools = [
+        types.Tool(
+            name="read_file",
+            description="Read contents of a text file",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file to read",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        types.Tool(
+            name="http_request",
+            description="Make an HTTP request to fetch documentation or API specs",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to request"},
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method",
+                        "default": "GET",
+                    },
+                    "headers": {
+                        "type": "object",
+                        "description": "Optional headers",
+                    },
+                },
+                "required": ["url"],
+            },
+        ),
+        types.Tool(
+            name="run_command",
+            description="Execute a command to get help/usage information",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Command to execute",
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Arguments (e.g., ['--help'])",
+                        "default": [],
+                    },
+                    "timeout": {"type": "number", "default": 10},
+                },
+                "required": ["command"],
+            },
+        ),
+        types.Tool(
+            name="save_tool_spec",
+            description="Save a tool specification to the registry as a skill file",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    # ``anyOf`` accepts both a structured object and a
+                    # JSON-encoded string.  Some MCP clients (notably
+                    # Claude Sonnet/Haiku 4.x) serialize nested object
+                    # arguments as JSON strings instead of objects; the
+                    # handler unwraps either shape.
+                    "spec": {
+                        "description": "Tool specification (object or JSON-encoded string)",
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Unique tool identifier",
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "description": "What the tool does",
+                                    },
+                                    "executable": {
+                                        "type": "string",
+                                        "description": "Command to execute",
+                                    },
+                                    "parameters": {
+                                        "type": "object",
+                                        "description": "Parameter definitions",
+                                        "additionalProperties": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {
+                                                    "type": "string",
+                                                    "description": "Parameter type",
+                                                },
+                                                "required": {"type": "boolean"},
+                                                "description": {"type": "string"},
+                                                "default": {
+                                                    "description": "Default value"
+                                                },
+                                                "cli": {
+                                                    "type": "string",
+                                                    "description": (
+                                                        "How to render this parameter on the command line: "
+                                                        "'positional[:N]' for positional args, '--name' or '-n' "
+                                                        "for spaced flags, '--name=' or '-n=' for glued flags, "
+                                                        "'key=' for dd-style key=value. Defaults to '--<param_name>' "
+                                                        "if omitted."
+                                                    ),
+                                                },
+                                            },
+                                            "required": ["type", "description"],
+                                        },
+                                    },
+                                    "dependencies": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "Python packages to install",
+                                    },
+                                    "tags": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "Tags for categorizing the tool",
+                                    },
+                                },
+                                "required": [
+                                    "name",
+                                    "description",
+                                    "executable",
+                                    "parameters",
+                                ],
+                            },
+                            {"type": "string"},
+                        ],
+                    },
+                },
+                "required": ["spec"],
+            },
+        ),
+        types.Tool(
+            name="save_skill",
+            description=(
+                "Register a skill (agent workflow / instructions) into "
+                "<project>/skills/<name>/SKILL.md, where the agent natively "
+                "auto-discovers it after the next `dsagt start`.  Symmetric "
+                "with save_tool_spec — use this when you've designed a "
+                "reusable instruction set you want future sessions to load "
+                "automatically."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    # ``anyOf`` for spec mirrors save_tool_spec — accept
+                    # both structured object and JSON-encoded string for
+                    # MCP clients that serialize nested args.
+                    "spec": {
+                        "description": "Skill spec (object or JSON-encoded string)",
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Unique skill identifier (becomes the directory name)",
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "description": "What the skill does / when to use it",
+                                    },
+                                    "tags": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "Tags for categorizing the skill",
+                                    },
+                                },
+                                "required": ["name", "description"],
+                            },
+                            {"type": "string"},
+                        ],
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": (
+                            "Markdown body of the SKILL.md (workflow / "
+                            "instructions the agent will follow).  When "
+                            "updating an existing skill, omit to preserve "
+                            "the existing body."
+                        ),
+                    },
+                    "reference_files": {
+                        "description": (
+                            "Optional additional files to write into the "
+                            "skill directory.  Object mapping relative "
+                            "path -> file contents, or JSON-encoded string."
+                        ),
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            },
+                            {"type": "string"},
+                        ],
+                    },
+                },
+                "required": ["spec"],
+            },
+        ),
+        types.Tool(
+            name="get_registry",
+            description="Get all tools from the registry",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
+            name="search_registry",
+            description="Search for tools by name, tag, or description via semantic search.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "tag": {"type": "string", "description": "Filter by tag"},
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Exact tool name lookup",
+                    },
+                    "top_k": {"type": "integer", "default": 10},
+                },
+            },
+        ),
+        types.Tool(
+            name="search_skills",
+            description=(
+                "Search agent skills by name, tag, or description. Spans installed "
+                "skills and the external installable catalog. Catalog hits are marked "
+                "'[catalog]' — use install_skill to add one to this project."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "tag": {"type": "string", "description": "Filter by tag"},
+                    "skill_name": {
+                        "type": "string",
+                        "description": "Exact skill name lookup",
+                    },
+                    "top_k": {"type": "integer", "default": 10},
+                },
+            },
+        ),
+        types.Tool(
+            name="install_skill",
+            description=(
+                "Install a skill from the external catalog (found via search_skills) "
+                "into this project so the agent can use it natively. Copies SKILL.md "
+                "+ scripts/references; available natively after the next restart."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "Catalog skill name to install",
+                    },
+                },
+                "required": ["skill_name"],
+            },
+        ),
+        types.Tool(
+            name="reconstruct_pipeline",
+            description="Reconstruct a reproducible pipeline script from tool execution records.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {
+                        "type": "string",
+                        "enum": ["bash", "snakemake"],
+                        "default": "bash",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="install_dependencies",
+            description="Install Python dependencies for one or all tools in the registry.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Install deps for a specific tool (omit for all)",
+                    },
+                },
+            },
+        ),
+    ]
+    return tools, handlers
+
+
+def create_registry_server(
+    registry: ToolRegistry,
+    kb: KnowledgeBase | None = None,
+    skill_registry: SkillRegistry | None = None,
+):
+    """Create and configure the standalone MCP registry server.
+
+    Test-facing API: tests call with a mock registry and get back a server
+    they can drive via call_tool_sync().  The merged ``dsagt-server`` uses
+    :func:`_registry_tools_and_handlers` directly instead of this wrapper.
+    """
+    server = Server("registry")
+    tools, handlers = _registry_tools_and_handlers(registry, kb, skill_registry)
+
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
-        return [
-            types.Tool(
-                name="read_file",
-                description="Read contents of a text file",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "Path to the file to read",
-                        },
-                    },
-                    "required": ["path"],
-                },
-            ),
-            types.Tool(
-                name="http_request",
-                description="Make an HTTP request to fetch documentation or API specs",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "url": {"type": "string", "description": "URL to request"},
-                        "method": {
-                            "type": "string",
-                            "description": "HTTP method",
-                            "default": "GET",
-                        },
-                        "headers": {
-                            "type": "object",
-                            "description": "Optional headers",
-                        },
-                    },
-                    "required": ["url"],
-                },
-            ),
-            types.Tool(
-                name="run_command",
-                description="Execute a command to get help/usage information",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string",
-                            "description": "Command to execute",
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments (e.g., ['--help'])",
-                            "default": [],
-                        },
-                        "timeout": {"type": "number", "default": 10},
-                    },
-                    "required": ["command"],
-                },
-            ),
-            types.Tool(
-                name="save_tool_spec",
-                description="Save a tool specification to the registry as a skill file",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        # ``anyOf`` accepts both a structured object and a
-                        # JSON-encoded string.  Some MCP clients (notably
-                        # Claude Sonnet/Haiku 4.x) serialize nested object
-                        # arguments as JSON strings instead of objects; the
-                        # handler unwraps either shape.
-                        "spec": {
-                            "description": "Tool specification (object or JSON-encoded string)",
-                            "anyOf": [
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {
-                                            "type": "string",
-                                            "description": "Unique tool identifier",
-                                        },
-                                        "description": {
-                                            "type": "string",
-                                            "description": "What the tool does",
-                                        },
-                                        "executable": {
-                                            "type": "string",
-                                            "description": "Command to execute",
-                                        },
-                                        "parameters": {
-                                            "type": "object",
-                                            "description": "Parameter definitions",
-                                            "additionalProperties": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "type": {
-                                                        "type": "string",
-                                                        "description": "Parameter type",
-                                                    },
-                                                    "required": {"type": "boolean"},
-                                                    "description": {"type": "string"},
-                                                    "default": {
-                                                        "description": "Default value"
-                                                    },
-                                                    "cli": {
-                                                        "type": "string",
-                                                        "description": (
-                                                            "How to render this parameter on the command line: "
-                                                            "'positional[:N]' for positional args, '--name' or '-n' "
-                                                            "for spaced flags, '--name=' or '-n=' for glued flags, "
-                                                            "'key=' for dd-style key=value. Defaults to '--<param_name>' "
-                                                            "if omitted."
-                                                        ),
-                                                    },
-                                                },
-                                                "required": ["type", "description"],
-                                            },
-                                        },
-                                        "dependencies": {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                            "description": "Python packages to install",
-                                        },
-                                        "tags": {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                            "description": "Tags for categorizing the tool",
-                                        },
-                                    },
-                                    "required": [
-                                        "name",
-                                        "description",
-                                        "executable",
-                                        "parameters",
-                                    ],
-                                },
-                                {"type": "string"},
-                            ],
-                        },
-                    },
-                    "required": ["spec"],
-                },
-            ),
-            types.Tool(
-                name="save_skill",
-                description=(
-                    "Register a skill (agent workflow / instructions) into "
-                    "<project>/skills/<name>/SKILL.md and index it into the "
-                    "registered_skills KB collection.  Symmetric with "
-                    "save_tool_spec — use this when you've designed a "
-                    "reusable instruction set you want future sessions to "
-                    "discover via search_skills."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        # ``anyOf`` for spec mirrors save_tool_spec — accept
-                        # both structured object and JSON-encoded string for
-                        # MCP clients that serialize nested args.
-                        "spec": {
-                            "description": "Skill spec (object or JSON-encoded string)",
-                            "anyOf": [
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {
-                                            "type": "string",
-                                            "description": "Unique skill identifier (becomes the directory name)",
-                                        },
-                                        "description": {
-                                            "type": "string",
-                                            "description": "What the skill does / when to use it",
-                                        },
-                                        "tags": {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                            "description": "Tags for categorizing the skill",
-                                        },
-                                    },
-                                    "required": ["name", "description"],
-                                },
-                                {"type": "string"},
-                            ],
-                        },
-                        "body": {
-                            "type": "string",
-                            "description": (
-                                "Markdown body of the SKILL.md (workflow / "
-                                "instructions the agent will follow).  When "
-                                "updating an existing skill, omit to preserve "
-                                "the existing body."
-                            ),
-                        },
-                        "reference_files": {
-                            "description": (
-                                "Optional additional files to write into the "
-                                "skill directory.  Object mapping relative "
-                                "path -> file contents, or JSON-encoded string."
-                            ),
-                            "anyOf": [
-                                {
-                                    "type": "object",
-                                    "additionalProperties": {"type": "string"},
-                                },
-                                {"type": "string"},
-                            ],
-                        },
-                    },
-                    "required": ["spec"],
-                },
-            ),
-            types.Tool(
-                name="get_registry",
-                description="Get all tools from the registry",
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            types.Tool(
-                name="search_registry",
-                description="Search for tools by name, tag, or description via semantic search.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query"},
-                        "tag": {"type": "string", "description": "Filter by tag"},
-                        "tool_name": {
-                            "type": "string",
-                            "description": "Exact tool name lookup",
-                        },
-                        "top_k": {"type": "integer", "default": 10},
-                    },
-                },
-            ),
-            types.Tool(
-                name="search_skills",
-                description=(
-                    "Search agent skills by name, tag, or description. Spans installed "
-                    "skills and the external installable catalog. Catalog hits are marked "
-                    "'[catalog]' — use install_skill to add one to this project."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query"},
-                        "tag": {"type": "string", "description": "Filter by tag"},
-                        "skill_name": {
-                            "type": "string",
-                            "description": "Exact skill name lookup",
-                        },
-                        "top_k": {"type": "integer", "default": 10},
-                    },
-                },
-            ),
-            types.Tool(
-                name="install_skill",
-                description=(
-                    "Install a skill from the external catalog (found via search_skills) "
-                    "into this project so the agent can use it natively. Copies SKILL.md "
-                    "+ scripts/references; available natively after the next restart."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "skill_name": {
-                            "type": "string",
-                            "description": "Catalog skill name to install",
-                        },
-                    },
-                    "required": ["skill_name"],
-                },
-            ),
-            types.Tool(
-                name="reconstruct_pipeline",
-                description="Reconstruct a reproducible pipeline script from tool execution records.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "format": {
-                            "type": "string",
-                            "enum": ["bash", "snakemake"],
-                            "default": "bash",
-                        },
-                    },
-                },
-            ),
-            types.Tool(
-                name="install_dependencies",
-                description="Install Python dependencies for one or all tools in the registry.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "tool_name": {
-                            "type": "string",
-                            "description": "Install deps for a specific tool (omit for all)",
-                        },
-                    },
-                },
-            ),
-        ]
+        return tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
@@ -840,135 +793,10 @@ def create_registry_server(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-
-
-def main():
-    """Entry point for dsagt-registry-server.
-
-    All configuration comes from the project directory:
-    - ``./dsagt_config.yaml`` → project path + name
-    - ``LLM_API_KEY``, ``OPENAI_BASE_URL`` env vars → embedding credentials
-
-    No CLI arguments.  By contract the agent's launch one-liner is
-    ``cd <pdir> && <agent>``, so cwd is project_dir for the MCP
-    children it spawns.
-    """
-    import logging as _logging
-    from dsagt.observability import find_project_config
-
-    project_dir, _cfg = find_project_config()
-    if project_dir is None:
-        raise RuntimeError(
-            "dsagt-registry-server: no dsagt_config.yaml in cwd "
-            f"({Path.cwd()}).  Launch the agent from the project "
-            "directory (`cd <pdir> && <agent>`)."
-        )
-
-    log_file = project_dir / "dsagt_registry_server.log"
-    # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  At DEBUG,
-    # transitive libraries (httpcore, urllib3, llama_index, chromadb) flood
-    # stderr with one line per network operation — when an agent like roo
-    # pipes the MCP server's stderr into its own debug stream, the human
-    # output gets buried under thousands of low-value lines.
-    _level_name = os.environ.get("DSAGT_LOG_LEVEL", "INFO").upper()
-    _level = getattr(_logging, _level_name, _logging.INFO)
-    _logging.basicConfig(
-        level=_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[
-            _logging.FileHandler(log_file, mode="a"),
-            _logging.StreamHandler(),
-        ],
-    )
-    log = _logging.getLogger(__name__)
-    log.info("Server starting — log file: %s", log_file)
-
-    config_path = project_dir / "dsagt_config.yaml"
-    from dsagt.session import resolve_env_vars
-
-    config = resolve_env_vars(yaml.safe_load(config_path.read_text()))
-
-    emb_config = config["embedding"]
-
-    from dsagt.observability import init_tracing, configure_litellm_retries
-
-    init_tracing(
-        "dsagt-registry-server"
-    )  # session_id picked up from DSAGT_SESSION_ID env
-    configure_litellm_retries()
-
-    # The KB is optional for the registry server — most tools (save_tool_spec,
-    # get_registry, read_file, run_command, etc.) work without it.  Only
-    # search_registry and search_skills need the KB for semantic search;
-    # they return a clear error if the KB is None.
-    backend = (emb_config.get("backend") or "local").lower()
-    # Cross-backend leakage guard: see the matching block in
-    # knowledge_server.py for the rationale.  In short: when
-    # ``embedding.backend`` is ``local`` but the resolved model name is
-    # an OpenAI-style alias (no slash), drop the override so we fall
-    # back to the LocalEmbeddingClient default rather than 404 from HF.
-    raw_model = (emb_config.get("model") or "").strip()
-    embedder_kwargs: dict = {}
-    if raw_model and not raw_model.startswith("${"):
-        looks_hf = "/" in raw_model
-        if backend == "local" and not looks_hf:
-            log.warning(
-                "Ignoring embedding.model=%r for backend=local (does not "
-                "look like a HuggingFace identifier).  Falling back to the "
-                "LocalEmbeddingClient default.",
-                raw_model,
-            )
-        else:
-            embedder_kwargs["model"] = raw_model
-    if backend == "local":
-        kb_available = True
-    else:  # backend == "api"
-        api_key = emb_config.get("api_key") or ""
-        kb_available = (
-            api_key and not api_key.startswith("${") and emb_config.get("base_url")
-        )
-        embedder_kwargs.update(
-            {
-                "base_url": emb_config.get("base_url") or "",
-                "api_key": api_key,
-            }
-        )
-
-    kb = None
-    if kb_available:
-        kb = KnowledgeBase(
-            index_dir=project_dir / "kb_index",
-            default_embedder=backend,
-            default_index=config["knowledge"]["vector_db"],
-            embedder_kwargs=embedder_kwargs,
-        )
-        # Background-load the embedder so the model is ready when the
-        # agent's first search_registry / save_tool_spec call lands.
-        # See knowledge_server for the same rationale.
-        kb.preload_default_embedder()
-
-    registry = ToolRegistry(
-        source_tools_dir=None,
-        runtime_dir=str(project_dir),
-        kb=kb,
-    )
-
-    skill_reg = SkillRegistry(
-        source_skills_dir=None,
-        runtime_dir=str(project_dir),
-        kb=kb,
-    )
-
-    # Bundled tools/skills are pre-embedded in the shared
-    # ~/dsagt-projects/kb_index/ by ``dsagt setup-kb`` (or by the auto-bootstrap
-    # in ``dsagt start``) and COPIED into the project's kb_index by
-    # ``setup_runtime_kb`` before either MCP server spawns.  This server
-    # does no embedding work for bundled content at startup; agent's
-    # save_tool_spec / save_skill incur a single embed at save time.
-
-    server = create_registry_server(registry, kb, skill_reg)
-    asyncio.run(_run_stdio(server, "registry"))
-
-
-if __name__ == "__main__":
-    main()
+#
+# There is no standalone ``dsagt-registry-server`` entry point any more.  The
+# registry tools run inside the merged ``dsagt-server`` (see
+# ``dsagt.commands.dsagt_server``), which composes
+# :func:`_registry_tools_and_handlers` with the knowledge server's tools under
+# one MCP ``Server`` + one shared ``KnowledgeBase``.  ``create_registry_server``
+# above is retained as a standalone, test-facing constructor.

@@ -13,8 +13,10 @@ Server configuration (chunk_size, vector_db, rerank) is read from the
 project's dsagt_config.yaml.  Embedding credentials flow through env vars
 (LLM_API_KEY, OPENAI_BASE_URL, EMBEDDING_MODEL) set by dsagt start.
 
-Usage:
-    dsagt-knowledge-server --base-index-dir ./kb_index --runtime-dir ./runtime
+These tool definitions + handlers run inside the merged ``dsagt-server``
+(see ``dsagt.commands.dsagt_server``).  There is no standalone knowledge-server
+entry point; ``create_knowledge_server`` is retained only as a test-facing
+constructor.
 """
 
 import asyncio
@@ -34,7 +36,6 @@ from pathlib import Path
 
 import mcp.server.stdio
 import mcp.types as types
-import yaml
 from mcp.server.lowlevel import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 
@@ -46,11 +47,8 @@ from dsagt.knowledge import (
 )
 from dsagt.memory import SuggestionQueue
 from dsagt.memory import ExplicitMemory
-from dsagt.session import (
-    REGISTRY_DIR,
-    _collection_exists,
-    setup_runtime_kb,
-)  # noqa: F401
+from dsagt.session import _collection_exists
+from dsagt.session import setup_runtime_kb  # noqa: F401  (re-exported for tests)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +74,8 @@ async def _run_stdio(server: Server, name: str) -> None:
         )
 
 
-# _collection_exists and setup_runtime_kb live in dsagt.session (imported above).
+# _collection_exists is used below; setup_runtime_kb is re-exported for tests +
+# the merged dsagt_server.  Both live in dsagt.session (imported above).
 
 
 def _register_external_collection(
@@ -580,8 +579,8 @@ async def _handle_add_skill_source(
         KNOWN_SOURCES,
         persist_source_to_config,
         resolve_source,
-        sync_source,
     )
+    from dsagt.skill_discovery import SkillRouter
 
     source = arguments.get("source")
     if not source:
@@ -592,7 +591,8 @@ async def _handle_add_skill_source(
         spec = resolve_source(source)
         if isinstance(source, str) and source in KNOWN_SOURCES:
             spec.setdefault("name", source)
-        stats = await asyncio.to_thread(sync_source, source, kb=kb)
+        router = SkillRouter(kb=kb)
+        stats = await asyncio.to_thread(router.sync, source)
     except (ValueError, RuntimeError) as e:
         return {"error": str(e)}
     persist_source_to_config(
@@ -615,30 +615,23 @@ async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> d
     flag + ``indexed`` count inline means the agent doesn't have to cross-
     reference a separate ``synced_collections`` list to tell the difference.
     """
-    import json
-
     from dsagt.commands.skills_catalog import KNOWN_SOURCES, _repo_slug
     from dsagt.registry import CATALOG_COLLECTION_PREFIX, catalog_collection
+    from dsagt.skill_discovery import SkillRouter
 
     synced = {c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)}
 
-    def _indexed_count(collection: str) -> int:
-        ids = Path(kb.index_dir) / collection / "chroma_ids.json"
-        try:
-            return len(json.loads(ids.read_text()))
-        except (FileNotFoundError, ValueError):
-            return 0
-
-    sources = {}
-    for name, s in KNOWN_SOURCES.items():
-        coll = catalog_collection(_repo_slug(s["url"]))
-        is_synced = coll in synced
-        sources[name] = {
+    # Single source of truth for the per-source synced/indexed view (shared
+    # with the CLI `skills list --catalog`).
+    sources = {
+        s["name"]: {
             "url": s["url"],
-            "description": s.get("description", ""),
-            "synced": is_synced,
-            "indexed": _indexed_count(coll) if is_synced else 0,
+            "description": s["description"],
+            "synced": s["synced"],
+            "indexed": s["indexed"],
         }
+        for s in SkillRouter(kb=kb).list_sources()
+    }
 
     # Surface any synced catalog whose source isn't in KNOWN_SOURCES (added
     # by raw GitHub URL) so the count is never silently dropped.
@@ -661,21 +654,19 @@ async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> d
     }
 
 
-def create_knowledge_server(
+def _knowledge_tools_and_handlers(
     kb: KnowledgeBase,
     runtime_dir: str | Path | None = None,
 ):
-    """Create and configure the MCP knowledge server.
+    """Build the knowledge server's ``(tool defs, handler map)``.
 
-    This is the test-facing API: tests call it with a mock KB and get back
-    a server they can drive via call_tool_sync().  main() reads the project
-    config and constructs KB before calling this.
+    Split out from :func:`create_knowledge_server` so the merged
+    ``dsagt-server`` can combine these with the registry server's tools
+    under one MCP ``Server`` without re-declaring them.
 
     The rerank default is on ``kb.default_rerank`` (set from
     ``knowledge.rerank`` in dsagt_config.yaml).
     """
-    server = Server("knowledge")
-
     mem_dir = Path(runtime_dir) if runtime_dir else kb.index_dir.parent
     memory = ExplicitMemory(runtime_dir=mem_dir)
     suggestions = SuggestionQueue(mem_dir / "suggestions.json")
@@ -706,287 +697,304 @@ def create_knowledge_server(
         ),
     }
 
+    tools = [
+        types.Tool(
+            name="add_skill_source",
+            description=(
+                "Enable an external agent-skill source (a known name like "
+                "'scientific'/'anthropic'/'antigravity'/'composio', or a GitHub URL). "
+                "Clones it and indexes its skills into the searchable catalog "
+                "(search_skills). Does NOT load them into context."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Known source name or GitHub repo URL / owner/repo",
+                    },
+                },
+                "required": ["source"],
+            },
+        ),
+        types.Tool(
+            name="list_skill_sources",
+            description="List known + synced external skill sources and their indexed catalogs.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
+            name="kb_list_collections",
+            description=(
+                "List all available knowledge base collections with their "
+                "embedding model and vector DB. Use this to discover what "
+                "documentation is already indexed."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
+            name="kb_search",
+            description=(
+                "Search knowledge base collections using semantic similarity. "
+                "Returns relevant chunks with source metadata. "
+                "Supports multi-collection search."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language search query",
+                    },
+                    "collection": {
+                        "type": "string",
+                        "description": "Name of a single collection to search",
+                    },
+                    "collections": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Search multiple collections and merge results (overrides 'collection')",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of results to return (default: 5)",
+                        "default": 5,
+                    },
+                    "rerank": {
+                        "type": "boolean",
+                        "description": "Use cross-encoder reranking (slower but more accurate). Default from config.",
+                        "default": kb.default_rerank,
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Filter by category tag (ChromaDB collections only)",
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Filter by session ID (ChromaDB collections only)",
+                    },
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Filter by tool name (ChromaDB collections only)",
+                    },
+                    "source_type": {
+                        "type": "string",
+                        "description": "Filter by source type (ChromaDB collections only)",
+                    },
+                    "return_code": {
+                        "type": "integer",
+                        "description": "Filter by tool exit code (ChromaDB collections only)",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        types.Tool(
+            name="kb_ingest",
+            description=(
+                "Index a folder as a new knowledge base collection. "
+                "Returns immediately with a job_id. "
+                "IMPORTANT: poll kb_job_status every 10 seconds and wait for "
+                "status='complete'. DO NOT call ingest again for the same "
+                "folder while a job is running."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "folder_path": {
+                        "type": "string",
+                        "description": "Path to folder containing documents to index",
+                    },
+                    "collection_name": {
+                        "type": "string",
+                        "description": "Name for the collection (default: folder name)",
+                    },
+                    "file_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "File extensions to include, e.g. ['pdf', 'md', 'py']. Defaults to common types.",
+                    },
+                    "embedding_backend": {
+                        "type": "string",
+                        "enum": list(EMBEDDER_REGISTRY.keys()),
+                        "description": "Embedding backend override for this collection.",
+                    },
+                    "embedding_model": {
+                        "type": "string",
+                        "description": "Embedding model override for this collection.",
+                    },
+                    "vector_db": {
+                        "type": "string",
+                        "enum": list(VECTORINDEX_REGISTRY.keys()),
+                        "description": "Vector database override for this collection.",
+                    },
+                },
+                "required": ["folder_path"],
+            },
+        ),
+        types.Tool(
+            name="kb_append",
+            description=(
+                "Add documents to an existing collection. Uses the same embedding "
+                "model and vector DB the collection was created with. "
+                "Returns immediately with a job_id -- poll kb_job_status for progress."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "collection": {
+                        "type": "string",
+                        "description": "Name of the existing collection to append to",
+                    },
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of file or folder paths to add",
+                    },
+                    "file_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "File extensions to include when expanding folders.",
+                    },
+                },
+                "required": ["collection", "paths"],
+            },
+        ),
+        types.Tool(
+            name="kb_add_vector_db",
+            description=(
+                "Register an already-built external vector store as a collection. "
+                "Queries will be embedded via the API using the specified model."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "collection_name": {
+                        "type": "string",
+                        "description": "Unique name for this collection",
+                    },
+                    "vector_db": {
+                        "type": "string",
+                        "enum": ["chroma", "lancedb", "qdrant"],
+                        "description": "Vector store backend type",
+                    },
+                    "connection_params": {
+                        "type": "object",
+                        "description": "Backend-specific connection parameters.",
+                    },
+                    "embedding_model": {
+                        "type": "string",
+                        "description": "The API model used to build this index",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Human-readable description for agent discovery",
+                    },
+                },
+                "required": [
+                    "collection_name",
+                    "vector_db",
+                    "connection_params",
+                    "embedding_model",
+                ],
+            },
+        ),
+        types.Tool(
+            name="kb_job_status",
+            description="Check the status of a background ingest or append job.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "description": "Job ID returned by kb_ingest or kb_append",
+                    },
+                },
+                "required": ["job_id"],
+            },
+        ),
+        types.Tool(
+            name="kb_remember",
+            description=(
+                "Store a user-confirmed fact as an explicit memory. "
+                "These persist across sessions. Use 'supersedes' to replace an outdated memory."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The fact to remember",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Classification tag",
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Current session identifier",
+                    },
+                    "supersedes": {
+                        "type": "string",
+                        "description": "entry_id of an existing memory this replaces",
+                    },
+                    "promoted_from": {
+                        "type": "string",
+                        "description": "suggestion_id if promoted from outlier suggestion",
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+        types.Tool(
+            name="kb_get_memories",
+            description=(
+                "Get all active explicit memories for this project. "
+                "Call at session start to load project context."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
+            name="kb_get_suggestions",
+            description=(
+                "Get pending memory suggestions flagged by outlier detection. "
+                "Present to user for confirmation or dismissal."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
+            name="kb_dismiss_suggestion",
+            description="Dismiss a pending memory suggestion.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "suggestion_id": {
+                        "type": "string",
+                        "description": "ID of the suggestion to dismiss",
+                    },
+                },
+                "required": ["suggestion_id"],
+            },
+        ),
+    ]
+    return tools, handlers
+
+
+def create_knowledge_server(
+    kb: KnowledgeBase,
+    runtime_dir: str | Path | None = None,
+):
+    """Create and configure the standalone MCP knowledge server.
+
+    Test-facing API: tests call it with a mock KB and get back a server they
+    can drive via call_tool_sync().  The merged ``dsagt-server`` uses
+    :func:`_knowledge_tools_and_handlers` directly instead of this wrapper.
+    """
+    server = Server("knowledge")
+    tools, handlers = _knowledge_tools_and_handlers(kb, runtime_dir)
+
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
-        return [
-            types.Tool(
-                name="add_skill_source",
-                description=(
-                    "Enable an external agent-skill source (a known name like "
-                    "'scientific'/'anthropic'/'antigravity'/'composio', or a GitHub URL). "
-                    "Clones it and indexes its skills into the searchable catalog "
-                    "(search_skills). Does NOT load them into context."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "source": {
-                            "type": "string",
-                            "description": "Known source name or GitHub repo URL / owner/repo",
-                        },
-                    },
-                    "required": ["source"],
-                },
-            ),
-            types.Tool(
-                name="list_skill_sources",
-                description="List known + synced external skill sources and their indexed catalogs.",
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            types.Tool(
-                name="kb_list_collections",
-                description=(
-                    "List all available knowledge base collections with their "
-                    "embedding model and vector DB. Use this to discover what "
-                    "documentation is already indexed."
-                ),
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            types.Tool(
-                name="kb_search",
-                description=(
-                    "Search knowledge base collections using semantic similarity. "
-                    "Returns relevant chunks with source metadata. "
-                    "Supports multi-collection search."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language search query",
-                        },
-                        "collection": {
-                            "type": "string",
-                            "description": "Name of a single collection to search",
-                        },
-                        "collections": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Search multiple collections and merge results (overrides 'collection')",
-                        },
-                        "top_k": {
-                            "type": "integer",
-                            "description": "Number of results to return (default: 5)",
-                            "default": 5,
-                        },
-                        "rerank": {
-                            "type": "boolean",
-                            "description": "Use cross-encoder reranking (slower but more accurate). Default from config.",
-                            "default": kb.default_rerank,
-                        },
-                        "category": {
-                            "type": "string",
-                            "description": "Filter by category tag (ChromaDB collections only)",
-                        },
-                        "session_id": {
-                            "type": "string",
-                            "description": "Filter by session ID (ChromaDB collections only)",
-                        },
-                        "tool_name": {
-                            "type": "string",
-                            "description": "Filter by tool name (ChromaDB collections only)",
-                        },
-                        "source_type": {
-                            "type": "string",
-                            "description": "Filter by source type (ChromaDB collections only)",
-                        },
-                        "return_code": {
-                            "type": "integer",
-                            "description": "Filter by tool exit code (ChromaDB collections only)",
-                        },
-                    },
-                    "required": ["query"],
-                },
-            ),
-            types.Tool(
-                name="kb_ingest",
-                description=(
-                    "Index a folder as a new knowledge base collection. "
-                    "Returns immediately with a job_id. "
-                    "IMPORTANT: poll kb_job_status every 10 seconds and wait for "
-                    "status='complete'. DO NOT call ingest again for the same "
-                    "folder while a job is running."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "folder_path": {
-                            "type": "string",
-                            "description": "Path to folder containing documents to index",
-                        },
-                        "collection_name": {
-                            "type": "string",
-                            "description": "Name for the collection (default: folder name)",
-                        },
-                        "file_types": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "File extensions to include, e.g. ['pdf', 'md', 'py']. Defaults to common types.",
-                        },
-                        "embedding_backend": {
-                            "type": "string",
-                            "enum": list(EMBEDDER_REGISTRY.keys()),
-                            "description": "Embedding backend override for this collection.",
-                        },
-                        "embedding_model": {
-                            "type": "string",
-                            "description": "Embedding model override for this collection.",
-                        },
-                        "vector_db": {
-                            "type": "string",
-                            "enum": list(VECTORINDEX_REGISTRY.keys()),
-                            "description": "Vector database override for this collection.",
-                        },
-                    },
-                    "required": ["folder_path"],
-                },
-            ),
-            types.Tool(
-                name="kb_append",
-                description=(
-                    "Add documents to an existing collection. Uses the same embedding "
-                    "model and vector DB the collection was created with. "
-                    "Returns immediately with a job_id -- poll kb_job_status for progress."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "collection": {
-                            "type": "string",
-                            "description": "Name of the existing collection to append to",
-                        },
-                        "paths": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of file or folder paths to add",
-                        },
-                        "file_types": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "File extensions to include when expanding folders.",
-                        },
-                    },
-                    "required": ["collection", "paths"],
-                },
-            ),
-            types.Tool(
-                name="kb_add_vector_db",
-                description=(
-                    "Register an already-built external vector store as a collection. "
-                    "Queries will be embedded via the API using the specified model."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "collection_name": {
-                            "type": "string",
-                            "description": "Unique name for this collection",
-                        },
-                        "vector_db": {
-                            "type": "string",
-                            "enum": ["chroma", "lancedb", "qdrant"],
-                            "description": "Vector store backend type",
-                        },
-                        "connection_params": {
-                            "type": "object",
-                            "description": "Backend-specific connection parameters.",
-                        },
-                        "embedding_model": {
-                            "type": "string",
-                            "description": "The API model used to build this index",
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "Human-readable description for agent discovery",
-                        },
-                    },
-                    "required": [
-                        "collection_name",
-                        "vector_db",
-                        "connection_params",
-                        "embedding_model",
-                    ],
-                },
-            ),
-            types.Tool(
-                name="kb_job_status",
-                description="Check the status of a background ingest or append job.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "job_id": {
-                            "type": "string",
-                            "description": "Job ID returned by kb_ingest or kb_append",
-                        },
-                    },
-                    "required": ["job_id"],
-                },
-            ),
-            types.Tool(
-                name="kb_remember",
-                description=(
-                    "Store a user-confirmed fact as an explicit memory. "
-                    "These persist across sessions. Use 'supersedes' to replace an outdated memory."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "text": {
-                            "type": "string",
-                            "description": "The fact to remember",
-                        },
-                        "category": {
-                            "type": "string",
-                            "description": "Classification tag",
-                        },
-                        "session_id": {
-                            "type": "string",
-                            "description": "Current session identifier",
-                        },
-                        "supersedes": {
-                            "type": "string",
-                            "description": "entry_id of an existing memory this replaces",
-                        },
-                        "promoted_from": {
-                            "type": "string",
-                            "description": "suggestion_id if promoted from outlier suggestion",
-                        },
-                    },
-                    "required": ["text"],
-                },
-            ),
-            types.Tool(
-                name="kb_get_memories",
-                description=(
-                    "Get all active explicit memories for this project. "
-                    "Call at session start to load project context."
-                ),
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            types.Tool(
-                name="kb_get_suggestions",
-                description=(
-                    "Get pending memory suggestions flagged by outlier detection. "
-                    "Present to user for confirmation or dismissal."
-                ),
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            types.Tool(
-                name="kb_dismiss_suggestion",
-                description="Dismiss a pending memory suggestion.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "suggestion_id": {
-                            "type": "string",
-                            "description": "ID of the suggestion to dismiss",
-                        },
-                    },
-                    "required": ["suggestion_id"],
-                },
-            ),
-        ]
+        return tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
@@ -1008,141 +1016,10 @@ def create_knowledge_server(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-
-
-def main():
-    """Entry point for dsagt-knowledge-server.
-
-    All configuration comes from the project directory:
-    - ``./dsagt_config.yaml`` → project path + non-secret settings
-      (chunk_size, vector_db, rerank)
-    - ``LLM_API_KEY``, ``OPENAI_BASE_URL`` env vars → embedding credentials
-
-    No CLI arguments — the server derives everything from the YAML.  By
-    contract the agent's launch one-liner is ``cd <pdir> && <agent>``,
-    so cwd is project_dir for the MCP children it spawns.
-    """
-    from dsagt.observability import find_project_config
-
-    project_dir, _ = find_project_config()
-    if project_dir is None:
-        raise RuntimeError(
-            "dsagt-knowledge-server: no dsagt_config.yaml in cwd "
-            f"({Path.cwd()}).  Launch the agent from the project "
-            "directory (`cd <pdir> && <agent>`)."
-        )
-
-    log_file = project_dir / "dsagt_knowledge_server.log"
-    # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  See
-    # registry_server.py main() for rationale (httpcore/urllib3/llama_index
-    # at DEBUG floods agent debug output).
-    _level_name = os.environ.get("DSAGT_LOG_LEVEL", "INFO").upper()
-    _level = getattr(logging, _level_name, logging.INFO)
-    logging.basicConfig(
-        level=_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, mode="a"),
-            logging.StreamHandler(),
-        ],
-    )
-    logger.info("Server starting — project_dir: %s, log: %s", project_dir, log_file)
-
-    # Read project config.  Required — this server runs inside a project
-    # created by dsagt init.  Every section must be present with all fields
-    # filled.  dsagt init generates complete defaults; if anything is missing,
-    # the config is broken and the server fails fast.
-    config_path = project_dir / "dsagt_config.yaml"
-    from dsagt.session import resolve_env_vars
-
-    config = resolve_env_vars(yaml.safe_load(config_path.read_text()))
-
-    kb_config = config["knowledge"]
-    emb_config = config["embedding"]
-
-    # Embedding backend selection.  Default is "local" (sentence-transformers,
-    # CPU, no creds) so a fresh ``dsagt init`` works zero-config.  Switching
-    # to "api" requires base_url + api_key — validate eagerly so a misconfig
-    # surfaces at MCP-server startup rather than at the first kb_search.
-    backend = (emb_config.get("backend") or "local").lower()
-    if backend not in ("local", "api"):
-        raise ValueError(
-            f"embedding.backend must be 'local' or 'api' (got {backend!r})"
-        )
-
-    # Only pass an explicit ``model`` when the user filled one in.  Empty /
-    # ``${EMBEDDING_MODEL}`` placeholders mean "use the backend's default"
-    # — LocalEmbeddingClient has its own default; APIEmbeddingClient has
-    # no default and will raise downstream, which is what we want for a
-    # misconfigured api setup.
-    #
-    # Cross-backend leakage guard: HuggingFace identifiers ("org/repo")
-    # and OpenAI-style aliases ("text-embedding-3-small") share the same
-    # ``EMBEDDING_MODEL`` env var in most setups.  When a user switches
-    # ``embedding.backend`` from api → local without also retargeting
-    # the env var, the api alias flows into LocalEmbeddingClient and
-    # produces a confusing 404 from HuggingFace at first embed.  Drop
-    # the override when it's clearly mis-shaped for the active backend.
-    raw_model = (emb_config.get("model") or "").strip()
-    embedder_kwargs: dict = {}
-    if raw_model and not raw_model.startswith("${"):
-        looks_hf = "/" in raw_model
-        if backend == "local" and not looks_hf:
-            logger.warning(
-                "Ignoring embedding.model=%r for backend=local (does not "
-                "look like a HuggingFace identifier).  Falling back to the "
-                "LocalEmbeddingClient default.",
-                raw_model,
-            )
-        else:
-            embedder_kwargs["model"] = raw_model
-    if backend == "api":
-        base_url = emb_config.get("base_url") or ""
-        api_key = emb_config.get("api_key") or ""
-        if not base_url:
-            raise ValueError(
-                "embedding.backend='api' requires embedding.base_url in "
-                "dsagt_config.yaml.  Either set it to your OpenAI-compatible "
-                "endpoint, or change backend to 'local'."
-            )
-        if not api_key or api_key.startswith("${"):
-            raise ValueError(
-                "embedding.backend='api' requires embedding.api_key in "
-                "dsagt_config.yaml.  Either fill it in (or export the "
-                "${EMBEDDING_API_KEY} env var), or change backend to 'local'."
-            )
-        embedder_kwargs.update({"base_url": base_url, "api_key": api_key})
-
-    from dsagt.observability import init_tracing, configure_litellm_retries
-
-    init_tracing(
-        "dsagt-knowledge-server"
-    )  # session_id picked up from DSAGT_SESSION_ID env
-    configure_litellm_retries()
-
-    runtime_kb_dir = setup_runtime_kb(REGISTRY_DIR / "kb_index", project_dir)
-
-    logger.info("Knowledge backend: %s", backend)
-    kb = KnowledgeBase(
-        index_dir=runtime_kb_dir,
-        chunk_size=kb_config["chunk_size"],
-        default_rerank=kb_config["rerank"],
-        default_embedder=backend,
-        default_index=kb_config["vector_db"],
-        embedder_kwargs=embedder_kwargs,
-    )
-    # Background-load the embedder so the model is ready when the
-    # agent's first kb call lands.  Without this, the first call pays
-    # the ~5–10s sentence-transformers import + SentenceTransformer
-    # construction cost, which looks like a hang to the operator.
-    kb.preload_default_embedder()
-
-    server = create_knowledge_server(kb, runtime_dir=str(project_dir))
-    try:
-        asyncio.run(_run_stdio(server, "knowledge"))
-    finally:
-        kb.close()
-
-
-if __name__ == "__main__":
-    main()
+#
+# There is no standalone ``dsagt-knowledge-server`` entry point any more.  The
+# knowledge tools run inside the merged ``dsagt-server`` (see
+# ``dsagt.commands.dsagt_server``), which composes
+# :func:`_knowledge_tools_and_handlers` with the registry server's tools under
+# one MCP ``Server`` + one shared ``KnowledgeBase``.  ``create_knowledge_server``
+# above is retained as a standalone, test-facing constructor.

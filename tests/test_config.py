@@ -486,8 +486,8 @@ class TestAgentRecord:
         mcp_path = working_dir / ".mcp.json"
         assert mcp_path.exists()
         mcp = json.loads(mcp_path.read_text())
-        assert "dsagt-registry" in mcp["mcpServers"]
-        assert "dsagt-knowledge" in mcp["mcpServers"]
+        assert set(mcp["mcpServers"]) == {"dsagt"}
+        assert mcp["mcpServers"]["dsagt"]["args"] == ["run", "dsagt-server"]
         assert (working_dir / "CLAUDE.md").exists()
         # BYOA: .dsagt_env is no longer written; user manages shell env.
         assert not (working_dir / ".dsagt_env").exists()
@@ -502,8 +502,8 @@ class TestAgentRecord:
         goose_path = working_dir / "goose.yaml"
         assert goose_path.exists()
         goose = yaml.safe_load(goose_path.read_text())
-        assert "registry" in goose["extensions"]
-        assert "knowledge" in goose["extensions"]
+        assert set(goose["extensions"]) == {"dsagt"}
+        assert goose["extensions"]["dsagt"]["cmd"] == "uv run dsagt-server"
         assert (working_dir / ".goosehints").exists()
 
     def test_roo_writes_static_and_dynamic(self, tmp_path):
@@ -520,7 +520,8 @@ class TestAgentRecord:
         # comes from dsagt_config.yaml via cwd-walk; the MCP env block
         # only carries EMBEDDING_* settings.
         mcp = json.loads((working_dir / ".roo" / "mcp.json").read_text())
-        assert "EMBEDDING_BACKEND" in mcp["mcpServers"]["dsagt-registry"]["env"]
+        assert set(mcp["mcpServers"]) == {"dsagt"}
+        assert "EMBEDDING_BACKEND" in mcp["mcpServers"]["dsagt"]["env"]
 
     def test_cline_writes_static_only_in_split_test(self, tmp_path):
         # Cline's dynamic writer shells out to `cline auth` and `cline mcp
@@ -547,7 +548,7 @@ class TestAgentRecord:
         assert (working_dir / "AGENTS.md").exists()
         assert (working_dir / ".codex-data").is_dir()
         toml = (working_dir / ".codex-data" / "config.toml").read_text()
-        assert "[mcp_servers.dsagt-registry.env]" in toml
+        assert "[mcp_servers.dsagt.env]" in toml
         # Project routing comes from dsagt_config.yaml via cwd-walk; the
         # MCP env block only carries EMBEDDING_* settings.
         assert "EMBEDDING_BACKEND" in toml
@@ -595,9 +596,8 @@ class TestAgentRecord:
         }
         toml = _render_codex_config(mcp_env)
 
-        assert "[mcp_servers.dsagt-registry]" in toml
-        assert "[mcp_servers.dsagt-knowledge]" in toml
-        assert "[mcp_servers.dsagt-registry.env]" in toml
+        assert "[mcp_servers.dsagt]" in toml
+        assert "[mcp_servers.dsagt.env]" in toml
         assert 'MLFLOW_TRACKING_URI = "http://localhost:5001"' in toml
         # OTel opt-in: enables OTLP-HTTP export + un-redacts user prompt.
         assert "[otel]" in toml
@@ -632,10 +632,10 @@ class TestAgentRecord:
         parsed = json.loads(body)
 
         assert parsed["$schema"] == "https://opencode.ai/config.json"
-        assert set(parsed["mcp"]) == {"dsagt-registry", "dsagt-knowledge"}
-        reg = parsed["mcp"]["dsagt-registry"]
+        assert set(parsed["mcp"]) == {"dsagt"}
+        reg = parsed["mcp"]["dsagt"]
         assert reg["type"] == "local"
-        assert reg["command"] == ["uv", "run", "dsagt-registry-server"]
+        assert reg["command"] == ["uv", "run", "dsagt-server"]
         assert reg["environment"]["DSAGT_PROJECT_DIR"] == "/proj"
         # Provider block uses {env:VAR} reference, never the resolved value.
         assert (
@@ -707,11 +707,11 @@ class TestAgentRecord:
         }
         mcp = _build_mcp_servers_dict(env_block)
 
-        assert set(mcp["mcpServers"]) == {"dsagt-registry", "dsagt-knowledge"}
-        assert mcp["mcpServers"]["dsagt-knowledge"]["disabled"] is False
+        assert set(mcp["mcpServers"]) == {"dsagt"}
+        assert mcp["mcpServers"]["dsagt"]["disabled"] is False
         # Env block plumbs through so the MCP server children have what they need.
         assert (
-            mcp["mcpServers"]["dsagt-registry"]["env"]["MLFLOW_TRACKING_URI"]
+            mcp["mcpServers"]["dsagt"]["env"]["MLFLOW_TRACKING_URI"]
             == "http://localhost:5001"
         )
 
@@ -727,11 +727,10 @@ class TestAgentRecord:
         self._write_both(config, working_dir)
 
         mcp = json.loads((working_dir / ".mcp.json").read_text())
-        for server in ("dsagt-registry", "dsagt-knowledge"):
-            env = mcp["mcpServers"][server].get("env", {})
-            assert "DSAGT_PROJECT" not in env
-            assert "DSAGT_PROJECT_DIR" not in env
-            assert "MLFLOW_TRACKING_URI" not in env
+        env = mcp["mcpServers"]["dsagt"].get("env", {})
+        assert "DSAGT_PROJECT" not in env
+        assert "DSAGT_PROJECT_DIR" not in env
+        assert "MLFLOW_TRACKING_URI" not in env
 
 
 # ---------------------------------------------------------------------------
@@ -1291,9 +1290,7 @@ class TestAgentCommand:
             "goose",
             "session",
             "--with-extension",
-            "uv run dsagt-registry-server",
-            "--with-extension",
-            "uv run dsagt-knowledge-server",
+            "uv run dsagt-server",
         ]
 
     def test_roo(self):
@@ -1386,13 +1383,12 @@ class TestConfigFlow:
         assert "EMBEDDING_MODEL" not in env
 
     def test_mcp_server_args_are_just_command(self):
-        """MCP server args are just ["run", "dsagt-<name>-server"].
-        All configuration flows through env vars and dsagt_config.yaml.
+        """MCP server args are just ["run", "dsagt-server"] — one merged
+        server.  All configuration flows through dsagt_config.yaml (cwd-walk).
         """
         from dsagt.agents import _mcp_server_args
 
-        assert _mcp_server_args("knowledge") == ["run", "dsagt-knowledge-server"]
-        assert _mcp_server_args("registry") == ["run", "dsagt-registry-server"]
+        assert _mcp_server_args() == ["run", "dsagt-server"]
 
     def test_mcp_env_block_carries_only_embedding_settings(self):
         from dsagt.agents import _mcp_env_block

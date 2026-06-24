@@ -32,13 +32,17 @@ logger = logging.getLogger(__name__)
 #: they can be evicted and refreshed on dsagt upgrade without touching
 #: agent-registered entries.
 TOOLS_COLLECTION = "tools"
+#: Legacy installed-skills collection.  No longer written or read: installed
+#: skills are natively auto-discovered by every supported agent, so skill
+#: search covers only the *catalog* tier below.  Kept as a name for back-compat
+#: and ``dsagt info`` display of any pre-existing index.
 SKILLS_COLLECTION = "skills"
 
 #: External skill catalogs (fetched from GitHub repos) live in their own
 #: per-source collections named ``skills_catalog__<slug>``.  Keeping each
 #: source in its own collection lets a re-sync drop+rebuild one source's
-#: directory without disturbing bundled/registered skills (the ``skills``
-#: collection) or other catalogs — no delete-by-metadata primitive needed.
+#: directory without disturbing other catalogs — no delete-by-metadata
+#: primitive needed.
 CATALOG_COLLECTION_PREFIX = "skills_catalog__"
 
 
@@ -499,9 +503,11 @@ class SkillRegistry:
         ``{relative_path: contents}`` for additional files the skill
         wants in its directory (templates, schemas, etc.).
 
-        Returns "added" or "updated".  Indexes the resulting SKILL.md
-        into ``registered_skills`` via ``_index_skill`` if a KB is
-        configured — symmetric with ``ToolRegistry.save_tool``.
+        Returns "added" or "updated".  Does **not** index into a KB:
+        saved skills land in ``<project>/skills/`` where every supported
+        agent natively auto-discovers them, so search only covers the
+        not-yet-installed *catalog* tier (see ``SkillRouter``).  The old
+        ``skills`` collection is no longer read by anything.
         """
         name = spec.get("name")
         if not name:
@@ -530,9 +536,6 @@ class SkillRegistry:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(contents)
 
-        if self._kb:
-            self._index_skill(spec, skill_md)
-
         return action
 
     def _skill_md_path(self, name: str) -> Path | None:
@@ -557,38 +560,3 @@ class SkillRegistry:
         """Get the full SKILL.md content for a skill."""
         path = self._skill_md_path(name)
         return path.read_text() if path is not None else None
-
-    def _index_skill(self, spec: dict, skill_md: Path) -> None:
-        """Index a skill into the ``skills`` KB collection.
-
-        Errors propagate to the caller — see _index_tool for the rationale.
-        """
-        text = skill_md.read_text()
-        metadata = {
-            "skill_name": spec["name"],
-            "tags": ",".join(spec.get("tags", [])),
-            "source": "registered",  # vs "bundled"
-        }
-        self._kb.add_entries(
-            texts=[text],
-            collection=SKILLS_COLLECTION,
-            metadatas=[metadata],
-        )
-
-    def reindex_all(self) -> int:
-        """Reindex project-local skills into ``registered_skills``.
-
-        Bundled skills are NOT indexed here — they live in the shared
-        ``bundled_skills`` collection (see ToolRegistry.reindex_all
-        docstring for the same architecture).
-        """
-        if not self._kb:
-            return 0
-        count = 0
-        for skill_dir in self._project_skill_dirs():
-            skill_md = skill_dir / "SKILL.md"
-            spec = _parse_frontmatter(skill_md)
-            if spec.get("name"):
-                self._index_skill(spec, skill_md)
-                count += 1
-        return count

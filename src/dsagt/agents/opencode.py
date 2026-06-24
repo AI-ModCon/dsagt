@@ -72,15 +72,14 @@ def _render_opencode_config(
         "$schema": "https://opencode.ai/config.json",
         "mcp": {},
     }
-    for server in ("registry", "knowledge"):
-        entry: dict = {
-            "type": "local",
-            "command": ["uv"] + _mcp_server_args(server),
-            "enabled": True,
-        }
-        if mcp_env:
-            entry["environment"] = dict(mcp_env)
-        config["mcp"][f"dsagt-{server}"] = entry
+    entry: dict = {
+        "type": "local",
+        "command": ["uv"] + _mcp_server_args(),
+        "enabled": True,
+    }
+    if mcp_env:
+        entry["environment"] = dict(mcp_env)
+    config["mcp"]["dsagt"] = entry
 
     providers: dict = {}
     if present_creds.get("OPENAI_API_KEY"):
@@ -113,7 +112,9 @@ def _render_opencode_config(
 
 
 def _render_opencode_config_proxy(
-    mcp_env: dict, proxy_port: int, opencode_model: str | None,
+    mcp_env: dict,
+    proxy_port: int,
+    opencode_model: str | None,
 ) -> str:
     """Phase-2 proxy-mode opencode.json body.
 
@@ -128,31 +129,35 @@ def _render_opencode_config_proxy(
     don't trip ProviderModelNotFoundError.
     """
     from .base import _PROXY_FORWARDED_SENTINEL
+
     proxy_url = f"http://localhost:{proxy_port}"
     config: dict = {
         "$schema": "https://opencode.ai/config.json",
         "mcp": {},
     }
-    for server in ("registry", "knowledge"):
-        entry: dict = {
-            "type": "local",
-            "command": ["uv"] + _mcp_server_args(server),
-            "enabled": True,
-        }
-        if mcp_env:
-            entry["environment"] = dict(mcp_env)
-        config["mcp"][f"dsagt-{server}"] = entry
+    entry: dict = {
+        "type": "local",
+        "command": ["uv"] + _mcp_server_args(),
+        "enabled": True,
+    }
+    if mcp_env:
+        entry["environment"] = dict(mcp_env)
+    config["mcp"]["dsagt"] = entry
 
     # Both providers point at the proxy — opencode picks via model prefix.
     providers: dict = {
-        "openai": {"options": {
-            "apiKey": _PROXY_FORWARDED_SENTINEL,
-            "baseURL": proxy_url,
-        }},
-        "anthropic": {"options": {
-            "apiKey": _PROXY_FORWARDED_SENTINEL,
-            "baseURL": proxy_url,
-        }},
+        "openai": {
+            "options": {
+                "apiKey": _PROXY_FORWARDED_SENTINEL,
+                "baseURL": proxy_url,
+            }
+        },
+        "anthropic": {
+            "options": {
+                "apiKey": _PROXY_FORWARDED_SENTINEL,
+                "baseURL": proxy_url,
+            }
+        },
     }
 
     if opencode_model and "/" in opencode_model:
@@ -179,17 +184,25 @@ class OpenCodeSetup(AgentSetup):
     # multi-protocol story, no on-disk credential leakage.
     credential_env_vars = (
         "OPENCODE_MODEL",
-        "OPENAI_API_KEY", "OPENAI_BASE_URL",
-        "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
     )
     telemetry_env = {}
     credential_hints = (
-        ("OPENCODE_MODEL", "model spec '<provider>/<name>' "
-         "(e.g. 'openai/claude-haiku-4-5-20251001-v1-project' for a PNNL-shape "
-         "openai gateway, or 'anthropic/claude-sonnet-4-5')"),
+        (
+            "OPENCODE_MODEL",
+            "model spec '<provider>/<name>' "
+            "(e.g. 'openai/claude-haiku-4-5-20251001-v1-project' for a PNNL-shape "
+            "openai gateway, or 'anthropic/claude-sonnet-4-5')",
+        ),
         ("OPENAI_API_KEY", "if your gateway speaks openai wire protocol"),
-        ("OPENAI_BASE_URL", "openai gateway URL "
-         "(referenced by opencode.json's provider.openai.options.baseURL)"),
+        (
+            "OPENAI_BASE_URL",
+            "openai gateway URL "
+            "(referenced by opencode.json's provider.openai.options.baseURL)",
+        ),
         ("ANTHROPIC_API_KEY", "if your gateway speaks anthropic wire protocol"),
         ("ANTHROPIC_BASE_URL", "anthropic gateway URL"),
     )
@@ -199,7 +212,9 @@ class OpenCodeSetup(AgentSetup):
         instructions = _load_master_instructions()
         if instructions:
             action = _append_or_write(
-                working_dir / "AGENTS.md", instructions, _DSAGT_MARKER,
+                working_dir / "AGENTS.md",
+                instructions,
+                _DSAGT_MARKER,
             )
             if action:
                 actions.append(action)
@@ -228,18 +243,21 @@ class OpenCodeSetup(AgentSetup):
         present = {
             name: bool(env.get(name))
             for name in (
-                "OPENAI_API_KEY", "OPENAI_BASE_URL",
-                "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_BASE_URL",
             )
         }
         body = _render_opencode_config(
-            mcp_env, present, opencode_model=env.get("OPENCODE_MODEL"),
+            mcp_env,
+            present,
+            opencode_model=env.get("OPENCODE_MODEL"),
         )
         config_path = working_dir / "opencode.json"
         config_path.write_text(body + "\n")
         n_providers = sum(
-            1 for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
-            if present.get(k)
+            1 for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY") if present.get(k)
         )
         actions.append(
             f"Wrote {config_path} ({len(mcp_env)} MCP env vars, "
@@ -279,9 +297,7 @@ class OpenCodeSetup(AgentSetup):
         body = _render_opencode_config_proxy(mcp_env, proxy_port, opencode_model)
         config_path = working_dir / "opencode.json"
         config_path.write_text(body + "\n")
-        actions.append(
-            f"Wrote {config_path} ({len(mcp_env)} MCP env vars, proxy mode)"
-        )
+        actions.append(f"Wrote {config_path} ({len(mcp_env)} MCP env vars, proxy mode)")
         return actions
 
     def run_script(
@@ -314,10 +330,13 @@ class OpenCodeSetup(AgentSetup):
                 "agents/opencode.py credential_hints."
             )
         cmd = [
-            "opencode", "run",
-            "--dir", str(working_dir),
+            "opencode",
+            "run",
+            "--dir",
+            str(working_dir),
             "--dangerously-skip-permissions",
-            "-m", model,
+            "-m",
+            model,
             text,
         ]
         return _run_simple_script(cmd, env, working_dir, self.install_hint)

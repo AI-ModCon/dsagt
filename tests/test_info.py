@@ -150,7 +150,7 @@ def test_report_aggregates_by_source_and_session(config):
             "trace_metadata": _metadata(
                 session="sess-A", agent="claude", in_t=200, out_t=0,
             ),
-            "spans": _spans_for("dsagt-knowledge-server"),
+            "spans": _spans_for("dsagt-server"),
         },
         {
             "trace_id": "t4",
@@ -175,8 +175,8 @@ def test_report_aggregates_by_source_and_session(config):
     assert sources["claude-code"]["input_tokens"] == 2300
     assert sources["claude-code"]["output_tokens"] == 170
     assert sources["claude-code"]["errors"] == 1
-    assert sources["dsagt-knowledge-server"]["traces"] == 1
-    assert sources["dsagt-knowledge-server"]["errors"] == 0
+    assert sources["dsagt-server"]["traces"] == 1
+    assert sources["dsagt-server"]["errors"] == 0
 
     assert [s["session"] for s in r["by_session"]] == ["sess-B", "sess-A"]
     sess_a = next(s for s in r["by_session"] if s["session"] == "sess-A")

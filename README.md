@@ -127,7 +127,7 @@ The same flow runs non-interactively via `dsagt smoke-test --agent claude` (or `
 `dsagt setup-kb` builds the shared ChromaDB collections under `~/.dsagt/kb_index/` that every project on this machine reuses. Three of the six collections shown in the [architecture diagram](#architecture) are populated here — the other three are per-project and fill in automatically during use (see [Knowledge Base](#knowledge-base) below):
 
 - **Tool Specs** — DSAgt's bundled tool specs from `src/dsagt/tools/`, tagged with `source: bundled` so the agent finds them via `search_registry` from the very first session.
-- **Skills** — DSAgt's bundled skill workflows from `src/dsagt/skills/` (e.g. `datacard-generator`), discovered via `search_skills`.
+- **Skills** — DSAgt's bundled skill workflows from `src/dsagt/skills/` (e.g. `skill-creator`), discovered via `search_skills`. Domain skills (datacards, etc.) come from external catalogs — `dsagt skills add <project> genesis`.
 - **Domain Knowledge** — Reference corpora (NVIDIA NeMo Curator, AI Data Readiness Inspector) downloaded and embedded so the agent has data-curation domain knowledge out of the box.
 
 The Tool Specs and Skills collections are wipe-and-rebuild on every run, so re-run `setup-kb` after upgrading DSAgt to pick up new bundled assets.
@@ -181,16 +181,29 @@ Projects are registered in `~/.dsagt/projects.yaml` so `dsagt mlflow <name>` and
   #   cline:    .clinerules/, cline_mcp_settings.json (managed via cline mcp add)
 ```
 
-### MCP Servers
+### MCP Server
 
-- **Registry** (`dsagt-registry-server`) — Tool registration and dependency installation. Tools are markdown files with YAML frontmatter under `<project>/tools/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`.
-- **Knowledge** (`dsagt-knowledge-server`) — Semantic search over indexed document collections (FAISS / ChromaDB). Background jobs handle long ingest operations. The agent searches via `kb_search`, ingests via `kb_ingest`, and saves user-confirmed facts via `kb_remember`.
+DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to once. It bundles two concern areas:
+
+- **Registry** — Tool registration and dependency installation. Tools are markdown files with YAML frontmatter under `<project>/tools/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers tools via `search_registry`.
+- **Knowledge** — Semantic search over indexed document collections (FAISS / ChromaDB). Background jobs handle long ingest operations. The agent searches via `kb_search`, ingests via `kb_ingest`, and saves user-confirmed facts via `kb_remember`.
+
+> **Upgrading from the two-server layout?** Earlier versions ran separate `dsagt-registry-server` and `dsagt-knowledge-server` processes. There is no automatic migration: re-run `dsagt start <project>` and the per-agent MCP config is regenerated to point at the single `dsagt-server`. For **cline** specifically, `cline mcp add` has no remove, so an upgraded project keeps stale `dsagt-registry`/`dsagt-knowledge` entries alongside the new `dsagt` one — delete `<project>/.cline-data` before `dsagt start` to get a clean config.
 
 ### Tools and Skills
 
 **Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. The agent registers new tools via the registry MCP server's `save_tool_spec`.
 
-**Skills** are instruction-based agent workflows in `<project>/skills/`. Each skill is a directory containing a `SKILL.md` and optional reference docs. DSAgt ships with a bundled `datacard-generator` skill. The agent discovers skills via `search_skills`.
+**Skills** are instruction-based agent workflows — a directory with a `SKILL.md` and optional reference docs. They come in two tiers:
+
+- **Installed** skills live in `<project>/skills/` (DSAgt ships a bundled `skill-creator`; domain skills like the MODCON datacard generator are installed from the `genesis` catalog). These are mirrored into the agent's native skill directory (e.g. `.claude/skills/`, `.agents/skills/`) at `dsagt init`/`start` so the agent auto-invokes them, and they are also searchable via `search_skills`.
+- **Catalog** skills come from external Git repositories — GitHub *or* GitLab — indexed into a searchable catalog the agent browses with `search_skills` but that is **not** loaded into its context (so a catalog can hold thousands of skills). The agent enables a source with `add_skill_source(...)`, finds skills with `search_skills(...)`, then copies one into the project with `install_skill(...)`.
+
+The catalog is **opt-in**: a source must be synced before its skills are searchable. Curated named sources ship out of the box — `scientific`, `anthropic`, `antigravity`, `composio`, and `genesis` (the OSTI GENESIS catalog: HPC, HuggingFace, LangChain, OpenAI, plasma-sim, and more) — and any Git URL or `owner/repo` works too. Manage catalogs from the CLI with `dsagt skills list/search/add/sync <project>`, or from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
+
+![DSAgt skills routing](latex/skills-routing.png)
+
+Skill handling runs through one service over two stores. **`SkillRouter`** is the single skill-MCP entry point — every skill tool routes through it: `add_skill_source` / `list_skill_sources` manage repos, `search_skills` queries the catalog, `install_skill` adopts a catalog skill into the project. **Registration** pulls skills from External Skills Repos (the curated `scientific` / `anthropic` / `antigravity` / `composio` / `genesis` sources, *or any git URL*) into the **Skills Catalog** — a federated, searchable store of *not-yet-installed* skills (semantic search, with a zero-dependency keyword fallback when no embedder is configured). **Discovery** is the catalog's irreplaceable job: surfacing skills the agent doesn't yet have, which native discovery can't see. **Progressive exposure** is native: the **Skill Directory** holds the project's installed + created skills in each agent's own skill dir (`.claude/skills`, `.agents/skills`, `.cline/skills`, `.roo/skills`), where the agent auto-discovers and model-invokes them by relevance — and authors new ones via the bundled **`skill-creator`** skill. The diagram source is [`latex/skills-routing.tex`](latex/skills-routing.tex).
 
 ### Knowledge Base
 
@@ -207,7 +220,7 @@ Six independently-partitioned ChromaDB collections hold everything the agent sea
 
 The default embedding backend is local (sentence-transformers, CPU-side, no API needed). Switch to `embedding.backend: api` in `dsagt_config.yaml` to route through a hosted embedder via LiteLLM. Cross-encoder reranking is optional (`knowledge.rerank: true`).
 
-The agent searches via `kb_search` (knowledge MCP server) and writes via `kb_ingest` / `kb_remember`. Tool Specs and Skills are queried through specialized routes (`search_registry`, `search_skills`) over the same backend.
+The agent searches via `kb_search` (knowledge MCP server) and writes via `kb_ingest` / `kb_remember`. Tool Specs and Skills are queried through specialized routes (`search_registry`, `search_skills`) over the same backend. Enabling external skill catalogs adds one `skills_catalog__<slug>` collection per source, which `search_skills` queries alongside the bundled Skills collection.
 
 ### Observability
 
@@ -229,6 +242,7 @@ Every span carries the project's `session.id` for filtering. Tool execution reco
 | `dsagt memory --project <name>` | Distill new traces from this project's MLflow into episodic memory |
 | `dsagt info <name> [--json]` | Resolved config (with source per value) and a session/error summary |
 | `dsagt setup-kb [--collection <name>]` | Build the shared core knowledge base collections |
+| `dsagt skills <sync\|add\|list\|search> <name> [source]` | Manage external skill catalogs and project skill installs |
 | `dsagt list` | List all projects with agent, status, and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project (and optionally delete its directory) |

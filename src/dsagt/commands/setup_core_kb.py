@@ -422,10 +422,8 @@ def run_setup_kb(args):
     args.index_dir.mkdir(parents=True, exist_ok=True)
     from dsagt.knowledge import KnowledgeBase
     from dsagt.registry import (
-        SKILLS_COLLECTION,
         TOOLS_COLLECTION,
         ToolRegistry,
-        SkillRegistry,
         _parse_frontmatter,
     )
 
@@ -436,9 +434,12 @@ def run_setup_kb(args):
         embedder_kwargs=embedder_kwargs or {},
     )
     try:
-        # Bundled tools + skills: each spec file is a single chunk with
-        # rich metadata.  Wipe-and-rebuild every run — there's no
-        # version sentinel, so the user controls when this happens.
+        # Bundled tools: each spec file is a single chunk with rich
+        # metadata.  Wipe-and-rebuild every run — there's no version
+        # sentinel, so the user controls when this happens.  Bundled
+        # *skills* are no longer indexed: every supported agent natively
+        # auto-discovers installed/bundled SKILL.md folders, so skill
+        # search covers only the external *catalog* tier below.
         current_version = _current_dsagt_version()
 
         tool_paths = [
@@ -446,18 +447,10 @@ def run_setup_kb(args):
             for p in sorted(ToolRegistry._PACKAGE_TOOLS_DIR.glob("*.md"))
             if _parse_frontmatter(p).get("name")
         ]
-        skill_dirs = [
-            d
-            for d in sorted(SkillRegistry._PACKAGE_SKILLS_DIR.iterdir())
-            if d.is_dir()
-            and (d / "SKILL.md").exists()
-            and _parse_frontmatter(d / "SKILL.md").get("name")
-        ]
 
-        for name in (TOOLS_COLLECTION, SKILLS_COLLECTION):
-            coll_dir = args.index_dir / name
-            if coll_dir.exists():
-                shutil.rmtree(coll_dir)
+        coll_dir = args.index_dir / TOOLS_COLLECTION
+        if coll_dir.exists():
+            shutil.rmtree(coll_dir)
 
         if tool_paths:
             tool_specs = [_parse_frontmatter(p) for p in tool_paths]
@@ -477,23 +470,7 @@ def run_setup_kb(args):
                 ],
             )
 
-        if skill_dirs:
-            skill_specs = [_parse_frontmatter(d / "SKILL.md") for d in skill_dirs]
-            shared_kb.add_entries(
-                texts=[(d / "SKILL.md").read_text() for d in skill_dirs],
-                collection=SKILLS_COLLECTION,
-                metadatas=[
-                    {
-                        "skill_name": s["name"],
-                        "tags": ",".join(s.get("tags", [])),
-                        "source": "bundled",
-                        "dsagt_version": current_version,
-                    }
-                    for s in skill_specs
-                ],
-            )
-
-        print("  bundled tools + skills: indexed", flush=True)
+        print("  bundled tools: indexed", flush=True)
 
         # External skill catalog: clone + index the default source(s) so
         # ``search_skills`` can browse installable skills out of the box.

@@ -391,12 +391,16 @@ def _cmd_skills(args):
         resolve_source,
         sync_source,
     )
-    from dsagt.registry import (
-        CATALOG_COLLECTION_PREFIX,
-        SKILLS_COLLECTION,
-        SkillRegistry,
-    )
+    from dsagt.registry import SkillRegistry
     from dsagt.session import kb_from_config, load_config
+    from dsagt.skill_discovery import SkillRouter
+
+    def _open_kb():
+        """Best-effort KB; None when no embedder is configured (keyword fallback)."""
+        try:
+            return kb_from_config(config)
+        except Exception:
+            return None
 
     action = getattr(args, "skills_action", None)
     if not action:
@@ -462,20 +466,22 @@ def _cmd_skills(args):
 
     if action == "list":
         if args.catalog:
-            kb = kb_from_config(config)
+            kb = _open_kb()
             try:
-                cats = [
-                    c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)
-                ]
+                reg = SkillRegistry(runtime_dir=pdir, kb=kb)
+                sources = SkillRouter(skill_registry=reg, kb=kb).list_sources()
             finally:
-                kb.close()
-            print(
-                "Catalog collections:"
-                if cats
-                else "No catalog synced. Run 'dsagt skills sync'."
-            )
-            for c in sorted(cats):
-                print(f"  {c}")
+                if kb is not None:
+                    kb.close()
+            synced = [s for s in sources if s["synced"]]
+            if synced:
+                print("Synced catalog sources:")
+                for s in synced:
+                    print(
+                        f"  {s['name']}: {s['indexed']} skill(s) indexed ({s['url']})"
+                    )
+            else:
+                print("No catalog synced. Run 'dsagt skills sync'.")
         else:
             reg = SkillRegistry(runtime_dir=pdir, kb=None)
             skills = reg.list_skills()
@@ -485,28 +491,14 @@ def _cmd_skills(args):
         return 0
 
     if action == "search":
-        kb = kb_from_config(config)
+        kb = _open_kb()
         try:
-            collections = [SKILLS_COLLECTION] + [
-                c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)
-            ]
-            hits = []
-            for coll in collections:
-                try:
-                    hits.extend(kb.search(query=args.query, collection=coll, top_k=10))
-                except (FileNotFoundError, KeyError, ValueError):
-                    continue
-            hits.sort(key=lambda r: r.get("score", 0), reverse=True)
-            for r in hits[:10]:
-                meta = r.get("chunk", {}).get("metadata", {})
-                print(
-                    f"  {meta.get('skill_name', '?')} ({r.get('score', 0):.2f}) "
-                    f"[{meta.get('source', '')}]"
-                )
-            if not hits:
-                print("No skills found.")
+            reg = SkillRegistry(runtime_dir=pdir, kb=kb)
+            router = SkillRouter(skill_registry=reg, kb=kb)
+            print(router.search(args.query))
         finally:
-            kb.close()
+            if kb is not None:
+                kb.close()
         return 0
 
     print(f"Unknown skills action: {action}", file=sys.stderr)

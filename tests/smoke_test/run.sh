@@ -173,12 +173,12 @@ check() {
 check "csvtool_filter spec written"  "test -f '${PDIR}/tools/csvtool_filter.md'"
 check "trace_archive has records"    "ls '${PDIR}/trace_archive/'*.json | grep -q ."
 check "scan_directory record"        "ls '${PDIR}/trace_archive/'*scan_directory*.json | grep -q ."
-# Both files are written by dsagt-knowledge-server's kb_ingest_directory MCP
-# tool — chroma.sqlite3 is the actual vector DB, route.json is the collection
-# manifest.  Checking only `test -d kb_index/knowledge` is too weak: an agent
-# can satisfy it by hand-crafting an empty directory tree, masking a broken
-# MCP wiring (which is exactly what we hit when cline's dsagt-knowledge
-# server crashed silently and the LLM compensated by mkdir-ing the path).
+# Both files are written by dsagt-server's kb_ingest MCP tool — chroma.sqlite3
+# is the actual vector DB, route.json is the collection manifest.  Checking
+# only `test -d kb_index/knowledge` is too weak: an agent can satisfy it by
+# hand-crafting an empty directory tree, masking a broken MCP wiring (which is
+# exactly what we hit when cline's dsagt server crashed silently and the LLM
+# compensated by mkdir-ing the path).
 check "knowledge ingested (route)"   "test -f '${PDIR}/kb_index/knowledge/route.json'"
 check "knowledge ingested (vectors)" "test -f '${PDIR}/kb_index/knowledge/chroma.sqlite3'"
 # Explicit memory writes to <project>/explicit_memories.yaml (YAML at the
@@ -218,8 +218,8 @@ for _, row in df.iterrows():
     spans = row.get("spans") or []
     # Match by service.name on root span — agent-emitted traces only.
     # MCP-server traces (kb.*, registry.*, tool.execute) carry
-    # service.name = "dsagt-knowledge-server" / "dsagt-registry-server" /
-    # "dsagt-run" and shouldn't count toward agent turn parity.
+    # service.name = "dsagt-server" / "dsagt-run" and shouldn't count
+    # toward agent turn parity.
     for s in spans:
         attrs = getattr(s, "attributes", None) or (
             s.get("attributes") if isinstance(s, dict) else None

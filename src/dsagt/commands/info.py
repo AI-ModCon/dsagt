@@ -18,8 +18,7 @@ on each trace's root span (set per emitting process by ``init_tracing``
 and the agent's own OTel SDK).  Possible values:
   - ``claude-code`` / ``goose`` / ``cline`` / ``roo`` / ``codex`` —
     agent-emitted LLM-call traces (the bulk of traffic)
-  - ``dsagt-knowledge-server`` / ``dsagt-registry-server`` — MCP server
-    spans (``kb.*``, ``registry.*``)
+  - ``dsagt-server`` — merged MCP server spans (``kb.*``, ``registry.*``)
   - ``dsagt-run`` — tool-execute spans
 """
 
@@ -257,8 +256,8 @@ _SPAN_NAME_TO_SOURCE: tuple[tuple[str, str], ...] = (
     # trace, so the no-root-span fallback in _source_from_spans needs
     # this name registered too.
     ("proxy_pre_call", "dsagt-proxy"),
-    ("kb.", "dsagt-knowledge-server"),
-    ("registry.", "dsagt-registry-server"),
+    ("kb.", "dsagt-server"),
+    ("registry.", "dsagt-server"),
     ("tool.execute", "dsagt-run"),
 )
 

@@ -36,8 +36,8 @@ Skills are instruction-based agent workflows in `<project>/skills/`. Each skill 
 
 ### Bundled Skills
 
-DSAgt ships a `datacard-generator` skill in `src/dsagt/skills/` with reference templates for generating dataset documentation. It is indexed into the global Skills collection by `dsagt setup-kb`.
+DSAgt ships a `skill-creator` skill in `src/dsagt/skills/` (for scaffolding new SKILL.md skills). Bundled and installed skills are **not** indexed for search — every supported agent natively auto-discovers `SKILL.md` folders, so `search_skills` is reserved for the *catalog* tier (skills you can install but haven't yet). Domain skills — including the MODCON `datacard-generator` — are sourced from external catalogs (`dsagt skills add <project> genesis`) rather than bundled, so they stay current upstream.
 
 ### Adding Skills
 
-Place a new directory under `<project>/skills/` with a `SKILL.md` describing the workflow. The knowledge server indexes it automatically on next startup, or trigger a re-index via `kb_ingest`.
+Place a new directory under `<project>/skills/` with a `SKILL.md` describing the workflow. The next `dsagt start` mirrors it into the agent's native skill directory (e.g. `.claude/skills/`), after which the agent auto-discovers and invokes it — no indexing step.

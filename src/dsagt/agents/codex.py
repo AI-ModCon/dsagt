@@ -90,23 +90,24 @@ def _render_codex_config(mcp_env: dict) -> str:
     do land in ``codex.tool_result`` log events with full args + output.
     """
     lines: list[str] = []
-    for server in ("registry", "knowledge"):
-        lines.append(f"[mcp_servers.dsagt-{server}]")
-        lines.append('command = "uv"')
-        args = _mcp_server_args(server)
-        args_toml = ", ".join(_toml_quote(a) for a in args)
-        lines.append(f"args = [{args_toml}]")
-        if mcp_env:
-            lines.append(f"[mcp_servers.dsagt-{server}.env]")
-            for k, v in mcp_env.items():
-                lines.append(f"{k} = {_toml_quote(v)}")
-        lines.append("")
-    lines.extend([
-        "[otel]",
-        'trace_exporter = "otlp-http"',
-        "log_user_prompt = true",
-        "",
-    ])
+    lines.append("[mcp_servers.dsagt]")
+    lines.append('command = "uv"')
+    args = _mcp_server_args()
+    args_toml = ", ".join(_toml_quote(a) for a in args)
+    lines.append(f"args = [{args_toml}]")
+    if mcp_env:
+        lines.append("[mcp_servers.dsagt.env]")
+        for k, v in mcp_env.items():
+            lines.append(f"{k} = {_toml_quote(v)}")
+    lines.append("")
+    lines.extend(
+        [
+            "[otel]",
+            'trace_exporter = "otlp-http"',
+            "log_user_prompt = true",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -126,16 +127,18 @@ def _render_codex_config_proxy(mcp_env: dict, proxy_port: int, model: str) -> st
     any table headers in TOML.
     """
     base = _render_codex_config(mcp_env)
-    header = "\n".join([
-        f'model = "{model}"',
-        'model_provider = "dsagt-proxy"',
-        '',
-        '[model_providers.dsagt-proxy]',
-        'name = "DSAGT Proxy"',
-        f'base_url = "http://localhost:{proxy_port}/v1"',
-        'wire_api = "chat"',
-        '',
-    ])
+    header = "\n".join(
+        [
+            f'model = "{model}"',
+            'model_provider = "dsagt-proxy"',
+            "",
+            "[model_providers.dsagt-proxy]",
+            'name = "DSAGT Proxy"',
+            f'base_url = "http://localhost:{proxy_port}/v1"',
+            'wire_api = "chat"',
+            "",
+        ]
+    )
     return header + base
 
 
@@ -143,9 +146,11 @@ class CodexSetup(AgentSetup):
     name = "codex"
     base_command = ["codex"]
     static_marker = "AGENTS.md"
+    # Project-local .agents/skills (repo-root, codex-discovered) — never the
+    # global ~/.agents/skills or ~/.codex; manifest-tracked, user skills safe.
+    native_skills_dir = ".agents/skills"
     install_hint = (
-        "Install with `npm i -g @openai/codex` or "
-        "`brew install --cask codex`."
+        "Install with `npm i -g @openai/codex` or " "`brew install --cask codex`."
     )
     otel_payload_support = "partial"
     # Codex is openai-protocol native.
@@ -164,7 +169,9 @@ class CodexSetup(AgentSetup):
         instructions = _load_master_instructions()
         if instructions:
             action = _append_or_write(
-                working_dir / "AGENTS.md", instructions, _DSAGT_MARKER,
+                working_dir / "AGENTS.md",
+                instructions,
+                _DSAGT_MARKER,
             )
             if action:
                 actions.append(action)
@@ -198,6 +205,7 @@ class CodexSetup(AgentSetup):
         """
         del env, pdir
         import shutil
+
         actions: list[str] = []
         codex_home = Path(working_dir) / ".codex-data"
         codex_home.mkdir(parents=True, exist_ok=True)
@@ -220,7 +228,7 @@ class CodexSetup(AgentSetup):
         base_toml = user_config.read_text() if user_config.exists() else ""
         mcp_env = _mcp_env_block(config)
         body = _render_codex_config(mcp_env)
-        merged = (base_toml.rstrip() + "\n\n" + body if base_toml else body)
+        merged = base_toml.rstrip() + "\n\n" + body if base_toml else body
         config_path.write_text(merged + "\n")
         actions.append(f"Wrote {config_path} ({len(mcp_env)} MCP env vars)")
         return actions
@@ -233,6 +241,7 @@ class CodexSetup(AgentSetup):
         """
         del project
         import shlex
+
         pdir = shlex.quote(str(project_dir))
         codex_home = shlex.quote(str(project_dir / ".codex-data"))
         return f"cd {pdir} && CODEX_HOME={codex_home} codex"
@@ -254,6 +263,7 @@ class CodexSetup(AgentSetup):
         """
         del env, pdir
         import shutil
+
         actions: list[str] = []
         codex_home = Path(working_dir) / ".codex-data"
         codex_home.mkdir(parents=True, exist_ok=True)
@@ -282,11 +292,9 @@ class CodexSetup(AgentSetup):
         base_toml = user_config.read_text() if user_config.exists() else ""
         mcp_env = _mcp_env_block(config)
         body = _render_codex_config_proxy(mcp_env, proxy_port, model)
-        merged = (base_toml.rstrip() + "\n\n" + body if base_toml else body)
+        merged = base_toml.rstrip() + "\n\n" + body if base_toml else body
         config_path.write_text(merged + "\n")
-        actions.append(
-            f"Wrote {config_path} ({len(mcp_env)} MCP env vars, proxy mode)"
-        )
+        actions.append(f"Wrote {config_path} ({len(mcp_env)} MCP env vars, proxy mode)")
         return actions
 
     def runtime_env(self, config: dict) -> dict[str, str]:
@@ -312,10 +320,12 @@ class CodexSetup(AgentSetup):
         if not text:
             return 1
         cmd = [
-            "codex", "exec",
+            "codex",
+            "exec",
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
-            "-C", str(working_dir),
+            "-C",
+            str(working_dir),
             text,
         ]
         return _run_simple_script(cmd, env, working_dir, self.install_hint)

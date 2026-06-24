@@ -58,7 +58,7 @@ Confirm before saving:
 
 ### 6. Save
 
-Save via the **`save_skill`** MCP tool (registry server) with the `spec` (frontmatter dict: `name`, `description`, optional `tags`), the `body` markdown, and any `reference_files` (a `{relative_path: contents}` map). This writes `<project>/skills/<name>/` and indexes it for `search_skills`.
+Save via the **`save_skill`** MCP tool with the `spec` (frontmatter dict: `name`, `description`, optional `tags`), the `body` markdown, and any `reference_files` (a `{relative_path: contents}` map). This writes `<project>/skills/<name>/`, which the agent natively auto-discovers after the next `dsagt start` (no KB indexing — `search_skills` is for the not-yet-installed catalog).
 
 ### 7. Confirm
 

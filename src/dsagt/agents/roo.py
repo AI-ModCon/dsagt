@@ -83,6 +83,7 @@ class RooSetup(AgentSetup):
     name = "roo"
     base_command = ["roo"]
     static_marker = ".roomodes"
+    native_skills_dir = ".roo/skills"
     install_hint = (
         "Install via "
         "https://github.com/RooCodeInc/Roo-Code/blob/main/apps/cli/install.sh"
@@ -94,17 +95,28 @@ class RooSetup(AgentSetup):
     # impossible with that path.  Only the anthropic provider works for
     # gateways — the Anthropic SDK natively reads ``ANTHROPIC_BASE_URL``.
     credential_env_vars = (
-        "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
     )
     # Roo emits no OTel — agent-side telemetry only via --proxy_traces.
     telemetry_env = {}
     credential_hints = (
-        ("ANTHROPIC_API_KEY", "your provider API key (works for openai-shape "
-         "gateways too — the Anthropic SDK reaches them via ANTHROPIC_BASE_URL)"),
-        ("ANTHROPIC_BASE_URL", "gateway / proxy URL "
-         "(roo CLI has no --base-url flag; this env var is the only way)"),
-        ("ANTHROPIC_MODEL", "model name your gateway serves "
-         "(e.g. claude-haiku-4-5-20251001-v1-project)"),
+        (
+            "ANTHROPIC_API_KEY",
+            "your provider API key (works for openai-shape "
+            "gateways too — the Anthropic SDK reaches them via ANTHROPIC_BASE_URL)",
+        ),
+        (
+            "ANTHROPIC_BASE_URL",
+            "gateway / proxy URL "
+            "(roo CLI has no --base-url flag; this env var is the only way)",
+        ),
+        (
+            "ANTHROPIC_MODEL",
+            "model name your gateway serves "
+            "(e.g. claude-haiku-4-5-20251001-v1-project)",
+        ),
     )
 
     def vscode_hint(self, project_dir: Path) -> list[str]:
@@ -176,6 +188,7 @@ class RooSetup(AgentSetup):
         """
         del project
         import shlex
+
         pdir = shlex.quote(str(project_dir))
         return f"cd {pdir} && roo --mode dsagt"
 
@@ -225,20 +238,26 @@ class RooSetup(AgentSetup):
         """
         del max_turns
         from .base import _PROXY_FORWARDED_SENTINEL
+
         model = (config.get("llm") or {}).get("model")
         if not model:
-            raise RuntimeError(
-                "roo proxy_run_script requires config['llm']['model']."
-            )
+            raise RuntimeError("roo proxy_run_script requires config['llm']['model'].")
         cmd = [
             "roo",
-            "--print", "--oneshot",
-            "--mode", "dsagt",
-            "--prompt-file", str(script_path),
-            "--workspace", str(working_dir),
+            "--print",
+            "--oneshot",
+            "--mode",
+            "dsagt",
+            "--prompt-file",
+            str(script_path),
+            "--workspace",
+            str(working_dir),
             "--debug",
-            "--provider", "anthropic",
-            "--api-key", _PROXY_FORWARDED_SENTINEL,
-            "--model", model,
+            "--provider",
+            "anthropic",
+            "--api-key",
+            _PROXY_FORWARDED_SENTINEL,
+            "--model",
+            model,
         ]
         return _run_simple_script(cmd, env, working_dir, self.install_hint)

@@ -37,35 +37,33 @@ _DSAGT_MARKER = "DSAgt Pipeline Builder"
 # sync with ``commands/registry_server.py`` and
 # ``commands/knowledge_server.py`` tool registrations; a tool added there
 # but not here means roo/cline will hang on its first call.
-_DSAGT_MCP_ALWAYS_ALLOW = {
-    "registry": [
-        "get_registry",
-        "http_request",
-        "install_dependencies",
-        "install_skill",
-        "read_file",
-        "reconstruct_pipeline",
-        "run_command",
-        "save_skill",
-        "save_tool_spec",
-        "search_registry",
-        "search_skills",
-    ],
-    "knowledge": [
-        "add_skill_source",
-        "kb_add_vector_db",
-        "kb_append",
-        "kb_dismiss_suggestion",
-        "kb_get_memories",
-        "kb_get_suggestions",
-        "kb_ingest",
-        "kb_job_status",
-        "kb_list_collections",
-        "kb_remember",
-        "kb_search",
-        "list_skill_sources",
-    ],
-}
+# All dsagt MCP tools (registry + knowledge) now live behind the single
+# ``dsagt-server``, so the always-allow list is one flat union.
+_DSAGT_MCP_ALWAYS_ALLOW = [
+    "add_skill_source",
+    "get_registry",
+    "http_request",
+    "install_dependencies",
+    "install_skill",
+    "kb_add_vector_db",
+    "kb_append",
+    "kb_dismiss_suggestion",
+    "kb_get_memories",
+    "kb_get_suggestions",
+    "kb_ingest",
+    "kb_job_status",
+    "kb_list_collections",
+    "kb_remember",
+    "kb_search",
+    "list_skill_sources",
+    "read_file",
+    "reconstruct_pipeline",
+    "run_command",
+    "save_skill",
+    "save_tool_spec",
+    "search_registry",
+    "search_skills",
+]
 
 
 # Sentinel API key planted in agent / MCP-child env when the optional
@@ -135,13 +133,13 @@ def _openai_env(llm: dict) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _mcp_server_args(server: str) -> list[str]:
-    """Build the argv tail for ``uv run dsagt-<server>-server``.
+def _mcp_server_args() -> list[str]:
+    """Build the argv tail for ``uv run dsagt-server``.
 
-    Both servers read all configuration from ``DSAGT_PROJECT_DIR`` (env)
-    and dsagt_config.yaml — no CLI args needed.
+    The single merged server reads all configuration from the project's
+    ``dsagt_config.yaml`` (located via cwd-walk) — no CLI args needed.
     """
-    return ["run", f"dsagt-{server}-server"]
+    return ["run", "dsagt-server"]
 
 
 def _mcp_env_block(config: dict) -> dict[str, str]:
@@ -294,25 +292,22 @@ def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
 
 
 def _build_mcp_servers_dict(env_block: dict | None) -> dict:
-    """Build the standard ``{"mcpServers": {...}}`` dict for dsagt servers.
+    """Build the standard ``{"mcpServers": {...}}`` dict for the dsagt server.
 
     Used by agents that load MCP config from a JSON file (roo via
     ``.roo/mcp.json``).  Claude Code uses the same shape via ``.mcp.json``
     but builds it inline in :class:`ClaudeSetup.write_dynamic`.  Cline
-    doesn't use this — it requires ``cline mcp add`` to register servers.
+    doesn't use this — it requires ``cline mcp add`` to register the server.
     """
-    mcp_config: dict = {"mcpServers": {}}
-    for server in ("registry", "knowledge"):
-        entry: dict = {
-            "command": "uv",
-            "args": _mcp_server_args(server),
-            "disabled": False,
-            "alwaysAllow": _DSAGT_MCP_ALWAYS_ALLOW[server],
-        }
-        if env_block:
-            entry["env"] = env_block
-        mcp_config["mcpServers"][f"dsagt-{server}"] = entry
-    return mcp_config
+    entry: dict = {
+        "command": "uv",
+        "args": _mcp_server_args(),
+        "disabled": False,
+        "alwaysAllow": _DSAGT_MCP_ALWAYS_ALLOW,
+    }
+    if env_block:
+        entry["env"] = env_block
+    return {"mcpServers": {"dsagt": entry}}
 
 
 def _toml_quote(value: str) -> str:
@@ -553,6 +548,15 @@ class AgentSetup(ABC):
     #: See agents/<name>.py docstrings for the per-agent investigation.
     otel_payload_support: ClassVar[str] = "full"
 
+    #: Directory (relative to the working dir) the agent natively auto-discovers
+    #: ``SKILL.md`` skill folders from.  ``setup_skills`` mirrors installed
+    #: (bundled + project) skills here so the agent discovers/auto-invokes them
+    #: without an MCP round-trip.  Every supported agent has one — claude
+    #: ``.claude/skills``, codex/goose ``.agents/skills`` (the cross-agent
+    #: standard), cline ``.cline/skills``, roo ``.roo/skills``.  ``None`` would
+    #: mean the agent has no native skill discovery (none currently).
+    native_skills_dir: ClassVar[str | None] = None
+
     @abstractmethod
     def write_static(self, working_dir: Path) -> list[str]:
         """Write the agent's instructions file + any state directories.
@@ -576,6 +580,29 @@ class AgentSetup(ABC):
         the actually-bound port and built ``env`` via :func:`agent_env`.
         Returns a list of one-line action descriptions.
         """
+
+    def setup_skills(self, working_dir: Path, config: dict) -> list[str]:
+        """Mirror installed (bundled + project) skills into the agent's native
+        skills dir so it auto-discovers/auto-invokes them.
+
+        Mode-independent (runs for BYOA and proxy alike) and idempotent — the
+        manifest-tracked :func:`_mirror_skills_to` only reaps skills dsagt
+        placed, never user-authored ones.  No-op when the agent declares no
+        ``native_skills_dir`` or ``skills.populate_native`` is disabled.
+        """
+        if not self.native_skills_dir:
+            return []
+        if not (config.get("skills") or {}).get("populate_native", True):
+            return []
+        from dsagt.registry import SkillRegistry
+
+        reg = SkillRegistry(runtime_dir=working_dir, kb=None)
+        # Bundled first, project last → project wins name collisions.
+        src_dirs = reg._bundled_skill_dirs() + reg._project_skill_dirs()
+        target = working_dir
+        for part in self.native_skills_dir.split("/"):
+            target = target / part
+        return _mirror_skills_to(target, src_dirs)
 
     def runtime_env(self, config: dict) -> dict[str, str]:
         """Dsagt-owned env vars the agent process needs at runtime (BYOA).

@@ -81,6 +81,9 @@ class ClineSetup(AgentSetup):
     name = "cline"
     base_command = ["cline"]
     static_marker = ".clinerules/dsagt_instructions.md"
+    # Cline skills are opt-in (Settings → Features → Enable Skills); mirroring
+    # is harmless if unused, and search_skills covers the disabled case.
+    native_skills_dir = ".cline/skills"
     install_hint = "Install with `npm i -g cline`."
     otel_payload_support = "none"
     # Cline's CLI nominally supports openai-native + anthropic, but cline
@@ -90,19 +93,30 @@ class ClineSetup(AgentSetup):
     # by cline's anthropic SDK at runtime, covering api.anthropic.com and
     # gateway endpoints alike.  Match roo's policy.
     credential_env_vars = (
-        "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
     )
     # Cline emits no OTel — agent-side telemetry only via --proxy_traces.
     telemetry_env = {}
     credential_hints = (
-        ("ANTHROPIC_API_KEY", "your provider API key (works for openai-shape "
-         "gateways too — cline's anthropic SDK reaches them via "
-         "ANTHROPIC_BASE_URL)"),
-        ("ANTHROPIC_BASE_URL", "gateway / proxy URL "
-         "(cline auth's -b flag is openai-only; the anthropic SDK reads "
-         "this env var at runtime)"),
-        ("ANTHROPIC_MODEL", "model name your gateway serves "
-         "(e.g. claude-haiku-4-5-20251001-v1-project)"),
+        (
+            "ANTHROPIC_API_KEY",
+            "your provider API key (works for openai-shape "
+            "gateways too — cline's anthropic SDK reaches them via "
+            "ANTHROPIC_BASE_URL)",
+        ),
+        (
+            "ANTHROPIC_BASE_URL",
+            "gateway / proxy URL "
+            "(cline auth's -b flag is openai-only; the anthropic SDK reads "
+            "this env var at runtime)",
+        ),
+        (
+            "ANTHROPIC_MODEL",
+            "model name your gateway serves "
+            "(e.g. claude-haiku-4-5-20251001-v1-project)",
+        ),
     )
 
     def write_static(self, working_dir: Path) -> list[str]:
@@ -163,15 +177,22 @@ class ClineSetup(AgentSetup):
                 "serve both wire protocols on the same key."
             )
         auth_cmd = [
-            "cline", "auth",
-            "--config", cline_dir,
-            "-p", "anthropic",
-            "-k", api_key,
-            "-m", model,
+            "cline",
+            "auth",
+            "--config",
+            cline_dir,
+            "-p",
+            "anthropic",
+            "-k",
+            api_key,
+            "-m",
+            model,
         ]
         result = subprocess.run(
-            auth_cmd, cwd=str(working_dir),
-            capture_output=True, text=True,
+            auth_cmd,
+            cwd=str(working_dir),
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
@@ -190,30 +211,35 @@ class ClineSetup(AgentSetup):
         existing: set[str] = set()
         if mcp_path.exists():
             try:
-                existing = set(json.loads(mcp_path.read_text())
-                               .get("mcpServers", {}).keys())
+                existing = set(
+                    json.loads(mcp_path.read_text()).get("mcpServers", {}).keys()
+                )
             except (json.JSONDecodeError, OSError):
                 existing = set()
 
-        for server in ("registry", "knowledge"):
-            name = f"dsagt-{server}"
-            if name in existing:
-                continue
+        if "dsagt" not in existing:
             add_cmd = [
-                "cline", "mcp", "add",
-                "--config", cline_dir,
-                name,
+                "cline",
+                "mcp",
+                "add",
+                "--config",
+                cline_dir,
+                "dsagt",
                 "--",
-                "uv", "run", f"dsagt-{server}-server",
+                "uv",
+                "run",
+                "dsagt-server",
             ]
             result = subprocess.run(
-                add_cmd, cwd=str(working_dir),
-                capture_output=True, text=True,
+                add_cmd,
+                cwd=str(working_dir),
+                capture_output=True,
+                text=True,
             )
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout).strip()
                 raise RuntimeError(
-                    f"cline mcp add {name} failed "
+                    f"cline mcp add dsagt failed "
                     f"(exit {result.returncode}): {detail}"
                 )
 
@@ -244,7 +270,10 @@ class ClineSetup(AgentSetup):
     # we extract them into a helper.
 
     def _patch_mcp_servers(
-        self, config: dict, working_dir: Path, cline_dir: str,
+        self,
+        config: dict,
+        working_dir: Path,
+        cline_dir: str,
     ) -> str:
         """Idempotent ``cline mcp add`` + JSON env-block patch.
         Returns the action string for the printout.
@@ -253,27 +282,35 @@ class ClineSetup(AgentSetup):
         existing: set[str] = set()
         if mcp_path.exists():
             try:
-                existing = set(json.loads(mcp_path.read_text())
-                               .get("mcpServers", {}).keys())
+                existing = set(
+                    json.loads(mcp_path.read_text()).get("mcpServers", {}).keys()
+                )
             except (json.JSONDecodeError, OSError):
                 existing = set()
 
-        for server in ("registry", "knowledge"):
-            name = f"dsagt-{server}"
-            if name in existing:
-                continue
+        if "dsagt" not in existing:
             add_cmd = [
-                "cline", "mcp", "add", "--config", cline_dir, name,
-                "--", "uv", "run", f"dsagt-{server}-server",
+                "cline",
+                "mcp",
+                "add",
+                "--config",
+                cline_dir,
+                "dsagt",
+                "--",
+                "uv",
+                "run",
+                "dsagt-server",
             ]
             result = subprocess.run(
-                add_cmd, cwd=str(working_dir),
-                capture_output=True, text=True,
+                add_cmd,
+                cwd=str(working_dir),
+                capture_output=True,
+                text=True,
             )
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout).strip()
                 raise RuntimeError(
-                    f"cline mcp add {name} failed "
+                    f"cline mcp add dsagt failed "
                     f"(exit {result.returncode}): {detail}"
                 )
 
@@ -308,6 +345,7 @@ class ClineSetup(AgentSetup):
         """
         del pdir
         from .base import _PROXY_FORWARDED_SENTINEL
+
         actions: list[str] = []
         cline_dir = str(working_dir / ".cline-data")
         Path(cline_dir).mkdir(parents=True, exist_ok=True)
@@ -320,16 +358,25 @@ class ClineSetup(AgentSetup):
                 "config['proxy']['port'] and config['llm']['model']."
             )
         auth_cmd = [
-            "cline", "auth",
-            "--config", cline_dir,
-            "-p", "openai",
-            "-k", _PROXY_FORWARDED_SENTINEL,
-            "-m", model,
-            "-b", f"http://localhost:{proxy_port}",
+            "cline",
+            "auth",
+            "--config",
+            cline_dir,
+            "-p",
+            "openai",
+            "-k",
+            _PROXY_FORWARDED_SENTINEL,
+            "-m",
+            model,
+            "-b",
+            f"http://localhost:{proxy_port}",
         ]
         result = subprocess.run(
-            auth_cmd, env=env, cwd=str(working_dir),
-            capture_output=True, text=True,
+            auth_cmd,
+            env=env,
+            cwd=str(working_dir),
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
@@ -356,6 +403,7 @@ class ClineSetup(AgentSetup):
         """
         del project
         import shlex
+
         pdir = shlex.quote(str(project_dir))
         cline_dir = shlex.quote(str(project_dir / ".cline-data"))
         return f"cd {pdir} && cline -v -y -a --config {cline_dir}"

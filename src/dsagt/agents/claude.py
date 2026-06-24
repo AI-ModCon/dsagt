@@ -52,7 +52,6 @@ from .base import (
     _load_master_instructions,
     _mcp_env_block,
     _mcp_server_args,
-    _mirror_skills_to,
     _run_simple_script,
 )
 
@@ -83,6 +82,7 @@ class ClaudeSetup(AgentSetup):
     name = "claude"
     base_command = ["claude"]
     static_marker = "CLAUDE.md"
+    native_skills_dir = ".claude/skills"
     install_hint = "Install with `npm i -g @anthropic-ai/claude-code`."
     # Anthropic-protocol native; cross-protocol routing requires the proxy.
     credential_env_vars = (
@@ -158,28 +158,19 @@ class ClaudeSetup(AgentSetup):
         actions: list[str] = []
         env_block = _mcp_env_block(config)
 
-        mcp_config: dict = {"mcpServers": {}}
-        for server in ("registry", "knowledge"):
-            entry: dict = {"command": "uv", "args": _mcp_server_args(server)}
-            if env_block:
-                entry["env"] = env_block
-            mcp_config["mcpServers"][f"dsagt-{server}"] = entry
+        entry: dict = {"command": "uv", "args": _mcp_server_args()}
+        if env_block:
+            entry["env"] = env_block
+        mcp_config: dict = {"mcpServers": {"dsagt": entry}}
 
         mcp_path = working_dir / ".mcp.json"
         mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
         actions.append(f"Wrote {mcp_path}")
 
-        # Mirror installed (project) + bundled skills into Claude Code's
-        # native skill dir so it discovers/auto-invokes them without an MCP
-        # round-trip.  Bundled first, project last → project wins collisions.
-        # A newly-created .claude/skills/ is only picked up on Claude restart,
-        # which is fine: this runs at init/start, before the agent launches.
-        if (config.get("skills") or {}).get("populate_native", True):
-            from dsagt.registry import SkillRegistry
-
-            reg = SkillRegistry(runtime_dir=working_dir, kb=None)
-            src_dirs = reg._bundled_skill_dirs() + reg._project_skill_dirs()
-            actions += _mirror_skills_to(working_dir / ".claude" / "skills", src_dirs)
+        # Skills are mirrored into .claude/skills/ centrally via
+        # AgentSetup.setup_skills (driven by native_skills_dir) in
+        # dynamic_agent_record — see base.py.  Picked up on the next Claude
+        # start, which is fine: this runs at init/start, before launch.
 
         # Configure mlflow autolog claude — writes .claude/settings.json
         # with the MLflow Stop hook + tracking env vars.  Idempotent and

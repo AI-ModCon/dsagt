@@ -630,7 +630,7 @@ class TestToolIndexing:
         server, reg, kb = _make_server_with_kb(tmp_path)
 
         text = call_tool(server, "search_skills", {"query": "vasp pymatgen dft"})
-        assert "No skills found" in text
+        assert "No catalog skills found" in text
         assert "no external skill catalog is synced" in text.lower()
         assert "add_skill_source" in text
 

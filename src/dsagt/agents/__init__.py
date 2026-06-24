@@ -362,6 +362,9 @@ def dynamic_agent_record(
         Path(working_dir),
         Path(config["project_dir"]),
     )
+    # Mirror installed skills into the agent's native skills dir (all agents,
+    # both modes).  Central here so each agent only declares native_skills_dir.
+    actions += setup.setup_skills(Path(working_dir), config)
     # Launch shim is BYOA-only. Skip when proxy mode is active —
     # ``dsagt start --enable-proxy`` is the only sensible entry point
     # in that mode (proxy URL must be plumbed through agent env).
