@@ -42,8 +42,7 @@ These are launched automatically by `dsagt init` via the per-agent MCP config an
 
 | Command | Description |
 |---------|-------------|
-| `dsagt-registry-server` | Tool registry MCP server |
-| `dsagt-knowledge-server` | Knowledge base MCP server |
+| `dsagt-server` | MCP server — tool registry + knowledge base |
 | `dsagt-run` | Provenance-capturing tool execution wrapper |
 | `dsagt-proxy` | LiteLLM proxy server (proxy mode only) |
 | `dsagt-setup-kb` | Core knowledge base setup (called by `dsagt setup-kb`) |

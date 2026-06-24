@@ -107,8 +107,8 @@ What this exercised:
 
 | Prompt | Layer |
 |---|---|
-| 1 | Knowledge MCP server (`kb_ingest`) — chunks and indexes docs into ChromaDB |
-| 2 | Registry MCP server (`save_tool_spec`) — writes `tools/csvcut.md`, `tools/csvgrep.md`, etc. (one per registered tool) |
+| 1 | `dsagt-server` (`kb_ingest`) — chunks and indexes docs into ChromaDB |
+| 2 | `dsagt-server` (`save_tool_spec`) — writes `tools/csvcut.md`, `tools/csvgrep.md`, etc. (one per registered tool) |
 | 3 | `dsagt-run` provenance wrapper — records exec layer to `trace_archive/` |
 | 4 | Explicit memory (`kb_remember` → `explicit_memories.yaml`) + KB recall |
 
@@ -127,10 +127,10 @@ The same flow runs non-interactively via `dsagt smoke-test --agent claude` (or `
 `dsagt setup-kb` builds the shared ChromaDB collections under `~/.dsagt/kb_index/` that every project on this machine reuses. Three of the six collections shown in the [architecture diagram](#architecture) are populated here — the other three are per-project and fill in automatically during use (see [Knowledge Base](#knowledge-base) below):
 
 - **Tool Specs** — DSAgt's bundled tool specs from `src/dsagt/tools/`, tagged with `source: bundled` so the agent finds them via `search_registry` from the very first session.
-- **Skills** — DSAgt's bundled skill workflows from `src/dsagt/skills/` (e.g. `skill-creator`), discovered via `search_skills`. Domain skills (datacards, etc.) come from external catalogs — `dsagt skills add <project> genesis`.
+- **Skills Catalog** — the default external skill source (`scientific`) cloned and frontmatter-indexed so `search_skills` returns installable skills from the first session. Add more (`dsagt skills add <project> genesis`, etc.). The bundled `skill-creator` is auto-discovered natively by the agent, not indexed.
 - **Domain Knowledge** — Reference corpora (NVIDIA NeMo Curator, AI Data Readiness Inspector) downloaded and embedded so the agent has data-curation domain knowledge out of the box.
 
-The Tool Specs and Skills collections are wipe-and-rebuild on every run, so re-run `setup-kb` after upgrading DSAgt to pick up new bundled assets.
+The Tool Specs collection is wipe-and-rebuild on every run, so re-run `setup-kb` after upgrading DSAgt to pick up new bundled tools. (Bundled skills are not indexed — agents auto-discover them natively.)
 
 ```bash
 dsagt setup-kb                       # all collections (local embedder, no creds)
@@ -192,11 +192,11 @@ DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to
 
 ### Tools and Skills
 
-**Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. The agent registers new tools via the registry MCP server's `save_tool_spec`.
+**Tools** are CLI executables defined as markdown files with YAML frontmatter in `<project>/tools/`. The agent registers new tools via the MCP server's `save_tool_spec`.
 
 **Skills** are instruction-based agent workflows — a directory with a `SKILL.md` and optional reference docs. They come in two tiers:
 
-- **Installed** skills live in `<project>/skills/` (DSAgt ships a bundled `skill-creator`; domain skills like the MODCON datacard generator are installed from the `genesis` catalog). These are mirrored into the agent's native skill directory (e.g. `.claude/skills/`, `.agents/skills/`) at `dsagt init`/`start` so the agent auto-invokes them, and they are also searchable via `search_skills`.
+- **Installed** skills live in `<project>/skills/` (DSAgt ships a bundled `skill-creator`; domain skills like the MODCON datacard generator are installed from the `genesis` catalog). These are mirrored into the agent's native skill directory (e.g. `.claude/skills/`, `.agents/skills/`) at `dsagt init`/`start`, where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the catalog tier below).
 - **Catalog** skills come from external Git repositories — GitHub *or* GitLab — indexed into a searchable catalog the agent browses with `search_skills` but that is **not** loaded into its context (so a catalog can hold thousands of skills). The agent enables a source with `add_skill_source(...)`, finds skills with `search_skills(...)`, then copies one into the project with `install_skill(...)`.
 
 The catalog is **opt-in**: a source must be synced before its skills are searchable. Curated named sources ship out of the box — `scientific`, `anthropic`, `antigravity`, `composio`, and `genesis` (the OSTI GENESIS catalog: HPC, HuggingFace, LangChain, OpenAI, plasma-sim, and more) — and any Git URL or `owner/repo` works too. Manage catalogs from the CLI with `dsagt skills list/search/add/sync <project>`, or from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
@@ -212,7 +212,7 @@ Six independently-partitioned ChromaDB collections hold everything the agent sea
 | Collection | Source | Populated by |
 |---|---|---|
 | **Tool Specs** | Bundled CLI tool specs in `src/dsagt/tools/` | `dsagt setup-kb` |
-| **Skills** | Bundled skill workflows in `src/dsagt/skills/` | `dsagt setup-kb` |
+| **Skills Catalog** | Installable skills from external repos (one `skills_catalog__<slug>` per source), frontmatter-indexed | `dsagt setup-kb` (default source) + `add_skill_source` |
 | **Domain Knowledge** | NeMo Curator + AIDRIN reference corpora; user-ingested docs | `dsagt setup-kb` + agent's `kb_ingest` |
 | **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/explicit_memories.yaml`); the agent fetches via `kb_get_memories` on demand — typically when you ask it to recall — not auto-loaded at session start |
 | **Episodic Memory** | Distilled facts from MLflow traces | `dsagt memory --project <name>` (per-category outlier detection via embedding centroids) |
@@ -220,7 +220,7 @@ Six independently-partitioned ChromaDB collections hold everything the agent sea
 
 The default embedding backend is local (sentence-transformers, CPU-side, no API needed). Switch to `embedding.backend: api` in `dsagt_config.yaml` to route through a hosted embedder via LiteLLM. Cross-encoder reranking is optional (`knowledge.rerank: true`).
 
-The agent searches via `kb_search` (knowledge MCP server) and writes via `kb_ingest` / `kb_remember`. Tool Specs and Skills are queried through specialized routes (`search_registry`, `search_skills`) over the same backend. Enabling external skill catalogs adds one `skills_catalog__<slug>` collection per source, which `search_skills` queries alongside the bundled Skills collection.
+The agent searches via `kb_search` and writes via `kb_ingest` / `kb_remember`. Registered tools have their own `search_registry` route over the same backend. Installed skills are auto-discovered natively by the agent (not indexed); enabling external skill catalogs adds one `skills_catalog__<slug>` collection per source, which `search_skills` browses for installable skills.
 
 ### Observability
 

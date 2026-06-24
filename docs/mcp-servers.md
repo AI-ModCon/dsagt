@@ -1,12 +1,12 @@
-# MCP Servers
+# MCP Server
 
-DSAgt exposes its capabilities through two MCP servers. Both are launched automatically by `dsagt init` and configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.).
+DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.) and launched automatically when the agent starts. It bundles two concern areas — a tool registry and a knowledge base — behind one process with one shared embedder and one ChromaDB owner.
 
-## Registry Server
+> Earlier versions ran two separate servers (`dsagt-registry-server` + `dsagt-knowledge-server`), merged in 0.3.0. Re-run `dsagt start <project>` on an existing project to regenerate its config against the single server (for cline, delete `<project>/.cline-data` first).
 
-**Command:** `dsagt-registry-server`
+## Registry tools
 
-Handles tool registration, dependency installation, and tool discovery.
+Tool registration, dependency installation, and tool discovery.
 
 | Tool | Description |
 |------|-------------|
@@ -17,9 +17,7 @@ Handles tool registration, dependency installation, and tool discovery.
 
 Tools are markdown files with YAML frontmatter under `<project>/tools/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies.
 
-## Knowledge Server
-
-**Command:** `dsagt-knowledge-server`
+## Knowledge tools
 
 Semantic search and ingestion over indexed document collections.
 
@@ -29,7 +27,7 @@ Semantic search and ingestion over indexed document collections.
 | `kb_ingest` | Index a file or directory into a named collection (runs in background for large corpora) |
 | `kb_remember` | Save a user-confirmed fact to explicit memory |
 | `kb_get_memories` | Retrieve explicit memories for the current project |
-| `search_skills` | Discover agent skill workflows |
+| `search_skills` | Discover installable skills in the external catalog (installed skills are auto-discovered natively) |
 
 ### Backend
 

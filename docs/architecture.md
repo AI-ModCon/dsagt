@@ -2,18 +2,18 @@
 
 ![DSAgt architecture](assets/architecture.png)
 
-DSAgt wraps an unmodified agent CLI with four independently-operable layers. Each layer exposes its own MCP server so the agent discovers and invokes capabilities through the standard MCP tool protocol.
+DSAgt wraps an unmodified agent CLI with four independently-operable layers. The tool-registry and knowledge-base layers are exposed through one MCP server (`dsagt-server`); the agent discovers and invokes their capabilities through the standard MCP tool protocol.
 
 ## Layers
 
-**Tool Registry** (`dsagt-registry-server`)
-The agent registers CLI tools as markdown files with YAML frontmatter under `<project>/tools/`. The registry server handles dependency installation via `uv run --with` and wraps every execution with `dsagt-run` for provenance capture. The agent discovers tools via `search_registry`.
+**Tool Registry** (`dsagt-server`)
+The agent registers CLI tools as markdown files with YAML frontmatter under `<project>/tools/`. DSAgt handles dependency installation via `uv run --with` and wraps every execution with `dsagt-run` for provenance capture. The agent discovers tools via `search_registry`.
 
-**Knowledge Base** (`dsagt-knowledge-server`)
-Semantic search over six independently-partitioned ChromaDB collections. Three are global (populated by `dsagt setup-kb`); three are per-project (filled automatically during use). Background jobs handle long ingest operations. The agent searches via `kb_search`, ingests via `kb_ingest`, and saves user-confirmed facts via `kb_remember`.
+**Knowledge Base** (`dsagt-server`)
+Semantic search over six independently-partitioned ChromaDB collections, served by the same process as the tool registry (one shared embedder, one ChromaDB owner). Three collections are global (populated by `dsagt setup-kb`); three are per-project (filled automatically during use). Background jobs handle long ingest operations. The agent searches via `kb_search`, ingests via `kb_ingest`, and saves user-confirmed facts via `kb_remember`.
 
 **Provenance** (`dsagt-run`)
-A thin wrapper invoked by the registry server around every tool execution. Records the command, arguments, exit code, duration, file counts, and truncated stderr to `<project>/trace_archive/<record_id>.json` and emits an OTLP span to MLflow. The agent calls `reconstruct_pipeline` to render the trace archive as a reproducible bash script or Snakemake workflow.
+A thin wrapper around every registered-tool execution. Records the command, arguments, exit code, duration, file counts, and truncated stderr to `<project>/trace_archive/<record_id>.json` and emits an OTLP span to MLflow. The agent calls `reconstruct_pipeline` to render the trace archive as a reproducible bash script or Snakemake workflow.
 
 **Observability** (MLflow + OTLP)
 MLflow runs locally at a port pinned at `dsagt init` time. All four layers emit OTLP HTTP spans to MLflow's `/v1/traces` endpoint. The agent's own LLM-call traces land in the same store when you export the `OTEL_EXPORTER_OTLP_ENDPOINT` printed by `dsagt init`.

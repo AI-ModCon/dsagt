@@ -28,11 +28,10 @@ Proxy mode reads upstream LLM credentials from `.env` or the shell. See [`tests/
 
 **Agent command not found.** The agent CLI is not installed or is not on PATH. See the [supported agents table](index.md#supported-agents).
 
-**MCP servers not connecting.** Verify the server commands are on your PATH:
+**MCP server not connecting.** Verify uv resolves the server command:
 
 ```bash
-which dsagt-registry-server
-which dsagt-knowledge-server
+uv run which dsagt-server
 ```
 
 If missing, reinstall: `pip install --force-reinstall https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip`.

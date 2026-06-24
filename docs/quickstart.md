@@ -48,8 +48,8 @@ dsagt stop quickstart
 
 | Prompt | DSAgt layer |
 |--------|-------------|
-| 1 | Knowledge MCP server (`kb_ingest`) — chunks and indexes docs into ChromaDB |
-| 2 | Registry MCP server (`save_tool_spec`) — writes `tools/csvcut.md`, etc. |
+| 1 | `dsagt-server` (`kb_ingest`) — chunks and indexes docs into ChromaDB |
+| 2 | `dsagt-server` (`save_tool_spec`) — writes `tools/csvcut.md`, etc. |
 | 3 | `dsagt-run` provenance wrapper — records exec layer to `trace_archive/` |
 | 4 | KB recall via `kb_search` and registered tool execution |
 | 5–6 | Explicit memory (`kb_remember` → `explicit_memories.yaml`) + `kb_get_memories` |
@@ -85,9 +85,9 @@ dsagt setup-kb --embedding-backend api --embedding-base-url ... --embedding-api-
 Three collections are populated:
 
 - **Tool Specs** — DSAgt's bundled tool specs from `src/dsagt/tools/`, tagged `source: bundled`.
-- **Skills** — DSAgt's bundled skill workflows from `src/dsagt/skills/`.
+- **Skills Catalog** — the default external skill source (`scientific`), cloned and frontmatter-indexed so `search_skills` has installable skills out of the box.
 - **Domain Knowledge** — NeMo Curator and AI Data Readiness Inspector reference corpora.
 
-The Tool Specs and Skills collections are wiped and rebuilt on every run, so re-run `setup-kb` after upgrading DSAgt.
+The Tool Specs collection is wiped and rebuilt on every run, so re-run `setup-kb` after upgrading DSAgt. (Bundled skills are not indexed — agents auto-discover them natively.)
 
 The default embedder is a local sentence-transformers model (~130 MB, CPU-only, no API key). Pass `--embedding-backend api` to route through a hosted embedder via LiteLLM.

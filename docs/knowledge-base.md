@@ -7,7 +7,7 @@ DSAgt maintains six independently-partitioned ChromaDB collections. The first th
 | Collection | Source | Populated by |
 |---|---|---|
 | **Tool Specs** | Bundled CLI tool specs in `src/dsagt/tools/` | `dsagt setup-kb` |
-| **Skills** | Bundled skill workflows in `src/dsagt/skills/` | `dsagt setup-kb` |
+| **Skills Catalog** | Installable skills from external repos (one `skills_catalog__<slug>` collection per source), frontmatter-indexed | `dsagt setup-kb` (default source) + `add_skill_source` |
 | **Domain Knowledge** | NeMo Curator + AIDRIN reference corpora; user-ingested docs | `dsagt setup-kb` + agent's `kb_ingest` |
 | **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/explicit_memories.yaml`) |
 | **Episodic Memory** | Distilled facts from MLflow traces | `dsagt memory --project <name>` |
@@ -23,7 +23,7 @@ Explicit memories are facts the user confirms during a session. The agent saves 
 
 ## Search
 
-The agent searches all collections via `kb_search` (knowledge MCP server) and writes via `kb_ingest` / `kb_remember`. Tool Specs and Skills are queried through specialized routes (`search_registry`, `search_skills`) over the same backend.
+The agent searches all collections via `kb_search` and writes via `kb_ingest` / `kb_remember`. Registered tools have their own `search_registry` route over the same backend. Skills are discovered separately — installed ones natively by the agent, installable ones via `search_skills` over the external catalog (see [Tools & Skills](tools-skills.md)).
 
 Hybrid search (dense embeddings + sparse BM25 via Reciprocal Rank Fusion) is on by default per collection route. Cross-encoder reranking is optional.
 
@@ -37,4 +37,4 @@ dsagt setup-kb --embedding-backend api \
     --embedding-api-key <key>
 ```
 
-The Tool Specs and Skills collections are wiped and rebuilt on every `setup-kb` run — re-run after upgrading DSAgt to pick up new bundled assets.
+The Tool Specs collection is wiped and rebuilt on every `setup-kb` run — re-run after upgrading DSAgt to pick up new bundled tools. (Bundled skills are not indexed — agents auto-discover them natively.)
