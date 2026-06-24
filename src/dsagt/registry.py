@@ -102,7 +102,17 @@ def _generate_tool_body(spec: dict) -> str:
 
 
 def _parse_frontmatter(path: Path) -> dict:
-    """Parse YAML frontmatter from a markdown file."""
+    """Parse YAML frontmatter from a markdown file.
+
+    Third-party skill catalogs (e.g. Genesis) ship SKILL.md files whose
+    frontmatter is *intended* as flat ``key: value`` but isn't strict YAML —
+    most commonly an unquoted ``description`` value that contains a colon
+    (``...readiness levels: Level 1...``), which PyYAML rejects as a nested
+    mapping. Rather than silently dropping such skills from discovery, fall back
+    to a best-effort flat parse (:func:`_lenient_frontmatter`) on YAML error so
+    ``name`` / ``description`` / ``tags`` are still recovered. dsagt-authored
+    tool/skill specs are valid YAML, so the fallback never fires for them.
+    """
     text = path.read_text()
     if not text.startswith("---"):
         return {}
@@ -112,7 +122,53 @@ def _parse_frontmatter(path: Path) -> dict:
     try:
         return yaml.safe_load(parts[1]) or {}
     except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML frontmatter in {path}: {e}") from e
+        logger.warning(
+            "Frontmatter in %s isn't strict YAML (%s); recovering flat fields.",
+            path,
+            str(e).splitlines()[0],
+        )
+        return _lenient_frontmatter(parts[1])
+
+
+def _lenient_frontmatter(block: str) -> dict:
+    """Best-effort flat ``key: value`` parse for frontmatter that isn't strict YAML.
+
+    Splits each top-level line on its **first** colon (so a value may itself
+    contain colons); indented ``- item`` lines extend the previous key into a
+    list, other indented lines continue the previous string value. Inline
+    ``[...]`` / ``{...}`` values are parsed as YAML when they can be. Lines
+    without a colon, and comments, are ignored. This recovers the discovery
+    fields (name/description/tags) from technically-invalid-but-obvious
+    frontmatter instead of dropping the skill.
+    """
+    out: dict = {}
+    key: str | None = None
+    for raw in block.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw[:1].isspace() and key is not None:
+            # Continuation of the previous key.
+            if stripped.startswith("- "):
+                if not isinstance(out.get(key), list):
+                    out[key] = []
+                out[key].append(stripped[2:].strip())
+            elif isinstance(out.get(key), str):
+                out[key] = (out[key] + " " + stripped).strip()
+            continue
+        if ":" not in stripped:
+            continue
+        k, _, v = stripped.partition(":")
+        key = k.strip()
+        v = v.strip()
+        if v.startswith(("[", "{")):
+            try:
+                out[key] = yaml.safe_load(v)
+            except yaml.YAMLError:
+                out[key] = v
+        else:
+            out[key] = v
+    return out
 
 
 # ---------------------------------------------------------------------------

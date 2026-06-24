@@ -9,9 +9,51 @@ import pytest
 import yaml
 
 from dsagt.registry import (
-    ToolRegistry, SkillRegistry, _wrap_executable, _uv_run_prefix, _parse_frontmatter,
+    ToolRegistry,
+    SkillRegistry,
+    _wrap_executable,
+    _uv_run_prefix,
+    _parse_frontmatter,
+    _lenient_frontmatter,
     render_arguments,
 )
+
+
+class TestLenientFrontmatter:
+    """Frontmatter that isn't strict YAML must still yield discovery fields.
+
+    Real third-party skill catalogs (e.g. Genesis) ship SKILL.md files whose
+    unquoted ``description`` contains a colon (``...readiness levels: Level
+    1...``) — invalid YAML. These must be recovered, not dropped from discovery.
+    """
+
+    def test_unquoted_colon_in_description_is_recovered(self, tmp_path):
+        path = tmp_path / "SKILL.md"
+        path.write_text(
+            "---\n"
+            "name: generating-datacards\n"
+            "description: Generates a datacard. Supports levels: Level 1, Level 2.\n"
+            "---\n\n# Body\n"
+        )
+        spec = _parse_frontmatter(path)  # must NOT raise
+        assert spec["name"] == "generating-datacards"
+        assert spec["description"].startswith("Generates a datacard")
+        assert "Level 1" in spec["description"]  # colon-bearing tail preserved
+
+    def test_lenient_parses_inline_list_and_continuation(self):
+        spec = _lenient_frontmatter(
+            "\nname: x\ndescription: a: b: c\ntags: [one, two]\n"
+        )
+        assert spec["name"] == "x"
+        assert spec["description"] == "a: b: c"  # split on first colon only
+        assert spec["tags"] == ["one", "two"]
+
+    def test_valid_yaml_still_uses_strict_path(self, tmp_path):
+        # Sanity: well-formed frontmatter is unchanged by the fallback.
+        path = tmp_path / "SKILL.md"
+        path.write_text("---\nname: ok\ndescription: clean\ntags:\n  - a\n---\n")
+        spec = _parse_frontmatter(path)
+        assert spec == {"name": "ok", "description": "clean", "tags": ["a"]}
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +129,7 @@ def empty_registry(tmp_path):
 # list_tools
 # ---------------------------------------------------------------------------
 
+
 class TestListTools:
 
     def test_schema_structure(self, registry):
@@ -146,6 +189,7 @@ class TestListTools:
 # get_tool
 # ---------------------------------------------------------------------------
 
+
 class TestGetTool:
 
     def test_found(self, registry):
@@ -164,6 +208,7 @@ class TestGetTool:
 # save_tool
 # ---------------------------------------------------------------------------
 
+
 class TestSaveTool:
 
     def test_add_new_tool(self, empty_registry):
@@ -177,27 +222,41 @@ class TestSaveTool:
 
     def test_wraps_executable_with_dsagt_run(self, empty_registry):
         """save_tool automatically wraps the executable with dsagt-run."""
-        empty_registry.save_tool({"name": "mytool", "description": "test",
-                                   "executable": "python mytool.py", "parameters": {}})
+        empty_registry.save_tool(
+            {
+                "name": "mytool",
+                "description": "test",
+                "executable": "python mytool.py",
+                "parameters": {},
+            }
+        )
         tool = empty_registry.get_tool("mytool")
         assert tool["executable"] == "dsagt-run --tool mytool -- python mytool.py"
 
     def test_does_not_double_wrap(self, empty_registry):
         """If executable already has dsagt-run, don't wrap again."""
-        empty_registry.save_tool({"name": "mytool", "description": "test",
-                                   "executable": "dsagt-run --tool mytool -- python mytool.py",
-                                   "parameters": {}})
+        empty_registry.save_tool(
+            {
+                "name": "mytool",
+                "description": "test",
+                "executable": "dsagt-run --tool mytool -- python mytool.py",
+                "parameters": {},
+            }
+        )
         tool = empty_registry.get_tool("mytool")
         assert tool["executable"].count("dsagt-run") == 1
 
     def test_python_deps_use_uv_run(self, empty_registry):
         """Python dependencies are wrapped with uv run --with."""
-        empty_registry.save_tool({
-            "name": "analyzer", "description": "test",
-            "executable": "python analyzer.py",
-            "parameters": {},
-            "dependencies": ["pandas>=2.0", "numpy"],
-        })
+        empty_registry.save_tool(
+            {
+                "name": "analyzer",
+                "description": "test",
+                "executable": "python analyzer.py",
+                "parameters": {},
+                "dependencies": ["pandas>=2.0", "numpy"],
+            }
+        )
         tool = empty_registry.get_tool("analyzer")
         assert tool["executable"] == (
             "dsagt-run --tool analyzer -- uv run --with pandas>=2.0,numpy -- python analyzer.py"
@@ -205,8 +264,14 @@ class TestSaveTool:
 
     def test_no_deps_no_uv_run(self, empty_registry):
         """Tools without dependencies don't get uv run prefix."""
-        empty_registry.save_tool({"name": "simple", "description": "test",
-                                   "executable": "echo hi", "parameters": {}})
+        empty_registry.save_tool(
+            {
+                "name": "simple",
+                "description": "test",
+                "executable": "echo hi",
+                "parameters": {},
+            }
+        )
         tool = empty_registry.get_tool("simple")
         assert "uv run" not in tool["executable"]
         assert tool["executable"] == "dsagt-run --tool simple -- echo hi"
@@ -247,6 +312,7 @@ class TestSaveTool:
 # Runtime isolation
 # ---------------------------------------------------------------------------
 
+
 class TestRuntimeIsolation:
 
     def test_source_unchanged_after_init(self, tmp_path):
@@ -276,6 +342,7 @@ class TestRuntimeIsolation:
 # ---------------------------------------------------------------------------
 # Default skills
 # ---------------------------------------------------------------------------
+
 
 class TestDefaultTools:
     """Validate the tool files that ship with the package."""
@@ -309,6 +376,7 @@ class TestDefaultTools:
 # ---------------------------------------------------------------------------
 # render_arguments
 # ---------------------------------------------------------------------------
+
 
 class TestRenderArguments:
 
@@ -353,7 +421,8 @@ class TestRenderArguments:
             "path": {"type": "string", "cli": "positional:0"},
         }
         assert render_arguments(params, {"path": "/x", "verbose": True}) == [
-            "/x", "--verbose",
+            "/x",
+            "--verbose",
         ]
 
     def test_boolean_true_emits_flag(self):
@@ -378,7 +447,9 @@ class TestRenderArguments:
         assert render_arguments(params, {}) == []
 
     def test_required_missing_raises(self):
-        params = {"directory": {"type": "string", "cli": "positional", "required": True}}
+        params = {
+            "directory": {"type": "string", "cli": "positional", "required": True}
+        }
         with pytest.raises(ValueError, match="directory"):
             render_arguments(params, {})
 
