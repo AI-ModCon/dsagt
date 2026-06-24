@@ -151,8 +151,13 @@ def mcp_call_tool(proc, tool_name: str, arguments: dict,
     return read_mcp_message(proc, timeout=timeout, expect_id=msg_id)
 
 
-def start_server(cmd: list[str], env: dict = None) -> subprocess.Popen:
-    """Start a server subprocess with stdio pipes."""
+def start_server(cmd: list[str], env: dict = None, cwd: str = None) -> subprocess.Popen:
+    """Start a server subprocess with stdio pipes.
+
+    ``cwd`` sets the working directory — ``dsagt-server`` discovers its project
+    config from cwd (see ``observability.find_project_config``), so startup tests
+    must run it from the project dir.
+    """
     proc_env = os.environ.copy()
     if env:
         proc_env.update(env)
@@ -164,4 +169,5 @@ def start_server(cmd: list[str], env: dict = None) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
         env=proc_env,
+        cwd=cwd,
     )

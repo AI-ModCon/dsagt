@@ -60,7 +60,7 @@ dependencies = [
 dsagt = "dsagt.commands.cli:main"
 dsagt-run = "dsagt.commands.run_tool:main"
 dsagt-proxy = "dsagt.commands.proxy_server:main"
-dsagt-server = "dsagt.commands.dsagt_server:main"
+dsagt-server = "dsagt.mcp.server:main"
 dsagt-setup-kb = "dsagt.commands.setup_core_kb:main"
 
 [dependency-groups]

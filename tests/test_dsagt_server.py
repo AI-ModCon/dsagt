@@ -1,9 +1,12 @@
-"""Tests for the merged ``dsagt-server`` (registry + knowledge under one Server).
+"""Tests for the merged ``dsagt-server`` (all four concern modules under one Server).
 
-These verify the *composition* contract: every tool from both concern modules is
-exposed under one MCP ``Server``, and the single ``call_tool`` wrapper preserves
-both return-type contracts (registry handlers return a plain string; knowledge
-handlers return a dict that gets JSON-encoded).
+These verify the *composition* contract: every tool from the registry / knowledge
+/ memory / skill modules is exposed under one MCP ``Server``, and the single
+``call_tool`` wrapper preserves both return-type contracts (registry + skill
+handlers may return a plain string; knowledge / memory handlers return a dict
+that gets JSON-encoded).  Also covers ``_build_kb_from_config`` credential
+validation in-process (the full subprocess boot needs a live MLflow — see
+``test_server_startup.py``).
 """
 
 import asyncio
@@ -14,7 +17,7 @@ from unittest.mock import MagicMock
 import mcp.types as types
 import pytest
 
-from dsagt.commands.dsagt_server import create_dsagt_server
+from dsagt.mcp.server import _build_kb_from_config, create_dsagt_server
 from dsagt.registry import SkillRegistry, ToolRegistry
 
 
@@ -50,7 +53,7 @@ def test_merged_server_exposes_all_tools(tmp_path):
     """Both concern modules' tools land under one server with no collision."""
     server = _make_merged_server(tmp_path)
     names = _list_tools(server)
-    # 11 registry + 12 knowledge = 23 distinct tools.
+    # 8 registry + 6 knowledge + 4 memory + 5 skill = 23 distinct tools.
     assert len(names) == 23
     assert len(set(names)) == len(names)  # no name collision
     # Representative tools from each side.
@@ -79,3 +82,35 @@ def test_knowledge_tool_returns_json(tmp_path):
     out = _call(server, "list_skill_sources", {})
     parsed = json.loads(out)
     assert "sources" in parsed
+
+
+class TestBuildKbFromConfig:
+    """``_build_kb_from_config`` validates embedding config before building a KB.
+
+    These raise paths fire before any embedder / ChromaDB construction, so they
+    need no real backend.
+    """
+
+    def _cfg(self, **embedding):
+        return {
+            "embedding": embedding,
+            "knowledge": {"chunk_size": 1024, "vector_db": "chroma", "rerank": False},
+        }
+
+    def test_invalid_backend_raises(self, tmp_path):
+        cfg = self._cfg(backend="not-a-backend")
+        with pytest.raises(ValueError, match="backend must be"):
+            _build_kb_from_config(cfg, tmp_path)
+
+    def test_api_backend_without_base_url_raises(self, tmp_path):
+        cfg = self._cfg(backend="api", model="m", base_url="", api_key="k")
+        with pytest.raises(ValueError, match="requires embedding.base_url"):
+            _build_kb_from_config(cfg, tmp_path)
+
+    def test_api_backend_without_api_key_raises(self, tmp_path):
+        # Unresolved ``${...}`` placeholder counts as missing.
+        cfg = self._cfg(
+            backend="api", model="m", base_url="http://x", api_key="${LLM_API_KEY}"
+        )
+        with pytest.raises(ValueError, match="requires embedding.api_key"):
+            _build_kb_from_config(cfg, tmp_path)

@@ -7,9 +7,8 @@ fake catalog cache, and in KB mode against a small fake KnowledgeBase.
 
 import json
 
-from dsagt import skill_keyword
 from dsagt.registry import SkillRegistry
-from dsagt.skill_discovery import SkillRouter
+from dsagt.skills import SkillRouter, rank_skills, score_skill
 
 
 def _mkskill(d, name, desc):
@@ -62,40 +61,40 @@ def _hit(name, text, source, score, tags=""):
 
 
 def test_score_name_token_weighs_more_than_description():
-    name_hit = skill_keyword.score_skill("slurm", "slurm-submit", "unrelated text")
-    desc_hit = skill_keyword.score_skill("slurm", "other", "submit a slurm job")
+    name_hit = score_skill("slurm", "slurm-submit", "unrelated text")
+    desc_hit = score_skill("slurm", "other", "submit a slurm job")
     assert name_hit > desc_hit
 
 
 def test_score_exact_name_beats_substring():
-    exact = skill_keyword.score_skill("datacard", "datacard", "x")
-    substr = skill_keyword.score_skill("datacard", "datacard-generator", "x")
+    exact = score_skill("datacard", "datacard", "x")
+    substr = score_skill("datacard", "datacard-generator", "x")
     assert exact > substr > 0
 
 
 def test_score_substring_description_bonus():
-    assert skill_keyword.score_skill("batch job", "x", "submit a batch job") > 0
+    assert score_skill("batch job", "x", "submit a batch job") > 0
 
 
 def test_stopwords_do_not_score():
     # only stopwords overlap → no score
-    assert skill_keyword.score_skill("the and of", "the skill", "and of the") == 0.0
+    assert score_skill("the and of", "the skill", "and of the") == 0.0
 
 
 def test_empty_query_scores_zero():
-    assert skill_keyword.score_skill("", "anything", "anything") == 0.0
+    assert score_skill("", "anything", "anything") == 0.0
 
 
 def test_substring_bonuses_are_mutually_exclusive():
     # Genesis parity: at most ONE of the +6/+4/+2 substring bonuses fires.
     # name-token 2 + desc-token 1 + exact-name 6 = 9; the desc-substring +2 is
     # NOT also added (a stacking bug would give 11).
-    assert skill_keyword.score_skill("alpha", "alpha", "alpha tool") == 9.0
+    assert score_skill("alpha", "alpha", "alpha tool") == 9.0
 
 
 def test_single_char_tokens_dropped():
     # "x" is a single char → not a token, so no name-token overlap.
-    assert skill_keyword.score_skill("x", "x", "y") == 6.0  # only the exact-name bonus
+    assert score_skill("x", "x", "y") == 6.0  # only the exact-name bonus
 
 
 def test_rank_orders_and_breaks_ties_by_name():
@@ -104,7 +103,7 @@ def test_rank_orders_and_breaks_ties_by_name():
         {"name": "alpha", "description": "submit jobs"},
         {"name": "unrelated", "description": "nothing here"},
     ]
-    ranked = skill_keyword.rank_skills("submit", skills, top_k=5)
+    ranked = rank_skills("submit", skills, top_k=5)
     names = [s["name"] for s, _ in ranked]
     assert names == ["alpha", "zeta"]  # equal score → name asc; unrelated dropped
 
@@ -209,7 +208,7 @@ def test_search_kb_tag_filter(tmp_path):
 
 
 def test_list_sources_flags_synced(tmp_path):
-    from dsagt.commands.skills_catalog import KNOWN_SOURCES, _repo_slug
+    from dsagt.skills import KNOWN_SOURCES, _repo_slug
     from dsagt.registry import catalog_collection
 
     genesis_coll = catalog_collection(_repo_slug(KNOWN_SOURCES["genesis"]["url"]))

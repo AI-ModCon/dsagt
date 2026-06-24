@@ -1,81 +1,49 @@
-"""
-DSAgt Knowledge Base MCP Server.
+"""MCP tools for knowledge-base retrieval.
 
-Provides semantic search over document collections for MCP-compatible agents.
+Semantic search over document collections, background ingest/append jobs, and
+registration of external vector stores.  Long-running operations (ingest,
+append) run in the background and return immediately with a ``job_id``; poll
+``kb_job_status`` for completion.
 
-At startup, symlinks base indexes into a session-specific runtime directory.
-All modifications (ingestion, append) happen in the runtime copy.
+Server configuration (chunk_size, vector_db, rerank) is read from the project's
+dsagt_config.yaml.  Embedding credentials flow through env vars (LLM_API_KEY,
+OPENAI_BASE_URL, EMBEDDING_MODEL) set by ``dsagt start``.
 
-Long-running operations (ingest, append) run in the background and return
-immediately with a job_id. Use kb_job_status to poll for completion.
-
-Server configuration (chunk_size, vector_db, rerank) is read from the
-project's dsagt_config.yaml.  Embedding credentials flow through env vars
-(LLM_API_KEY, OPENAI_BASE_URL, EMBEDDING_MODEL) set by dsagt start.
-
-These tool definitions + handlers run inside the merged ``dsagt-server``
-(see ``dsagt.commands.dsagt_server``).  There is no standalone knowledge-server
-entry point; ``create_knowledge_server`` is retained only as a test-facing
-constructor.
+These definitions + handlers run inside the merged ``dsagt-server`` (see
+:mod:`dsagt.mcp.server`); ``create_knowledge_server`` is retained only as a
+test-facing constructor.  Explicit-memory tools (``kb_remember`` / etc.) live in
+:mod:`dsagt.mcp.memory_tools`; skill-source tools in
+:mod:`dsagt.mcp.skill_tools`.
 """
 
-import asyncio
-import json
-import logging
 import os
-import time
-from dataclasses import dataclass, field
-from functools import partial
 
 # Prevent fatal OpenMP crash when multiple libraries (FAISS, PyTorch/
-# sentence-transformers) each bundle their own libomp.
+# sentence-transformers) each bundle their own libomp.  Must precede the
+# ``dsagt.knowledge`` import below.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-import uuid
-from pathlib import Path
+import asyncio  # noqa: E402
+import logging  # noqa: E402
+import time  # noqa: E402
+import uuid  # noqa: E402
+from dataclasses import dataclass, field  # noqa: E402
+from functools import partial  # noqa: E402
+from pathlib import Path  # noqa: E402
 
-import mcp.server.stdio
-import mcp.types as types
-from mcp.server.lowlevel import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
+import mcp.types as types  # noqa: E402
 
-from dsagt.knowledge import (
+from dsagt.knowledge import (  # noqa: E402
     EMBEDDER_REGISTRY,
     VECTORINDEX_REGISTRY,
     CollectionRoute,
     KnowledgeBase,
 )
-from dsagt.memory import SuggestionQueue
-from dsagt.memory import ExplicitMemory
-from dsagt.session import _collection_exists
-from dsagt.session import setup_runtime_kb  # noqa: F401  (re-exported for tests)
+from dsagt.mcp.server import build_dispatch_server  # noqa: E402
+from dsagt.session import _collection_exists  # noqa: E402
+from dsagt.session import setup_runtime_kb  # noqa: E402, F401  (re-exported for tests)
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# MCP server helpers
-# ---------------------------------------------------------------------------
-
-
-async def _run_stdio(server: Server, name: str) -> None:
-    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name=name,
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
-
-
-# _collection_exists is used below; setup_runtime_kb is re-exported for tests +
-# the merged dsagt_server.  Both live in dsagt.session (imported above).
 
 
 def _register_external_collection(
@@ -182,8 +150,8 @@ class _JobTracker:
 # Per-tool handlers (module-level, explicit dependencies)
 #
 # Each handler takes ``arguments: dict`` plus its dependencies as keyword
-# args bound via functools.partial in create_knowledge_server().  Handlers
-# return a result dict; the outer call_tool wrapper JSON-serializes it.
+# args bound via functools.partial.  Handlers return a result dict; the outer
+# dispatch wrapper JSON-serializes it.
 # ---------------------------------------------------------------------------
 
 
@@ -475,253 +443,30 @@ async def _handle_kb_job_status(arguments: dict, *, job_tracker: _JobTracker) ->
     return result
 
 
-async def _handle_kb_remember(
-    arguments: dict,
-    *,
-    kb: KnowledgeBase,
-    memory: ExplicitMemory,
-    suggestions: SuggestionQueue,
-) -> dict:
-    text = arguments["text"]
-    category = arguments.get("category", "")
-    session_id = arguments.get("session_id", "")
-    supersedes = arguments.get("supersedes")
-    promoted_from = arguments.get("promoted_from")
-
-    store_result = await asyncio.to_thread(
-        memory.remember,
-        text=text,
-        category=category,
-        session_id=session_id,
-        supersedes=supersedes,
-    )
-
-    if not store_result.get("stored"):
-        return {
-            "status": "error",
-            "error": store_result.get("error", "Failed to store memory"),
-        }
-
-    await asyncio.to_thread(
-        kb.add_entries,
-        texts=[text],
-        collection="session_memory",
-        metadatas=[
-            {
-                "source_type": "explicit_memory",
-                "category": category,
-                "session_id": session_id,
-            }
-        ],
-    )
-
-    if promoted_from:
-        suggestions.dismiss(promoted_from)
-
-    return {
-        "status": "ok",
-        "entry_id": store_result["entry_id"],
-        "superseded_id": store_result.get("superseded_id"),
-        "promoted_from": promoted_from,
-        "total_memories": await asyncio.to_thread(memory.count),
-    }
-
-
-async def _handle_kb_get_memories(
-    arguments: dict,
-    *,
-    memory: ExplicitMemory,
-    suggestions: SuggestionQueue,
-) -> dict:
-    entries = await asyncio.to_thread(memory.get_all)
-    pending = suggestions.get_all()
-    result = {"status": "ok", "count": len(entries), "memories": entries}
-    if pending:
-        result["suggestions"] = pending
-        result["suggestion_count"] = len(pending)
-    return result
-
-
-async def _handle_kb_get_suggestions(
-    arguments: dict,
-    *,
-    suggestions: SuggestionQueue,
-) -> dict:
-    pending = suggestions.get_all()
-    return {"status": "ok", "count": len(pending), "suggestions": pending}
-
-
-async def _handle_kb_dismiss_suggestion(
-    arguments: dict,
-    *,
-    suggestions: SuggestionQueue,
-) -> dict:
-    suggestion_id = arguments["suggestion_id"]
-    dismissed = suggestions.dismiss(suggestion_id)
-    if not dismissed:
-        return {"status": "error", "error": f"Suggestion not found: {suggestion_id}"}
-    return {"status": "ok", "dismissed": suggestion_id, "remaining": suggestions.count}
-
-
 # ---------------------------------------------------------------------------
-# Server factory (thin wiring — used by main() and tests)
+# Tool defs + handler map (used by the merged server and the test wrapper)
 # ---------------------------------------------------------------------------
 
 
-async def _handle_add_skill_source(
-    arguments: dict,
-    *,
-    kb: KnowledgeBase,
-    runtime_dir: Path,
-) -> dict:
-    """Enable a skill source (known name or GitHub URL): clone + index the catalog."""
-    from dsagt.commands.skills_catalog import (
-        KNOWN_SOURCES,
-        persist_source_to_config,
-        resolve_source,
-    )
-    from dsagt.skill_discovery import SkillRouter
+def _knowledge_tools_and_handlers(kb: KnowledgeBase):
+    """Build the knowledge-base ``(tool defs, handler map)``.
 
-    source = arguments.get("source")
-    if not source:
-        return {
-            "error": "add_skill_source requires 'source' (known name or GitHub URL)."
-        }
-    try:
-        spec = resolve_source(source)
-        if isinstance(source, str) and source in KNOWN_SOURCES:
-            spec.setdefault("name", source)
-        router = SkillRouter(kb=kb)
-        stats = await asyncio.to_thread(router.sync, source)
-    except (ValueError, RuntimeError) as e:
-        return {"error": str(e)}
-    persist_source_to_config(
-        runtime_dir, {"name": spec.get("name", stats["slug"]), **spec}
-    )
-    return {
-        "source": spec["url"],
-        "slug": stats["slug"],
-        "skills_indexed": stats["indexed"],
-        "note": "Searchable via search_skills; install one with install_skill.",
-    }
-
-
-async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> dict:
-    """List known skill sources, each flagged synced/available with its count.
-
-    A source is ``synced`` (searchable via ``search_skills``) only after an
-    ``add_skill_source`` call has cloned + indexed it; otherwise it is
-    ``available`` (known name + URL, nothing indexed yet).  Reporting the
-    flag + ``indexed`` count inline means the agent doesn't have to cross-
-    reference a separate ``synced_collections`` list to tell the difference.
+    Combined with the other concern modules' tools under one MCP ``Server`` by
+    :func:`dsagt.mcp.server.create_dsagt_server`.  The rerank default is on
+    ``kb.default_rerank`` (set from ``knowledge.rerank`` in dsagt_config.yaml).
     """
-    from dsagt.commands.skills_catalog import KNOWN_SOURCES, _repo_slug
-    from dsagt.registry import CATALOG_COLLECTION_PREFIX, catalog_collection
-    from dsagt.skill_discovery import SkillRouter
-
-    synced = {c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)}
-
-    # Single source of truth for the per-source synced/indexed view (shared
-    # with the CLI `skills list --catalog`).
-    sources = {
-        s["name"]: {
-            "url": s["url"],
-            "description": s["description"],
-            "synced": s["synced"],
-            "indexed": s["indexed"],
-        }
-        for s in SkillRouter(kb=kb).list_sources()
-    }
-
-    # Surface any synced catalog whose source isn't in KNOWN_SOURCES (added
-    # by raw GitHub URL) so the count is never silently dropped.
-    known_colls = {
-        catalog_collection(_repo_slug(s["url"])) for s in KNOWN_SOURCES.values()
-    }
-    extra = sorted(synced - known_colls)
-
-    any_synced = any(v["synced"] for v in sources.values()) or bool(extra)
-    return {
-        "sources": sources,
-        "other_synced_collections": extra,
-        "note": (
-            "add_skill_source <name|url> to sync a source whose synced=false; "
-            "then search_skills to browse. search_skills only sees synced sources."
-            if any_synced
-            else "No catalog synced yet — add_skill_source <name|url> "
-            "(e.g. 'scientific') to enable one, then search_skills to browse."
-        ),
-    }
-
-
-def _knowledge_tools_and_handlers(
-    kb: KnowledgeBase,
-    runtime_dir: str | Path | None = None,
-):
-    """Build the knowledge server's ``(tool defs, handler map)``.
-
-    Split out from :func:`create_knowledge_server` so the merged
-    ``dsagt-server`` can combine these with the registry server's tools
-    under one MCP ``Server`` without re-declaring them.
-
-    The rerank default is on ``kb.default_rerank`` (set from
-    ``knowledge.rerank`` in dsagt_config.yaml).
-    """
-    mem_dir = Path(runtime_dir) if runtime_dir else kb.index_dir.parent
-    memory = ExplicitMemory(runtime_dir=mem_dir)
-    suggestions = SuggestionQueue(mem_dir / "suggestions.json")
     job_tracker = _JobTracker()
 
     handlers = {
-        "add_skill_source": partial(
-            _handle_add_skill_source, kb=kb, runtime_dir=mem_dir
-        ),
-        "list_skill_sources": partial(_handle_list_skill_sources, kb=kb),
         "kb_list_collections": partial(_handle_kb_list_collections, kb=kb),
         "kb_search": partial(_handle_kb_search, kb=kb),
         "kb_ingest": partial(_handle_kb_ingest, kb=kb, job_tracker=job_tracker),
         "kb_append": partial(_handle_kb_append, kb=kb, job_tracker=job_tracker),
         "kb_add_vector_db": partial(_handle_kb_add_vector_db, kb=kb),
         "kb_job_status": partial(_handle_kb_job_status, job_tracker=job_tracker),
-        "kb_remember": partial(
-            _handle_kb_remember, kb=kb, memory=memory, suggestions=suggestions
-        ),
-        "kb_get_memories": partial(
-            _handle_kb_get_memories, memory=memory, suggestions=suggestions
-        ),
-        "kb_get_suggestions": partial(
-            _handle_kb_get_suggestions, suggestions=suggestions
-        ),
-        "kb_dismiss_suggestion": partial(
-            _handle_kb_dismiss_suggestion, suggestions=suggestions
-        ),
     }
 
     tools = [
-        types.Tool(
-            name="add_skill_source",
-            description=(
-                "Enable an external agent-skill source (a known name like "
-                "'scientific'/'anthropic'/'antigravity'/'composio', or a GitHub URL). "
-                "Clones it and indexes its skills into the searchable catalog "
-                "(search_skills). Does NOT load them into context."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "source": {
-                        "type": "string",
-                        "description": "Known source name or GitHub repo URL / owner/repo",
-                    },
-                },
-                "required": ["source"],
-            },
-        ),
-        types.Tool(
-            name="list_skill_sources",
-            description="List known + synced external skill sources and their indexed catalogs.",
-            inputSchema={"type": "object", "properties": {}},
-        ),
         types.Tool(
             name="kb_list_collections",
             description=(
@@ -912,114 +657,16 @@ def _knowledge_tools_and_handlers(
                 "required": ["job_id"],
             },
         ),
-        types.Tool(
-            name="kb_remember",
-            description=(
-                "Store a user-confirmed fact as an explicit memory. "
-                "These persist across sessions. Use 'supersedes' to replace an outdated memory."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "The fact to remember",
-                    },
-                    "category": {
-                        "type": "string",
-                        "description": "Classification tag",
-                    },
-                    "session_id": {
-                        "type": "string",
-                        "description": "Current session identifier",
-                    },
-                    "supersedes": {
-                        "type": "string",
-                        "description": "entry_id of an existing memory this replaces",
-                    },
-                    "promoted_from": {
-                        "type": "string",
-                        "description": "suggestion_id if promoted from outlier suggestion",
-                    },
-                },
-                "required": ["text"],
-            },
-        ),
-        types.Tool(
-            name="kb_get_memories",
-            description=(
-                "Get all active explicit memories for this project. "
-                "Call at session start to load project context."
-            ),
-            inputSchema={"type": "object", "properties": {}},
-        ),
-        types.Tool(
-            name="kb_get_suggestions",
-            description=(
-                "Get pending memory suggestions flagged by outlier detection. "
-                "Present to user for confirmation or dismissal."
-            ),
-            inputSchema={"type": "object", "properties": {}},
-        ),
-        types.Tool(
-            name="kb_dismiss_suggestion",
-            description="Dismiss a pending memory suggestion.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "suggestion_id": {
-                        "type": "string",
-                        "description": "ID of the suggestion to dismiss",
-                    },
-                },
-                "required": ["suggestion_id"],
-            },
-        ),
     ]
     return tools, handlers
 
 
-def create_knowledge_server(
-    kb: KnowledgeBase,
-    runtime_dir: str | Path | None = None,
-):
-    """Create and configure the standalone MCP knowledge server.
+def create_knowledge_server(kb: KnowledgeBase):
+    """Create a standalone MCP server exposing only the knowledge-base tools.
 
-    Test-facing API: tests call it with a mock KB and get back a server they
-    can drive via call_tool_sync().  The merged ``dsagt-server`` uses
+    Test-facing API: tests call it with a mock KB and drive the server via
+    ``call_tool_sync()``.  The merged ``dsagt-server`` uses
     :func:`_knowledge_tools_and_handlers` directly instead of this wrapper.
     """
-    server = Server("knowledge")
-    tools, handlers = _knowledge_tools_and_handlers(kb, runtime_dir)
-
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return tools
-
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-        handler = handlers[name]
-        try:
-            result = await handler(arguments)
-        except ValueError as e:
-            result = {"status": "error", "error": str(e)}
-        except Exception as e:
-            logger.exception("Unexpected error in tool '%s'", name)
-            result = {"status": "error", "error": f"Unexpected error: {e}"}
-        return [
-            types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))
-        ]
-
-    return server
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-#
-# There is no standalone ``dsagt-knowledge-server`` entry point any more.  The
-# knowledge tools run inside the merged ``dsagt-server`` (see
-# ``dsagt.commands.dsagt_server``), which composes
-# :func:`_knowledge_tools_and_handlers` with the registry server's tools under
-# one MCP ``Server`` + one shared ``KnowledgeBase``.  ``create_knowledge_server``
-# above is retained as a standalone, test-facing constructor.
+    tools, handlers = _knowledge_tools_and_handlers(kb)
+    return build_dispatch_server("knowledge", tools, handlers)

@@ -32,10 +32,10 @@ The codebase separates **commands** (entry points with argparse, launched as CLI
 - `cli.py` — `dsagt init / mlflow / memory / info / list / mv / rm / setup-kb / smoke-test / stop / start` (user-facing CLI). `dsagt start --enable-proxy` activates proxy mode; without `--enable-proxy` it's the supervised BYOA equivalent (start MLflow + agent under one process tree).
 - `proxy_server.py` — `dsagt-proxy` (LiteLLM proxy with OTel autolog). Spawned by `dsagt start --enable-proxy`.
 - `run_tool.py` — `dsagt-run` (tool execution wrapper).
-- `registry_server.py` — `dsagt-registry-server` (MCP server).
-- `knowledge_server.py` — `dsagt-knowledge-server` (MCP server).
 - `setup_core_kb.py` — core KB setup (called via `dsagt setup-kb`).
 - `info.py` — `dsagt info` (project / config introspection).
+
+(The MCP server — `dsagt-server` — lives in the `src/dsagt/mcp/` package, see below.)
 
 **Modules** (`src/dsagt/`):
 - `session.py` — Project init, agent config generation, env-var resolution, config load/validate, service start/stop, end-of-session memory extraction orchestration.
@@ -45,8 +45,11 @@ The codebase separates **commands** (entry points with argparse, launched as CLI
 - `provenance.py` — Tool execution records (`run_and_record`, `ToolRecordStore`), execution-record indexing into ChromaDB, pipeline reconstruction (`reconstruct_pipeline`, dependency graph).
 - `observability.py` — MLflow / OTel tracing setup, `init_tracing`, span helpers.
 - `memory.py` — Explicit memory (YAML), episodic-memory extraction prompt + LLM call, outlier detection, `extract_session`.
+- `skills.py` — External skill catalog data plane (`SkillsCatalog`: clone/sync/index/install), the `SkillRouter` render facade, and the Genesis-derived keyword scorer (`rank_skills`).
 
-Entry points are defined in `pyproject.toml` `[project.scripts]` and all point to `dsagt.commands.*:main`.
+**MCP server** (`src/dsagt/mcp/`) — the single merged `dsagt-server`. `server.py` owns `main()`, the shared-KB startup (`_build_kb_from_config`), and the dispatch shell (`build_dispatch_server`); the tool surface is split by concern across `registry_tools.py` (tool registry + execution + provenance, 8 tools), `knowledge_tools.py` (KB retrieval, 6), `memory_tools.py` (explicit memory + suggestions, 4), and `skill_tools.py` (skill search/install/sources, 5). Each `*_tools.py` exposes a `_*_tools_and_handlers()` factory (composed by `create_dsagt_server`) plus a `create_*_server` test wrapper.
+
+Entry points are defined in `pyproject.toml` `[project.scripts]`: the CLI/proxy/run/setup-kb tools point to `dsagt.commands.*:main`, and `dsagt-server` points to `dsagt.mcp.server:main`.
 
 **Bundled assets** (shipped as `package-data` in `pyproject.toml`):
 - `src/dsagt/tools/` — built-in tool specs (markdown + YAML frontmatter) copied into new projects.
@@ -67,16 +70,20 @@ Entry points are defined in `pyproject.toml` `[project.scripts]` and all point t
 
 ## Architecture
 
-### MCP Servers
+### MCP Server
 
-1. **Registry Server** (`commands/registry_server.py` + `registry.py`) — Tool analysis, registration, dependency installation. Tools are saved as skill files (markdown with YAML frontmatter).
-2. **Knowledge Server** (`commands/knowledge_server.py` + `knowledge.py`) — Semantic search over document collections using FAISS + ChromaDB with optional cross-encoder reranking. Background jobs for long operations.
+A single merged `dsagt-server` (`src/dsagt/mcp/`) exposes 23 tools across four concern modules under one `Server` + one shared `KnowledgeBase`:
+
+1. **Registry tools** (`mcp/registry_tools.py` + `registry.py` / `provenance.py`) — tool analysis, registration, dependency installation, command/file/http execution, and pipeline reconstruction. Tools are saved as markdown specs with YAML frontmatter.
+2. **Knowledge tools** (`mcp/knowledge_tools.py` + `knowledge.py`) — semantic search over document collections (FAISS + ChromaDB, optional cross-encoder reranking); long ops run as background jobs.
+3. **Memory tools** (`mcp/memory_tools.py` + `memory.py`) — explicit memory + outlier suggestions (`kb_remember` / `kb_get_memories` / …).
+4. **Skill tools** (`mcp/skill_tools.py` + `skills.py`) — skill search / install + external catalog sources.
 
 ### Observability
 
 - **MLflow** — Token usage, cost, latency, full LLM-call traces via OTel. Started by `dsagt mlflow <project>` (foreground, in its own terminal). Port is pinned at init time and lives in `dsagt_config.yaml`.
 - **dsagt-run** (`commands/run_tool.py` + `provenance.py`) — Wraps tool commands; captures execution layer (command, stdout/stderr, timing, file lists) into `trace_archive/`.
-- **MCP-server OTel** — Both servers call `init_tracing()` at startup; their tool spans (kb.*, registry.*) flow to MLflow alongside the agent's LLM-call spans.
+- **MCP-server OTel** — `dsagt-server` calls `init_tracing()` at startup; its tool spans (kb.*, registry.*) flow to MLflow alongside the agent's LLM-call spans.
 
 ### Memory System
 

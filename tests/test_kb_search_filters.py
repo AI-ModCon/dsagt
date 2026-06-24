@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 import mcp.types as types
 
-from dsagt.commands.knowledge_server import create_knowledge_server
+from dsagt.mcp.knowledge_tools import create_knowledge_server
 from mcp_helpers import call_tool_json as call_tool
 
 

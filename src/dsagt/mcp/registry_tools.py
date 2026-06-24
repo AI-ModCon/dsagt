@@ -1,24 +1,24 @@
-"""
-DSAgt Registry MCP Server.
+"""MCP tools for the tool registry, execution, and provenance.
 
-Provides tools for building a tool registry by reading documentation,
-fetching web resources, and running commands to extract tool specifications.
+The "tool lifecycle" surface of ``dsagt-server``: define a tool spec
+(``save_tool_spec``), discover tools (``get_registry`` / ``search_registry``),
+execute / gather (``read_file`` / ``http_request`` / ``run_command`` /
+``install_dependencies``), and reconstruct a reproducible pipeline from the
+recorded executions (``reconstruct_pipeline``).
 
-Tool specs are saved as skill markdown files in the runtime skills directory
-and indexed into a ChromaDB collection for semantic search.
+Tool specs are saved as markdown files in the runtime tools directory and
+indexed into a ChromaDB collection for semantic search.  Server configuration
+(embedding credentials) flows through env vars (LLM_API_KEY, OPENAI_BASE_URL,
+EMBEDDING_MODEL) set by ``dsagt start``.
 
-Server configuration (embedding credentials) flows through env vars
-(LLM_API_KEY, OPENAI_BASE_URL, EMBEDDING_MODEL) set by dsagt start.
-
-These tool definitions + handlers run inside the merged ``dsagt-server``
-(see ``dsagt.commands.dsagt_server``).  There is no standalone registry-server
-entry point; ``create_registry_server`` is retained only as a test-facing
-constructor.
+These definitions + handlers run inside the merged ``dsagt-server`` (see
+:mod:`dsagt.mcp.server`); ``create_registry_server`` is retained only as a
+test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
+``install_skill``) live in :mod:`dsagt.mcp.skill_tools`.
 """
 
 import json
 import logging
-import os
 import subprocess
 import sys
 from functools import partial
@@ -27,12 +27,10 @@ from pathlib import Path
 import httpx
 import yaml
 
-import mcp.server.stdio
 import mcp.types as types
-from mcp.server.lowlevel import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
 
 from dsagt.knowledge import KnowledgeBase
+from dsagt.mcp.server import build_dispatch_server
 from dsagt.observability import (
     obs,
     registry_install_deps_span,
@@ -40,36 +38,9 @@ from dsagt.observability import (
     registry_save_tool_span,
 )
 from dsagt.provenance import reconstruct_pipeline
-from dsagt.registry import (
-    TOOLS_COLLECTION,
-    SkillRegistry,
-    ToolRegistry,
-)
-
-os.environ["PYTHONUNBUFFERED"] = "1"
+from dsagt.registry import TOOLS_COLLECTION, ToolRegistry
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# MCP server helpers
-# ---------------------------------------------------------------------------
-
-
-async def _run_stdio(server: Server, name: str):
-    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name=name,
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
 
 
 def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
@@ -197,44 +168,6 @@ async def _handle_save_tool_spec(
         return message
 
 
-async def _handle_save_skill(
-    arguments: dict,
-    *,
-    skill_registry: SkillRegistry,
-) -> str:
-    """Register a skill (workflow / agent instructions) for later reuse.
-
-    Writes SKILL.md to ``<project>/skills/<name>/``, where every supported
-    agent natively auto-discovers it (after the next ``dsagt start`` mirror).
-    No KB indexing — ``search_skills`` covers only the not-yet-installed
-    *catalog* tier, since installed skills are already natively discoverable.
-    """
-    spec = arguments["spec"]
-    if isinstance(spec, str):
-        try:
-            spec = json.loads(spec)
-        except json.JSONDecodeError as e:
-            return f"Error: spec must be a JSON object (or string-encoded JSON object): {e}"
-    body = arguments.get("body")
-    reference_files = arguments.get("reference_files")
-    if isinstance(reference_files, str):
-        try:
-            reference_files = json.loads(reference_files)
-        except json.JSONDecodeError as e:
-            return f"Error: reference_files must be a JSON object: {e}"
-    try:
-        action = skill_registry.save_skill(
-            spec, body=body, reference_files=reference_files
-        )
-    except (KeyError, ValueError, OSError) as e:
-        return f"Error saving skill: {e}"
-    skill_count = len(skill_registry.list_skills())
-    return (
-        f"Skill '{spec['name']}' {action} successfully. "
-        f"Registry now contains {skill_count} skills."
-    )
-
-
 async def _handle_get_registry(
     arguments: dict,
     *,
@@ -301,72 +234,6 @@ async def _handle_search_registry(
     return f"Found {len(results)} tool(s):\n\n" + "\n\n".join(summaries)
 
 
-async def _handle_search_skills(
-    arguments: dict,
-    *,
-    kb: KnowledgeBase | None,
-    skill_registry: SkillRegistry | None,
-) -> str:
-    if skill_registry is None:
-        return "search_skills is unavailable (no skill registry configured)."
-
-    from dsagt.skill_discovery import SkillRouter
-
-    router = SkillRouter(skill_registry=skill_registry, kb=kb)
-    return router.search(
-        arguments.get("query", ""),
-        top_k=arguments.get("top_k", 10),
-        tag=arguments.get("tag"),
-        skill_name=arguments.get("skill_name"),
-    )
-
-
-async def _handle_install_skill(
-    arguments: dict,
-    *,
-    runtime_dir: Path,
-) -> str:
-    """Install a catalog skill into ``<project>/skills/<name>/``.
-
-    The skill's files land on disk immediately, so the agent can use it in the
-    current session by reading its SKILL.md.  *Native* auto-invocation requires
-    the next ``dsagt start`` (which mirrors installed skills into
-    ``.claude/skills/`` before launch) plus an agent restart.
-    """
-    from dsagt.skill_discovery import SkillRouter
-
-    name = arguments.get("skill_name")
-    if not name:
-        return "install_skill requires 'skill_name'."
-    try:
-        info = SkillRouter().install(name, runtime_dir)
-    except LookupError as e:
-        return f"Error: {e}"
-
-    # No KB re-index: the installed skill now lives in <project>/skills/ where
-    # the agent natively auto-discovers it (after the next `dsagt start` mirror).
-    # search_skills covers only the not-yet-installed catalog tier.
-    attribution = info.get("attribution") or []
-    attribution_note = (
-        f"\nPreserved upstream license/attribution ({', '.join(attribution)}) "
-        f"+ PROVENANCE.txt."
-        if attribution
-        else "\nWrote PROVENANCE.txt recording the source."
-    )
-
-    return (
-        f"{info['action'].capitalize()} skill '{info['name']}' at "
-        f"{info['dest_dir']}.\n\n"
-        f"Usable now — its SKILL.md and any scripts/references are already on "
-        f"disk in this project. To use it this session, read "
-        f"{info['dest_dir']}/SKILL.md and follow it; you don't need to restart.\n"
-        f"Restart is only for hands-free auto-invocation: the next `dsagt start` "
-        f"mirrors it into the platform's native skill dir (.claude/skills/), and "
-        f"after relaunch the agent discovers and auto-invokes it without this tool."
-        f"{attribution_note}"
-    )
-
-
 async def _handle_reconstruct_pipeline(
     arguments: dict,
     *,
@@ -424,40 +291,28 @@ async def _handle_install_dependencies(
 
 
 # ---------------------------------------------------------------------------
-# Server factory (thin wiring — used by main() and tests)
+# Tool defs + handler map (used by the merged server and the test wrapper)
 # ---------------------------------------------------------------------------
 
 
 def _registry_tools_and_handlers(
     registry: ToolRegistry,
     kb: KnowledgeBase | None = None,
-    skill_registry: SkillRegistry | None = None,
 ):
-    """Build the registry server's ``(tool defs, handler map)``.
+    """Build the registry/execution/provenance ``(tool defs, handler map)``.
 
-    Split out from :func:`create_registry_server` so the merged
-    ``dsagt-server`` can combine these with the knowledge server's tools
-    under one MCP ``Server`` without re-declaring them.
+    Combined with the other concern modules' tools under one MCP ``Server`` by
+    :func:`dsagt.mcp.server.create_dsagt_server`.
     """
     runtime_dir = Path(registry.runtime_dir)
 
-    # Dispatch table — maps MCP tool names to handler functions with
-    # dependencies bound via functools.partial.
     handlers = {
         "read_file": _handle_read_file,
         "http_request": _handle_http_request,
         "run_command": _handle_run_command,
         "save_tool_spec": partial(_handle_save_tool_spec, registry=registry),
-        "save_skill": partial(_handle_save_skill, skill_registry=skill_registry),
         "get_registry": partial(_handle_get_registry, registry=registry),
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
-        "search_skills": partial(
-            _handle_search_skills, kb=kb, skill_registry=skill_registry
-        ),
-        "install_skill": partial(
-            _handle_install_skill,
-            runtime_dir=runtime_dir,
-        ),
         "reconstruct_pipeline": partial(
             _handle_reconstruct_pipeline, runtime_dir=runtime_dir
         ),
@@ -606,74 +461,6 @@ def _registry_tools_and_handlers(
             },
         ),
         types.Tool(
-            name="save_skill",
-            description=(
-                "Register a skill (agent workflow / instructions) into "
-                "<project>/skills/<name>/SKILL.md, where the agent natively "
-                "auto-discovers it after the next `dsagt start`.  Symmetric "
-                "with save_tool_spec — use this when you've designed a "
-                "reusable instruction set you want future sessions to load "
-                "automatically."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    # ``anyOf`` for spec mirrors save_tool_spec — accept
-                    # both structured object and JSON-encoded string for
-                    # MCP clients that serialize nested args.
-                    "spec": {
-                        "description": "Skill spec (object or JSON-encoded string)",
-                        "anyOf": [
-                            {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "description": "Unique skill identifier (becomes the directory name)",
-                                    },
-                                    "description": {
-                                        "type": "string",
-                                        "description": "What the skill does / when to use it",
-                                    },
-                                    "tags": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
-                                        "description": "Tags for categorizing the skill",
-                                    },
-                                },
-                                "required": ["name", "description"],
-                            },
-                            {"type": "string"},
-                        ],
-                    },
-                    "body": {
-                        "type": "string",
-                        "description": (
-                            "Markdown body of the SKILL.md (workflow / "
-                            "instructions the agent will follow).  When "
-                            "updating an existing skill, omit to preserve "
-                            "the existing body."
-                        ),
-                    },
-                    "reference_files": {
-                        "description": (
-                            "Optional additional files to write into the "
-                            "skill directory.  Object mapping relative "
-                            "path -> file contents, or JSON-encoded string."
-                        ),
-                        "anyOf": [
-                            {
-                                "type": "object",
-                                "additionalProperties": {"type": "string"},
-                            },
-                            {"type": "string"},
-                        ],
-                    },
-                },
-                "required": ["spec"],
-            },
-        ),
-        types.Tool(
             name="get_registry",
             description="Get all tools from the registry",
             inputSchema={"type": "object", "properties": {}},
@@ -692,44 +479,6 @@ def _registry_tools_and_handlers(
                     },
                     "top_k": {"type": "integer", "default": 10},
                 },
-            },
-        ),
-        types.Tool(
-            name="search_skills",
-            description=(
-                "Search agent skills by name, tag, or description. Spans installed "
-                "skills and the external installable catalog. Catalog hits are marked "
-                "'[catalog]' — use install_skill to add one to this project."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "tag": {"type": "string", "description": "Filter by tag"},
-                    "skill_name": {
-                        "type": "string",
-                        "description": "Exact skill name lookup",
-                    },
-                    "top_k": {"type": "integer", "default": 10},
-                },
-            },
-        ),
-        types.Tool(
-            name="install_skill",
-            description=(
-                "Install a skill from the external catalog (found via search_skills) "
-                "into this project so the agent can use it natively. Copies SKILL.md "
-                "+ scripts/references; available natively after the next restart."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "skill_name": {
-                        "type": "string",
-                        "description": "Catalog skill name to install",
-                    },
-                },
-                "required": ["skill_name"],
             },
         ),
         types.Tool(
@@ -766,37 +515,12 @@ def _registry_tools_and_handlers(
 def create_registry_server(
     registry: ToolRegistry,
     kb: KnowledgeBase | None = None,
-    skill_registry: SkillRegistry | None = None,
 ):
-    """Create and configure the standalone MCP registry server.
+    """Create a standalone MCP server exposing only the registry/exec/provenance tools.
 
-    Test-facing API: tests call with a mock registry and get back a server
-    they can drive via call_tool_sync().  The merged ``dsagt-server`` uses
+    Test-facing API: tests call with a mock registry and drive the server via
+    ``call_tool_sync()``.  The merged ``dsagt-server`` uses
     :func:`_registry_tools_and_handlers` directly instead of this wrapper.
     """
-    server = Server("registry")
-    tools, handlers = _registry_tools_and_handlers(registry, kb, skill_registry)
-
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return tools
-
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-        handler = handlers[name]  # KeyError = bug in list_tools schema
-        text = await handler(arguments)
-        return [types.TextContent(type="text", text=text)]
-
-    return server
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-#
-# There is no standalone ``dsagt-registry-server`` entry point any more.  The
-# registry tools run inside the merged ``dsagt-server`` (see
-# ``dsagt.commands.dsagt_server``), which composes
-# :func:`_registry_tools_and_handlers` with the knowledge server's tools under
-# one MCP ``Server`` + one shared ``KnowledgeBase``.  ``create_registry_server``
-# above is retained as a standalone, test-facing constructor.
+    tools, handlers = _registry_tools_and_handlers(registry, kb)
+    return build_dispatch_server("registry", tools, handlers)

@@ -31,7 +31,7 @@ import pytest
 import yaml
 
 
-from dsagt.commands.registry_server import create_registry_server
+from dsagt.mcp.registry_tools import create_registry_server
 from dsagt.registry import ToolRegistry
 
 

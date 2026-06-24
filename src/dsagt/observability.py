@@ -1,8 +1,8 @@
 """
 DSAgt observability — span emission via MLflow's native tracer provider.
 
-Business modules (knowledge.py, provenance.py, registry_server.py, run_tool.py)
-import the small public surface defined here.  ``init_tracing`` installs
+Business modules (knowledge.py, provenance.py, mcp/registry_tools.py,
+run_tool.py) import the small public surface defined here.  ``init_tracing`` installs
 MLflow's own ``TracerProvider`` as the OTel global, so every
 ``trace.get_tracer(...)`` call routes spans into MLflow's native trace store
 with full ``mlflow.spanInputs`` / ``mlflow.spanOutputs`` integration and
@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 #   every span helper.  DSAgt runs one process per project, so the session
 #   id is a process-wide constant set at startup by init_tracing(), and
 #   propagating it implicitly via this module-level value lets business
-#   code in knowledge.py / provenance.py / registry_server.py emit spans
+#   code in knowledge.py / provenance.py / mcp/registry_tools.py emit spans
 #   without ever knowing about session ids.  The cost is that tests have
 #   to monkeypatch the global to isolate (see _reset_tracing fixture in
 #   test_observability.py).

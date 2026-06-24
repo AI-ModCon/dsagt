@@ -1,22 +1,38 @@
-"""
-External skill catalog — fetch Agent-Skills repos, index, install.
+"""Skill discovery — catalog data plane, keyword scorer, and the router facade.
+
+One module for all the importable skill-discovery logic that is *not* an entry
+point (entry points — the MCP tool handlers — stay in
+``commands/registry_server.py`` and ``commands/knowledge_server.py``).  Three
+cohesive concerns, in dependency order:
+
+1. **Keyword scorer** (:func:`score_skill` / :func:`rank_skills`) — a faithful
+   reimplementation of the Genesis Skills ``skill-search`` engine, the
+   zero-dependency fallback ranker used when no embedder / KB is configured.
+2. **Catalog data plane** (:class:`SkillsCatalog` + its module functions) —
+   fetch Agent-Skills repos, index per-source into ``skills_catalog__<slug>``
+   collections, search, and install into a project.
+3. **Router facade** (:class:`SkillRouter`) — the thin render layer the MCP
+   ``search_skills`` tool and the ``dsagt skills`` CLI share.
 
 Two tiers (see the skill-management plan):
 
-* **Catalog** — every skill in a configured GitHub source repo, indexed
-  into a per-source ``skills_catalog__<slug>`` KB collection.  Searchable
-  via ``search_skills``, but NOT copied locally and NOT loaded into the
-  agent's context.  This is the one job native skill discovery can't do
-  (you can't hold thousands of skill descriptions in context).
-* **Installed** — a chosen skill copied into ``<project>/skills/<name>/``.
-  The agent setup then mirrors it into ``.claude/skills/`` for native
-  discovery (see ``agents.base._mirror_skills_to``).
+* **Catalog** — every skill in a configured source repo, indexed into a
+  per-source ``skills_catalog__<slug>`` KB collection.  Searchable via
+  ``search_skills``, but NOT copied locally and NOT loaded into the agent's
+  context.  This is the one job native skill discovery can't do (you can't hold
+  thousands of skill descriptions in context).
+* **Installed** — a chosen skill copied into ``<project>/skills/<name>/``.  The
+  agent setup mirrors it into the agent's native skills dir for native
+  discovery (see ``agents.base.setup_skills``).
 
 Re-sync is idempotent by dropping the per-source collection directory and
-rebuilding it — no delete-by-metadata primitive required.
+rebuilding it.  ``clone_github`` is imported lazily inside :func:`sync_source`
+to avoid an import cycle with ``setup_core_kb`` (which calls back into
+:func:`sync_source`).
 
-``clone_github`` is imported lazily inside :func:`sync_source` to avoid an
-import cycle with ``setup_core_kb`` (which calls back into ``sync_source``).
+Genesis Skills: Apache-2.0, gitlab.osti.gov/genesis/genesis-skills
+(``skill_search/catalog.py``).  See ``design-notes/genesis-skills-comparison.md``
+and ``design-notes/skills-catalog-server-merge.md``.
 """
 
 from __future__ import annotations
@@ -35,6 +51,110 @@ from dsagt.registry import (
 from dsagt.session import REGISTRY_DIR
 
 logger = logging.getLogger(__name__)
+
+
+# ===========================================================================
+# Keyword scorer — Genesis-derived token-overlap fallback (stdlib only)
+# ===========================================================================
+#
+# A faithful reimplementation (not an import) of the Genesis Skills
+# ``skill-search`` engine (``skill_search/catalog.py``: ``_score_skill`` /
+# ``rank_skills``).  Used by :class:`SkillsCatalog` when no embedder / KB is
+# configured: keyword overlap only, deterministic.
+#
+# Scoring (per skill, against a query) — matching Genesis exactly:
+#
+# * +2 for each query token that also appears in the skill **name**
+# * +1 for each query token that also appears in the **description**
+# * then **at most one** substring bonus (mutually exclusive, in priority
+#   order): +6 if the query equals the name, else +4 if it is a substring of
+#   the name, else +2 if it is a substring of the description
+#
+# Tokens are casefolded ``\w+`` runs with hyphens split, single-character
+# tokens and stopwords dropped.  Ties break by name (ascending); below
+# ``min_score`` are dropped.
+
+#: Stopword set — kept identical to Genesis so ranking parity holds.
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "be",
+        "for",
+        "from",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "please",
+        "the",
+        "this",
+        "to",
+        "use",
+        "using",
+        "with",
+    }
+)
+
+_TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
+
+
+def _tokens(text: str) -> set[str]:
+    """Casefolded word tokens (hyphens split), single-char + stopwords removed."""
+    normalized = (text or "").casefold().replace("-", " ")
+    return {
+        t for t in _TOKEN_RE.findall(normalized) if len(t) > 1 and t not in _STOPWORDS
+    }
+
+
+def score_skill(query: str, name: str, description: str) -> float:
+    """Token-overlap score of one skill against *query* (0.0 = no match)."""
+    qtokens = _tokens(query)
+    normalized_query = (query or "").casefold().strip()
+    if not qtokens and not normalized_query:
+        return 0.0
+
+    score = 2 * len(qtokens & _tokens(name)) + len(qtokens & _tokens(description))
+
+    if normalized_query:
+        name_l = (name or "").casefold()
+        if normalized_query == name_l:
+            score += 6
+        elif normalized_query in name_l:
+            score += 4
+        elif normalized_query in (description or "").casefold():
+            score += 2
+    return float(score)
+
+
+def rank_skills(
+    query: str, skills, top_k: int | None = 8, min_score: int = 1
+) -> list[tuple[dict, float]]:
+    """Rank *skills* (dicts with ``name`` + ``description``) against *query*.
+
+    Returns ``[(skill, score), ...]`` for skills scoring at least *min_score*,
+    sorted by score descending then name ascending, truncated to *top_k* (all
+    when *top_k* is ``None``).
+    """
+    scored: list[tuple[dict, float]] = []
+    for s in skills:
+        sc = score_skill(query, s.get("name", ""), s.get("description", ""))
+        if sc >= min_score:
+            scored.append((s, sc))
+    scored.sort(key=lambda kv: (-kv[1], (kv[0].get("name") or "")))
+    return scored[:top_k] if top_k is not None else scored
+
+
+# ===========================================================================
+# Catalog data plane — sources, sync/index, lookup/install, SkillsCatalog
+# ===========================================================================
 
 #: Default source enabled out of the box (matches dsagt_config.yaml default).
 DEFAULT_SOURCE = "scientific"
@@ -424,8 +544,7 @@ class SkillsCatalog:
     ``sync`` / ``search`` / ``install`` / ``list_sources``.  The skill-specific
     behavior (frontmatter-indexed catalog collections, the no-embedder keyword
     fallback over the clone cache) lives here; the vector store + embedder are
-    the shared KB.  :class:`~dsagt.skill_discovery.SkillRouter` is a thin
-    render/MCP facade over this.
+    the shared KB.  :class:`SkillRouter` is a thin render/MCP facade over this.
 
     Catalog tier only: installed/created skills are natively auto-discovered by
     every supported agent, so they are never search candidates.  ``search``
@@ -434,14 +553,23 @@ class SkillsCatalog:
     """
 
     def __init__(self, *, kb=None, cache_dir: Path | None = None):
+        """Compose a catalog over an existing KB + a clone-cache directory.
+
+        ``kb`` is the host server's :class:`~dsagt.knowledge.KnowledgeBase` (so
+        the embedder/Chroma are shared, never a second model load); pass ``None``
+        for the no-embedder keyword path.  ``cache_dir`` overrides the default
+        machine-global clone cache (:data:`SKILL_SOURCES_DIR`) — handy for tests.
+        """
         self._kb = kb
         self._cache_dir = cache_dir  # default resolved lazily
 
     @property
     def has_kb(self) -> bool:
+        """True when an embedder-backed KB is available (vs the keyword path)."""
         return self._kb is not None
 
     def _resolved_cache_dir(self) -> Path:
+        """The clone-cache dir — the ``cache_dir`` override or the global default."""
         return Path(self._cache_dir or SKILL_SOURCES_DIR)
 
     # -- write ops (delegate to the module functions) ------------------------
@@ -479,6 +607,14 @@ class SkillsCatalog:
         return self._select_keyword(query, top_k, tag)
 
     def _select_kb(self, query, top_k: int, tag) -> list[dict]:
+        """Semantic backend: ChromaDB search across every synced catalog
+        collection, merged + sorted by score into normalized hit dicts.
+
+        Each ``skills_catalog__*`` collection is queried independently (a
+        missing/corrupt one is skipped, not fatal); when a ``tag`` filter is
+        set we over-fetch (``top_k * 3``) then post-filter so the tag doesn't
+        starve the result set.
+        """
         collections = self.synced_collections()
         fetch_k = top_k * 3 if tag else top_k
         hits: list[dict] = []
@@ -531,8 +667,13 @@ class SkillsCatalog:
         return cands
 
     def _select_keyword(self, query, top_k: int, tag) -> list[dict]:
-        from dsagt import skill_keyword  # lazy: keep import graph light
+        """No-embedder backend: rank cached-catalog skills with the Genesis
+        token-overlap scorer (:func:`rank_skills`) into normalized hit dicts.
 
+        With no ``query`` there's nothing to score, so it returns the first
+        ``top_k`` candidates (tag-filtered) at score 0.0 — a browse mode rather
+        than a search.
+        """
         cands = self._candidate_skills()
         if tag:
             cands = [c for c in cands if tag in (c["tags"] or "")]
@@ -542,7 +683,7 @@ class SkillsCatalog:
                 {**c, "summary": (c["description"] or "")[:200], "score": 0.0}
                 for c in picks
             ]
-        ranked = skill_keyword.rank_skills(query, cands, top_k=top_k)
+        ranked = rank_skills(query, cands, top_k=top_k)
         return [
             {**c, "summary": (c["description"] or "")[:200], "score": sc}
             for c, sc in ranked
@@ -569,6 +710,11 @@ class SkillsCatalog:
         return out
 
     def _indexed_count(self, collection: str) -> int:
+        """Number of skills indexed in a catalog *collection* (0 if absent/no KB).
+
+        Reads the collection's persisted ``chroma_ids.json`` directly rather than
+        querying the store — cheap, and works without loading the embedder.
+        """
         if self._kb is None:
             return 0
         ids = Path(self._kb.index_dir) / collection / "chroma_ids.json"
@@ -576,3 +722,122 @@ class SkillsCatalog:
             return len(json.loads(ids.read_text()))
         except (FileNotFoundError, ValueError, OSError):
             return 0
+
+
+# ===========================================================================
+# SkillRouter — the thin render/MCP facade over the catalog
+# ===========================================================================
+#
+# ``SkillRouter`` adds only the presentation concerns that the MCP handlers and
+# the CLI share: rendering a ranked hit list into the ``search_skills`` string,
+# the empty-result message, and the exact-``skill_name`` lookup (which needs the
+# installed-skill registry, not the catalog).
+#
+# Construct it from the same inputs at every call site (MCP ``search_skills``,
+# CLI ``skills search/list``) so policy can't diverge between them — or hand it
+# a prebuilt :class:`SkillsCatalog` via ``catalog=`` so a server that already
+# owns a shared KB reuses one catalog instance.
+#
+# Skill *materialization* (mirroring installed skills into each agent's native
+# skills directory) lives in the agent layer (``AgentSetup.setup_skills``), not
+# here: every supported agent (claude/codex/goose/cline/roo) natively
+# auto-discovers ``SKILL.md`` folders, so there is no agent-facing disclosure
+# tier for the router to own.  ``search_skills`` exists for the *catalog* tier
+# (skills not yet installed, which native discovery can't see) plus the
+# no-embedder keyword fallback.
+
+
+def _where_label(source: str) -> str:
+    """Human tag for a hit's origin, matching the legacy search output."""
+    if source in ("bundled", "registered", "installed"):
+        return " [installed]"
+    if source.startswith("catalog:"):
+        return " [catalog · install_skill to add]"
+    return ""
+
+
+class SkillRouter:
+    """Renders catalog discovery for the MCP ``search_skills`` tool + the CLI."""
+
+    def __init__(self, *, kb=None, skill_registry=None, cache_dir=None, catalog=None):
+        """Wire the router to a catalog + (optional) installed-skill registry.
+
+        Pass a prebuilt ``catalog`` (a :class:`SkillsCatalog`) to share one
+        instance with the server; otherwise one is constructed from ``kb`` /
+        ``cache_dir``.  ``skill_registry`` is only consulted for the exact
+        ``skill_name`` lookup in :meth:`search` (installed skills live there,
+        not in the catalog), so it may be ``None`` for catalog-only callers.
+        """
+        self._catalog = (
+            catalog
+            if catalog is not None
+            else SkillsCatalog(kb=kb, cache_dir=cache_dir)
+        )
+        self._reg = skill_registry
+
+    # -- rendering -----------------------------------------------------------
+
+    def _render_search(self, hits: list[dict]) -> str:
+        """Format ranked catalog hits into the ``search_skills`` markdown list.
+
+        Each line carries the skill name, an origin tag (:func:`_where_label`),
+        the score, and the summary — the human-facing string the MCP tool and
+        CLI both return.
+        """
+        lines = []
+        for h in hits:
+            lines.append(
+                f"- **{h['name']}**{_where_label(h['source'])} "
+                f"(score: {h['score']:.2f})\n  {h['summary']}"
+            )
+        return f"Found {len(hits)} skill(s):\n\n" + "\n\n".join(lines)
+
+    def _empty_message(self) -> str:
+        """The no-results string, tailored to *why* nothing matched.
+
+        When a KB exists but no catalog source is synced yet, point the agent
+        at ``list_skill_sources`` / ``add_skill_source`` (the likely cause);
+        otherwise it's a genuine no-match for the query.
+        """
+        if not self._catalog.synced_collections() and self._catalog.has_kb:
+            return (
+                "No catalog skills found. No external skill catalog is synced "
+                "yet — search covers the catalog (skills you can install), since "
+                "installed skills are already natively discoverable. Call "
+                "list_skill_sources() to see available sources, then "
+                "add_skill_source(source=...) to sync one before searching again."
+            )
+        return "No catalog skills found matching the query."
+
+    # -- public API ----------------------------------------------------------
+
+    def search(self, query=None, *, top_k: int = 8, tag=None, skill_name=None) -> str:
+        """Stage B. Select + render. Stateless — no session/exposure tracking."""
+        if skill_name:
+            import yaml
+
+            if self._reg is None:
+                return f"No skill named '{skill_name}'."
+            spec = self._reg.get_skill(skill_name)
+            if spec:
+                return f"Found skill '{skill_name}':\n\n" + yaml.dump(
+                    spec, default_flow_style=False, sort_keys=False
+                )
+            return f"No skill named '{skill_name}'."
+
+        hits = self._catalog.search(query, top_k=top_k, tag=tag)
+        if not hits:
+            return self._empty_message()
+        return self._render_search(hits)
+
+    def sync(self, source, *, force: bool = False) -> dict:
+        """Stage A passthrough — see :meth:`SkillsCatalog.sync`."""
+        return self._catalog.sync(source, force=force)
+
+    def install(self, name: str, project_dir) -> dict:
+        """Stage C passthrough — see :meth:`SkillsCatalog.install`."""
+        return self._catalog.install(name, project_dir)
+
+    def list_sources(self) -> list[dict]:
+        """Stage A view passthrough — see :meth:`SkillsCatalog.list_sources`."""
+        return self._catalog.list_sources()

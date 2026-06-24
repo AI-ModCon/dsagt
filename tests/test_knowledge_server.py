@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 import mcp.types as types
 
-from dsagt.commands.knowledge_server import create_knowledge_server, setup_runtime_kb
+from dsagt.mcp.knowledge_tools import create_knowledge_server, setup_runtime_kb
 from mcp_helpers import call_tool_json as call_tool
 
 
@@ -108,28 +108,6 @@ def server(mock_kb):
 # ---------------------------------------------------------------------------
 # kb_list_collections
 # ---------------------------------------------------------------------------
-
-
-class TestSkillSources:
-
-    def test_list_skill_sources_returns_known(self, mock_kb):
-        mock_kb.collections = []
-        server = create_knowledge_server(mock_kb)
-        result = call_tool(server, "list_skill_sources", {})
-        assert "scientific" in result["sources"]
-        # Nothing synced → every known source flagged available, not synced.
-        assert result["sources"]["scientific"]["synced"] is False
-        assert result["sources"]["scientific"]["indexed"] == 0
-        assert result["other_synced_collections"] == []
-        assert "scientific" in result["note"]
-
-    def test_add_skill_source_bad_source_errors(self, mock_kb):
-        mock_kb.collections = []
-        server = create_knowledge_server(mock_kb)
-        result = call_tool(
-            server, "add_skill_source", {"source": "not-a-real-known-name"}
-        )
-        assert "error" in result
 
 
 class TestListCollections:
@@ -753,17 +731,17 @@ class TestSetupRuntimeKb:
 
 
 class TestOpenMPWorkaround:
-    """Importing knowledge_server must set KMP_DUPLICATE_LIB_OK to prevent
-    a fatal OpenMP crash when FAISS and sentence-transformers (PyTorch)
+    """Importing the knowledge tools module must set KMP_DUPLICATE_LIB_OK to
+    prevent a fatal OpenMP crash when FAISS and sentence-transformers (PyTorch)
     both bundle libomp.
 
     Without this, kb_search with rerank=true kills
     the server process, producing 'transport closed' in MCP clients."""
 
     def test_kmp_duplicate_lib_ok_is_set(self):
-        """KMP_DUPLICATE_LIB_OK is set after importing the knowledge server."""
+        """KMP_DUPLICATE_LIB_OK is set after importing dsagt.mcp.knowledge_tools."""
         import os
-        import dsagt.commands.knowledge_server  # noqa: F401
+        import dsagt.mcp.knowledge_tools  # noqa: F401
 
         assert os.environ.get("KMP_DUPLICATE_LIB_OK") == "TRUE"
 
@@ -816,3 +794,127 @@ class TestRerankSchemaDefault:
             top_k=5,
             rerank=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# kb_search — multi-collection fan-out (moved from the former memory test file)
+# ---------------------------------------------------------------------------
+
+
+class TestKbSearchMultiCollection:
+
+    def test_single_collection_backward_compat(self, server, mock_kb):
+        """Plain search with collection still works."""
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
+
+        assert result["status"] == "ok"
+        mock_kb.search.assert_called_once()
+
+    def test_multi_collection_fanout(self, server, mock_kb):
+        """Searching multiple collections calls search for each."""
+        mock_kb.search.return_value = [
+            make_search_result("result", "/file.md", 0, 0.9),
+        ]
+
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collections": ["docs", "papers"],
+            },
+        )
+
+        assert result["status"] == "ok"
+        assert mock_kb.search.call_count == 2
+
+    def test_no_collection_returns_error(self, server):
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+            },
+        )
+
+        assert result["status"] == "error"
+
+    def test_multi_collection_merges_results(self, server, mock_kb):
+        """Results from multiple collections are merged and sorted."""
+        call_count = [0]
+
+        def varying_results(**kwargs):
+            call_count[0] += 1
+            score = 0.9 if call_count[0] == 1 else 0.7
+            return [
+                make_search_result(
+                    f"result_{call_count[0]}",
+                    f"/file_{call_count[0]}.md",
+                    score=score,
+                )
+            ]
+
+        mock_kb.search.side_effect = varying_results
+
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collections": ["docs", "papers"],
+                "top_k": 5,
+            },
+        )
+
+        assert result["result_count"] == 2
+        scores = [r["score"] for r in result["results"]]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_missing_collection_skipped(self, server, mock_kb):
+        """A missing collection logs a warning but doesn't fail the search."""
+
+        def search_with_error(**kwargs):
+            if kwargs["collection"] == "missing":
+                raise ValueError("Collection 'missing' not found")
+            return [make_search_result("result", "/file.md")]
+
+        mock_kb.search.side_effect = search_with_error
+
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collections": ["docs", "missing"],
+            },
+        )
+
+        assert result["status"] == "ok"
+        assert result["result_count"] == 1
+
+
+class TestKbSearchSchema:
+
+    def _get_tool(self, server, name):
+        req = types.ListToolsRequest(method="tools/list")
+        handler = server.request_handlers[types.ListToolsRequest]
+        result = asyncio.run(handler(req))
+        for tool in result.root.tools:
+            if tool.name == name:
+                return tool
+        return None
+
+    def test_kb_search_has_collections_param(self, server):
+        tool = self._get_tool(server, "kb_search")
+        assert "collections" in tool.inputSchema["properties"]
+
+    def test_kb_search_query_is_only_required(self, server):
+        tool = self._get_tool(server, "kb_search")
+        assert tool.inputSchema["required"] == ["query"]

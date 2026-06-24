@@ -32,13 +32,12 @@ _INSTRUCTIONS_PATH = Path(__file__).parent.parent / "dsagt_instructions.md"
 # files between init and start without losing edits on the next start.
 _DSAGT_MARKER = "DSAgt Pipeline Builder"
 
-# Tools each dsagt MCP server exposes — listed in ``alwaysAllow`` so roo
+# Tools the dsagt MCP server exposes — listed in ``alwaysAllow`` so roo
 # and cline auto-approve them without a human-in-the-loop prompt.  Keep in
-# sync with ``commands/registry_server.py`` and
-# ``commands/knowledge_server.py`` tool registrations; a tool added there
-# but not here means roo/cline will hang on its first call.
-# All dsagt MCP tools (registry + knowledge) now live behind the single
-# ``dsagt-server``, so the always-allow list is one flat union.
+# sync with the ``mcp/*_tools.py`` tool registrations (registry / knowledge /
+# memory / skill); a tool added there but not here means roo/cline will hang on
+# its first call.  All dsagt MCP tools live behind the single ``dsagt-server``,
+# so the always-allow list is one flat union.
 _DSAGT_MCP_ALWAYS_ALLOW = [
     "add_skill_source",
     "get_registry",

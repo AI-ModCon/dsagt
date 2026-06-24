@@ -11,7 +11,7 @@ from dsagt.agents.base import (
     _SKILL_MANIFEST,
     _mirror_skills_to,
 )
-from dsagt.commands import skills_catalog as sc
+from dsagt import skills as sc
 from dsagt.registry import CATALOG_COLLECTION_PREFIX, catalog_collection
 
 

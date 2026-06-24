@@ -23,7 +23,7 @@ import pytest
 pytestmark = pytest.mark.integration
 
 from dsagt.knowledge import KnowledgeBase
-from dsagt.commands.knowledge_server import create_knowledge_server, setup_runtime_kb
+from dsagt.mcp.knowledge_tools import create_knowledge_server, setup_runtime_kb
 from mcp_helpers import call_tool_json as call_tool, call_tool_async as _call_tool_async_raw
 
 

@@ -477,7 +477,7 @@ def run_setup_kb(args):
         # Best-effort — a clone failure (offline, repo moved) warns and
         # continues rather than aborting the whole KB build.
         if not getattr(args, "no_skill_catalog", False):
-            from dsagt.commands.skills_catalog import sync_source
+            from dsagt.skills import sync_source
             from dsagt.session import DEFAULTS
 
             for src in DEFAULTS["skills"]["sources"]:

@@ -735,7 +735,7 @@ def _make_registry_server(tmp_path):
     Mirrors the pattern used by tests/test_registry_server.py so we exercise
     the real call_tool dispatcher rather than reaching into private state.
     """
-    from dsagt.commands.registry_server import create_registry_server
+    from dsagt.mcp.registry_tools import create_registry_server
     from dsagt.registry import ToolRegistry
 
     source_dir = tmp_path / "source_skills"
@@ -788,7 +788,7 @@ def test_save_tool_spec_with_deps_nests_install_span(
     from mcp_helpers import call_tool_sync as call_tool
 
     # Stub the actual uv install so the test doesn't hit the network.
-    import dsagt.commands.registry_server as rs_mod
+    import dsagt.mcp.registry_tools as rs_mod
 
     monkeypatch.setattr(
         rs_mod,
@@ -819,7 +819,7 @@ def test_install_dependencies_failed_records_event(
     an install_failed event with the error message truncated."""
     from mcp_helpers import call_tool_sync as call_tool
 
-    import dsagt.commands.registry_server as rs_mod
+    import dsagt.mcp.registry_tools as rs_mod
 
     monkeypatch.setattr(
         rs_mod,

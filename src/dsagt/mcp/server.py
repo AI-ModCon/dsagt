@@ -11,9 +11,14 @@ The heavy/risky work is already offloaded out of the event loop (``run_command``
 → ``dsagt-run`` subprocess; ``kb_ingest`` → background job thread), so collapsing
 the two processes costs little isolation.
 
-Tool *definitions* and *handlers* still live in their concern modules
-(``registry_server`` / ``knowledge_server``); this module only composes their
-``(tools, handlers)`` under one dispatch shell and owns the shared-KB startup.
+Tool *definitions* and *handlers* live in their concern modules
+(:mod:`~dsagt.mcp.registry_tools` / :mod:`~dsagt.mcp.knowledge_tools` /
+:mod:`~dsagt.mcp.memory_tools` / :mod:`~dsagt.mcp.skill_tools`); this module only
+composes their ``(tools, handlers)`` under one dispatch shell
+(:func:`build_dispatch_server`) and owns the shared-KB startup.  The factory
+imports are *lazy* (inside :func:`create_dsagt_server` / :func:`main`) so the
+concern modules can import :func:`build_dispatch_server` from here without a
+cycle.
 
 See ``design-notes/skills-catalog-server-merge.md`` §2.
 
@@ -23,72 +28,63 @@ regenerates the per-agent MCP config to a single ``dsagt`` server).  See the
 upgrade note in the README.
 """
 
-import asyncio
-import json
-import logging
 import os
-from pathlib import Path
 
-import yaml
-
-import mcp.types as types
-from mcp.server.lowlevel import Server
-
-from dsagt.commands.knowledge_server import _knowledge_tools_and_handlers
-from dsagt.commands.registry_server import (
-    _registry_tools_and_handlers,
-    _run_stdio,
-)
-from dsagt.knowledge import KnowledgeBase
-from dsagt.registry import SkillRegistry, ToolRegistry
-
+# Set before any import that may pull in FAISS / PyTorch / sentence-transformers
+# (e.g. ``dsagt.knowledge`` below): prevents a fatal OpenMP crash when multiple
+# libraries each bundle their own libomp.
 os.environ["PYTHONUNBUFFERED"] = "1"
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
+import asyncio  # noqa: E402
+import json  # noqa: E402
+import logging  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import yaml  # noqa: E402
+
+import mcp.server.stdio  # noqa: E402
+import mcp.types as types  # noqa: E402
+from mcp.server.lowlevel import Server, NotificationOptions  # noqa: E402
+from mcp.server.models import InitializationOptions  # noqa: E402
+
+from dsagt.knowledge import KnowledgeBase  # noqa: E402
+from dsagt.registry import SkillRegistry, ToolRegistry  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
-def create_dsagt_server(
-    registry: ToolRegistry,
-    kb: KnowledgeBase | None,
-    skill_registry: SkillRegistry | None,
-    runtime_dir: str | Path | None = None,
-):
-    """Compose the registry + knowledge tools under one MCP ``Server``.
+# ---------------------------------------------------------------------------
+# Shared dispatch shell (used by the merged server *and* the per-concern
+# test-facing ``create_*_server`` wrappers)
+# ---------------------------------------------------------------------------
 
-    Test-facing API: build the two registries + a (mock) KB, then drive the
-    returned server via ``call_tool_sync()``.  ``main()`` constructs the real
-    deps from project config before calling this.
+
+def build_dispatch_server(name: str, tools, handlers) -> Server:
+    """Wrap a ``(tools, handlers)`` pair in a configured MCP ``Server``.
+
+    One dispatch contract for every concern module: catch + wrap errors, then
+    format by return type — a handler that returns ``str`` passes through, one
+    that returns ``dict`` is JSON-encoded.  This is a superset of the old
+    per-server behavior (registry handlers returned ``str`` and never raised;
+    knowledge handlers returned ``dict`` and raised ``ValueError`` on bad
+    input), so it is behavior-preserving for both.
     """
-    server = Server("dsagt")
-
-    r_tools, r_handlers = _registry_tools_and_handlers(registry, kb, skill_registry)
-    k_tools, k_handlers = _knowledge_tools_and_handlers(kb, runtime_dir)
-
-    tools = r_tools + k_tools
-    handlers = {**r_handlers, **k_handlers}
-    if len(handlers) != len(r_handlers) + len(k_handlers):
-        overlap = set(r_handlers) & set(k_handlers)
-        raise RuntimeError(
-            f"dsagt-server tool-name collision across modules: {overlap}"
-        )
+    server = Server(name)
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
         return tools
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-        handler = handlers[name]  # KeyError = bug in list_tools schema
-        # Registry handlers return a plain string and never raise; knowledge
-        # handlers return a dict and raise ValueError on bad input.  One wrapper
-        # serves both: catch + wrap errors (knowledge contract), then format by
-        # return type — str passes through, dict is JSON-encoded.
+    async def call_tool(tool_name: str, arguments: dict) -> list[types.TextContent]:
+        handler = handlers[tool_name]  # KeyError = bug in list_tools schema
         try:
             result = await handler(arguments)
         except ValueError as e:
             result = {"status": "error", "error": str(e)}
         except Exception as e:
-            logger.exception("Unexpected error in tool '%s'", name)
+            logger.exception("Unexpected error in tool '%s'", tool_name)
             result = {"status": "error", "error": f"Unexpected error: {e}"}
         text = (
             result
@@ -98,6 +94,67 @@ def create_dsagt_server(
         return [types.TextContent(type="text", text=text)]
 
     return server
+
+
+async def _run_stdio(server: Server, name: str) -> None:
+    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            InitializationOptions(
+                server_name=name,
+                server_version="0.1.0",
+                capabilities=server.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
+                ),
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Composition — merge the four concern modules' tools under one Server
+# ---------------------------------------------------------------------------
+
+
+def create_dsagt_server(
+    registry: ToolRegistry,
+    kb: KnowledgeBase | None,
+    skill_registry: SkillRegistry | None,
+    runtime_dir: str | Path | None = None,
+):
+    """Compose the registry + knowledge + memory + skill tools under one ``Server``.
+
+    Test-facing API: build the registries + a (mock) KB, then drive the
+    returned server via ``call_tool_sync()``.  ``main()`` constructs the real
+    deps from project config before calling this.  Factory imports are lazy to
+    keep the concern modules' top-level import of :func:`build_dispatch_server`
+    cycle-free.
+    """
+    from dsagt.mcp.knowledge_tools import _knowledge_tools_and_handlers
+    from dsagt.mcp.memory_tools import _memory_tools_and_handlers
+    from dsagt.mcp.registry_tools import _registry_tools_and_handlers
+    from dsagt.mcp.skill_tools import _skill_tools_and_handlers
+
+    groups = [
+        _registry_tools_and_handlers(registry, kb),
+        _knowledge_tools_and_handlers(kb),
+        _memory_tools_and_handlers(kb, runtime_dir),
+        _skill_tools_and_handlers(skill_registry, kb, runtime_dir),
+    ]
+
+    tools: list[types.Tool] = []
+    handlers: dict = {}
+    for g_tools, g_handlers in groups:
+        overlap = set(handlers) & set(g_handlers)
+        if overlap:
+            raise RuntimeError(
+                f"dsagt-server tool-name collision across modules: {overlap}"
+            )
+        tools += g_tools
+        handlers.update(g_handlers)
+
+    return build_dispatch_server("dsagt", tools, handlers)
 
 
 def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:

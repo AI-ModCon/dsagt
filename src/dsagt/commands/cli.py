@@ -384,16 +384,16 @@ def _cmd_setup_kb(args):
 
 def _cmd_skills(args):
     """Manage external skill catalogs and project skill installs."""
-    from dsagt.commands.skills_catalog import (
+    from dsagt.registry import SkillRegistry
+    from dsagt.session import kb_from_config, load_config
+    from dsagt.skills import (
         KNOWN_SOURCES,
+        SkillRouter,
         install_into_project,
         persist_source_to_config,
         resolve_source,
         sync_source,
     )
-    from dsagt.registry import SkillRegistry
-    from dsagt.session import kb_from_config, load_config
-    from dsagt.skill_discovery import SkillRouter
 
     def _open_kb():
         """Best-effort KB; None when no embedder is configured (keyword fallback)."""
@@ -433,7 +433,7 @@ def _cmd_skills(args):
         return 0
 
     if action == "add":
-        from dsagt.commands.skills_catalog import SKILL_SOURCES_DIR
+        from dsagt.skills import SKILL_SOURCES_DIR
 
         target = args.target
         # A "<synced-slug>/<skill>" target is a source-qualified *install*, not

@@ -1,8 +1,8 @@
 # MCP Server
 
-DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.) and launched automatically when the agent starts. It bundles two concern areas — a tool registry and a knowledge base — behind one process with one shared embedder and one ChromaDB owner.
+DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.) and launched automatically when the agent starts. It bundles four concern areas — a tool registry, a knowledge base, explicit memory, and skill discovery — behind one process with one shared embedder and one ChromaDB owner.
 
-> Earlier versions ran two separate servers (`dsagt-registry-server` + `dsagt-knowledge-server`), merged in 0.3.0. Re-run `dsagt start <project>` on an existing project to regenerate its config against the single server (for cline, delete `<project>/.cline-data` first).
+> Earlier versions ran two separate servers (`dsagt-registry-server` + `dsagt-knowledge-server`), merged in 0.2.0. Re-run `dsagt start <project>` on an existing project to regenerate its config against the single server (for cline, delete `<project>/.cline-data` first).
 
 ## Registry tools
 
