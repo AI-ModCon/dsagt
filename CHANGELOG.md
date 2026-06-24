@@ -27,6 +27,12 @@ adopting 0.3.0 is rebuild-not-migrate, and no project data changes:
   otherwise linger next to the new one.
 - Tools, skills, the KB index, traces, and memory all carry over untouched.
 
+### Added
+- Source-qualified catalog install: when the same skill name exists in more
+  than one synced source, install a specific one with a `<source-slug>/<skill>`
+  name (via `install_skill` or `dsagt skills add <project> <slug>/<skill>`)
+  instead of dead-ending on the ambiguity guard.
+
 ### Changed
 - **The two MCP servers are now one `dsagt-server`** — one shared
   `KnowledgeBase`/embedder, one MCP entry per agent, one trace `service.name`.
@@ -46,6 +52,10 @@ adopting 0.3.0 is rebuild-not-migrate, and no project data changes:
   is now installed on demand via `dsagt skills add <project> genesis`.
 - Dead indexing of installed/bundled skills into the `skills` ChromaDB
   collection (nothing read it after the catalog-only search change).
+
+### Fixed
+- `dsagt --version` now works (it was documented but unimplemented — argparse
+  errored). Reports the version from `dsagt.__version__`.
 
 ## [0.2.0] - 2026-06-23
 
