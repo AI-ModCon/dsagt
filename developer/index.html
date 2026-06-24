@@ -1047,11 +1047,11 @@
 <p>Proxy mode reads upstream LLM credentials from <code>.env</code> or the shell. See <a href="https://github.com/AI-ModCon/dsagt/blob/main/tests/smoke_test/manual_runs/proxy_walkthrough.md"><code>tests/smoke_test/manual_runs/proxy_walkthrough.md</code></a> for the full setup walkthrough.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <p><strong>Agent command not found.</strong> The agent CLI is not installed or is not on PATH. See the <a href="../#supported-agents">supported agents table</a>.</p>
-<p><strong>MCP servers not connecting.</strong> Verify uv resolves the server commands:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>which<span class="w"> </span>dsagt-registry-server
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>run<span class="w"> </span>which<span class="w"> </span>dsagt-knowledge-server
+<p><strong>MCP servers not connecting.</strong> Verify the server commands are on your PATH:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>which<span class="w"> </span>dsagt-registry-server
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>which<span class="w"> </span>dsagt-knowledge-server
 </code></pre></div>
-<p>If missing, reinstall: <code>uv sync --reinstall</code>.</p>
+<p>If missing, reinstall: <code>pip install --force-reinstall https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip</code>.</p>
 <p><strong>MLflow UI empty.</strong> Confirm MLflow is running for the right project:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>&lt;name&gt;<span class="w">           </span><span class="c1"># shows the pinned port</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>http://localhost:&lt;mlflow_port&gt;
