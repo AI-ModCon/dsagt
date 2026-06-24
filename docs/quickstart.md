@@ -6,10 +6,7 @@ This guide walks through knowledge ingest, tool registration, provenance, and ex
 
 ```bash
 # Install
-git clone https://github.com/AI-ModCon/dsagt.git
-cd dsagt
-uv sync
-source .venv/bin/activate
+pip install https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip
 
 # Set a convenience variable for the smoke test directory (not a normal dsagt step)
 export SMOKE_DIR="$(pwd)/tests/smoke_test"

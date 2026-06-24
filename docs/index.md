@@ -18,16 +18,12 @@ DSAgt connects an MCP-compatible AI coding agent to tool registration, a semanti
 ## Prerequisites
 
 - Python 3.12–3.13
-- [uv](https://github.com/astral-sh/uv)
 - One of the supported agent platforms above, installed and authenticated against your LLM provider
 
 ## Installation
 
 ```bash
-git clone https://github.com/AI-ModCon/dsagt.git
-cd dsagt
-uv sync
-source .venv/bin/activate
+pip install https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip
 ```
 
 ## Key Capabilities
