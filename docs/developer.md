@@ -28,14 +28,14 @@ Proxy mode reads upstream LLM credentials from `.env` or the shell. See [`tests/
 
 **Agent command not found.** The agent CLI is not installed or is not on PATH. See the [supported agents table](index.md#supported-agents).
 
-**MCP servers not connecting.** Verify uv resolves the server commands:
+**MCP servers not connecting.** Verify the server commands are on your PATH:
 
 ```bash
-uv run which dsagt-registry-server
-uv run which dsagt-knowledge-server
+which dsagt-registry-server
+which dsagt-knowledge-server
 ```
 
-If missing, reinstall: `uv sync --reinstall`.
+If missing, reinstall: `pip install --force-reinstall https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip`.
 
 **MLflow UI empty.** Confirm MLflow is running for the right project:
 

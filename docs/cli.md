@@ -1,6 +1,6 @@
 # CLI Reference
 
-All commands are available after running `uv sync` and activating the virtual environment (`source .venv/bin/activate`).
+All commands are available after installing DSAgt.
 
 ## Project Management
 
