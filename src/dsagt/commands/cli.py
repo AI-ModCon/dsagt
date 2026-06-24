@@ -1013,10 +1013,15 @@ _USER_ERRORS = (FileNotFoundError, FileExistsError, ValueError, RuntimeError)
 
 
 def main(argv=None):
+    from dsagt import __version__
+
     parser = argparse.ArgumentParser(
         prog="dsagt", description="DSAgt project and session management."
     )
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--version", action="version", version=f"dsagt {__version__}"
+    )
 
     sub = parser.add_subparsers(dest="command")
 
