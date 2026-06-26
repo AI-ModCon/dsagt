@@ -42,9 +42,8 @@ Category A functions that call fpy-dependent `m3dc1_tools` functions
 `plot_standard_spectra`, `plot_perturbed_field_map`, `plot_geqdsk_compare`) will
 emit C/Fortran-level diagnostic messages (e.g. `"deleting simulation object"`)
 directly to the OS-level stdout.  This is harmless in library use — Python
-output is not captured.  It becomes an issue only when wrapping these functions
-in a CLI tool that captures stdout; use `--output-json FILE` as described in
-`m3dc1_tools.py`.
+output is not captured.  It becomes an issue only when capturing stdout in a
+subprocess; in that case write results to a file rather than relying on stdout.
 
 ---
 
@@ -214,6 +213,17 @@ plot_field(
 
 2-D filled-contour field plot on the R,Z plane via `m3.plot_field`.  Uses the
 figure-capture pattern.
+
+The colormap and normalisation are chosen automatically from the data:
+
+- If both positive and negative values are present and neither extreme is less
+  than 5 % of the other, uses **RdBu_r** with symmetric limits
+  `vmin = −vmax = max(|data|)`.
+- Otherwise uses **inferno** with natural data limits (suited to
+  single-sign fields such as pressure or density).
+
+The colorbar and figure title use a LaTeX label derived from the field name and
+component, e.g. `coord="phi"` on field `"j"` produces $J_{\phi}$.
 
 ---
 
@@ -417,7 +427,7 @@ import sys
 sys.path.insert(0, "/path/to/tokamak_stability")
 import m3dc1_plots
 
-case = "/data/runs/sparc_1425"
+case = "/data/runs/m3dc1_data"
 
 # Quick KE check (no m3dc1 needed)
 m3dc1_plots.plot_kinetic_energy(case, "ke.png")

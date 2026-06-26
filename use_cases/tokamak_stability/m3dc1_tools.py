@@ -32,32 +32,12 @@ Equilibrium profiles (requires m3dc1 + fpy):
 Perturbed fields (requires m3dc1 + fpy):
     compute_perturbed_fields  Perturbed fields at arbitrary (R, Z, phi) points
 
+Field evaluation on a grid (requires m3dc1 + fpy):
+    evaluate_field_on_grid    One or more fields evaluated on the mesh-vertex or Cartesian grid
+
 Spectral analysis (requires m3dc1 + fpy):
     compute_poloidal_spectrum   Poloidal m-spectrum of a single field
     compute_standard_spectra    Spectra for p, B_R, B_Z, B_phi
-
-IMPORTANT NOTE FOR AGENTS GENERATING NEW TOOLS
------------------------------------------------
-The functions marked "requires m3dc1 + fpy" above call into compiled
-C/Fortran code that writes diagnostic messages (e.g. "deleting simulation
-object", "period = 6.28318") directly to the OS-level stdout file descriptor.
-This output bypasses Python's sys.stdout entirely and cannot be suppressed or
-redirected from Python.
-
-Consequence: any CLI tool that (1) calls one of these functions and (2) prints
-its JSON result to stdout will produce contaminated output that cannot be parsed
-as JSON when captured via shell redirect.
-
-Required pattern for any new CLI tool wrapping these functions:
-    - Accept an --output-json FILE argument.
-    - Write the JSON result to that file instead of printing to stdout.
-    - Document in the tool spec that the agent MUST use --output-json and read
-      from the file rather than capturing stdout.
-
-Functions NOT affected (h5py / numpy only — no compiled stdout writes):
-    read_c1input, list_time_snapshots, read_snapshot_time, read_scalar_traces,
-    read_case_metadata, read_mesh_vertices, make_evaluation_grid,
-    compute_ke_growth_trace, compute_growth_rate, compute_q95
 """
 from __future__ import annotations
 
@@ -658,6 +638,110 @@ def compute_perturbed_fields(
                 _add_scalar(name)
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Field evaluation on a grid (requires m3dc1 + fpy)
+# ---------------------------------------------------------------------------
+
+def evaluate_field_on_grid(
+    case_dir: str | Path,
+    fields: str | list[str],
+    time_idx: int = -1,
+    coord: str = "scalar",
+    mode: str = "mesh",
+    grid_res: int = 200,
+    phi: float = 0.0,
+    output_path: str | Path | None = None,
+) -> dict[str, np.ndarray]:
+    """Evaluate one or more fields on an (R, Z) grid and optionally save to HDF5.
+
+    Builds the evaluation grid from the mesh vertices or a regular Cartesian
+    grid, opens the simulation at the requested timeslice, and evaluates each
+    field using ``eval_field``.
+
+    Requires the ``m3dc1`` and ``fpy`` libraries.
+
+    Args:
+        case_dir:    Path to the M3D-C1 case directory.
+        fields:      Field name or list of field names, e.g. ``"te"`` or
+                     ``["te", "ne", "p"]``.
+        time_idx:    Timeslice index. ``-1`` selects the equilibrium state;
+                     any non-negative integer matches the NNN in
+                     ``time_NNN.h5``.
+        coord:       Component or mode for field evaluation:
+
+                     - ``"scalar"`` — scalar value, or magnitude for vector
+                       fields.
+                     - ``"R"``, ``"phi"``, ``"Z"`` — a specific cylindrical
+                       component (vector fields only).
+                     - ``"all"`` — for scalar fields behaves like
+                       ``"scalar"``; for vector fields (B, E, A, j, v)
+                       evaluates all three components and stores them as
+                       separate keys, e.g. ``"BR"``, ``"BPHI"``, ``"BZ"``.
+
+        mode:        Grid type:
+
+                     - ``"mesh"`` — unique mesh vertex positions; output
+                       arrays are 1-D.
+                     - ``"grid"`` — regular ``grid_res × grid_res`` Cartesian
+                       grid spanning the mesh bounding box; output arrays are
+                       2-D.
+
+        grid_res:    Points per axis for ``mode="grid"``.
+        phi:         Toroidal angle in radians applied to all evaluation
+                     points.
+        output_path: If given, write results to an HDF5 file at this path.
+                     The file will contain datasets ``"R"``, ``"Z"``, and one
+                     dataset per field or component key.
+
+    Returns:
+        Dict with keys ``"R"``, ``"Z"``, and one key per evaluated field or
+        component. Array shapes match the grid: 1-D for ``mode="mesh"``, 2-D
+        ``(grid_res, grid_res)`` for ``mode="grid"``.
+    """
+    import fpy
+    from m3dc1 import eval_field
+
+    case_dir = Path(case_dir)
+    c1h5 = str(case_dir / "C1.h5")
+
+    if isinstance(fields, str):
+        fields = [fields]
+
+    R_verts, Z_verts = read_mesh_vertices(c1h5)
+    R, Z, phi_arr = make_evaluation_grid(
+        R_verts, Z_verts, mode=mode, grid_res=grid_res, phi=phi
+    )
+
+    sim = fpy.sim_data(c1h5, time=time_idx)
+    result: dict[str, np.ndarray] = {"R": R, "Z": Z}
+
+    for field in fields:
+        is_vector = field in _VECTOR_FIELDS
+        if coord == "all" and is_vector:
+            tag = field.upper()
+            for comp, key in (("R", f"{tag}R"), ("phi", f"{tag}PHI"), ("Z", f"{tag}Z")):
+                result[key] = eval_field(
+                    field, R, phi_arr, Z,
+                    coord=comp, sim=sim, time=sim.timeslice, quiet=True,
+                )
+        else:
+            effective_coord = "scalar" if (coord == "all" and not is_vector) else coord
+            result[field] = eval_field(
+                field, R, phi_arr, Z,
+                coord=effective_coord, sim=sim, time=sim.timeslice, quiet=True,
+            )
+
+    if output_path is not None:
+        with h5py.File(str(output_path), "w") as f:
+            f.create_dataset("R", data=R)
+            f.create_dataset("Z", data=Z)
+            for key, arr in result.items():
+                if key not in ("R", "Z"):
+                    f.create_dataset(key, data=arr)
+
+    return result
 
 
 # ---------------------------------------------------------------------------

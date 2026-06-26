@@ -2,7 +2,7 @@
 
 This guide documents the structure of HDF5 output files produced by the M3D-C1
 extended-MHD simulation code, based on direct inspection of the example dataset at
-`/Users/kparfrey/data/asv/run1/sparc_1425/` and the reference scripts in `existing/`.
+`/Users/kparfrey/data/asv/run1/m3dc1_data/` and the reference scripts in `existing/`.
 
 
 ## 1. Files in a Case Directory
@@ -523,14 +523,14 @@ stored in the `field` / `field_i` datasets in the time-slice groups.
 
 A set of standalone post-processing tools is provided in `m3dc1_tools.py`.
 These are designed for use in an agentic pipeline and cover the most common
-operations. See `doc/m3dc1_tools_api.md` for the full API reference.
+operations. See `m3dc1_tools_api.md` in this directory for the full API reference.
 
 ### Recommended starting point — case summary
 
 ```python
 from m3dc1_tools import read_case_metadata
 
-meta = read_case_metadata("sparc_1425")
+meta = read_case_metadata("m3dc1_data")
 # meta["params"]["ntor"]   → 9
 # meta["snapshots"]        → [0, 1]
 # meta["R_mag"]            → 1.855 m
@@ -541,7 +541,7 @@ meta = read_case_metadata("sparc_1425")
 ```python
 from m3dc1_tools import read_scalar_traces
 
-traces = read_scalar_traces("sparc_1425", names=["time", "E_K3"])
+traces = read_scalar_traces("m3dc1_data", names=["time", "E_K3"])
 t   = traces["time"]   # Alfvén times, shape (1001,)
 ke  = traces["E_K3"]   # kinetic energy
 ```
@@ -551,7 +551,7 @@ ke  = traces["E_K3"]   # kinetic energy
 ```python
 from m3dc1_tools import read_mesh_vertices
 
-R, Z = read_mesh_vertices("sparc_1425/C1.h5")
+R, Z = read_mesh_vertices("m3dc1_data/C1.h5")
 # R, Z are 1-D float32 arrays of unique mesh vertex positions
 ```
 
@@ -560,7 +560,7 @@ R, Z = read_mesh_vertices("sparc_1425/C1.h5")
 ```python
 from m3dc1_tools import read_mesh_vertices, make_evaluation_grid
 
-R_v, Z_v = read_mesh_vertices("sparc_1425/C1.h5")
+R_v, Z_v = read_mesh_vertices("m3dc1_data/C1.h5")
 R, Z, phi = make_evaluation_grid(R_v, Z_v, mode="mesh")
 # or use a regular 200×200 Cartesian grid:
 R, Z, phi = make_evaluation_grid(R_v, Z_v, mode="grid", grid_res=200)
@@ -571,7 +571,7 @@ R, Z, phi = make_evaluation_grid(R_v, Z_v, mode="grid", grid_res=200)
 ```python
 from m3dc1_tools import compute_growth_rate
 
-gamma = compute_growth_rate("sparc_1425")   # → ~0.0067 τ_A⁻¹
+gamma = compute_growth_rate("m3dc1_data")   # → ~0.0067 τ_A⁻¹
 ```
 
 ### Listing all HDF5 variables
@@ -579,7 +579,7 @@ gamma = compute_growth_rate("sparc_1425")   # → ~0.0067 τ_A⁻¹
 ```python
 from hdf5 import list_h5_variables
 
-variables = list_h5_variables("sparc_1425/C1.h5")
+variables = list_h5_variables("m3dc1_data/C1.h5")
 ```
 
 ### Reading a single HDF5 dataset directly
@@ -587,10 +587,10 @@ variables = list_h5_variables("sparc_1425/C1.h5")
 ```python
 from hdf5 import read_h5_dataset, read_h5_attrs
 
-psi = read_h5_dataset("sparc_1425/C1.h5", "equilibrium/fields/psi")
+psi = read_h5_dataset("m3dc1_data/C1.h5", "equilibrium/fields/psi")
 # psi shape: (18555, 20)  — FEM coefficients, not pointwise values
 
-attrs = read_h5_attrs("sparc_1425/C1.h5", "equilibrium")
+attrs = read_h5_attrs("m3dc1_data/C1.h5", "equilibrium")
 # {"version": 45, "nspace": 2, "ntimestep": 0, "time": 0.0}
 ```
 
@@ -603,7 +603,7 @@ they cannot be interpolated manually. Use:
 import fpy
 from m3dc1.eval_field import eval_field
 
-sim = fpy.sim_data("sparc_1425/C1.h5", time=-1)   # time=-1 = equilibrium
+sim = fpy.sim_data("m3dc1_data/C1.h5", time=-1)   # time=-1 = equilibrium
 # eval_field argument order: (name, R, phi, Z, ...)
 psi_values = eval_field("psi", R, phi, Z, coord="scalar", sim=sim, time=sim.timeslice)
 ```
@@ -614,7 +614,7 @@ wrapper:
 ```python
 from m3dc1_tools import compute_perturbed_fields
 
-perts = compute_perturbed_fields("sparc_1425", time_idx=1, R=R, Z=Z, phi=phi)
+perts = compute_perturbed_fields("m3dc1_data", time_idx=1, R=R, Z=Z, phi=phi)
 # perts["psi"]  → perturbed psi at each (R, Z, phi) point
 ```
 

@@ -33,7 +33,7 @@ Returns `dict` with keys: `ntor` (int), `pscale`, `batemanscale`, `dt`
 (float). Any absent parameter is `None`.
 
 ```python
-params = read_c1input("sparc_1425")
+params = read_c1input("m3dc1_data")
 # {'ntor': 9, 'pscale': 0.815, 'linear': 1, ...}
 ```
 
@@ -51,7 +51,7 @@ present in the case directory.
 Returns `list[int]`, e.g. `[0, 1]`. Returns `[]` if no snapshots are found.
 
 ```python
-snaps = list_time_snapshots("sparc_1425")
+snaps = list_time_snapshots("m3dc1_data")
 # [0, 1]
 ```
 
@@ -71,8 +71,8 @@ Returns `float`. `"s"` requires `m3dc1`; falls back to Alfvén times with a
 warning if unavailable. Returns `nan` when the snapshot is not found.
 
 ```python
-t = read_snapshot_time("sparc_1425", 1)          # → 1000.0 (Alfvén times)
-t_s = read_snapshot_time("sparc_1425", 1, "mks") # → physical seconds
+t = read_snapshot_time("m3dc1_data", 1)          # → 1000.0 (Alfvén times)
+t_s = read_snapshot_time("m3dc1_data", 1, "mks") # → physical seconds
 ```
 
 ---
@@ -90,7 +90,7 @@ Returns `dict[str, np.ndarray]` — each array has length `ntimestep + 1`. The
 `"time"` key gives Alfvén times.
 
 ```python
-traces = read_scalar_traces("sparc_1425", names=["time", "E_K3", "W_M"])
+traces = read_scalar_traces("m3dc1_data", names=["time", "E_K3", "W_M"])
 t   = traces["time"]   # Alfvén times, shape (1001,)
 ke  = traces["E_K3"]   # kinetic energy, shape (1001,)
 ```
@@ -110,7 +110,7 @@ Returns `dict` with keys: `params`, `snapshots`, `final_time`, `R_mag`,
 `Z_mag`, `R_xpoint`, `Z_xpoint`, `psi_min`, `psi_lcfs`.
 
 ```python
-meta = read_case_metadata("sparc_1425")
+meta = read_case_metadata("m3dc1_data")
 # meta["params"]["ntor"]  → 9
 # meta["R_mag"]           → 1.855 m
 # meta["snapshots"]       → [0, 1]
@@ -132,7 +132,7 @@ array in an M3D-C1 HDF5 file.
 Returns `(R, Z)` — two 1-D `float32` arrays sorted lexicographically.
 
 ```python
-R, Z = read_mesh_vertices("sparc_1425/C1.h5")
+R, Z = read_mesh_vertices("m3dc1_data/C1.h5")
 # R shape: (n_vertices,)  R ∈ [1.25, 2.55] m
 ```
 
@@ -154,7 +154,7 @@ Returns `(R, Z, phi_arr)` with identical shapes. **Note:** `eval_field` takes
 arguments as `(name, R, phi, Z, ...)` — pass `phi_arr` before `Z`.
 
 ```python
-R, Z = read_mesh_vertices("sparc_1425/C1.h5")
+R, Z = read_mesh_vertices("m3dc1_data/C1.h5")
 R_eval, Z_eval, phi_eval = make_evaluation_grid(R, Z, mode="mesh")
 # or: R_eval, Z_eval, phi_eval = make_evaluation_grid(R, Z, mode="grid", grid_res=200)
 ```
@@ -175,7 +175,7 @@ from `C1.h5/scalars/`. No m3dc1 dependency.
 Returns `(time, ke)` — two 1-D float arrays of length `ntimestep + 1`.
 
 ```python
-t, ke = compute_ke_growth_trace("sparc_1425")
+t, ke = compute_ke_growth_trace("m3dc1_data")
 # ke[-1] / ke[1]  ≈ 7 × 10⁵  (mode amplitude growth over 1000 τ_A)
 ```
 
@@ -194,7 +194,7 @@ kinetic energy trace. No m3dc1 dependency.
 Returns `float` in units of 1/τ_A. Returns `nan` if insufficient data.
 
 ```python
-gamma = compute_growth_rate("sparc_1425")
+gamma = compute_growth_rate("m3dc1_data")
 # → 0.0067 τ_A⁻¹  (n=9 mode growth rate)
 ```
 
@@ -217,7 +217,7 @@ Returns `dict[str, (psi_norm, profile)]` where each value is a pair of 1-D
 `float64` arrays of length `points`. Fields that fail are omitted.
 
 ```python
-profiles = compute_flux_average_profiles("sparc_1425")
+profiles = compute_flux_average_profiles("m3dc1_data")
 psin, q = profiles["q"]   # safety factor profile vs psi_norm
 ```
 
@@ -254,7 +254,7 @@ Returns `dict` with keys `"R0"` (m), `"a"` (m), `"kappa"`, `"delta"`.
 Returns `{}` on failure.
 
 ```python
-shape = compute_miller_geometry("sparc_1425")
+shape = compute_miller_geometry("m3dc1_data")
 # {"R0": 1.85, "a": 0.57, "kappa": 1.85, "delta": 0.42}
 ```
 
@@ -281,11 +281,58 @@ Returns `dict[str, ndarray]`. Vector fields (B, E, A, j, v) produce keys like
 `"BR"`, `"BPHI"`, `"BZ"`. Shapes match R.
 
 ```python
-R, Z = read_mesh_vertices("sparc_1425/C1.h5")
+R, Z = read_mesh_vertices("m3dc1_data/C1.h5")
 R, Z, phi = make_evaluation_grid(R, Z)
-perts = compute_perturbed_fields("sparc_1425", 1, R, Z, phi, fields=["psi", "B"])
+perts = compute_perturbed_fields("m3dc1_data", 1, R, Z, phi, fields=["psi", "B"])
 # perts["psi"]  → 1-D array, same length as R
 # perts["BR"]   → R-component of perturbed B
+```
+
+---
+
+## Field Evaluation on a Grid  *(requires m3dc1 + fpy)*
+
+### `evaluate_field_on_grid(case_dir, fields, time_idx=-1, coord="scalar", mode="mesh", grid_res=200, phi=0.0, output_path=None)`
+
+Evaluate one or more fields on an (R, Z) grid derived from the mesh vertices or a regular
+Cartesian grid, and optionally save the result to an HDF5 file.
+
+| Parameter     | Type              | Description |
+|---------------|-------------------|-------------|
+| `case_dir`    | path              | M3D-C1 case directory |
+| `fields`      | str or list[str]  | Field name(s), e.g. `"te"` or `["te", "ne", "p"]` |
+| `time_idx`    | int               | `-1` for equilibrium; non-negative integer for a snapshot |
+| `coord`       | str               | `"scalar"` (value or magnitude), `"R"` / `"phi"` / `"Z"` (vector component), or `"all"` (see below) |
+| `mode`        | str               | `"mesh"` (unique mesh vertices, 1-D output) or `"grid"` (regular grid, 2-D output) |
+| `grid_res`    | int               | Points per axis for `mode="grid"` |
+| `phi`         | float             | Toroidal angle in radians |
+| `output_path` | path \| None      | If given, write results to an HDF5 file at this path |
+
+**`coord="all"`** behaviour:
+
+- Scalar fields (e.g. `te`, `p`, `ne`): evaluated as `"scalar"`, stored under the field name.
+- Vector fields (`B`, `E`, `A`, `j`, `v`): all three cylindrical components are evaluated and
+  stored as separate keys — e.g. `"BR"`, `"BPHI"`, `"BZ"` for `field="B"`.
+
+Returns `dict[str, np.ndarray]` with keys `"R"`, `"Z"`, and one key per field or component.
+Array shapes are 1-D for `mode="mesh"` or 2-D `(grid_res, grid_res)` for `mode="grid"`.
+
+```python
+# Equilibrium temperature and density on the mesh vertex grid, saved to file
+result = evaluate_field_on_grid(
+    "m3dc1_data", ["te", "ne", "p"],
+    time_idx=-1, mode="mesh",
+    output_path="equilibrium_scalars.h5",
+)
+# result["te"]  → 1-D array at each mesh vertex
+
+# All components of B on a 200×200 Cartesian grid at snapshot 1
+result = evaluate_field_on_grid(
+    "m3dc1_data", "B",
+    time_idx=1, coord="all", mode="grid", grid_res=200,
+    output_path="B_components.h5",
+)
+# result["BR"], result["BPHI"], result["BZ"]  → each (200, 200)
 ```
 
 ---
@@ -312,7 +359,7 @@ Returns `(m_modes, psi_norm, spectrum)`:
 - `spectrum`: 2-D float array, shape `(len(m_modes), points)`
 
 ```python
-m, psi, spec = compute_poloidal_spectrum("sparc_1425", 1, "p", points=200)
+m, psi, spec = compute_poloidal_spectrum("m3dc1_data", 1, "p", points=200)
 # spec[i, j] = amplitude of mode m[i] at psi_norm[j]
 ```
 
@@ -335,52 +382,7 @@ Returns `dict` with keys `"p"`, `"br"`, `"bz"`, `"bphi"`. Each value is a
 `(m_modes, psi_norm, spectrum)` tuple. Failed fields are absent.
 
 ```python
-spectra = compute_standard_spectra("sparc_1425", 1, points=200)
+spectra = compute_standard_spectra("m3dc1_data", 1, points=200)
 m, psi, spec_p = spectra["p"]
 ```
 
----
-
-## CLI Tools (`clitools/`)
-
-Standalone scripts in `clitools/` wrap the m3dc1-dependent functions for use in an
-agentic pipeline. All scripts accept `--output-json FILE` to write JSON output to
-a file rather than stdout. This is required when using the real m3dc1/fpy libraries,
-which emit diagnostic messages to C/Fortran-level stdout that would otherwise
-contaminate a shell-captured JSON stream.
-
-| Script | Required positional args | Key options |
-|--------|--------------------------|-------------|
-| `compute_flux_average_profiles.py` | `case_dir` | `--fields`, `--fcoords`, `--points`, `--output-json` |
-| `compute_miller_geometry.py` | `case_dir` | `--res`, `--output-json` |
-| `compute_q95.py` | `case_dir` | `--fcoords`, `--points`, `--output-json` |
-| `compute_poloidal_spectrum.py` | `case_dir time_idx field` | `--coord`, `--fcoords`, `--points`, `--full-fft`, `--output-json` |
-| `compute_standard_spectra.py` | `case_dir time_idx` | `--fcoords`, `--points`, `--full-fft`, `--output-json` |
-| `compute_perturbed_fields.py` | `case_dir time_idx` | `--fields`, `--mode`, `--grid-res`, `--phi`, `--output-json`, `--output-npz` |
-
-### Example usage
-
-```bash
-# Write equilibrium profiles to a file; fpy diagnostic noise stays on stdout only
-python clitools/compute_flux_average_profiles.py sparc_1425 --output-json profiles.json
-
-# Read q95 from the resulting file
-python clitools/compute_q95.py sparc_1425 --output-json q95.json
-
-# Poloidal spectrum of pressure at snapshot 1
-python clitools/compute_poloidal_spectrum.py sparc_1425 1 p --output-json spec_p.json
-
-# Perturbed fields: JSON summary to file, full arrays to .npz
-python clitools/compute_perturbed_fields.py sparc_1425 1 \
-    --output-json fields_summary.json --output-npz fields.npz
-```
-
-`compute_q95.py` internally calls `compute_flux_average_profiles` to obtain the q
-profile; there is no need to pre-compute and pass the profile separately.
-
-`compute_perturbed_fields.py` internally calls `read_mesh_vertices` +
-`make_evaluation_grid` to build the evaluation grid; pass `--mode grid --grid-res N`
-for a regular Cartesian grid or leave the default `--mode mesh` for the mesh vertices.
-Full field arrays (one value per mesh point per field) are saved to `.npz` via
-`--output-npz`; the JSON summary contains only statistics (min, max, rms) and field
-names.
