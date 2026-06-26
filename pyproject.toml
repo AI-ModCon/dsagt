@@ -53,7 +53,7 @@ dependencies = [
     # sys.exit(main()) so every successful run exited 1) — that broke
     # agent error-detection on every csvtool call.
     "csvkit>=2.2.0",
-    "h5py>=3.16.0",
+    "h5py>=3.16.0"
 ]
 
 [project.scripts]
@@ -73,6 +73,9 @@ dev = [
 docs = [
     "mkdocs-material>=9.5",
 ]
+
+[project.optional-dependencies]
+fix-certificates = ["truststore>=0.10.4"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
