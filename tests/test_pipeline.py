@@ -15,10 +15,10 @@ from dsagt.provenance import (
     render_snakemake,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_record(trace_dir: Path, record: dict) -> Path:
     trace_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +60,7 @@ def _make_record(
 # load_pipeline_records
 # ---------------------------------------------------------------------------
 
+
 class TestLoadPipelineRecords:
 
     def test_loads_wrapper_records(self, tmp_path):
@@ -86,16 +87,30 @@ class TestLoadPipelineRecords:
         assert len(records) == 0
 
     def test_filters_by_session(self, tmp_path):
-        _write_record(tmp_path, _make_record("a", ["a"], session_id="s1", record_id="r1"))
-        _write_record(tmp_path, _make_record("b", ["b"], session_id="s2", record_id="r2"))
+        _write_record(
+            tmp_path, _make_record("a", ["a"], session_id="s1", record_id="r1")
+        )
+        _write_record(
+            tmp_path, _make_record("b", ["b"], session_id="s2", record_id="r2")
+        )
 
         records = load_pipeline_records(tmp_path, session_id="s1")
         assert len(records) == 1
         assert records[0]["tool_name"] == "a"
 
     def test_sorted_by_timestamp(self, tmp_path):
-        _write_record(tmp_path, _make_record("late", ["late"], timestamp="2024-01-15T11:00:00Z", record_id="r2"))
-        _write_record(tmp_path, _make_record("early", ["early"], timestamp="2024-01-15T09:00:00Z", record_id="r1"))
+        _write_record(
+            tmp_path,
+            _make_record(
+                "late", ["late"], timestamp="2024-01-15T11:00:00Z", record_id="r2"
+            ),
+        )
+        _write_record(
+            tmp_path,
+            _make_record(
+                "early", ["early"], timestamp="2024-01-15T09:00:00Z", record_id="r1"
+            ),
+        )
 
         records = load_pipeline_records(tmp_path)
         assert records[0]["tool_name"] == "early"
@@ -112,6 +127,7 @@ class TestLoadPipelineRecords:
 # ---------------------------------------------------------------------------
 # build_dependency_graph
 # ---------------------------------------------------------------------------
+
 
 class TestBuildDependencyGraph:
 
@@ -161,6 +177,7 @@ class TestBuildDependencyGraph:
 # render_bash
 # ---------------------------------------------------------------------------
 
+
 class TestRenderBash:
 
     def test_basic_script(self):
@@ -175,7 +192,9 @@ class TestRenderBash:
 
     def test_includes_file_comments(self):
         records = [
-            _make_record("fastp", ["fastp"], input_files=["raw.fq"], output_files=["clean.fq"]),
+            _make_record(
+                "fastp", ["fastp"], input_files=["raw.fq"], output_files=["clean.fq"]
+            ),
         ]
         deps = build_dependency_graph(records)
         script = render_bash(records, deps)
@@ -212,12 +231,17 @@ class TestRenderBash:
 # render_snakemake
 # ---------------------------------------------------------------------------
 
+
 class TestRenderSnakemake:
 
     def test_basic_workflow(self):
         records = [
-            _make_record("fastp", ["fastp", "-q", "20"],
-                         input_files=["raw.fq"], output_files=["clean.fq"]),
+            _make_record(
+                "fastp",
+                ["fastp", "-q", "20"],
+                input_files=["raw.fq"],
+                output_files=["clean.fq"],
+            ),
         ]
         deps = build_dependency_graph(records)
         workflow = render_snakemake(records, deps)
@@ -230,7 +254,12 @@ class TestRenderSnakemake:
     def test_multi_step(self):
         records = [
             _make_record("fastp", ["fastp"], output_files=["clean.fq"]),
-            _make_record("megahit", ["megahit"], input_files=["clean.fq"], output_files=["contigs.fa"]),
+            _make_record(
+                "megahit",
+                ["megahit"],
+                input_files=["clean.fq"],
+                output_files=["contigs.fa"],
+            ),
         ]
         deps = build_dependency_graph(records)
         workflow = render_snakemake(records, deps)
@@ -245,21 +274,29 @@ class TestRenderSnakemake:
 # reconstruct_pipeline (end-to-end)
 # ---------------------------------------------------------------------------
 
+
 class TestReconstructPipeline:
 
     def test_bash_format(self, tmp_path):
-        _write_record(tmp_path, _make_record("fastp", ["fastp", "-q", "20"], record_id="r1"))
+        _write_record(
+            tmp_path, _make_record("fastp", ["fastp", "-q", "20"], record_id="r1")
+        )
         script = reconstruct_pipeline(tmp_path, fmt="bash")
 
         assert "#!/usr/bin/env bash" in script
         assert "fastp -q 20" in script
 
     def test_snakemake_format(self, tmp_path):
-        _write_record(tmp_path, _make_record(
-            "fastp", ["fastp"],
-            input_files=["raw.fq"], output_files=["clean.fq"],
-            record_id="r1",
-        ))
+        _write_record(
+            tmp_path,
+            _make_record(
+                "fastp",
+                ["fastp"],
+                input_files=["raw.fq"],
+                output_files=["clean.fq"],
+                record_id="r1",
+            ),
+        )
         workflow = reconstruct_pipeline(tmp_path, fmt="snakemake")
 
         assert "rule fastp_1:" in workflow
@@ -270,8 +307,12 @@ class TestReconstructPipeline:
         assert "No execution records found" in result
 
     def test_session_filter(self, tmp_path):
-        _write_record(tmp_path, _make_record("a", ["a"], session_id="s1", record_id="r1"))
-        _write_record(tmp_path, _make_record("b", ["b"], session_id="s2", record_id="r2"))
+        _write_record(
+            tmp_path, _make_record("a", ["a"], session_id="s1", record_id="r1")
+        )
+        _write_record(
+            tmp_path, _make_record("b", ["b"], session_id="s2", record_id="r2")
+        )
 
         script = reconstruct_pipeline(tmp_path, session_id="s1", fmt="bash")
         assert "Step 1: a" in script
@@ -279,22 +320,37 @@ class TestReconstructPipeline:
 
     def test_full_pipeline_with_deps(self, tmp_path):
         """Three-step pipeline: fastp → megahit → quast."""
-        _write_record(tmp_path, _make_record(
-            "fastp", ["fastp", "-q", "20", "--in1", "raw.fq.gz"],
-            output_files=["clean.fq.gz"],
-            timestamp="2024-01-15T10:00:00Z", record_id="r1",
-        ))
-        _write_record(tmp_path, _make_record(
-            "megahit", ["megahit", "-r", "clean.fq.gz", "-o", "assembly"],
-            input_files=["clean.fq.gz"],
-            output_files=["assembly/final.contigs.fa"],
-            timestamp="2024-01-15T10:10:00Z", record_id="r2",
-        ))
-        _write_record(tmp_path, _make_record(
-            "quast", ["quast", "assembly/final.contigs.fa", "-o", "quast_out"],
-            input_files=["assembly/final.contigs.fa"],
-            timestamp="2024-01-15T10:20:00Z", record_id="r3",
-        ))
+        _write_record(
+            tmp_path,
+            _make_record(
+                "fastp",
+                ["fastp", "-q", "20", "--in1", "raw.fq.gz"],
+                output_files=["clean.fq.gz"],
+                timestamp="2024-01-15T10:00:00Z",
+                record_id="r1",
+            ),
+        )
+        _write_record(
+            tmp_path,
+            _make_record(
+                "megahit",
+                ["megahit", "-r", "clean.fq.gz", "-o", "assembly"],
+                input_files=["clean.fq.gz"],
+                output_files=["assembly/final.contigs.fa"],
+                timestamp="2024-01-15T10:10:00Z",
+                record_id="r2",
+            ),
+        )
+        _write_record(
+            tmp_path,
+            _make_record(
+                "quast",
+                ["quast", "assembly/final.contigs.fa", "-o", "quast_out"],
+                input_files=["assembly/final.contigs.fa"],
+                timestamp="2024-01-15T10:20:00Z",
+                record_id="r3",
+            ),
+        )
 
         script = reconstruct_pipeline(tmp_path, session_id="s1", fmt="bash")
 

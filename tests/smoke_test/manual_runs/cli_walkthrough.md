@@ -1,6 +1,6 @@
 # BYOA CLI hand-test
 
-Tests goose, codex, opencode, and claude in the BYOA-CLI flow (no proxy, no IDE extension).
+Tests goose, codex, opencode, and claude in the BYOA-CLI flow (no IDE extension).
 
 Replace `<AGENT>` below with one of: `goose`, `codex`, `opencode`, `claude`.
 

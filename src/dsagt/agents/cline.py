@@ -6,7 +6,7 @@ Generates: ``.clinerules/dsagt_instructions.md``;
 ``cline auth`` + ``cline mcp add`` run per-init in
 :meth:`ClineSetup.write_dynamic` and write to ``$CLINE_DIR/data/``.
 
-**BYOA Phase 1 status: PUNTED for batch / smoke-test.** Cline's bundled
+**Batch / smoke-test status: NOT SUPPORTED.** Cline's bundled
 ``lib.mjs`` ships a hardcoded anthropic-provider model whitelist
 (``claude-haiku-4-5-20251001``, ``claude-sonnet-4-5-20250929``, etc. —
 all without the ``-v1-project`` suffix lab gateways like PNNL require).
@@ -20,11 +20,8 @@ because PNNL only serves the suffixed variant.
 The openai-native path has the same problem (whitelisted ``gpt-5.5``,
 ``gpt-4o`` etc.; PNNL serves ``-project``-suffixed variants).  Bedrock
 is locked behind ``cline auth``'s interactive setup flow, not the CLI.
-
-Phase 2 reactivates batch mode: ``dsagt-proxy`` aliases the cline-
-substituted name back to the upstream's served name (same trick old_code
-used for roo).  Until then, ``cline.run_script`` raises ``RuntimeError``
-and the smoke test short-circuits in ``tests/smoke_test/run.sh``.
+So ``cline.run_script`` raises ``RuntimeError`` and the smoke test
+short-circuits in ``tests/smoke_test/run.sh``.
 
 Interactive use is unaffected — ``dsagt init --agent cline`` still
 writes the project state, and users running cline via VS Code (where
@@ -41,15 +38,6 @@ Activation also uses non-standard ``CLINE_OTEL_*``-prefixed env vars
 that ignore our standard ``OTEL_EXPORTER_OTLP_ENDPOINT``.  Memory
 extraction will see no agent-conversation traces; tool execution and KB
 observability still work via dsagt-run / MCP-server spans.
-
-Workaround: ``dsagt start --enable-proxy`` makes every cline LLM call
-visible in MLflow — each agent turn becomes an inspectable trace
-(messages + assistant response + tool_use blocks) you can audit live or
-replay.  The dsagt-proxy interposes on cline's LLM calls, forwards them
-to the user's upstream, and emits an OTel trace on cline's behalf.
-Memory extraction is a downstream consequence — but the primary value
-of the flag is being able to see what cline is doing at all.  Adds one
-subprocess per project session.  See ``commands/proxy_server.py``.
 
 MCP config: hand-writing ``cline_mcp_settings.json`` is silently ignored;
 the only path cline loads is via ``cline mcp add``, which writes a
@@ -71,7 +59,6 @@ from .base import (
     _DSAGT_MARKER,
     _load_master_instructions,
     _mcp_env_block,
-    _run_simple_script,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,14 +78,12 @@ class ClineSetup(AgentSetup):
     # path needs a non-standard model env var.  Anthropic is the only
     # path with consistent env conventions: ``ANTHROPIC_BASE_URL`` is read
     # by cline's anthropic SDK at runtime, covering api.anthropic.com and
-    # gateway endpoints alike.  Match roo's policy.
+    # gateway endpoints alike.
     credential_env_vars = (
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_BASE_URL",
         "ANTHROPIC_MODEL",
     )
-    # Cline emits no OTel — agent-side telemetry only via --proxy_traces.
-    telemetry_env = {}
     credential_hints = (
         (
             "ANTHROPIC_API_KEY",
@@ -118,6 +103,13 @@ class ClineSetup(AgentSetup):
             "(e.g. claude-haiku-4-5-20251001-v1-project)",
         ),
     )
+
+    def owned_artifacts(self, working_dir: Path) -> list[Path]:
+        return [
+            working_dir / ".clinerules",
+            working_dir / ".cline-data",
+            working_dir / ".cline",
+        ]
 
     def write_static(self, working_dir: Path) -> list[str]:
         actions: list[str] = []
@@ -257,156 +249,17 @@ class ClineSetup(AgentSetup):
         actions.append(
             f"Registered MCP servers and patched {len(mcp_env)} env vars into {mcp_path}"
         )
-
-        # ``launch_oneliner`` (used by ``dsagt init`` printout) tells
-        # the user to run ``cline -v -y -a --config <pdir>/.cline-data``
-        # — the per-project state dir we just populated above.
-        return actions
-
-    # --- Phase 2 proxy-mode write_dynamic --------------------------------
-    # Differs from BYOA only in the auth call: ``cline auth -p openai -b
-    # http://localhost:<proxy_port> -k <sentinel> -m <model>`` instead of
-    # ``-p anthropic``.  The MCP-add + JSON-patch steps are identical, so
-    # we extract them into a helper.
-
-    def _patch_mcp_servers(
-        self,
-        config: dict,
-        working_dir: Path,
-        cline_dir: str,
-    ) -> str:
-        """Idempotent ``cline mcp add`` + JSON env-block patch.
-        Returns the action string for the printout.
-        """
-        mcp_path = Path(cline_dir) / "data" / "settings" / "cline_mcp_settings.json"
-        existing: set[str] = set()
-        if mcp_path.exists():
-            try:
-                existing = set(
-                    json.loads(mcp_path.read_text()).get("mcpServers", {}).keys()
-                )
-            except (json.JSONDecodeError, OSError):
-                existing = set()
-
-        if "dsagt" not in existing:
-            add_cmd = [
-                "cline",
-                "mcp",
-                "add",
-                "--config",
-                cline_dir,
-                "dsagt",
-                "--",
-                "uv",
-                "run",
-                "dsagt-server",
-            ]
-            result = subprocess.run(
-                add_cmd,
-                cwd=str(working_dir),
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                detail = (result.stderr or result.stdout).strip()
-                raise RuntimeError(
-                    f"cline mcp add dsagt failed "
-                    f"(exit {result.returncode}): {detail}"
-                )
-
-        if not mcp_path.exists():
-            raise RuntimeError(
-                f"cline mcp add succeeded but {mcp_path} was not created — "
-                "cline may have changed its config layout."
-            )
-        settings = json.loads(mcp_path.read_text())
-        mcp_env = _mcp_env_block(config)
-        for entry in settings.get("mcpServers", {}).values():
-            entry["env"] = mcp_env
-        mcp_path.write_text(json.dumps(settings, indent=2) + "\n")
-        return (
-            f"Registered MCP servers and patched {len(mcp_env)} "
-            f"env vars into {mcp_path}"
-        )
-
-    def proxy_write_dynamic(
-        self,
-        config: dict,
-        env: dict,
-        working_dir: Path,
-        pdir: Path,
-    ) -> list[str]:
-        """Phase-2 proxy-mode setup.  Cline auths against the
-        localhost dsagt-proxy with the sentinel API key (real upstream
-        creds live only in the proxy subprocess).  Provider is forced
-        to ``openai`` because cline auth's ``-b/--baseurl`` flag is
-        openai-only — the proxy speaks /chat/completions on every
-        upstream regardless of what the agent emits, so this is fine.
-        """
-        del pdir
-        from .base import _PROXY_FORWARDED_SENTINEL
-
-        actions: list[str] = []
-        cline_dir = str(working_dir / ".cline-data")
-        Path(cline_dir).mkdir(parents=True, exist_ok=True)
-
-        proxy_port = (config.get("proxy") or {}).get("port")
-        model = (config.get("llm") or {}).get("model")
-        if not proxy_port or not model:
-            raise RuntimeError(
-                "cline proxy-mode write_dynamic requires "
-                "config['proxy']['port'] and config['llm']['model']."
-            )
-        auth_cmd = [
-            "cline",
-            "auth",
-            "--config",
-            cline_dir,
-            "-p",
-            "openai",
-            "-k",
-            _PROXY_FORWARDED_SENTINEL,
-            "-m",
-            model,
-            "-b",
-            f"http://localhost:{proxy_port}",
-        ]
-        result = subprocess.run(
-            auth_cmd,
-            env=env,
-            cwd=str(working_dir),
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip()
-            raise RuntimeError(
-                f"cline auth (proxy) failed (exit {result.returncode}): {detail}"
-            )
-        actions.append(f"Configured cline auth at {cline_dir} (proxy mode)")
-        actions.append(self._patch_mcp_servers(config, working_dir, cline_dir))
         return actions
 
     def runtime_env(self, config: dict) -> dict[str, str]:
-        """BYOA infrastructure: per-project ``CLINE_DIR`` (state dir)
-        plus inherited telemetry flags.  Isolates per-project MCP /
-        auth state from the global ``~/.cline-data``.
+        """BYOA infrastructure: per-project ``CLINE_DIR`` (state dir).
+
+        Isolates per-project MCP / auth state from the global
+        ``~/.cline-data``.
         """
         env = super().runtime_env(config)
         env["CLINE_DIR"] = str(Path(config["project_dir"]) / ".cline-data")
         return env
-
-    def launch_oneliner(self, project: str, project_dir: Path) -> str:
-        """Cline needs ``--config <pdir>/.cline-data`` so it picks up
-        the MCP-server registrations + auth state ``write_dynamic``
-        wrote.  Also ``-v -y -a`` for verbose / auto-yes / act-mode.
-        """
-        del project
-        import shlex
-
-        pdir = shlex.quote(str(project_dir))
-        cline_dir = shlex.quote(str(project_dir / ".cline-data"))
-        return f"cd {pdir} && cline -v -y -a --config {cline_dir}"
 
     def run_script(
         self,
@@ -416,49 +269,18 @@ class ClineSetup(AgentSetup):
         script_path: Path,
         max_turns: int,
     ) -> int:
-        """Punted in BYOA Phase 1 — see module docstring.
+        """Not supported for cline — see module docstring.
 
         Cline's bundled anthropic provider hardcodes a model-ID whitelist
         that doesn't include lab-gateway aliases (``-v1-project`` etc.),
         so the request silently substitutes a default cline thinks it
-        knows and the gateway 401s.  Phase 2 ``dsagt-proxy`` fixes this
-        by aliasing names back to the upstream's served IDs.
+        knows and the gateway 401s.
         """
         del config, env, working_dir, script_path, max_turns
         raise RuntimeError(
-            "cline batch mode is punted in Phase 1 BYOA — cline's anthropic "
+            "cline batch mode is not supported — cline's anthropic "
             "provider rewrites unrecognized model names (lab-gateway "
             "aliases like ``-v1-project``) to its hardcoded default, "
-            "which the gateway then rejects.  Phase 2 reactivates this "
-            "via dsagt-proxy aliasing.  See agents/cline.py module "
+            "which the gateway then rejects.  See agents/cline.py module "
             "docstring."
         )
-
-    def proxy_run_script(
-        self,
-        config: dict,
-        env: dict,
-        working_dir: Path,
-        script_path: Path,
-        max_turns: int,
-    ) -> int:
-        """Phase-2 proxy-mode batch run.  Un-punts cline:
-        ``proxy_write_dynamic`` already configured cline auth against
-        the localhost proxy + registered our MCP servers, so we just
-        invoke cline pointing at the per-project state dir.  The proxy
-        translates lab-gateway-aliased model names back to upstream-
-        served names, sidestepping cline's hardcoded whitelist.
-        """
-        del max_turns
-        text = script_path.read_text().strip()
-        if not text:
-            return 1
-        cline_dir = env.get("CLINE_DIR") or str(
-            Path(config["project_dir"]) / ".cline-data"
-        )
-        # ``-a`` (act mode) — without it cline defaults to its task UI
-        # mode whose model fallback is ``gpt-5.5`` regardless of what
-        # ``cline auth`` configured for plan/act modes.  Model comes
-        # from the per-project auth state ``proxy_write_dynamic`` populated.
-        cmd = ["cline", "-v", "-y", "-a", "--config", cline_dir, text]
-        return _run_simple_script(cmd, env, working_dir, self.install_hint)

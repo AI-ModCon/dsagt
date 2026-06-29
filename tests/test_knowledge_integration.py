@@ -24,7 +24,10 @@ pytestmark = pytest.mark.integration
 
 from dsagt.knowledge import KnowledgeBase
 from dsagt.mcp.knowledge_tools import create_knowledge_server, setup_runtime_kb
-from mcp_helpers import call_tool_json as call_tool, call_tool_async as _call_tool_async_raw
+from mcp_helpers import (
+    call_tool_json as call_tool,
+    call_tool_async as _call_tool_async_raw,
+)
 
 
 async def _call_tool_async(server, name: str, arguments: dict) -> dict:
@@ -32,7 +35,9 @@ async def _call_tool_async(server, name: str, arguments: dict) -> dict:
     return json.loads(await _call_tool_async_raw(server, name, arguments))
 
 
-async def call_tool_and_await_job(server, name: str, arguments: dict) -> tuple[dict, dict]:
+async def call_tool_and_await_job(
+    server, name: str, arguments: dict
+) -> tuple[dict, dict]:
     """Call a tool that starts a background job, wait for it, return (initial, final)."""
     initial = await _call_tool_async(server, name, arguments)
     assert initial["status"] == "started"
@@ -50,6 +55,7 @@ async def call_tool_and_await_job(server, name: str, arguments: dict) -> tuple[d
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def smoke_test_dir():
@@ -94,6 +100,7 @@ def kb_server(tmp_path, smoke_test_dir, embedding_config):
 # Ingest via MCP handler
 # ---------------------------------------------------------------------------
 
+
 class TestIngestIntegration:
 
     def test_ingest_smoke_test_docs(self, tmp_path, smoke_test_dir, embedding_config):
@@ -121,14 +128,19 @@ class TestIngestIntegration:
 # Search via MCP handler
 # ---------------------------------------------------------------------------
 
+
 class TestSearchIntegration:
 
     def test_search_returns_results(self, kb_server):
         """Search through MCP handler returns relevant chunks."""
-        result = call_tool(kb_server, "kb_search", {
-            "query": "how to handle large files",
-            "collection": "knowledge",
-        })
+        result = call_tool(
+            kb_server,
+            "kb_search",
+            {
+                "query": "how to handle large files",
+                "collection": "knowledge",
+            },
+        )
 
         assert result["status"] == "ok"
         assert result["result_count"] > 0
@@ -137,31 +149,43 @@ class TestSearchIntegration:
 
     def test_search_nonexistent_collection(self, kb_server):
         """Searching a nonexistent collection returns an error."""
-        result = call_tool(kb_server, "kb_search", {
-            "query": "anything",
-            "collection": "nonexistent",
-        })
+        result = call_tool(
+            kb_server,
+            "kb_search",
+            {
+                "query": "anything",
+                "collection": "nonexistent",
+            },
+        )
 
         assert result["status"] == "error"
 
     def test_search_with_top_k(self, kb_server):
         """top_k limits the number of results."""
-        result = call_tool(kb_server, "kb_search", {
-            "query": "installation",
-            "collection": "knowledge",
-            "top_k": 2,
-        })
+        result = call_tool(
+            kb_server,
+            "kb_search",
+            {
+                "query": "installation",
+                "collection": "knowledge",
+                "top_k": 2,
+            },
+        )
 
         assert result["status"] == "ok"
         assert result["result_count"] <= 2
 
     def test_search_result_format(self, kb_server):
         """Each result has expected fields."""
-        result = call_tool(kb_server, "kb_search", {
-            "query": "API reference",
-            "collection": "knowledge",
-            "top_k": 1,
-        })
+        result = call_tool(
+            kb_server,
+            "kb_search",
+            {
+                "query": "API reference",
+                "collection": "knowledge",
+                "top_k": 1,
+            },
+        )
 
         assert result["status"] == "ok"
         if result["result_count"] > 0:
@@ -175,6 +199,7 @@ class TestSearchIntegration:
 # ---------------------------------------------------------------------------
 # List collections via MCP handler
 # ---------------------------------------------------------------------------
+
 
 class TestListCollectionsIntegration:
 
@@ -192,9 +217,12 @@ class TestListCollectionsIntegration:
 # Setup runtime KB with symlinks
 # ---------------------------------------------------------------------------
 
+
 class TestSetupRuntimeKB:
 
-    def test_symlinks_base_collections(self, tmp_path, smoke_test_dir, embedding_config):
+    def test_symlinks_base_collections(
+        self, tmp_path, smoke_test_dir, embedding_config
+    ):
         """setup_runtime_kb symlinks base collections into runtime."""
         base_dir = tmp_path / "base_kb"
         base_dir.mkdir()
@@ -211,9 +239,11 @@ class TestSetupRuntimeKB:
         knowledge_link = runtime_kb_dir / "knowledge"
         assert knowledge_link.exists()
         assert knowledge_link.is_symlink()
-        assert (knowledge_link / "index.faiss").exists()
+        assert (knowledge_link / "chroma_ids.json").exists()
 
-    def test_runtime_search_via_symlink(self, tmp_path, smoke_test_dir, embedding_config):
+    def test_runtime_search_via_symlink(
+        self, tmp_path, smoke_test_dir, embedding_config
+    ):
         """A KB pointing at runtime symlinks can search successfully."""
         base_dir = tmp_path / "base_kb"
         base_dir.mkdir()

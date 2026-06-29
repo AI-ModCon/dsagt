@@ -61,7 +61,7 @@ test -s ~/dsagt-projects/smoke-<AGENT>/explicit_memories.yaml && echo OK
 In MLflow UI:
 
 - **claude extension:** same trace shape as claude CLI — full `api_response_body` + `tool_use` payloads in OTel log events (gated by `CLAUDE_CODE_*` / `OTEL_LOG_*` env vars; the extension reads them from the shell or VS Code's `terminal.integrated.env.osx` setting).
-- **roo extension:** no agent LLM-call OTel (roo emits none natively). MCP-server spans (`kb.*`, `registry.*`) and `dsagt-run` `tool.execute` spans only. For LLM-call visibility with roo, switch to the proxy walkthrough.
+- **roo extension:** no agent LLM-call OTel (roo emits none natively). MCP-server spans (`kb.*`, `registry.*`) and `dsagt-run` `tool.execute` spans only.
 
 ## Notes
 

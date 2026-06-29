@@ -1,14 +1,19 @@
 # Observability
 
-DSAgt provides end-to-end trace visibility through a local MLflow instance. All internal layers emit OTLP HTTP spans to MLflow's `/v1/traces` endpoint.
-
-## Starting MLflow
+DSAgt logs traces to a **serverless MLflow store** — a SQLite file at `<project>/mlflow.db`. There is no server or daemon to start or stop; the file is created lazily on the first span. View it with MLflow's UI pointed at the file:
 
 ```bash
-dsagt mlflow <project-name>
+mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
 ```
 
-Prints the MLflow UI URL and the `export` block for routing agent OTel output. The port is pinned at `dsagt init` time and listed by `dsagt info <name>`.
+`dsagt info <name>` prints the resolved tracking URI and a session/trace summary. The tracking URI resolves as `MLFLOW_TRACKING_URI` env → project config → the `sqlite:///<project>/mlflow.db` default, and never raises.
+
+## Two feeds
+
+DSAgt is **BYOA** and does not interpose on the agent's LLM traffic. Traces come from two places:
+
+1. **First-party spans (live).** DSAgt instruments its own code and emits spans directly to the store as it runs.
+2. **Agent traces (post-hoc).** The MCP server's in-session heartbeat reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — so prompts, responses, and tool calls are recovered without any proxy or credentials.
 
 ## Trace Coverage
 
@@ -17,29 +22,18 @@ Prints the MLflow UI URL and the `export` block for routing agent OTel output. T
 | Knowledge base | `kb.search`, `kb.embed`, `kb.index_search`, `kb.rerank` | Per-phase timing trees |
 | Tool executions | `tool.execute` | Exit code, duration, file counts, truncated stderr. Full payload in `trace_archive/<record_id>.json` |
 | Registry events | `save_tool_spec`, `install_dependencies`, `reconstruct_pipeline` | Span metadata |
-| Native agent OTel | LLM call spans | Coverage varies by agent (see below) |
+| Agent traces | one AGENT subtree per turn (`llm` / `tool_<name>` children) | Prompts, responses, tool calls, and token usage where the transcript carries them |
 
-### Agent OTel Coverage
+### Agent trace coverage
 
-Export the variables printed by `dsagt mlflow` before launching your agent:
+Agent traces are reconstructed from each agent's on-disk session record, so coverage no longer depends on the agent emitting OTel. A per-agent reader + translator runs for every supported agent (claude, codex, goose, opencode, cline); claude additionally wires an `mlflow autolog` Stop hook at `dsagt init`. Fidelity is capped by what the transcript persisted (e.g. token counts and timing appear where the agent recorded them).
 
-| Agent | Coverage |
-|-------|----------|
-| claude | Full request/response payloads |
-| goose | Full request/response payloads |
-| codex | Token counts and tool names |
-| opencode | None natively |
+Every span carries the project's session id (minted per launch into `<project>/.dsagt/state.yaml`) for filtering in the MLflow trace view.
 
-Every span carries the project's `session.id` for filtering in the MLflow trace view.
+## The heartbeat
+
+The trace scan runs as a periodic heartbeat inside the long-lived MCP server — the one DSAgt process alive in every launch flow. Each tick reads new transcript records, translates completed turns, and fans out to subscribers (the MLflow sink always; the episodic-memory extractor when enabled). Correctness rests on idempotency: each subscriber keeps its own ack set, so a re-tick or a next-session catch-up can never double-log or lose a turn. The same heartbeat incrementally indexes `dsagt-run` tool-execution records into the `tool_use` collection.
 
 ## Provenance and Reconstruction
 
-Tool execution records on disk (`trace_archive/<record_id>.json`) provide the canonical provenance chain. The agent calls `reconstruct_pipeline` to render the archive as a reproducible bash script or Snakemake workflow.
-
-## Stopping MLflow
-
-```bash
-dsagt stop <project-name>
-```
-
-Releases the port and stops the gunicorn workers. The PID is stored in `<project>/.runtime`.
+Tool execution records on disk (`trace_archive/<record_id>.json`) provide the canonical provenance chain. The agent calls `reconstruct_pipeline` to render the archive as a reproducible bash script or Snakemake workflow (which also flushes the latest tool-use records into the searchable index first).

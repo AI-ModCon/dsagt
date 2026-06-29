@@ -1,0 +1,12 @@
+DSAGT (DataSmith Agent)
+Copyright 2026 the DSAGT authors
+
+This product includes software developed at Databricks, Inc.
+
+Portions of src/dsagt/traces.py (the Claude transcript-parsing grammar — last
+user-message selection, per-turn input windowing, and next-timestamp span
+durations) are ported and adapted from MLflow's mlflow/claude_code/tracing.py.
+
+  MLflow — Copyright (c) Databricks, Inc.
+  Licensed under the Apache License, Version 2.0.
+  https://github.com/mlflow/mlflow

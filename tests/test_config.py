@@ -23,7 +23,7 @@ from dsagt.agents import (
     static_agent_record,
     static_agent_files_present,
 )
-from dsagt.session import init_project, persist_agent_choice
+from dsagt.session import init_project
 
 
 @pytest.fixture(autouse=True)
@@ -36,10 +36,10 @@ def _use_tmp_registry(tmp_path):
     registry = {}
 
     def fake_load():
-        # Auto-discover: any subdir of tmp_path with dsagt_config.yaml counts
+        # Auto-discover: any subdir of tmp_path with .dsagt/config.yaml counts
         discovered = dict(registry)
         for child in tmp_path.iterdir():
-            if child.is_dir() and (child / "dsagt_config.yaml").exists():
+            if child.is_dir() and (child / ".dsagt" / "config.yaml").exists():
                 discovered.setdefault(child.name, str(child))
         return discovered
 
@@ -50,12 +50,21 @@ def _use_tmp_registry(tmp_path):
     def fake_register(name, path):
         registry[name] = str(Path(path).resolve())
 
+    # Isolate the shared KB to tmp_path and stub the asset build so init
+    # tests stay fast and offline (no embedding-model load, no git clone).
+    def _noop_ensure_assets(*_a, **_k):
+        return {"built": [], "skipped": []}
+
     with patch("dsagt.session._load_registry", fake_load):
         with patch("dsagt.session._save_registry", fake_save):
             with patch("dsagt.session.register_project", fake_register):
                 with patch("dsagt.session.DEFAULT_PROJECTS_BASE", tmp_path):
-                    with patch("dsagt.session.DEFAULT_PROJECTS_BASE", tmp_path):
-                        yield
+                    with patch("dsagt.session.REGISTRY_DIR", tmp_path):
+                        with patch(
+                            "dsagt.commands.setup_core_kb.ensure_assets",
+                            _noop_ensure_assets,
+                        ):
+                            yield
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +120,8 @@ class TestLoadConfig:
 
     def _write_config(self, tmp_path, name, content: dict):
         pdir = tmp_path / name
-        pdir.mkdir(exist_ok=True)
-        (pdir / "dsagt_config.yaml").write_text(
+        (pdir / ".dsagt").mkdir(parents=True, exist_ok=True)
+        (pdir / ".dsagt" / "config.yaml").write_text(
             yaml.dump(content, default_flow_style=False)
         )
         return name
@@ -132,32 +141,15 @@ class TestLoadConfig:
 
         assert config["project"] == "myproject"
         assert config["agent"] == "goose"
-        # Ports are no longer defaulted in YAML — start_services picks them
-        # at runtime via socket.bind(("", 0)) and writes them to .runtime.
-        assert "proxy" not in config or "port" not in config.get("proxy", {})
+        # Serverless: no mlflow block at all — the store is a sqlite path
+        # resolved from the project dir, nothing to pin in config.
+        assert "proxy" not in config
+        assert "mlflow" not in config
         # User-supplied keys win on the merge; DEFAULTS fills in missing
         # llm.* fields with ``${VAR}`` placeholders (resolved by
         # ``resolve_env_vars`` against the user's shell, or filtered by
-        # ``_real()`` if env unset).  In BYOA the agent_env gate prevents
-        # env_overrides from acting on these — they only matter when
-        # --enable-proxy populates ``config["proxy"]["port"]``.
+        # ``_real()`` if env unset).
         assert config["llm"]["provider"] == "openai"  # user value preserved
-        assert config["mlflow"]["backend"] == "sqlite"  # non-llm defaults kept
-
-    def test_overrides_defaults(self, tmp_path):
-        name = self._write_config(
-            tmp_path,
-            "myproject",
-            {
-                "project": "myproject",
-                "agent": "claude",
-                "llm": {"provider": "openai"},
-                "proxy": {"port": 9000},  # explicit override stays honored
-            },
-        )
-
-        config = load_config(name)
-        assert config["proxy"]["port"] == 9000
 
     def test_missing_project_raises(self, tmp_path):
         name = self._write_config(tmp_path, "myproject", {"agent": "goose"})
@@ -165,18 +157,20 @@ class TestLoadConfig:
             load_config(name)
 
     def test_skills_block_backfilled_for_old_config(self, tmp_path):
-        """A config written before the skills block still gets the default."""
+        """A config with no skills block gets the default genesis source.
+
+        ``populate_native`` is a code default (in ``AgentSetup.setup_skills``),
+        not a config key — so it isn't backfilled here."""
         name = self._write_config(
             tmp_path,
             "myproject",
-            {"project": "myproject", "agent": "claude", "llm": {"provider": "openai"}},
+            {"project": "myproject", "agent": "claude"},
         )
         config = load_config(name)
         sources = config["skills"]["sources"]
-        assert sources[0]["name"] == "scientific"
-        assert "K-Dense-AI" in sources[0]["url"]
-        assert config["skills"]["populate_native"] is True
-        assert config["skills"]["populate_catalog"] is True
+        assert sources[0]["name"] == "genesis"
+        assert "genesis-skills" in sources[0]["url"]
+        assert "populate_native" not in config["skills"]
 
     def test_missing_agent_raises(self, tmp_path):
         name = self._write_config(tmp_path, "myproject", {"project": "myproject"})
@@ -213,11 +207,11 @@ class TestSkillsDefaults:
     def test_defaults_has_skills(self):
         from dsagt.session import DEFAULTS
 
-        assert DEFAULTS["skills"]["sources"][0]["name"] == "scientific"
+        assert DEFAULTS["skills"]["sources"][0]["name"] == "genesis"
 
     def test_default_config_content_includes_skills(self):
-        body = yaml.safe_load(default_config_content("p", "claude", 5001))
-        assert body["skills"]["sources"][0]["name"] == "scientific"
+        body = yaml.safe_load(default_config_content("p", "claude"))
+        assert body["skills"]["sources"][0]["name"] == "genesis"
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +236,7 @@ class TestProjectDir:
 class TestDefaultConfigContent:
 
     def test_roundtrips_as_valid_yaml(self):
-        content = default_config_content("test", "goose", mlflow_port=5000)
+        content = default_config_content("test", "goose")
         parsed = yaml.safe_load(content)
         assert parsed["project"] == "test"
         assert parsed["agent"] == "goose"
@@ -250,15 +244,133 @@ class TestDefaultConfigContent:
     def test_no_user_facing_llm_block(self):
         """BYOA: project YAML is internal-only — no llm: block, no
         ${VAR} placeholders.  User credentials live in their shell."""
-        content = default_config_content("test", "claude", mlflow_port=5000)
+        content = default_config_content("test", "claude")
         parsed = yaml.safe_load(content)
         assert "llm" not in parsed
         assert "${" not in content
 
-    def test_pinned_mlflow_port_lands_in_yaml(self):
-        content = default_config_content("test", "claude", mlflow_port=12345)
+    def test_no_mlflow_port_pinned(self):
+        """Serverless store — nothing to pin.  The config carries no
+        mlflow block at all."""
+        content = default_config_content("test", "claude")
         parsed = yaml.safe_load(content)
-        assert parsed["mlflow"]["port"] == 12345
+        assert "mlflow" not in parsed
+
+
+# ---------------------------------------------------------------------------
+# CLI: init choice resolution (_collect_settings)
+# ---------------------------------------------------------------------------
+
+
+class TestCollectSettings:
+    """``_collect_settings`` resolves the init choices into the config blocks.
+
+    Two selection questions (KB collections, skill sources) + agent; the
+    bundled ``tools`` collection is always provisioned and not a choice.
+    """
+
+    def test_interactive_menus(self):
+        """Interactive path drives questionary select/checkbox; genesis is the
+        default-checked skill source, collections default to none, tools is
+        always in the provisioning set."""
+        import types
+        import questionary
+        from unittest.mock import patch
+        from dsagt.commands import cli
+
+        def fake_select(message, choices, default, **kw):
+            return _Ask(default)
+
+        def fake_checkbox(message, choices, **kw):
+            return _Ask([c.value for c in choices if c.checked])
+
+        class _Ask:
+            def __init__(self, ret):
+                self.ret = ret
+
+            def ask(self):
+                return self.ret
+
+        args = types.SimpleNamespace(agent=None, include=None, exclude=None)
+        with (
+            patch.object(questionary, "select", fake_select),
+            patch.object(questionary, "checkbox", fake_checkbox),
+            patch.object(cli, "_confirm", lambda *a, **k: False),  # episodic off
+        ):
+            s = cli._collect_settings(args, interactive=True, existing={}, pdir=None)
+
+        assert s["agent"] == "claude"
+        assert s["knowledge"] == {"collections": []}
+        assert [src["name"] for src in s["skills"]["sources"]] == ["genesis"]
+        assert s["assets"] == ["tools", "genesis"]  # tools always provisioned
+        assert s["episodic"] is None  # opt-in, off by default
+
+    def test_interactive_episodic_enabled(self):
+        """Enabling episodic at the prompt yields a Tier-1 local-judge block
+        with the free-text domain tags merged in."""
+        import types
+        import questionary
+        from unittest.mock import patch
+        from dsagt.commands import cli
+
+        class _Ask:
+            def __init__(self, ret):
+                self.ret = ret
+
+            def ask(self):
+                return self.ret
+
+        args = types.SimpleNamespace(agent=None, include=None, exclude=None)
+        with (
+            patch.object(questionary, "select", lambda *a, **k: _Ask("claude")),
+            patch.object(questionary, "checkbox", lambda *a, **k: _Ask([])),
+            patch.object(cli, "_confirm", lambda *a, **k: True),
+            patch.object(cli, "_prompt", lambda *a, **k: "assembly, variant_calling"),
+        ):
+            s = cli._collect_settings(args, interactive=True, existing={}, pdir=None)
+
+        assert s["episodic"]["enabled"] is True
+        assert s["episodic"]["judge"]["backend"] == "local"
+        assert s["episodic"]["domain_tags"] == {
+            "assembly": "assembly",
+            "variant_calling": "variant_calling",
+        }
+
+    def test_non_interactive_splits_assets(self):
+        """No-TTY path splits --include into collections vs skill sources;
+        tools is always provisioned.  Episodic omitted → None."""
+        import types
+        from dsagt.commands import cli
+
+        args = types.SimpleNamespace(
+            agent="goose", include=["tools", "nemo_curator", "anthropic"], exclude=None
+        )
+        s = cli._collect_settings(args, interactive=False, existing={}, pdir=None)
+        assert s["agent"] == "goose"
+        assert s["knowledge"]["collections"] == ["nemo_curator"]
+        assert [src["name"] for src in s["skills"]["sources"]] == ["anthropic"]
+        assert s["assets"] == ["tools", "nemo_curator", "anthropic"]
+        assert s["episodic"] is None
+
+    def test_non_interactive_episodic_flag(self):
+        """--episodic + --domain-tags build the Tier-1 block on the no-TTY path."""
+        import types
+        from dsagt.commands import cli
+
+        args = types.SimpleNamespace(
+            agent="goose",
+            include=["tools"],
+            exclude=None,
+            episodic=True,
+            domain_tags="proteomics, qc_metrics",
+        )
+        s = cli._collect_settings(args, interactive=False, existing={}, pdir=None)
+        assert s["episodic"]["enabled"] is True
+        assert s["episodic"]["judge"]["backend"] == "local"
+        assert s["episodic"]["domain_tags"] == {
+            "proteomics": "proteomics",
+            "qc_metrics": "qc_metrics",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -269,18 +381,21 @@ class TestDefaultConfigContent:
 class TestInitProject:
 
     def test_creates_directory_structure(self):
-        pdir, _port = init_project("myproj", "goose")
+        pdir = init_project("myproj", "goose")
 
         assert pdir.exists()
-        assert (pdir / "dsagt_config.yaml").exists()
+        assert (pdir / ".dsagt" / "config.yaml").exists()
         assert (pdir / "trace_archive").is_dir()
-        assert (pdir / "mlflow").is_dir()
         assert (pdir / "skills").is_dir()
         assert (pdir / "kb_index").is_dir()
         assert (pdir / ".dsagt").is_dir()
         # `tools/` is intentionally NOT created by init_project — ToolRegistry
         # creates it on first server startup so bundled tools get copied in.
         assert not (pdir / "tools").exists()
+        # Serverless: no MLflow store is pre-created; ``mlflow.db`` is
+        # written lazily by the MLflow client on first span.
+        assert not (pdir / "mlflow.db").exists()
+        assert not (pdir / "mlflow").exists()
 
     def test_config_is_valid(self):
         init_project("myproj", "claude")
@@ -288,29 +403,67 @@ class TestInitProject:
         assert config["project"] == "myproj"
         assert config["agent"] == "claude"
 
-    def test_returns_pdir_and_port(self):
-        """BYOA: init_project returns (pdir, mlflow_port)."""
-        pdir, port = init_project("myproj", "goose")
-        assert isinstance(port, int) and port > 0
-        # Port is persisted in the YAML so MCP servers can read it.
+    def test_returns_pdir(self):
+        """Serverless: init_project returns just the project dir — no port."""
+        pdir = init_project("myproj", "goose")
+        assert pdir.exists()
         config = load_config("myproj")
-        assert config["mlflow"]["port"] == port
+        assert "mlflow" not in config
 
-    def test_explicit_mlflow_port_honored(self):
-        from dsagt.session import pick_free_port
+    def test_exclude_all_creates_empty_kb_without_building(self):
+        """``--exclude all`` provisions a valid project with an empty KB and
+        never attempts an asset build."""
+        from dsagt.commands import setup_core_kb
 
-        chosen = pick_free_port()
-        _pdir, port = init_project("myproj", "goose", mlflow_port=chosen)
-        assert port == chosen
+        with patch.object(setup_core_kb, "ensure_assets") as mock_ensure:
+            pdir = init_project("myproj", "goose", exclude=["all"])
+            mock_ensure.assert_not_called()
+        kb_index = pdir / "kb_index"
+        assert kb_index.is_dir()
+        assert not any(kb_index.iterdir())
 
-    def test_duplicate_raises(self):
-        init_project("myproj", "goose")
-        with pytest.raises(FileExistsError):
+    def test_default_init_provisions_default_asset_set(self):
+        """Default init builds exactly the default asset set into the shared
+        cache (here stubbed) — tools + genesis, nothing heavier."""
+        from dsagt.commands import setup_core_kb
+
+        with patch.object(
+            setup_core_kb, "ensure_assets", return_value={"built": [], "skipped": []}
+        ) as mock_ensure:
             init_project("myproj", "goose")
+            mock_ensure.assert_called_once()
+            requested = mock_ensure.call_args.args[0]
+            assert requested == ["tools", "genesis"]
+
+    def test_reinit_is_idempotent_update(self):
+        """``dsagt init`` is re-runnable: a second init on the same project
+        updates settings in place rather than raising."""
+        init_project("myproj", "goose")
+        init_project("myproj", "claude")  # re-init, switch agent
+        config = load_config("myproj")
+        assert config["agent"] == "claude"
 
     def test_invalid_agent_raises(self):
         with pytest.raises(ValueError):
             init_project("myproj", "invalid-agent")
+
+    def test_episodic_block_round_trips_through_config(self):
+        """init_project writes the opted-in episodic block; load_config reads it
+        back.  A project without it backfills ``enabled: False`` from DEFAULTS."""
+        epi = {
+            "enabled": True,
+            "judge": {"backend": "local", "model": ""},
+            "domain_tags": {"assembly": "assembly"},
+            "outlier_sensitivity": 0.0,
+        }
+        init_project("withmem", "goose", exclude=["all"], episodic=epi)
+        cfg = load_config("withmem")
+        assert cfg["episodic"]["enabled"] is True
+        assert cfg["episodic"]["domain_tags"] == {"assembly": "assembly"}
+
+        init_project("nomem", "goose", exclude=["all"])
+        cfg2 = load_config("nomem")
+        assert cfg2["episodic"]["enabled"] is False  # backfilled default
 
     def test_static_record_written_eagerly(self, tmp_path):
         """BYOA flow writes static + dynamic records at init time so the
@@ -319,132 +472,61 @@ class TestInitProject:
         the CLI command, not init_project itself — but the agent dir
         layout exists post-init.
         """
-        pdir, _ = init_project("myproj", "claude")
+        init_project("myproj", "claude")
         config = load_config("myproj")
         assert config["agent"] == "claude"
 
 
 # ---------------------------------------------------------------------------
-# persist_agent_choice: first-start agent selection writes back to YAML
+# Session state (.dsagt/state.yaml) — owned by the MCP server
 # ---------------------------------------------------------------------------
 
 
-class TestPersistAgentChoice:
-    """``persist_agent_choice`` is called from ``_cmd_start`` when the
-    YAML doesn't already pin an agent — covers the case where the user
-    deferred ``--agent`` from init time and supplied it on first start.
+class TestSessionState:
+    """The MCP server mints sessions into ``.dsagt/state.yaml`` (a monotonic
+    per-project counter) and ``dsagt-run`` reads the current tag from there.
     """
 
-    def test_overwrites_existing_field(self, tmp_path):
-        init_project("myproj", "goose")
-        persist_agent_choice("myproj", "claude")
+    def test_append_session_increments(self, tmp_path):
+        from dsagt.session import append_session, current_session
 
-        config = load_config("myproj")
-        assert config["agent"] == "claude"
+        pdir = tmp_path / "proj"
+        pdir.mkdir()
+        e1 = append_session(pdir)
+        e2 = append_session(pdir)
+        assert e1["id"] == 1
+        assert e2["id"] == 2
+        assert e1["started_at"].endswith("Z")
+        assert current_session(pdir)["id"] == 2
 
-    def test_invalid_agent_raises(self, tmp_path):
-        init_project("myproj", "goose")
-        with pytest.raises(ValueError):
-            persist_agent_choice("myproj", "not-an-agent")
+    def test_session_tag_shape(self):
+        from dsagt.session import session_tag
 
+        assert session_tag("myproj", 3) == "myproj-3"
 
-# ---------------------------------------------------------------------------
-# pick_free_port: kernel-assigned via socket.bind(("", 0))
-# ---------------------------------------------------------------------------
-
-
-class TestPickFreePort:
-
-    def test_returns_a_usable_port(self):
-        """The kernel hands back a positive port number we can bind."""
-        from dsagt.session import pick_free_port
-        import socket as _socket
-
-        port = pick_free_port()
-        assert isinstance(port, int)
-        assert 1024 <= port <= 65535
-        # And we can actually bind it (no leak, no half-stuck socket).
-        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
-            s.bind(("", port))
-
-    def test_consecutive_calls_pick_different_ports(self):
-        """No memoization, no preferred-port bias — consecutive calls just
-        reflect whatever the kernel hands out (almost always different on
-        a quiet box, very rarely the same; this test tolerates that)."""
-        from dsagt.session import pick_free_port
-
-        ports = {pick_free_port() for _ in range(10)}
-        # Not strictly guaranteed all 10 differ, but >1 distinct is expected.
-        assert len(ports) > 1
-
-
-# ---------------------------------------------------------------------------
-# reap_runtime: SIGTERM PIDs in <project>/.runtime, grace, SIGKILL stragglers
-# ---------------------------------------------------------------------------
-
-
-class TestReapRuntime:
-
-    def test_no_runtime_file_returns_empty(self, tmp_path):
-        from dsagt.session import reap_runtime
-
-        assert reap_runtime(tmp_path / ".runtime") == []
-
-    def test_skips_pids_whose_cmdline_doesnt_match(self, tmp_path, monkeypatch):
-        """PID-recycling guard: cmdline doesn't name our service → leave alone."""
-        from dsagt import session
-
-        runtime = tmp_path / ".runtime"
-        runtime.write_text(
-            json.dumps(
-                {
-                    "pids": {"mlflow": 99999, "proxy": 99998},
-                    "ports": {"mlflow": 12345, "proxy": 12346},
-                }
-            )
+    def test_current_session_tag_from_state(self, tmp_path):
+        from dsagt.session import (
+            append_session,
+            current_session_tag,
+            write_config_file,
+            build_config,
         )
-        # Pretend both PIDs are recycled — cmdline doesn't contain our name.
-        monkeypatch.setattr(session, "_process_command", lambda pid: "/bin/zsh")
-        killed = session.reap_runtime(runtime)
-        assert killed == []
-        # File still gets cleaned up so a stale .runtime doesn't linger.
-        assert not runtime.exists()
 
-    def test_signals_pids_whose_cmdline_matches(self, tmp_path, monkeypatch):
-        """When the cmdline still names our service, SIGTERM is sent."""
-        from dsagt import session
+        pdir = tmp_path / "proj"
+        pdir.mkdir()
+        write_config_file(pdir, build_config("proj", "claude"))
+        assert current_session_tag(pdir, "proj") is None  # no session yet
+        append_session(pdir)
+        assert current_session_tag(pdir, "proj") == "proj-1"
 
-        runtime = tmp_path / ".runtime"
-        runtime.write_text(
-            json.dumps(
-                {
-                    "pids": {"mlflow": 11111, "proxy": 22222},
-                    "ports": {"mlflow": 12345, "proxy": 12346},
-                }
-            )
-        )
-        monkeypatch.setattr(
-            session,
-            "_process_command",
-            lambda pid: f"python -m {'mlflow' if pid == 11111 else 'dsagt.commands.proxy_server'}",
-        )
-        signals_sent: list[tuple[int, int]] = []
+    def test_update_cursor_roundtrip(self, tmp_path):
+        from dsagt.session import read_state, update_cursor
 
-        def fake_killpg(pgid, sig):
-            signals_sent.append((pgid, sig))
-
-        monkeypatch.setattr(session.os, "killpg", fake_killpg)
-        monkeypatch.setattr(session.os, "getpgid", lambda pid: pid)
-        # Make grace-wait short and the process appear to exit immediately.
-        monkeypatch.setattr(session, "_STOP_GRACE_SECONDS", 0)
-
-        killed = session.reap_runtime(runtime)
-        assert len(killed) == 2
-        # Both PIDs got SIGTERM.
-        import signal as _signal
-
-        sigterm_pgids = {pgid for pgid, sig in signals_sent if sig == _signal.SIGTERM}
-        assert sigterm_pgids == {11111, 22222}
+        pdir = tmp_path / "proj"
+        pdir.mkdir()
+        update_cursor(pdir, tool_use_indexed_through="2026-01-01T00:00:00Z")
+        cur = read_state(pdir)["memory_cursor"]
+        assert cur["tool_use_indexed_through"] == "2026-01-01T00:00:00Z"
 
 
 # ---------------------------------------------------------------------------
@@ -465,13 +547,8 @@ class TestAgentRecord:
         return load_config("testproj")
 
     def _write_both(self, config, working_dir):
-        """Run static then dynamic — what dsagt start does, minus services.
-
-        ``start_services`` populates ``config["mlflow"]["port"]`` in
-        production; we stub it here so ``agent_env`` (which reads it to
-        build the OTLP endpoint) doesn't KeyError.
-        """
-        config.setdefault("mlflow", {})["port"] = 5001
+        """Run static then dynamic — what dsagt start does.  Serverless:
+        no port to populate; the store resolves from the project dir."""
         static_agent_record(config, config["agent"], working_dir)
         env = agent_env(config)
         dynamic_agent_record(config, env, working_dir)
@@ -505,23 +582,6 @@ class TestAgentRecord:
         assert set(goose["extensions"]) == {"dsagt"}
         assert goose["extensions"]["dsagt"]["cmd"] == "uv run dsagt-server"
         assert (working_dir / ".goosehints").exists()
-
-    def test_roo_writes_static_and_dynamic(self, tmp_path):
-        config = self._init_and_load("roo")
-        working_dir = tmp_path / "workdir"
-        working_dir.mkdir()
-
-        self._write_both(config, working_dir)
-
-        assert (working_dir / ".roo").is_dir()
-        assert (working_dir / ".roomodes").exists()
-        assert (working_dir / ".roo" / "mcp.json").exists()
-        # BYOA: project routing (project name, project_dir, mlflow port)
-        # comes from dsagt_config.yaml via cwd-walk; the MCP env block
-        # only carries EMBEDDING_* settings.
-        mcp = json.loads((working_dir / ".roo" / "mcp.json").read_text())
-        assert set(mcp["mcpServers"]) == {"dsagt"}
-        assert "EMBEDDING_BACKEND" in mcp["mcpServers"]["dsagt"]["env"]
 
     def test_cline_writes_static_only_in_split_test(self, tmp_path):
         # Cline's dynamic writer shells out to `cline auth` and `cline mcp
@@ -582,11 +642,11 @@ class TestAgentRecord:
         assert static_agent_files_present("codex", working_dir)
 
     def test_codex_config_toml_shape(self, tmp_path):
-        """``_render_codex_config`` emits ``[mcp_servers.*]`` sections
-        plus an ``[otel]`` block (opting codex's partial-OTel emission
-        into MLflow via the OTLP exporter).  No top-level keys — those
-        come from the user's ``~/.codex/config.toml`` which
-        ``write_dynamic`` copies as a base.
+        """``_render_codex_config`` emits only ``[mcp_servers.*]`` sections.
+        No ``[otel]`` block — DSAGT no longer forces codex's native
+        telemetry (nor the ``log_user_prompt`` privacy override).  No
+        top-level keys — those come from the user's ``~/.codex/config.toml``
+        which ``write_dynamic`` copies as a base.
         """
         from dsagt.agents import _render_codex_config
 
@@ -599,10 +659,9 @@ class TestAgentRecord:
         assert "[mcp_servers.dsagt]" in toml
         assert "[mcp_servers.dsagt.env]" in toml
         assert 'MLFLOW_TRACKING_URI = "http://localhost:5001"' in toml
-        # OTel opt-in: enables OTLP-HTTP export + un-redacts user prompt.
-        assert "[otel]" in toml
-        assert 'trace_exporter = "otlp-http"' in toml
-        assert "log_user_prompt = true" in toml
+        # No forced telemetry / privacy override.
+        assert "[otel]" not in toml
+        assert "log_user_prompt" not in toml
         # No top-level approval/sandbox keys — those come from user's
         # config.toml or the codex exec CLI flag.
         assert "approval_policy" not in toml
@@ -715,11 +774,12 @@ class TestAgentRecord:
             == "http://localhost:5001"
         )
 
-    def test_mcp_config_omits_redundant_dsagt_env(self, tmp_path):
-        """Single source of truth: project routing (project, project_dir,
-        mlflow port) lives in dsagt_config.yaml and is read via cwd-walk
-        by every dsagt service.  The MCP env block must NOT duplicate
-        those values — that's the contract being asserted here."""
+    def test_mcp_config_carries_routing_env(self, tmp_path):
+        """Benign routing in the MCP env block: agents that don't inherit
+        the parent's shell env into their MCP children (codex / cline
+        — and claude's block is robust against shells that don't
+        export it) need project name + dir and the serverless
+        ``MLFLOW_TRACKING_URI`` baked in.  No credentials, no OTel."""
         config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
@@ -728,9 +788,12 @@ class TestAgentRecord:
 
         mcp = json.loads((working_dir / ".mcp.json").read_text())
         env = mcp["mcpServers"]["dsagt"].get("env", {})
-        assert "DSAGT_PROJECT" not in env
-        assert "DSAGT_PROJECT_DIR" not in env
-        assert "MLFLOW_TRACKING_URI" not in env
+        assert env["DSAGT_PROJECT"] == config["project"]
+        assert env["DSAGT_PROJECT_DIR"] == config["project_dir"]
+        assert env["MLFLOW_TRACKING_URI"].startswith("sqlite:///")
+        # No credentials or OTel routing leak into the MCP config.
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in env
 
 
 # ---------------------------------------------------------------------------
@@ -739,7 +802,7 @@ class TestAgentRecord:
 
 
 class TestResolveRecordsDirProjectAware:
-    """``_resolve_records_dir`` reads the project's ``dsagt_config.yaml``
+    """``_resolve_records_dir`` reads the project's ``.dsagt/config.yaml``
     from cwd as the single source of truth — no env-var chain."""
 
     def test_explicit_overrides_cwd(self, tmp_path):
@@ -749,12 +812,13 @@ class TestResolveRecordsDirProjectAware:
         assert result == Path("/custom")
 
     def test_cwd_with_config(self, tmp_path, monkeypatch):
-        """When cwd contains ``dsagt_config.yaml``, records dir is
+        """When cwd contains ``.dsagt/config.yaml``, records dir is
         ``<cwd>/trace_archive``.  Even if env vars are set to point
         elsewhere, the config-in-cwd rule wins (env is ignored)."""
         from dsagt.provenance import _resolve_records_dir
 
-        (tmp_path / "dsagt_config.yaml").write_text("project: t\n")
+        (tmp_path / ".dsagt").mkdir()
+        (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         monkeypatch.chdir(tmp_path)
         # Stale env vars must not be consulted.
         monkeypatch.setenv("DSAGT_PROJECT_DIR", "/stale/proj/dir")
@@ -787,411 +851,54 @@ class TestAgentEnv:
         assert env["DSAGT_AGENT"] == "claude"
         assert env["DSAGT_PROJECT_DIR"] == "/proj"
 
-    def test_claude_byoa_skips_otel_routing(self):
-        """Claude in BYOA mode (no proxy) uses ``mlflow autolog claude``
-        for agent-side traces — its Stop hook produces richer
-        transcript-based traces than native OTel.  agent_env should NOT
-        export OTEL_EXPORTER_OTLP_* vars for Claude in BYOA, to avoid
-        duplicate (and inferior) trace shapes.
+    def test_no_otel_routing_for_any_agent(self, monkeypatch):
+        """DSAGT forces no native OTel emission — agent traces are
+        recovered post-hoc from the on-disk transcript.  ``agent_env``
+        sets ``MLFLOW_TRACKING_URI`` (for MCP-server / MLflow-client
+        logging) but never the OTLP routing env, for any agent.
         """
         from dsagt.agents import agent_env
+
+        for var in (
+            "MLFLOW_TRACKING_URI",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_RESOURCE_ATTRIBUTES",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+        for agent in ("claude", "goose", "codex", "cline", "opencode"):
+            env = agent_env(self._make_config(agent))
+            # Serverless sqlite store derived from the project dir.
+            assert env["MLFLOW_TRACKING_URI"] == "sqlite:////proj/mlflow.db"
+            assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in env
+            assert "OTEL_EXPORTER_OTLP_HEADERS" not in env
+            assert "OTEL_RESOURCE_ATTRIBUTES" not in env
+
+    def test_no_telemetry_flags_for_claude(self, monkeypatch):
+        """The forced Claude telemetry/privacy flags are gone — DSAGT no
+        longer flips ``CLAUDE_CODE_ENABLE_TELEMETRY`` / ``OTEL_LOG_*``
+        (the latter defeated Anthropic's off-by-default redaction).
+
+        Cleared from the inherited shell env first so we test that DSAGT
+        doesn't *add* them — not whatever the test runner's own shell set.
+        """
+        from dsagt.agents import agent_env
+
+        flags = (
+            "CLAUDE_CODE_ENABLE_TELEMETRY",
+            "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+            "OTEL_LOG_TOOL_DETAILS",
+            "OTEL_LOG_USER_PROMPTS",
+            "OTEL_TRACES_EXPORTER",
+            "OTEL_LOG_RAW_API_BODIES",
+        )
+        for flag in flags:
+            monkeypatch.delenv(flag, raising=False)
 
         env = agent_env(self._make_config("claude"))
-        assert env["MLFLOW_TRACKING_URI"] == "http://localhost:5001"
-        assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in env
-        assert "OTEL_EXPORTER_OTLP_HEADERS" not in env
-        assert "OTEL_RESOURCE_ATTRIBUTES" not in env
-
-    def test_non_claude_byoa_keeps_otel_routing(self):
-        """Goose has no ``mlflow autolog goose`` analog — it still gets
-        OTel routing so its native OTel emission lands in MLflow.
-        """
-        from dsagt.agents import agent_env
-
-        env = agent_env(self._make_config("goose"))
-        assert env["MLFLOW_TRACKING_URI"] == "http://localhost:5001"
-        assert env["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://localhost:5001/v1/traces"
-        assert "service.name=goose" in env["OTEL_RESOURCE_ATTRIBUTES"]
-
-    def test_claude_telemetry_verbosity_flags(self):
-        """Claude Code needs OTEL_LOG_TOOL_DETAILS + OTEL_LOG_USER_PROMPTS
-        to emit unredacted tool_use payloads + user prompts memory
-        extraction depends on.  OTEL_LOG_RAW_API_BODIES is intentionally
-        NOT in the static env block — its value is a per-project file
-        path rendered dynamically by ``_cmd_mlflow`` (see claude.py for
-        why ``=1`` mode would lose bodies to MLflow's missing /v1/logs
-        endpoint)."""
-        from dsagt.agents import agent_env
-
-        env = agent_env(self._make_config("claude"))
-        assert env["CLAUDE_CODE_ENABLE_TELEMETRY"] == "1"
-        assert env["OTEL_LOG_TOOL_DETAILS"] == "1"
-        assert env["OTEL_LOG_USER_PROMPTS"] == "1"
-        assert "OTEL_LOG_RAW_API_BODIES" not in env
-
-
-@pytest.mark.skip(
-    reason=(
-        "Old-code-shape env_overrides: assertions describe the pre-Phase-1 "
-        "design where env_overrides translated llm.* into ANTHROPIC_*/OPENAI_* "
-        "credential env vars across the board.  Phase 2's env_overrides is "
-        "narrower — it pins the agent's MODEL env var only; provider creds "
-        "and base URLs are set by proxy_env_overrides (sentinel + proxy URL) "
-        "or live in agent config files (cline auth state, codex config.toml, "
-        "opencode.json).  See ``TestPhase2EnvOverrides`` below for the new "
-        "contract.  Keeping these tests around for the LoC reference; "
-        "delete when Phase 2 is stable."
-    )
-)
-class TestProviderEnvInjection:
-    """``llm.{provider, model, api_key, base_url}`` from dsagt_config must
-    flow into the agent's expected env-var names — otherwise the agent
-    falls back to its own user-config and the project YAML's settings
-    don't actually drive the agent.  This was a real bug for goose."""
-
-    def _config_with_llm(self, **llm) -> dict:
-        return {
-            "project": "test",
-            "agent": "goose",
-            "project_dir": "/proj",
-            "mlflow": {"port": 5001},
-            "llm": llm,
-            "embedding": {},
-        }
-
-    def test_openai_provider_sets_openai_env(self):
-        from dsagt.agents import agent_env
-
-        env = agent_env(
-            self._config_with_llm(
-                provider="openai",
-                model="gpt-4o",
-                api_key="sk-real",
-                base_url="https://gateway.example.com",
-            )
-        )
-        assert env["OPENAI_API_KEY"] == "sk-real"
-        assert env["OPENAI_BASE_URL"] == "https://gateway.example.com"
-        assert env["GOOSE_PROVIDER"] == "openai"
-        assert env["GOOSE_MODEL"] == "gpt-4o"
-        # Goose's Rust openai client reads OPENAI_HOST, not OPENAI_BASE_URL.
-        # Without this, goose silently hits api.openai.com regardless of
-        # the project's gateway.
-        assert env["OPENAI_HOST"] == "https://gateway.example.com"
-
-    def test_goose_anthropic_sets_anthropic_host(self):
-        """Same HOST-vs-BASE_URL issue for goose's anthropic provider."""
-        from dsagt.agents import agent_env
-
-        env = agent_env(
-            self._config_with_llm(
-                provider="anthropic",
-                model="claude-sonnet",
-                api_key="anthropic-key",
-                base_url="https://api.anthropic.com",
-            )
-        )
-        assert env["ANTHROPIC_HOST"] == "https://api.anthropic.com"
-
-    @pytest.mark.skip(reason="proxy mode deferred to Phase 2")
-    def test_goose_proxy_sets_host_at_proxy(self):
-        """Proxy mode: OPENAI_HOST / ANTHROPIC_HOST must point at the proxy
-        too, not just the standard BASE_URL slots."""
-        from dsagt.agents import agent_env
-
-        config = self._config_with_llm(
-            provider="openai",
-            api_key="sk-real",
-            base_url="https://upstream.example.com",
-        )
-        config["proxy"] = {"port": 9999}
-        env = agent_env(config)
-        assert env["OPENAI_HOST"] == "http://localhost:9999"
-        assert env["ANTHROPIC_HOST"] == "http://localhost:9999"
-
-    def test_openai_like_provider_treated_as_openai(self):
-        """openai_like (lab gateways speaking OpenAI wire protocol) maps
-        to OPENAI_* env vars too — that's what every OpenAI-compat client
-        reads."""
-        from dsagt.agents import agent_env
-
-        env = agent_env(
-            self._config_with_llm(
-                provider="openai_like",
-                api_key="sk-lab",
-                base_url="https://lab.example.com",
-            )
-        )
-        assert env["OPENAI_API_KEY"] == "sk-lab"
-        assert env["OPENAI_BASE_URL"] == "https://lab.example.com"
-
-    def test_anthropic_provider_sets_anthropic_env(self):
-        from dsagt.agents import agent_env
-
-        env = agent_env(
-            self._config_with_llm(
-                provider="anthropic",
-                model="claude-sonnet-4-5",
-                api_key="anthropic-key",
-                base_url="https://api.anthropic.com",
-            )
-        )
-        assert env["ANTHROPIC_API_KEY"] == "anthropic-key"
-        assert env["ANTHROPIC_BASE_URL"] == "https://api.anthropic.com"
-        # ANTHROPIC_MODEL pins the model so claude code doesn't fall back
-        # to its built-in default (which won't exist on lab gateways).
-        assert env["ANTHROPIC_MODEL"] == "claude-sonnet-4-5"
-
-    def test_cline_gets_provider_env(self):
-        """Cline's CLI reads OPENAI_*/ANTHROPIC_* — must flow from llm.*."""
-        from dsagt.agents import agent_env
-
-        cfg = self._config_with_llm(
-            provider="openai",
-            api_key="sk-cline",
-            base_url="https://gateway.example.com",
-        )
-        cfg["agent"] = "cline"
-        env = agent_env(cfg)
-        assert env["OPENAI_API_KEY"] == "sk-cline"
-        assert env["OPENAI_BASE_URL"] == "https://gateway.example.com"
-
-    def test_roo_gets_provider_env(self):
-        """Roo's CLI reads ANTHROPIC_* — must flow from llm.*."""
-        from dsagt.agents import agent_env
-
-        cfg = self._config_with_llm(
-            provider="anthropic",
-            model="claude-haiku-4-5",
-            api_key="anthropic-roo-key",
-            base_url="https://api.anthropic.com",
-        )
-        cfg["agent"] = "roo"
-        env = agent_env(cfg)
-        assert env["ANTHROPIC_API_KEY"] == "anthropic-roo-key"
-        assert env["ANTHROPIC_BASE_URL"] == "https://api.anthropic.com"
-        assert env["ANTHROPIC_MODEL"] == "claude-haiku-4-5"
-
-    def test_unresolved_placeholder_skipped(self):
-        """``${VAR}`` (unresolved interpolation) must NOT be propagated —
-        we only inject real values."""
-        from dsagt.agents import agent_env
-
-        env = agent_env(
-            self._config_with_llm(
-                provider="openai",
-                api_key="${LLM_API_KEY}",
-                base_url="${LLM_BASE_URL}",
-            )
-        )
-        # Provider still set, but bogus key/url not injected.
-        assert env["GOOSE_PROVIDER"] == "openai"
-        assert env.get("OPENAI_API_KEY") != "${LLM_API_KEY}"
-        assert env.get("OPENAI_BASE_URL") != "${LLM_BASE_URL}"
-
-    def test_blank_values_skipped(self):
-        from dsagt.agents import agent_env
-
-        env = agent_env(
-            self._config_with_llm(
-                provider="openai",
-                api_key="",
-                base_url="   ",
-            )
-        )
-        # Blank values shouldn't override the user's shell-level env vars
-        # (which the os.environ copy in agent_env preserves).
-        assert env.get("OPENAI_API_KEY") != ""
-        assert env.get("OPENAI_BASE_URL") != "   "
-
-    def test_unknown_provider_still_sets_goose_vars(self):
-        """Goose can dispatch to unknown providers via its own config
-        fallback; we still set GOOSE_PROVIDER / GOOSE_MODEL so the agent
-        knows which provider to look up."""
-        from dsagt.agents import agent_env
-
-        env = agent_env(
-            self._config_with_llm(
-                provider="bedrock",
-                model="anthropic.claude-3-sonnet",
-            )
-        )
-        assert env["GOOSE_PROVIDER"] == "bedrock"
-        assert env["GOOSE_MODEL"] == "anthropic.claude-3-sonnet"
-        # No OPENAI_* / ANTHROPIC_* injection for unknown providers — user
-        # supplies those via their shell env (e.g. AWS_ACCESS_KEY_ID).
-        assert "OPENAI_API_KEY" not in env or env["OPENAI_API_KEY"] != ""
-
-    @pytest.mark.skip(reason="proxy mode deferred to Phase 2")
-    def test_proxy_overrides_provider_injection(self):
-        """When --enable-proxy is set, the proxy block runs AFTER provider
-        injection and overrides OPENAI_BASE_URL / OPENAI_API_KEY with the
-        proxy URL + sentinel.  Provider injection must not stomp the proxy."""
-        from dsagt.agents import agent_env
-
-        config = self._config_with_llm(
-            provider="openai",
-            api_key="sk-real",
-            base_url="https://upstream.example.com",
-        )
-        config["proxy"] = {"port": 9999}
-        env = agent_env(config)
-        assert env["OPENAI_BASE_URL"] == "http://localhost:9999"
-        assert env["OPENAI_API_KEY"].startswith("dsagt-proxy-forwarded")
-
-    def test_claude_does_not_get_openai_env(self):
-        """Protocol isolation: claude is anthropic-native.  When the user
-        configures provider=openai, claude's env_overrides must NOT
-        propagate OPENAI_* — claude's runtime ignores them and the cross-
-        protocol mismatch is what the proxy is for.  Setting them anyway
-        muddies the contract."""
-        from dsagt.agents import agent_env
-
-        cfg = self._config_with_llm(
-            provider="openai",
-            api_key="sk-real",
-            base_url="https://gateway.example.com",
-        )
-        cfg["agent"] = "claude"
-        env = agent_env(cfg)
-        # Claude is openai-blind; project openai creds shouldn't show up
-        # in claude's process env (the user's shell may set them, in
-        # which case os.environ wins — that's a user-controlled choice).
-        # We assert ours specifically isn't injected.
-        assert env.get("OPENAI_BASE_URL") != "https://gateway.example.com"
-
-    def test_codex_does_not_get_anthropic_env(self):
-        """Protocol isolation: codex is openai-native.  Anthropic upstream
-        requires --enable-proxy for translation."""
-        from dsagt.agents import agent_env
-
-        cfg = self._config_with_llm(
-            provider="anthropic",
-            model="claude-sonnet",
-            api_key="anthropic-key",
-            base_url="https://api.anthropic.com",
-        )
-        cfg["agent"] = "codex"
-        env = agent_env(cfg)
-        assert env.get("ANTHROPIC_BASE_URL") != "https://api.anthropic.com"
-
-
-class TestPhase2EnvOverrides:
-    """Phase 2 ``env_overrides`` is narrower than old code: it pins the
-    agent's MODEL env var only.  Provider creds / base URLs are set by
-    ``proxy_env_overrides`` (sentinel + proxy URL) or live in agent
-    config files (cline auth state, codex config.toml, opencode.json).
-    All gated by ``config["proxy"]["port"]`` — BYOA mode doesn't fire it.
-    """
-
-    def _proxy_config(self, agent: str, model: str = "test-model") -> dict:
-        return {
-            "project": "test",
-            "agent": agent,
-            "project_dir": "/proj",
-            "mlflow": {"port": 5001},
-            "llm": {
-                "provider": "openai",
-                "model": model,
-                "base_url": "https://up",
-                "api_key": "sk-up",
-            },
-            "embedding": {},
-            "proxy": {"port": 9999},
-        }
-
-    def test_claude_pins_anthropic_model_in_proxy_mode(self):
-        from dsagt.agents import agent_env
-
-        env = agent_env(self._proxy_config("claude", model="claude-test"))
-        assert env["ANTHROPIC_MODEL"] == "claude-test"
-
-    def test_goose_pins_provider_and_model_in_proxy_mode(self):
-        from dsagt.agents import agent_env
-
-        env = agent_env(self._proxy_config("goose", model="my-model"))
-        assert env["GOOSE_PROVIDER"] == "openai"
-        assert env["GOOSE_MODEL"] == "my-model"
-
-    def test_roo_pins_anthropic_model_in_proxy_mode(self):
-        from dsagt.agents import agent_env
-
-        env = agent_env(self._proxy_config("roo", model="my-roo-model"))
-        assert env["ANTHROPIC_MODEL"] == "my-roo-model"
-
-    def test_byoa_mode_does_not_fire_env_overrides(self):
-        """Without proxy_port in config, env_overrides is not called —
-        the user's shell ANTHROPIC_MODEL / GOOSE_MODEL etc. are not
-        overwritten by config["llm"] values.  This is the gate that
-        prevents the Phase-1 GOOSE_MODEL bug from coming back.
-        """
-        from dsagt.agents import agent_env
-
-        cfg = self._proxy_config("goose", model="config-model")
-        cfg.pop("proxy")  # BYOA: no proxy block
-        env = agent_env(cfg)
-        # GOOSE_MODEL only set if user's shell has it; we don't override.
-        assert env.get("GOOSE_MODEL") != "config-model"
-
-    def test_unresolved_placeholder_filtered(self):
-        """A ${VAR} that didn't resolve at load_config time must not
-        leak into env vars (would be an obvious bug surface)."""
-        from dsagt.agents import agent_env
-
-        cfg = self._proxy_config("goose", model="${LLM_MODEL}")
-        env = agent_env(cfg)
-        assert "GOOSE_MODEL" not in env or env["GOOSE_MODEL"] != "${LLM_MODEL}"
-
-
-class TestProxyEnvOverrides:
-    """``--enable-proxy`` plants the same proxy-routing env vars on
-    every agent.  AgentSetup.proxy_env_overrides centralizes the
-    contract; agents inherit the default unless they have a non-
-    standard env-var convention (goose's OPENAI_HOST/ANTHROPIC_HOST)."""
-
-    def _make_config(self, agent: str) -> dict:
-        return {
-            "project": "test",
-            "agent": agent,
-            "project_dir": "/proj",
-            "mlflow": {"port": 5001},
-            "llm": {"provider": "openai", "api_key": "sk-up", "base_url": "https://up"},
-            "embedding": {},
-            "proxy": {"port": 9999},
-        }
-
-    def test_default_sets_proxy_url_for_both_protocols(self):
-        from dsagt.agents.base import AgentSetup
-
-        # Spin up any concrete subclass to call the inherited default.
-        from dsagt.agents.goose import GooseSetup
-
-        env = GooseSetup().proxy_env_overrides(9999)
-        assert env["ANTHROPIC_BASE_URL"] == "http://localhost:9999"
-        assert env["OPENAI_BASE_URL"] == "http://localhost:9999"
-        assert env["EMBEDDING_BASE_URL"] == "http://localhost:9999"
-
-    def test_default_plants_sentinel_keys(self):
-        from dsagt.agents.goose import GooseSetup
-
-        env = GooseSetup().proxy_env_overrides(9999)
-        assert env["ANTHROPIC_API_KEY"].startswith("dsagt-proxy-forwarded")
-        assert env["OPENAI_API_KEY"].startswith("dsagt-proxy-forwarded")
-        assert env["EMBEDDING_API_KEY"].startswith("dsagt-proxy-forwarded")
-
-    def test_proxy_applied_uniformly_across_agents(self):
-        """Every agent gets identical proxy env from the inherited
-        default — that's the whole point of putting it on the base class."""
-        from dsagt.agents import agent_env
-
-        envs = {
-            a: agent_env(self._make_config(a))
-            for a in ("claude", "goose", "cline", "roo", "codex")
-        }
-        for agent, env in envs.items():
-            assert env["ANTHROPIC_BASE_URL"] == "http://localhost:9999", agent
-            assert env["OPENAI_BASE_URL"] == "http://localhost:9999", agent
-            assert env["OPENAI_API_KEY"].startswith("dsagt-proxy-forwarded"), agent
+        for flag in flags:
+            assert flag not in env
 
 
 class TestPreconfiguredCredsWarning:
@@ -1242,19 +949,6 @@ class TestPreconfiguredCredsWarning:
         msgs = " ".join(r.getMessage() for r in caplog.records)
         assert "preconfigured env vars" not in msgs
 
-    def test_no_warning_when_proxy_enabled(self, caplog):
-        """Proxy mode plants its own creds; transparency warning is moot."""
-        from dsagt.agents import agent_env
-
-        cfg = self._config(agent="claude")
-        cfg["proxy"] = {"port": 9999}
-
-        with caplog.at_level("WARNING", logger="dsagt.agents"):
-            agent_env(cfg)
-
-        msgs = " ".join(r.getMessage() for r in caplog.records)
-        assert "preconfigured env vars" not in msgs
-
     def test_warns_with_no_shell_either_lists_expected_vars(self, caplog, monkeypatch):
         """When neither project nor shell has creds, surface the var names
         the agent's runtime expects so the user can fix the gap."""
@@ -1293,11 +987,6 @@ class TestAgentCommand:
             "uv run dsagt-server",
         ]
 
-    def test_roo(self):
-        from dsagt.agents import agent_command
-
-        assert agent_command({"agent": "roo"}) == ["roo"]
-
     def test_cline(self):
         from dsagt.agents import agent_command
 
@@ -1316,12 +1005,32 @@ class TestAgentCommand:
 
 class TestConfigFlow:
 
-    def test_default_config_has_embedding_block(self):
-        """default_config_content() includes embedding (KB needs it)."""
-        content = default_config_content("test", "claude", mlflow_port=5000)
+    def test_default_config_mirrors_init_choices(self):
+        """The written config holds only the init choices: project, agent,
+        knowledge.collections, skills.sources.  The bundled ``tools`` collection
+        is always provisioned (not a choice); embedding / chunk_size / rerank
+        are code defaults backfilled on read, never written."""
+        content = default_config_content("test", "claude")
         parsed = yaml.safe_load(content)
-        assert "embedding" in parsed
-        assert "backend" in parsed["embedding"]
+        assert set(parsed) == {"project", "agent", "knowledge", "skills"}
+        assert parsed["knowledge"] == {"collections": []}
+        assert parsed["skills"]["sources"][0]["name"] == "genesis"
+        assert "embedding" not in parsed
+        assert "episodic" not in parsed  # opt-in, omitted unless enabled
+
+    def test_episodic_written_only_when_enabled(self):
+        """An opted-in episodic block is written verbatim; absent otherwise
+        (and ``load_config`` backfills ``enabled: false`` for the absent case)."""
+        epi = {
+            "enabled": True,
+            "judge": {"backend": "local", "model": ""},
+            "domain_tags": {"assembly": "assembly"},
+            "outlier_sensitivity": 0.0,
+        }
+        parsed = yaml.safe_load(default_config_content("t", "claude", episodic=epi))
+        assert parsed["episodic"] == epi
+        # Omitted when None.
+        assert "episodic" not in yaml.safe_load(default_config_content("t", "claude"))
 
     def test_mcp_env_block_carries_embedding_routing(self):
         """_mcp_env_block plumbs embedding routing (model + base_url)
@@ -1347,23 +1056,23 @@ class TestConfigFlow:
         # Credentials never land in artifacts; user sets in shell.
         assert "EMBEDDING_API_KEY" not in env
 
-    def test_mcp_env_block_omits_project_routing(self):
-        """Single source of truth: MLflow URI / project name / project_dir
-        come from dsagt_config.yaml via cwd-walk, not from a duplicated
-        env block.  The MCP env block carries only embedding-backend
-        settings (and EMBEDDING_API_KEY from the user's shell)."""
+    def test_mcp_env_block_carries_project_routing(self, monkeypatch):
+        """Benign routing: the MCP env block carries project name + dir and
+        the serverless ``MLFLOW_TRACKING_URI`` so MCP children of agents
+        that don't inherit the parent shell env still log to the right
+        store.  No credentials, no OTel."""
         from dsagt.agents import _mcp_env_block
 
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
         config = {
             "project": "test",
             "project_dir": "/p",
-            "mlflow": {"port": 12345},
             "embedding": {"backend": "local"},
         }
         env = _mcp_env_block(config)
-        assert "MLFLOW_TRACKING_URI" not in env
-        assert "DSAGT_PROJECT" not in env
-        assert "DSAGT_PROJECT_DIR" not in env
+        assert env["DSAGT_PROJECT"] == "test"
+        assert env["DSAGT_PROJECT_DIR"] == "/p"
+        assert env["MLFLOW_TRACKING_URI"] == "sqlite:////p/mlflow.db"
         assert env["EMBEDDING_BACKEND"] == "local"
 
     def test_mcp_env_block_omits_empty_embedding_keys(self):
@@ -1384,28 +1093,30 @@ class TestConfigFlow:
 
     def test_mcp_server_args_are_just_command(self):
         """MCP server args are just ["run", "dsagt-server"] — one merged
-        server.  All configuration flows through dsagt_config.yaml (cwd-walk).
+        server.  All configuration flows through .dsagt/config.yaml (cwd-walk).
         """
         from dsagt.agents import _mcp_server_args
 
         assert _mcp_server_args() == ["run", "dsagt-server"]
 
-    def test_mcp_env_block_carries_only_embedding_settings(self):
+    def test_mcp_env_block_carries_no_session_id(self):
+        """The MCP server owns the session lifecycle now (minted into
+        ``.dsagt/state.yaml`` at startup), so the env block never carries a
+        ``DSAGT_SESSION_ID`` — only project routing + embedding settings."""
         from dsagt.agents import _mcp_env_block
 
         config = {
             "project": "test",
             "project_dir": "/home/user/dsagt-projects/test",
-            "mlflow": {"port": 5000},
             "embedding": {"model": "m", "base_url": "u"},
         }
         env = _mcp_env_block(config)
-        # Project routing comes from dsagt_config.yaml via cwd-walk —
-        # never duplicated into the MCP env block.
-        assert "DSAGT_PROJECT_DIR" not in env
-        assert "DSAGT_PROJECT" not in env
+        assert "DSAGT_SESSION_ID" not in env
         assert env["EMBEDDING_MODEL"] == "m"
         assert env["EMBEDDING_BASE_URL"] == "u"
+        # Even if a stray session_id is on the config dict, it isn't emitted.
+        env2 = _mcp_env_block({**config, "session_id": "test-1"})
+        assert "DSAGT_SESSION_ID" not in env2
 
 
 # ---------------------------------------------------------------------------
@@ -1419,15 +1130,13 @@ class TestByoaEnvHints:
     the per-project launch shim — the user's shell stays clean."""
 
     @pytest.mark.parametrize(
-        "agent_name", ["claude", "goose", "cline", "roo", "codex", "opencode"]
+        "agent_name", ["claude", "goose", "cline", "codex", "opencode"]
     )
     def test_returns_only_credential_hints(self, agent_name, tmp_path):
         from dsagt.agents import AGENTS
 
         setup = AGENTS[agent_name]()
-        hints = setup.byoa_env_hints(
-            mlflow_port=5001, project="p", project_dir=tmp_path
-        )
+        hints = setup.byoa_env_hints()
         # Only credential hints come back; no DSAGT/MLflow/OTel routing.
         names = [n for n, _ in hints]
         assert "DSAGT_PROJECT" not in names
@@ -1435,13 +1144,13 @@ class TestByoaEnvHints:
         assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in names
 
     @pytest.mark.parametrize(
-        "agent_name", ["claude", "goose", "cline", "roo", "codex", "opencode"]
+        "agent_name", ["claude", "goose", "cline", "codex", "opencode"]
     )
     def test_credentials_match_credential_hints(self, agent_name, tmp_path):
         from dsagt.agents import AGENTS
 
         setup = AGENTS[agent_name]()
-        hints = setup.byoa_env_hints(5001, "p", tmp_path)
+        hints = setup.byoa_env_hints()
         assert hints == list(setup.credential_hints)
 
     def test_goose_credentials_include_host_not_base_url(self, tmp_path):
@@ -1451,7 +1160,7 @@ class TestByoaEnvHints:
         gateway' bug."""
         from dsagt.agents import AGENTS
 
-        names = [n for n, _ in AGENTS["goose"]().byoa_env_hints(5001, "p", tmp_path)]
+        names = [n for n, _ in AGENTS["goose"]().byoa_env_hints()]
         assert "OPENAI_HOST" in names
         assert "ANTHROPIC_HOST" in names
 
@@ -1460,12 +1169,11 @@ class TestByoaEnvHints:
         [
             ("claude", "ANTHROPIC_BASE_URL"),
             ("codex", "OPENAI_BASE_URL"),
-            # Cline / roo: ``cline auth -b`` is openai-only and openai-native
+            # Cline: ``cline auth -b`` is openai-only and the openai-native
             # path needs a non-standard model env var, so we standardize on
-            # the anthropic path for both — same env conventions as the rest
-            # of the BYOA story.  See cline.py / roo.py credential_hints.
+            # the anthropic path — same env conventions as the rest of the
+            # BYOA story.  See cline.py credential_hints.
             ("cline", "ANTHROPIC_BASE_URL"),
-            ("roo", "ANTHROPIC_BASE_URL"),
             # opencode emits both — its provider config supports both wire
             # protocols via {env:VAR} interpolation in opencode.json.
             ("opencode", "OPENAI_BASE_URL"),
@@ -1477,125 +1185,14 @@ class TestByoaEnvHints:
         speaks the standard BASE_URL convention."""
         from dsagt.agents import AGENTS
 
-        names = [n for n, _ in AGENTS[agent_name]().byoa_env_hints(5001, "p", tmp_path)]
+        names = [n for n, _ in AGENTS[agent_name]().byoa_env_hints()]
         assert gateway_var in names
 
 
-class TestLaunchOneliner:
-    """``launch_oneliner`` returns the literal agent command (no shim).
-    The shim is a separate file (``dsagt-launch.sh``) written by
-    ``dynamic_agent_record`` — see TestLaunchShim below."""
-
-    @pytest.mark.parametrize(
-        "agent_name", ["claude", "goose", "cline", "roo", "codex", "opencode"]
-    )
-    def test_oneliner_does_not_invoke_shim(self, agent_name, tmp_path):
-        from dsagt.agents import AGENTS
-
-        cmd = AGENTS[agent_name]().launch_oneliner("myproj", tmp_path)
-        assert "dsagt-launch.sh" not in cmd
-
-    @pytest.mark.parametrize(
-        "agent_name,expected_cmd",
-        [
-            ("claude", "claude"),
-            ("goose", "goose session"),
-            ("roo", "roo"),
-            ("opencode", "opencode"),
-        ],
-    )
-    def test_oneliner_runs_agent_directly(self, agent_name, expected_cmd, tmp_path):
-        from dsagt.agents import AGENTS
-
-        cmd = AGENTS[agent_name]().launch_oneliner("myproj", tmp_path)
-        assert expected_cmd in cmd
-        assert f"cd {tmp_path}" in cmd
-
-    def test_cline_oneliner_includes_config_flag(self, tmp_path):
-        """Cline's ``--config <pdir>/.cline-data`` is the only way to
-        pick up the per-project MCP-server registrations."""
-        from dsagt.agents import AGENTS
-
-        cmd = AGENTS["cline"]().launch_oneliner("myproj", tmp_path)
-        assert "--config" in cmd
-        assert ".cline-data" in cmd
-
-    def test_codex_oneliner_sets_codex_home(self, tmp_path):
-        """Codex has no ``--config`` flag — must export ``CODEX_HOME``
-        before launching so codex finds the per-project config.toml."""
-        from dsagt.agents import AGENTS
-
-        cmd = AGENTS["codex"]().launch_oneliner("myproj", tmp_path)
-        assert "CODEX_HOME=" in cmd
-        assert ".codex-data" in cmd
-
-
-# ---------------------------------------------------------------------------
-# dsagt memory: high-water-mark extraction state
-# ---------------------------------------------------------------------------
-
-
-class TestMemoryWatermark:
-    """``dsagt memory --project X`` tracks which sessions have been
-    extracted in ``<pdir>/.dsagt/extracted_at.json`` so re-runs only
-    process new traces."""
-
-    def test_first_run_creates_watermark_on_success(self, tmp_path, monkeypatch):
-        from argparse import Namespace
-        from dsagt.commands.cli import _cmd_memory
-
-        pdir, _ = init_project("mem-test", "claude")
-        monkeypatch.setattr(
-            "dsagt.commands.cli.run_extraction",
-            lambda _project: {"status": "ok", "total_entries": 3},
-        )
-        _cmd_memory(Namespace(project="mem-test"))
-
-        state_path = pdir / ".dsagt" / "extracted_at.json"
-        assert state_path.exists()
-        state = json.loads(state_path.read_text())
-        assert "last_extracted_at" in state
-        assert state["previous"] is None
-
-    def test_subsequent_run_records_previous_watermark(self, tmp_path, monkeypatch):
-        from argparse import Namespace
-        from dsagt.commands.cli import _cmd_memory
-
-        pdir, _ = init_project("mem-test", "claude")
-        monkeypatch.setattr(
-            "dsagt.commands.cli.run_extraction",
-            lambda _project: {"status": "ok", "total_entries": 1},
-        )
-        _cmd_memory(Namespace(project="mem-test"))
-        first_state = json.loads((pdir / ".dsagt" / "extracted_at.json").read_text())
-
-        _cmd_memory(Namespace(project="mem-test"))
-        second_state = json.loads((pdir / ".dsagt" / "extracted_at.json").read_text())
-
-        # The previous run's mark moves into the "previous" slot.
-        assert second_state["previous"] == first_state["last_extracted_at"]
-        assert second_state["last_extracted_at"] != first_state["last_extracted_at"]
-
-    def test_empty_extraction_does_not_advance_watermark(self, tmp_path, monkeypatch):
-        """When run_extraction returns status=empty, the state file is
-        not written — re-running later still picks up new traces."""
-        from argparse import Namespace
-        from dsagt.commands.cli import _cmd_memory
-
-        pdir, _ = init_project("mem-test", "claude")
-        monkeypatch.setattr(
-            "dsagt.commands.cli.run_extraction",
-            lambda _project: {"status": "empty"},
-        )
-        _cmd_memory(Namespace(project="mem-test"))
-
-        assert not (pdir / ".dsagt" / "extracted_at.json").exists()
-
-
-class TestLaunchShim:
-    """``dynamic_agent_record`` writes ``dsagt-launch.sh`` for BYOA-mode
-    projects.  The shim starts MLflow, exports env, and prints how to
-    launch the agent (it does NOT exec the agent — user picks)."""
+class TestNoLaunchShim:
+    """Phase 1 collapsed the launch surface: ``dynamic_agent_record``
+    writes the MCP config but NO ``dsagt-launch.sh`` shim.  The user
+    starts the agent directly in the project dir or via ``dsagt start``."""
 
     def _make_config(self, agent_name: str, pdir):
         return {
@@ -1608,103 +1205,38 @@ class TestLaunchShim:
             "session_id": "sess-xyz",
         }
 
-    def test_shim_written_for_byoa(self, tmp_path):
-        """`dynamic_agent_record` writes dsagt-launch.sh in BYOA mode."""
+    @pytest.mark.parametrize("agent_name", ["goose", "claude", "codex"])
+    def test_no_shim_written(self, agent_name, tmp_path):
         from dsagt.agents import dynamic_agent_record
 
-        config = self._make_config("goose", tmp_path)
+        config = self._make_config(agent_name, tmp_path)
         dynamic_agent_record(config, env={}, working_dir=tmp_path)
 
-        shim = tmp_path / "dsagt-launch.sh"
-        assert shim.exists()
-        assert (shim.stat().st_mode & 0o111) != 0  # executable
-
-    def test_shim_does_not_exec_agent(self, tmp_path):
-        """Shim prints launch options instead of execing — user picks."""
-        from dsagt.agents import dynamic_agent_record
-
-        config = self._make_config("goose", tmp_path)
-        dynamic_agent_record(config, env={}, working_dir=tmp_path)
-
-        shim_text = (tmp_path / "dsagt-launch.sh").read_text()
-        assert "exec " not in shim_text
-        assert "Environment ready. Launch the agent" in shim_text
-        assert "goose session" in shim_text  # CLI option printed
-
-    def test_shim_starts_mlflow_in_background(self, tmp_path):
-        from dsagt.agents import dynamic_agent_record
-
-        config = self._make_config("goose", tmp_path)
-        dynamic_agent_record(config, env={}, working_dir=tmp_path)
-
-        shim_text = (tmp_path / "dsagt-launch.sh").read_text()
-        assert "dsagt mlflow test --background-only" in shim_text
-
-    def test_shim_for_claude_skips_otel_routing(self, tmp_path):
-        """Claude shim omits OTEL_EXPORTER_OTLP_* exports — agent-side
-        traces come from `mlflow autolog claude`'s Stop hook."""
-        from dsagt.agents import dynamic_agent_record
-
-        config = self._make_config("claude", tmp_path)
-        dynamic_agent_record(config, env={}, working_dir=tmp_path)
-
-        shim_text = (tmp_path / "dsagt-launch.sh").read_text()
-        assert "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" not in shim_text
-        assert "MLFLOW_TRACKING_URI" in shim_text  # still exported
-
-    def test_shim_for_goose_includes_otel_routing(self, tmp_path):
-        """Non-Claude agents need OTel routing (no autolog analog)."""
-        from dsagt.agents import dynamic_agent_record
-
-        config = self._make_config("goose", tmp_path)
-        dynamic_agent_record(config, env={}, working_dir=tmp_path)
-
-        shim_text = (tmp_path / "dsagt-launch.sh").read_text()
-        assert "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" in shim_text
-        assert "service.name=goose" in shim_text
+        assert not (tmp_path / "dsagt-launch.sh").exists()
 
 
-class TestClaudeAutologSetup:
-    """`dsagt init --agent claude` configures `mlflow autolog claude`
-    by writing `.claude/settings.json` with the Stop hook + tracking
-    env vars."""
+class TestClaudeSetup:
+    """`dsagt init --agent claude` writes `.mcp.json` and does NOT wire MLflow's
+    autolog Stop hook — DSAGT's own serverless heartbeat pipeline (ClaudeReader →
+    ClaudeTranslator → MLflowSink) produces Claude's traces, uniformly with every
+    other agent, so wiring autolog too would double-log."""
 
-    def test_settings_file_written(self, tmp_path):
+    def test_writes_mcp_json_no_autolog_hook(self, tmp_path, monkeypatch):
         from dsagt.agents.claude import ClaudeSetup
 
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
         config = {
             "project": "myproj",
             "project_dir": str(tmp_path),
             "agent": "claude",
-            "mlflow": {"port": 5099},
             "embedding": {},
             "llm": {},
         }
         actions = ClaudeSetup().write_dynamic(
-            config,
-            env={},
-            working_dir=tmp_path,
-            pdir=tmp_path,
+            config, env={}, working_dir=tmp_path, pdir=tmp_path
         )
 
-        settings_file = tmp_path / ".claude" / "settings.json"
-        assert settings_file.exists()
-        assert any("mlflow autolog claude" in a for a in actions)
-
-        import json as _json
-
-        settings = _json.loads(settings_file.read_text())
-        env_block = settings.get("env") or {}
-        assert env_block.get("MLFLOW_TRACKING_URI") == "http://localhost:5099"
-        assert env_block.get("MLFLOW_EXPERIMENT_NAME") == "myproj"
-        assert env_block.get("MLFLOW_CLAUDE_TRACING_ENABLED") == "true"
-
-        hooks = settings.get("hooks") or {}
-        stop_hooks = hooks.get("Stop") or []
-        # Stop hook should reference mlflow autolog claude.
-        all_commands = []
-        for group in stop_hooks:
-            for h in group.get("hooks") or []:
-                if h.get("command"):
-                    all_commands.append(h["command"])
-        assert any("mlflow autolog claude" in c for c in all_commands)
+        assert (tmp_path / ".mcp.json").exists()
+        # No autolog: no Stop hook, no .claude/settings.json.
+        assert not any("autolog" in a.lower() for a in actions)
+        assert not (tmp_path / ".claude" / "settings.json").exists()

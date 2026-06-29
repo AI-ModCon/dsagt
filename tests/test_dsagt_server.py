@@ -53,8 +53,9 @@ def test_merged_server_exposes_all_tools(tmp_path):
     """Both concern modules' tools land under one server with no collision."""
     server = _make_merged_server(tmp_path)
     names = _list_tools(server)
-    # 8 registry + 6 knowledge + 4 memory + 5 skill = 23 distinct tools.
-    assert len(names) == 23
+    # 8 registry + 5 knowledge + 4 memory + 5 skill = 22 distinct tools.
+    # (kb_add_vector_db is gated off until BYO lands — see knowledge_tools.py.)
+    assert len(names) == 22
     assert len(set(names)) == len(names)  # no name collision
     # Representative tools from each side.
     for expected in (
@@ -94,7 +95,7 @@ class TestBuildKbFromConfig:
     def _cfg(self, **embedding):
         return {
             "embedding": embedding,
-            "knowledge": {"chunk_size": 1024, "vector_db": "chroma", "rerank": False},
+            "knowledge": {"chunk_size": 1024, "rerank": False},
         }
 
     def test_invalid_backend_raises(self, tmp_path):
@@ -102,15 +103,15 @@ class TestBuildKbFromConfig:
         with pytest.raises(ValueError, match="backend must be"):
             _build_kb_from_config(cfg, tmp_path)
 
-    def test_api_backend_without_base_url_raises(self, tmp_path):
-        cfg = self._cfg(backend="api", model="m", base_url="", api_key="k")
+    def test_api_backend_without_base_url_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EMBEDDING_API_KEY", "k")
+        cfg = self._cfg(backend="api", model="m", base_url="")
         with pytest.raises(ValueError, match="requires embedding.base_url"):
             _build_kb_from_config(cfg, tmp_path)
 
-    def test_api_backend_without_api_key_raises(self, tmp_path):
-        # Unresolved ``${...}`` placeholder counts as missing.
-        cfg = self._cfg(
-            backend="api", model="m", base_url="http://x", api_key="${LLM_API_KEY}"
-        )
-        with pytest.raises(ValueError, match="requires embedding.api_key"):
+    def test_api_backend_without_api_key_raises(self, tmp_path, monkeypatch):
+        # Credentials come from the EMBEDDING_API_KEY env var, never on disk.
+        monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
+        cfg = self._cfg(backend="api", model="m", base_url="http://x")
+        with pytest.raises(ValueError, match="requires the EMBEDDING_API_KEY"):
             _build_kb_from_config(cfg, tmp_path)

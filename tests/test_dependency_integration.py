@@ -34,10 +34,10 @@ import yaml
 from dsagt.mcp.registry_tools import create_registry_server
 from dsagt.registry import ToolRegistry
 
-
 # ---------------------------------------------------------------------------
 # Skip conditions
 # ---------------------------------------------------------------------------
+
 
 def _uv_available() -> bool:
     return shutil.which("uv") is not None
@@ -61,6 +61,7 @@ pytestmark = [
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module", autouse=True)
 def uninstall_cowsay_after():
     """Ensure cowsay is uninstalled after all tests in this module."""
@@ -74,10 +75,10 @@ def uninstall_cowsay_after():
 
 from mcp_helpers import call_tool_sync as call_tool
 
-
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
+
 
 def test_register_and_run_tool_with_dependency(tmp_path):
     """End-to-end: register a tool with a dependency, install it, run the tool."""

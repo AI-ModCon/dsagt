@@ -31,6 +31,6 @@ Semantic search and ingestion over indexed document collections.
 
 ### Backend
 
-The default embedding backend is local (`sentence-transformers`, CPU-only, no API key needed). Switch to `embedding.backend: api` in `dsagt_config.yaml` to route through a hosted embedder via LiteLLM. Cross-encoder reranking is available via `knowledge.rerank: true`.
+The default embedding backend is local (`sentence-transformers`, CPU-only, no API key needed). Switch to `embedding.backend: api` in `.dsagt/config.yaml` to route through a hosted, OpenAI-compatible `/v1/embeddings` endpoint (set `embedding.base_url` and export `EMBEDDING_API_KEY`). Cross-encoder reranking is available via `knowledge.rerank: true`.
 
-Hybrid search (dense + sparse BM25) is on by default and controlled per-route via the `hybrid` flag.
+Hybrid search (dense + sparse BM25, fused by Reciprocal Rank Fusion) is always on per collection — it is a property of the store, not a per-call flag.

@@ -54,15 +54,17 @@ def _reset_tracing(monkeypatch):
     exporter.clear()
 
 
-def test_init_tracing_no_endpoint_raises(monkeypatch):
-    """init_tracing must fail loudly when no backend is configured — silent
-    no-op behavior would let a misconfigured subprocess run with tracing
-    silently dropped, which is exactly the kind of silent-fallback bug
-    DSAGT's design principles prohibit."""
+def test_init_tracing_outside_project_is_noop(monkeypatch):
+    """Serverless + never-raise: when cwd isn't a dsagt project dir (no
+    ``dsagt_config.yaml`` with a ``project``), ``init_tracing`` logs and
+    no-ops rather than raising — one-shot tools / tests outside a project
+    simply run untraced.  The store itself never needs a server, so the
+    only reason to skip is "not in a project", which must not be fatal."""
     monkeypatch.setattr(obs_module, "_initialized", False)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-    with pytest.raises(RuntimeError, match="no observability backend"):
-        init_tracing("test-service")
+    # Repo root has no dsagt_config.yaml → find_project_config returns None.
+    init_tracing("test-service")  # must not raise
+    assert obs_module._initialized is False
 
 
 def test_traced_emits_span_with_args(_reset_tracing):
@@ -193,8 +195,7 @@ def test_init_tracing_installs_mlflow_provider(monkeypatch):
     global, so every span flows into MLflow's trace store with full
     ``mlflow.spanInputs`` / ``mlflow.spanOutputs`` integration.  Pins the
     set_experiment call (so the project's experiment exists) and verifies
-    the strategy pointers (_metadata_stamper, _llm_context_factory) get
-    bound.
+    the strategy pointer (_metadata_stamper) gets bound.
     """
     captured: dict = {}
 
@@ -222,21 +223,12 @@ def test_init_tracing_installs_mlflow_provider(monkeypatch):
 
     monkeypatch.setattr(obs_module, "_initialized", False)
     monkeypatch.setattr(obs_module, "_metadata_stamper", None)
-    monkeypatch.setattr(obs_module, "_llm_context_factory", None)
     monkeypatch.setattr(
         obs_module,
         "find_project_config",
         lambda: (None, {"project": "my-project"}),
     )
-    monkeypatch.setattr(
-        obs_module,
-        "_read_session_id_from_runtime",
-        lambda _pdir: None,
-    )
 
-    # Skip autolog wiring — using service_name="dsagt-run" exits the
-    # autolog branch in init_tracing. The strategy pointers and provider
-    # install are what we actually care about here.
     try:
         init_tracing("dsagt-run", mlflow_url="http://localhost:5000/")
     finally:
@@ -244,9 +236,8 @@ def test_init_tracing_installs_mlflow_provider(monkeypatch):
 
     assert captured["installed_url"] == "http://localhost:5000/"
     assert captured["installed_project"] == "my-project"
-    # Strategy pointers should be bound to the MLflow-backed implementations.
+    # Strategy pointer should be bound to the MLflow-backed implementation.
     assert obs_module._metadata_stamper is obs_module._stamp_metadata_mlflow
-    assert obs_module._llm_context_factory is obs_module._mlflow_llm_context
 
 
 # ---------------------------------------------------------------------------
@@ -382,34 +373,6 @@ def test_attach_captured_args_happy_path_protects_bind_partial_catch(_reset_trac
     assert "d" not in span.attributes
 
 
-def test_litellm_imports_at_observability_init_no_fallback():
-    """Regression test for the deletion of `except ImportError: return` in
-    configure_litellm_retries.
-
-    litellm is a hard dependency in pyproject.toml.  If anyone re-introduces
-    a try/except around the import (turning litellm "optional" again), the
-    function would silently no-op and the rate-limit retry/backoff knobs
-    would never be configured — exactly the silent-degradation pattern
-    we're trying to eliminate.
-
-    This test asserts the import succeeds AND the side-effects of
-    configure_litellm_retries actually happened.
-    """
-    import litellm
-    from dsagt.observability import configure_litellm_retries
-
-    # Mutate litellm state to known-bad values, then call configure and
-    # verify it stomped them.  If configure ever silently no-ops on a
-    # caught ImportError, the asserts below would fail.
-    litellm.num_retries = -999
-    litellm.request_timeout = -999.0
-
-    configure_litellm_retries(num_retries=7, request_timeout=42.0)
-
-    assert litellm.num_retries == 7
-    assert litellm.request_timeout == 42.0
-
-
 # ---------------------------------------------------------------------------
 # Stage 1: KnowledgeBase instrumentation
 # ---------------------------------------------------------------------------
@@ -438,11 +401,11 @@ def _kb_with_mocked_embedder(tmp_path, backend: str = "api", model: str = "test-
     mock_client = MagicMock()
     mock_client.embed = fake_embed
 
-    with patch("dsagt.knowledge._make_embedder", return_value=mock_client):
+    with patch("dsagt.knowledge.Embedder.create", return_value=mock_client):
         kb = KnowledgeBase(
             index_dir=tmp_path / f"kb_{backend}",
             default_embedder=backend,
-            embedder_kwargs={"model": model},
+            model=model,
         )
         try:
             yield kb
@@ -538,63 +501,6 @@ def test_kb_add_entries_emits_span(_reset_tracing, tmp_path):
     assert "kb.add_entries" in spans
     assert spans["kb.add_entries"].attributes["collection"] == "epis"
     assert spans["kb.add_entries"].attributes["n_entries"] == 3
-
-
-# ---------------------------------------------------------------------------
-# Stage 2: LiteLLM retry wiring
-# ---------------------------------------------------------------------------
-
-
-def test_configure_litellm_retries_sets_module_globals(monkeypatch):
-    """configure_litellm_retries must set litellm.num_retries / request_timeout."""
-    import litellm
-
-    from dsagt.observability import configure_litellm_retries
-
-    # Save and clear so the test owns the values.
-    monkeypatch.setattr(litellm, "num_retries", None, raising=False)
-    monkeypatch.setattr(litellm, "request_timeout", 0.0, raising=False)
-
-    configure_litellm_retries(num_retries=7, request_timeout=42.0)
-
-    assert litellm.num_retries == 7
-    assert litellm.request_timeout == 42.0
-
-
-def test_configure_litellm_retries_works_without_tracing(monkeypatch):
-    """The retry knobs must be applied even when tracing is not initialized.
-
-    This is the dsagt-setup-kb path: the long-running embed job that has to
-    survive rate limits also runs before any MLflow endpoint exists.
-    """
-    import litellm
-
-    from dsagt.observability import configure_litellm_retries
-
-    monkeypatch.setattr(obs_module, "_initialized", False)
-    monkeypatch.setattr(obs_module, "_tracer_provider", None)
-    monkeypatch.setattr(litellm, "num_retries", None, raising=False)
-
-    configure_litellm_retries(num_retries=3, request_timeout=120.0)
-
-    assert litellm.num_retries == 3
-    assert litellm.request_timeout == 120.0
-
-
-def test_kb_search_does_not_call_real_litellm(_reset_tracing, tmp_path):
-    """Sanity check: with a mocked embedder, no litellm.embedding call escapes."""
-    from unittest.mock import patch as _patch
-
-    exporter = _reset_tracing
-    with _patch("litellm.embedding") as mock_embed:
-        with _kb_with_mocked_embedder(tmp_path) as kb:
-            kb.add_entries(texts=["hello"], collection="tcoll")
-            kb.search("hello", collection="tcoll", top_k=1)
-
-    # _kb_with_mocked_embedder patches _make_embedder, so litellm.embedding
-    # should never be called even though APIEmbeddingClient now uses it.
-    assert mock_embed.call_count == 0
-    assert "kb.search" in _spans_by_name(exporter)
 
 
 # ---------------------------------------------------------------------------
@@ -876,75 +782,3 @@ def test_search_registry_does_not_emit_span(_reset_tracing, tmp_path):
     spans = _spans_by_name(exporter)
     assert "registry.search" not in spans
     assert "registry.search_registry" not in spans
-
-
-# ---------------------------------------------------------------------------
-# extract_cache_stats — provider-agnostic cache-token reader
-# ---------------------------------------------------------------------------
-#
-# Each provider returns cache stats under a different field name; LiteLLM
-# doesn't backfill across them.  Lock in the field-name handling so a
-# regression can't silently hide cache hits in `dsagt info`.
-
-
-def test_extract_cache_stats_anthropic_format():
-    from dsagt.observability import extract_cache_stats
-
-    usage = {
-        "prompt_tokens": 5000,
-        "completion_tokens": 100,
-        "cache_read_input_tokens": 3000,
-        "cache_creation_input_tokens": 2000,
-    }
-    assert extract_cache_stats(usage) == (3000, 2000)
-
-
-def test_extract_cache_stats_openai_format():
-    from dsagt.observability import extract_cache_stats
-
-    # OpenAI/Azure: cached_tokens nested under prompt_tokens_details, no write field
-    usage = {
-        "prompt_tokens": 5000,
-        "completion_tokens": 100,
-        "prompt_tokens_details": {"cached_tokens": 2400, "audio_tokens": None},
-    }
-    assert extract_cache_stats(usage) == (2400, 0)
-
-
-def test_extract_cache_stats_gemini_format():
-    from dsagt.observability import extract_cache_stats
-
-    usage = {"prompt_tokens": 1000, "cached_content_token_count": 700}
-    assert extract_cache_stats(usage) == (700, 0)
-
-
-def test_extract_cache_stats_deepseek_format():
-    from dsagt.observability import extract_cache_stats
-
-    # DeepSeek: prompt_cache_hit_tokens is the read; prompt_cache_miss_tokens
-    # is the COMPLEMENT (uncached prompt tokens), not a "write" — don't count it.
-    usage = {
-        "prompt_tokens": 1000,
-        "prompt_cache_hit_tokens": 600,
-        "prompt_cache_miss_tokens": 400,
-    }
-    assert extract_cache_stats(usage) == (600, 0)
-
-
-def test_extract_cache_stats_no_cache_fields():
-    from dsagt.observability import extract_cache_stats
-
-    assert extract_cache_stats({"prompt_tokens": 100, "completion_tokens": 10}) == (
-        0,
-        0,
-    )
-
-
-def test_extract_cache_stats_handles_garbage():
-    from dsagt.observability import extract_cache_stats
-
-    # Real responses occasionally have None or non-dict values where we expect dicts
-    assert extract_cache_stats({"prompt_tokens_details": None}) == (0, 0)
-    assert extract_cache_stats({"prompt_tokens_details": "garbage"}) == (0, 0)
-    assert extract_cache_stats(None) == (0, 0)
-    assert extract_cache_stats({}) == (0, 0)

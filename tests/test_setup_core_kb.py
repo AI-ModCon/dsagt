@@ -1,10 +1,10 @@
 """
-Tests for dsagt-setup-kb internals.
+Tests for the knowledge-base asset builder (dsagt.commands.setup_core_kb),
+the engine behind ``dsagt init``'s KB provisioning.
 
-These cover the helpers in dsagt.commands.setup_core_kb that don't require
-network access — the git clone subprocess is mocked so the tests can run
-offline.  The actual end-to-end behavior of dsagt-setup-kb against real
-upstream repos is exercised manually.
+These cover the helpers that don't require network access — the git clone
+subprocess is mocked so the tests can run offline.  The actual end-to-end
+behavior against real upstream repos is exercised manually.
 """
 
 from __future__ import annotations
@@ -16,11 +16,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dsagt.commands.setup_core_kb import (
-    DEFAULT_EXCLUDE_PATTERNS,
-    clone_github,
-)
+import numpy as np
 
+from dsagt.commands.setup_core_kb import (
+    DEFAULT_ASSETS,
+    DEFAULT_EXCLUDE_PATTERNS,
+    all_assets,
+    asset_collection_name,
+    clone_github,
+    ensure_assets,
+    resolve_assets,
+)
 
 # ---------------------------------------------------------------------------
 # clone_github top-level-files behavior
@@ -135,3 +141,80 @@ def test_default_exclude_patterns_keeps_packaging_metadata():
         f"DEFAULT_EXCLUDE_PATTERNS contains packaging metadata files "
         f"that the agent needs: {overlap}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Installable-asset selection (--include / --exclude namespace)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAssets:
+
+    def test_default_is_tools_plus_genesis(self):
+        assert resolve_assets() == list(DEFAULT_ASSETS) == ["tools", "genesis"]
+
+    def test_include_all_is_everything(self):
+        assert resolve_assets(include=["all"]) == all_assets()
+
+    def test_include_subset_returns_canonical_order(self):
+        # input order shouldn't matter — cheap assets always built first.
+        assert resolve_assets(include=["aidrin", "tools"]) == ["tools", "aidrin"]
+
+    def test_exclude_trims_the_default_set(self):
+        assert resolve_assets(exclude=["genesis"]) == ["tools"]
+
+    def test_exclude_all_is_empty(self):
+        assert resolve_assets(exclude=["all"]) == []
+
+    def test_unknown_asset_raises(self):
+        with pytest.raises(ValueError, match="unknown KB asset"):
+            resolve_assets(include=["not-a-real-asset"])
+
+    def test_include_exclude_mutually_exclusive(self):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            resolve_assets(include=["tools"], exclude=["genesis"])
+
+
+class TestAssetCollectionName:
+
+    def test_tools(self):
+        assert asset_collection_name("tools") == "tools"
+
+    def test_catalog_uses_catalog_prefix(self):
+        name = asset_collection_name("genesis")
+        assert name.startswith("skills_catalog__") and "genesis" in name
+
+    def test_scientific_collection_is_its_own_name(self):
+        assert asset_collection_name("nemo_curator") == "nemo_curator"
+
+    def test_unknown_raises(self):
+        with pytest.raises(ValueError, match="unknown KB asset"):
+            asset_collection_name("bogus")
+
+
+class TestEnsureAssetsTools:
+    """``ensure_assets`` for the bundled-tools asset, with a mocked embedder
+    so the test stays offline (no model download, no git clone)."""
+
+    def _fake_embedder(self):
+        emb = MagicMock()
+        emb.embed = lambda texts: np.full((len(texts), 8), 0.1, dtype=np.float32)
+        return emb
+
+    def test_builds_tools_collection(self, tmp_path):
+        with patch(
+            "dsagt.knowledge.Embedder.create", return_value=self._fake_embedder()
+        ):
+            result = ensure_assets(["tools"], tmp_path)
+        assert "tools" in result["built"]
+        # ChromaIndex.save writes chroma_ids.json — the collection marker.
+        assert (tmp_path / "tools" / "chroma_ids.json").exists()
+
+    def test_is_idempotent(self, tmp_path):
+        with patch(
+            "dsagt.knowledge.Embedder.create", return_value=self._fake_embedder()
+        ):
+            ensure_assets(["tools"], tmp_path)
+            second = ensure_assets(["tools"], tmp_path)
+        assert second["skipped"] == ["tools"]
+        assert second["built"] == []

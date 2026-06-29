@@ -37,7 +37,7 @@ from dsagt.observability import (
     registry_reconstruct_pipeline_span,
     registry_save_tool_span,
 )
-from dsagt.provenance import reconstruct_pipeline
+from dsagt.provenance import ToolUseIndexer, reconstruct_pipeline
 from dsagt.registry import TOOLS_COLLECTION, ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -238,9 +238,19 @@ async def _handle_reconstruct_pipeline(
     arguments: dict,
     *,
     runtime_dir: Path,
+    kb: KnowledgeBase | None = None,
 ) -> str:
     fmt = arguments.get("format", "bash")
     trace_dir = runtime_dir / "trace_archive"
+    # Index the session's tool-use first: reconstruct is the moment the pipeline
+    # is "done enough" to review, so make the just-run executions searchable now
+    # rather than waiting on the heartbeat.  Idempotent + file-locked, so this
+    # is safe to fire alongside the heartbeat's own ToolUseIndexer.
+    if kb is not None:
+        try:
+            ToolUseIndexer(kb, runtime_dir).tick()
+        except Exception as e:  # noqa: BLE001 — indexing is best-effort here
+            logger.warning("tool_use indexing before reconstruct failed: %s", e)
     with registry_reconstruct_pipeline_span(fmt):
         try:
             script = reconstruct_pipeline(trace_dir, fmt=fmt)
@@ -314,7 +324,7 @@ def _registry_tools_and_handlers(
         "get_registry": partial(_handle_get_registry, registry=registry),
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
         "reconstruct_pipeline": partial(
-            _handle_reconstruct_pipeline, runtime_dir=runtime_dir
+            _handle_reconstruct_pipeline, runtime_dir=runtime_dir, kb=kb
         ),
         "install_dependencies": partial(
             _handle_install_dependencies, registry=registry

@@ -16,13 +16,24 @@ def _make_parser() -> argparse.ArgumentParser:
         prog="dsagt-run",
         description="Wrap a tool command and capture execution provenance.",
     )
-    parser.add_argument("--tool", required=True, help="Name of the tool being executed.")
-    parser.add_argument("--session", default=None,
-                        help="Session ID. Defaults to session_id from <project>/.runtime.")
+    parser.add_argument(
+        "--tool", required=True, help="Name of the tool being executed."
+    )
+    parser.add_argument(
+        "--session",
+        default=None,
+        help="Session ID. Defaults to the DSAGT_SESSION_ID env var.",
+    )
     parser.add_argument("--record-id", default=None, help="Pre-assigned record ID.")
-    parser.add_argument("--records-dir", default=None, help="Directory for execution records.")
-    parser.add_argument("--input-files", default=None, help="Comma-separated input file paths.")
-    parser.add_argument("--output-files", default=None, help="Comma-separated output file paths.")
+    parser.add_argument(
+        "--records-dir", default=None, help="Directory for execution records."
+    )
+    parser.add_argument(
+        "--input-files", default=None, help="Comma-separated input file paths."
+    )
+    parser.add_argument(
+        "--output-files", default=None, help="Comma-separated output file paths."
+    )
     return parser
 
 
@@ -37,7 +48,7 @@ def _parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list
         sys.exit(1)
 
     wrapper_args = args_to_parse[:sep]
-    command_args = args_to_parse[sep + 1:]
+    command_args = args_to_parse[sep + 1 :]
 
     parsed = _make_parser().parse_args(wrapper_args)
     return parsed, command_args
@@ -51,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     from dsagt.observability import init_tracing
+
     init_tracing("dsagt-run", session_id=args.session)
 
     records_dir = _resolve_records_dir(args.records_dir)

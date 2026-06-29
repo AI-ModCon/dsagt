@@ -28,7 +28,7 @@ DSAgt wraps every registered tool with `dsagt-run` for provenance capture and `u
 
 ### Bundled Tools
 
-DSAgt ships a `scan_directory` tool in `src/dsagt/tools/` that is indexed into the global Tool Specs collection by `dsagt setup-kb`.
+DSAgt ships a `scan_directory` tool in `src/dsagt/tools/` that is indexed into the shared Tool Specs collection by `dsagt init` (always provisioned).
 
 ## Skills
 
@@ -54,7 +54,7 @@ The diagram's three bands trace a skill's lifecycle: **Discovery** (the router) 
 
 ### Bundled Skills
 
-DSAgt ships a `skill-creator` skill in `src/dsagt/skills/` (for scaffolding new SKILL.md skills). Bundled and installed skills are **not** indexed for search — every supported agent natively auto-discovers `SKILL.md` folders, so `search_skills` is reserved for the *catalog* tier (skills you can install but haven't yet). Domain skills — including the MODCON `datacard-generator` — are sourced from external catalogs (`dsagt skills add <project> genesis`) rather than bundled, so they stay current upstream.
+DSAgt ships a `skill-creator` skill in `src/dsagt/skills/` (for scaffolding new SKILL.md skills). Bundled and installed skills are **not** indexed for search — every supported agent natively auto-discovers `SKILL.md` folders, so `search_skills` is reserved for the *catalog* tier (skills you can install but haven't yet). Domain skills — including the MODCON `datacard-generator` — are sourced from external catalogs (enabled from the agent with `add_skill_source`, or chosen at `dsagt init`) rather than bundled, so they stay current upstream.
 
 ### Adding Skills
 

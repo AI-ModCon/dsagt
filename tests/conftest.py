@@ -23,26 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 _ENV_PATH = Path(__file__).parent.parent / ".env"
 
 
-@pytest.fixture(autouse=True)
-def _stub_mlflow_experiment_lookup(monkeypatch):
-    """Short-circuit ``_resolve_experiment_id`` in unit tests.
-
-    Most tests pass ``mlflow.port=5001`` but don't actually run an MLflow
-    server.  Real ``mlflow.set_experiment`` would block on the unreachable
-    URL until socket timeout (tens of seconds × every test that builds
-    ``agent_env``).  Returning a fake numeric id keeps the env block
-    populated without paying for the lookup.
-
-    Tests that DO run a real MLflow (the integration suite, smoke tests)
-    pass through unchanged because ``mlflow.set_experiment`` is the only
-    thing this stubs — the real network calls happen elsewhere.
-    """
-    monkeypatch.setattr(
-        "dsagt.agents._resolve_experiment_id",
-        lambda mlflow_url, project_name: "1",
-    )
-
-
 def _load_env() -> dict:
     """Parse .env as KEY=VALUE lines.  Fails if the file is missing.
 
@@ -74,7 +54,7 @@ def _require(env: dict, key: str) -> str:
 
 @pytest.fixture
 def embedding_config(monkeypatch):
-    """Embedding endpoint from .env.  Sets env vars for APIEmbeddingClient."""
+    """Embedding endpoint from .env.  Sets env vars for APIEmbedder."""
     env = _load_env()
     base_url = _require(env, "EMBEDDING_BASE_URL")
     api_key = _require(env, "EMBEDDING_API_KEY")
@@ -103,8 +83,8 @@ def llm_config():
 def integration_config(tmp_path, monkeypatch):
     """Full DSAGT config as ``load_config()`` would return it.
 
-    Builds a dsagt_config.yaml in a temp project dir from .env values, then
-    patches the registry so ``load_config(project_name)`` resolves to it.
+    Builds a ``.dsagt/config.yaml`` in a temp project dir from .env values,
+    then patches the registry so ``load_config(project_name)`` resolves to it.
     """
     from dsagt.session import load_config
 
@@ -113,26 +93,25 @@ def integration_config(tmp_path, monkeypatch):
     config_data = {
         "project": project_name,
         "agent": "claude",
-        "llm": {
-            "provider": _require(env, "LLM_PROVIDER"),
-            "model": _require(env, "LLM_MODEL"),
-            "base_url": _require(env, "LLM_BASE_URL"),
-            "api_key": _require(env, "LLM_API_KEY"),
-        },
         "embedding": {
+            "backend": "api",
             "model": _require(env, "EMBEDDING_MODEL"),
             "base_url": _require(env, "EMBEDDING_BASE_URL"),
-            "api_key": _require(env, "EMBEDDING_API_KEY"),
         },
-        "proxy": {"port": 14000},
-        "mlflow": {"port": 15001, "backend": "sqlite"},
     }
 
     project_dir = tmp_path / project_name
     project_dir.mkdir(parents=True)
-    for subdir in ("trace_archive", "mlflow", "tools", "tools/code", "skills", "kb_index"):
+    for subdir in (
+        "trace_archive",
+        "tools",
+        "tools/code",
+        "skills",
+        "kb_index",
+        ".dsagt",
+    ):
         (project_dir / subdir).mkdir()
-    (project_dir / "dsagt_config.yaml").write_text(
+    (project_dir / ".dsagt" / "config.yaml").write_text(
         yaml.dump(config_data, default_flow_style=False, sort_keys=False)
     )
 

@@ -15,15 +15,13 @@ import pytest
 
 from dsagt.knowledge import (
     ChromaIndex,
-    CollectionRoute,
-    FAISSIndex,
     KnowledgeBase,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def fake_embed(texts: list[str]) -> np.ndarray:
     """Deterministic fake embeddings: hash-based so different texts get
@@ -43,6 +41,7 @@ def fake_embed(texts: list[str]) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # ChromaIndex — metadata on add
 # ---------------------------------------------------------------------------
+
 
 class TestChromaIndexMetadataAdd:
 
@@ -90,6 +89,7 @@ class TestChromaIndexMetadataAdd:
 # ChromaIndex — where filter on search
 # ---------------------------------------------------------------------------
 
+
 class TestChromaIndexWhereSearch:
 
     @pytest.fixture
@@ -127,7 +127,8 @@ class TestChromaIndexWhereSearch:
         query = np.ones(8, dtype=np.float32)
         query /= np.linalg.norm(query)
         scores, indices = indexed.search(
-            query, k=4,
+            query,
+            k=4,
             where={"$and": [{"tool_name": "megahit"}, {"session_id": "s2"}]},
         )
         assert set(indices.tolist()) == {3}
@@ -140,7 +141,9 @@ class TestChromaIndexWhereSearch:
         # or raises when where matches nothing. Both are acceptable.
         try:
             scores, indices = indexed.search(
-                query, k=4, where={"tool_name": "nonexistent"},
+                query,
+                k=4,
+                where={"tool_name": "nonexistent"},
             )
             assert len(scores) == 0
             assert len(indices) == 0
@@ -159,6 +162,7 @@ class TestChromaIndexWhereSearch:
 # ---------------------------------------------------------------------------
 # ChromaIndex — persistence with metadata
 # ---------------------------------------------------------------------------
+
 
 class TestChromaIndexPersistence:
 
@@ -182,27 +186,9 @@ class TestChromaIndexPersistence:
 
 
 # ---------------------------------------------------------------------------
-# FAISSIndex — unchanged behavior
-# ---------------------------------------------------------------------------
-
-class TestFAISSUnchanged:
-
-    def test_faiss_add_search_unchanged(self):
-        """FAISSIndex add/search signatures are unchanged."""
-        idx = FAISSIndex()
-        emb = np.random.randn(3, 8).astype(np.float32)
-        # Normalize for inner-product search
-        emb /= np.linalg.norm(emb, axis=1, keepdims=True)
-        idx.add(emb)
-        assert idx.size == 3
-
-        scores, indices = idx.search(emb[0], k=2)
-        assert len(scores) == 2
-
-
-# ---------------------------------------------------------------------------
 # KnowledgeBase.search — where parameter
 # ---------------------------------------------------------------------------
+
 
 class TestKnowledgeBaseSearchWhere:
 
@@ -212,17 +198,12 @@ class TestKnowledgeBaseSearchWhere:
         entries with metadata."""
         index_dir = tmp_path / "kb"
 
-        chroma_route = CollectionRoute(
-            embedding_backend="api",
-            vector_db="chroma",
-        )
-
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
 
-            kb = KnowledgeBase(index_dir=index_dir, routes={"mem": chroma_route})
+            kb = KnowledgeBase(index_dir=index_dir)
 
             # Manually build the collection with metadata
             kb.add_entries(
@@ -239,7 +220,6 @@ class TestKnowledgeBaseSearchWhere:
                     {"tool_name": "fastp", "session_id": "s2"},
                     {"tool_name": "megahit", "session_id": "s2"},
                 ],
-                route=chroma_route,
             )
 
             yield kb
@@ -248,14 +228,20 @@ class TestKnowledgeBaseSearchWhere:
     def test_search_without_where(self, kb_with_chroma):
         """Search without where returns results from all entries."""
         results = kb_with_chroma.search(
-            "fastp quality", collection="mem", top_k=4, rerank=False,
+            "fastp quality",
+            collection="mem",
+            top_k=4,
+            rerank=False,
         )
         assert len(results) > 0
 
     def test_search_with_where_filters(self, kb_with_chroma):
         """Search with where restricts to matching metadata."""
         results = kb_with_chroma.search(
-            "quality filtering", collection="mem", top_k=4, rerank=False,
+            "quality filtering",
+            collection="mem",
+            top_k=4,
+            rerank=False,
             where={"tool_name": "fastp"},
         )
         # All results should be fastp entries
@@ -265,49 +251,27 @@ class TestKnowledgeBaseSearchWhere:
     def test_search_with_session_filter(self, kb_with_chroma):
         """Search with session_id filter returns only that session."""
         results = kb_with_chroma.search(
-            "assembly", collection="mem", top_k=4, rerank=False,
+            "assembly",
+            collection="mem",
+            top_k=4,
+            rerank=False,
             where={"session_id": "s2"},
         )
         for r in results:
             assert r["chunk"]["metadata"]["session_id"] == "s2"
-
-    def test_search_where_on_faiss_ignored(self, tmp_path):
-        """where parameter is silently ignored on FAISS collections."""
-        index_dir = tmp_path / "kb_faiss"
-
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
-            mock_embedder = MagicMock()
-            mock_embedder.embed = fake_embed
-            mock_make.return_value = mock_embedder
-
-            kb = KnowledgeBase(index_dir=index_dir, default_index="faiss")
-
-            # Use add_entries on a FAISS collection
-            kb.add_entries(
-                texts=["hello world", "goodbye world"],
-                collection="faiss_coll",
-            )
-
-            # where should not cause an error
-            results = kb.search(
-                "hello", collection="faiss_coll", top_k=2, rerank=False,
-                where={"some_field": "value"},
-            )
-            # Should still return results (where was ignored)
-            assert len(results) > 0
-            kb.close()
 
 
 # ---------------------------------------------------------------------------
 # KnowledgeBase.add_entries
 # ---------------------------------------------------------------------------
 
+
 class TestAddEntries:
 
     @pytest.fixture
     def mock_kb(self, tmp_path):
         """KnowledgeBase with mocked embedder."""
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -341,24 +305,19 @@ class TestAddEntries:
 
     def test_add_entries_with_metadata(self, tmp_path):
         """add_entries stores metadata in chunks.jsonl."""
-        chroma_route = CollectionRoute(
-            embedding_backend="api", vector_db="chroma",
-        )
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
 
             kb = KnowledgeBase(
                 index_dir=tmp_path / "kb",
-                routes={"mem": chroma_route},
             )
 
             kb.add_entries(
                 texts=["ran fastp with Q20"],
                 collection="mem",
                 metadatas=[{"tool_name": "fastp", "session_id": "s1"}],
-                route=chroma_route,
             )
 
             # Verify chunks.jsonl includes metadata
@@ -378,7 +337,10 @@ class TestAddEntries:
             collection="test_search",
         )
         results = mock_kb.search(
-            "quick fox", collection="test_search", top_k=2, rerank=False,
+            "quick fox",
+            collection="test_search",
+            top_k=2,
+            rerank=False,
         )
         assert len(results) > 0
 
@@ -406,20 +368,9 @@ class TestAddEntries:
         norms = np.linalg.norm(embeddings, axis=1)
         assert np.allclose(norms, 1.0, atol=1e-5)
 
-    def test_add_entries_return_embeddings_empty(self, mock_kb):
-        """Empty input with return_embeddings=True returns an empty array."""
-        result = mock_kb.add_entries(
-            texts=[], collection="ret_empty", return_embeddings=True,
-        )
-        assert "embeddings" in result
-        assert result["embeddings"].shape == (0,)
-
-    def test_add_entries_with_route(self, tmp_path):
-        """add_entries with explicit ChromaDB route uses ChromaDB."""
-        chroma_route = CollectionRoute(
-            embedding_backend="api", vector_db="chroma",
-        )
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+    def test_add_entries_uses_chroma(self, tmp_path):
+        """add_entries writes a ChromaDB-backed collection (chroma_ids.json)."""
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -428,37 +379,11 @@ class TestAddEntries:
             kb.add_entries(
                 texts=["test entry"],
                 collection="chroma_coll",
-                route=chroma_route,
             )
 
-            # Verify it used ChromaDB (chroma_ids.json exists, not index.faiss)
+            # Verify it used ChromaDB (chroma_ids.json exists)
             coll_dir = tmp_path / "kb" / "chroma_coll"
             assert (coll_dir / "chroma_ids.json").exists()
-            assert not (coll_dir / "index.faiss").exists()
-
-            kb.close()
-
-    def test_add_entries_preserves_route(self, tmp_path):
-        """Route is persisted so subsequent searches use the right backend."""
-        chroma_route = CollectionRoute(
-            embedding_backend="api", vector_db="chroma",
-        )
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
-            mock_embedder = MagicMock()
-            mock_embedder.embed = fake_embed
-            mock_make.return_value = mock_embedder
-
-            kb = KnowledgeBase(index_dir=tmp_path / "kb")
-            kb.add_entries(
-                texts=["test entry"],
-                collection="routed",
-                route=chroma_route,
-            )
-
-            route_path = tmp_path / "kb" / "routed" / "route.json"
-            assert route_path.exists()
-            route_data = json.loads(route_path.read_text())
-            assert route_data["vector_db"] == "chroma"
 
             kb.close()
 
@@ -467,21 +392,18 @@ class TestAddEntries:
 # End-to-end: add_entries + filtered search
 # ---------------------------------------------------------------------------
 
+
 class TestAddEntriesFilteredSearch:
     """Integration test: add entries with metadata, then search with where."""
 
     def test_filtered_search_returns_correct_subset(self, tmp_path):
-        chroma_route = CollectionRoute(
-            embedding_backend="api", vector_db="chroma",
-        )
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
 
             kb = KnowledgeBase(
                 index_dir=tmp_path / "kb",
-                routes={"executions": chroma_route},
             )
 
             kb.add_entries(
@@ -498,13 +420,14 @@ class TestAddEntriesFilteredSearch:
                     {"tool_name": "fastp", "session_id": "s2", "return_code": 0},
                     {"tool_name": "megahit", "session_id": "s2", "return_code": 1},
                 ],
-                route=chroma_route,
             )
 
             # Filter by tool_name
             fastp_results = kb.search(
-                "quality filtering", collection="executions",
-                top_k=4, rerank=False,
+                "quality filtering",
+                collection="executions",
+                top_k=4,
+                rerank=False,
                 where={"tool_name": "fastp"},
             )
             for r in fastp_results:
@@ -512,8 +435,10 @@ class TestAddEntriesFilteredSearch:
 
             # Filter by session
             s1_results = kb.search(
-                "assembly", collection="executions",
-                top_k=4, rerank=False,
+                "assembly",
+                collection="executions",
+                top_k=4,
+                rerank=False,
                 where={"session_id": "s1"},
             )
             for r in s1_results:
@@ -521,8 +446,10 @@ class TestAddEntriesFilteredSearch:
 
             # Compound filter
             failed = kb.search(
-                "megahit", collection="executions",
-                top_k=4, rerank=False,
+                "megahit",
+                collection="executions",
+                top_k=4,
+                rerank=False,
                 where={"$and": [{"tool_name": "megahit"}, {"return_code": 1}]},
             )
             for r in failed:

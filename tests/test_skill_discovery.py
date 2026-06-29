@@ -41,8 +41,16 @@ class FakeKB:
         self._hits = hits_by_collection or {}
         self.index_dir = index_dir
 
-    def search(self, query, collection, top_k=5):
-        return self._hits.get(collection, [])[:top_k]
+    def search(self, query, collection=None, collections=None, top_k=5, **kwargs):
+        # Mirror KnowledgeBase.search's fan-out surface; a simplified stand-in
+        # that merges by raw score (real cross-collection RRF is exercised in
+        # test_knowledge_base.TestFederatedSearch).
+        targets = collections or ([collection] if collection else [])
+        hits: list[dict] = []
+        for c in targets:
+            hits.extend(self._hits.get(c, []))
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        return hits[:top_k]
 
 
 def _hit(name, text, source, score, tags=""):

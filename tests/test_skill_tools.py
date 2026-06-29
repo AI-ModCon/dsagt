@@ -32,7 +32,6 @@ def _make_skill_server(tmp_path):
     kb = KnowledgeBase(
         index_dir=tmp_path / "kb_index",
         default_embedder="local",
-        default_index="chroma",
     )
     skill_reg = SkillRegistry(
         source_skills_dir=None,  # package default (empty bundled is fine)
@@ -185,12 +184,12 @@ class TestSkillSources:
     def test_list_skill_sources_returns_known(self, mock_kb):
         server = create_skill_server(kb=mock_kb)
         result = call_tool_json(server, "list_skill_sources", {})
-        assert "scientific" in result["sources"]
+        assert "k-dense-ai" in result["sources"]
         # Nothing synced → every known source flagged available, not synced.
-        assert result["sources"]["scientific"]["synced"] is False
-        assert result["sources"]["scientific"]["indexed"] == 0
+        assert result["sources"]["k-dense-ai"]["synced"] is False
+        assert result["sources"]["k-dense-ai"]["indexed"] == 0
         assert result["other_synced_collections"] == []
-        assert "scientific" in result["note"]
+        assert "k-dense-ai" in result["note"]
 
     def test_add_skill_source_bad_source_errors(self, mock_kb):
         server = create_skill_server(kb=mock_kb)

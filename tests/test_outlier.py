@@ -11,10 +11,10 @@ import pytest
 
 from dsagt.memory import CategoryCentroids, SuggestionQueue, check_and_queue_outliers
 
-
 # ---------------------------------------------------------------------------
 # CategoryCentroids
 # ---------------------------------------------------------------------------
+
 
 class TestCategoryCentroids:
 
@@ -79,6 +79,7 @@ class TestCategoryCentroids:
 # SuggestionQueue
 # ---------------------------------------------------------------------------
 
+
 class TestSuggestionQueue:
 
     def test_add_returns_id(self, tmp_path):
@@ -129,6 +130,7 @@ class TestSuggestionQueue:
 # check_and_queue_outliers
 # ---------------------------------------------------------------------------
 
+
 class TestCheckAndQueueOutliers:
 
     def _make_embeddings(self, vectors):
@@ -149,8 +151,13 @@ class TestCheckAndQueueOutliers:
         embeddings = self._make_embeddings([[0.0, 1.0, 0.0]])  # orthogonal
 
         ids = check_and_queue_outliers(
-            texts, categories, embeddings, centroids, queue,
-            threshold=0.3, session_id="s1",
+            texts,
+            categories,
+            embeddings,
+            centroids,
+            queue,
+            threshold=0.3,
+            session_id="s1",
         )
 
         assert len(ids) == 1
@@ -170,8 +177,13 @@ class TestCheckAndQueueOutliers:
         embeddings = self._make_embeddings([[0.98, 0.1, 0.0]])  # close
 
         ids = check_and_queue_outliers(
-            texts, categories, embeddings, centroids, queue,
-            threshold=0.3, session_id="s1",
+            texts,
+            categories,
+            embeddings,
+            centroids,
+            queue,
+            threshold=0.3,
+            session_id="s1",
         )
 
         assert len(ids) == 0
@@ -187,8 +199,13 @@ class TestCheckAndQueueOutliers:
         embeddings = self._make_embeddings([[0.5, 0.5, 0.5]])
 
         ids = check_and_queue_outliers(
-            texts, categories, embeddings, centroids, queue,
-            threshold=0.1, session_id="s1",
+            texts,
+            categories,
+            embeddings,
+            centroids,
+            queue,
+            threshold=0.1,
+            session_id="s1",
         )
 
         assert len(ids) == 0
@@ -203,7 +220,11 @@ class TestCheckAndQueueOutliers:
         embeddings = self._make_embeddings([[1.0, 0.0, 0.0]])
 
         ids = check_and_queue_outliers(
-            texts, categories, embeddings, centroids, queue,
+            texts,
+            categories,
+            embeddings,
+            centroids,
+            queue,
             threshold=0.1,
         )
 
@@ -219,10 +240,12 @@ class TestCheckAndQueueOutliers:
         embeddings = self._make_embeddings([[1.0, 0.0]])
 
         check_and_queue_outliers(
-            texts, categories, embeddings, centroids, queue,
+            texts,
+            categories,
+            embeddings,
+            centroids,
+            queue,
             threshold=0.3,
         )
 
         assert (tmp_path / "centroids.json").exists()
-
-

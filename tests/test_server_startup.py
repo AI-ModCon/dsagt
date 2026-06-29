@@ -29,7 +29,7 @@ _SERVER_CMD = [sys.executable, "-m", "dsagt.mcp.server"]
 class TestServerEntryPoint:
 
     def test_fails_fast_without_project_config(self, tmp_path):
-        """Run from a dir with no dsagt_config.yaml → clean fail-fast.
+        """Run from a dir with no .dsagt/config.yaml → clean fail-fast.
 
         ``dsagt-server`` discovers its project from cwd; launched anywhere else
         it must say so rather than boot a half-configured server.
@@ -39,34 +39,41 @@ class TestServerEntryPoint:
         proc = start_server(_SERVER_CMD, cwd=str(empty))
         rc = proc.wait(timeout=15)
         assert rc != 0
-        assert "no dsagt_config.yaml in cwd" in proc.stderr.read()
+        assert "no .dsagt/config.yaml in cwd" in proc.stderr.read()
 
-    def test_fails_fast_without_observability_backend(self, tmp_path):
-        """A project config lacking ``mlflow.port`` → init_tracing fails fast.
+    def test_mints_session_into_state_on_boot(self, tmp_path):
+        """The server owns the session lifecycle: on boot it appends a session
+        entry to ``.dsagt/state.yaml`` (serverless — no MLflow backend needed).
 
-        The merged server requires an observability backend (it autologs every
-        LLM call into MLflow); booting without one is a misconfiguration.
+        Session minting happens before the (slow) KB build, so the state file
+        appears within a second; we poll for it, then terminate.
         """
+        import time
+
         import yaml
 
         project = tmp_path / "runtime"
-        project.mkdir()
+        (project / ".dsagt").mkdir(parents=True)
         config = {
             "project": "test",
             "agent": "claude",
-            "embedding": {
-                "backend": "api",
-                "model": "test-model",
-                "base_url": "http://localhost:9999",
-                "api_key": "test-fake-key",
-            },
-            "knowledge": {"chunk_size": 1024, "vector_db": "chroma", "rerank": False},
-            # no mlflow.port
+            "embedding": {"backend": "local", "model": "BAAI/bge-small-en-v1.5"},
+            "knowledge": {"chunk_size": 1024, "rerank": False},
         }
-        (project / "dsagt_config.yaml").write_text(
+        (project / ".dsagt" / "config.yaml").write_text(
             yaml.dump(config, default_flow_style=False)
         )
+        state_file = project / ".dsagt" / "state.yaml"
         proc = start_server(_SERVER_CMD, cwd=str(project))
-        rc = proc.wait(timeout=15)
-        assert rc != 0
-        assert "no observability backend configured" in proc.stderr.read()
+        try:
+            for _ in range(60):  # up to ~12s
+                if state_file.exists():
+                    break
+                time.sleep(0.2)
+            assert state_file.exists(), "server did not mint a session into state.yaml"
+            state = yaml.safe_load(state_file.read_text())
+            assert state["sessions"][-1]["id"] == 1
+            assert state["sessions"][-1]["started_at"].endswith("Z")
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)

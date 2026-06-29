@@ -9,7 +9,7 @@ interpolation references).
 OTel support: **none** natively (one third-party plugin exists but isn't
 wired in by default).  Agent transparency in MLflow is limited to MCP-server
 spans (kb.*, registry.*) and dsagt-run tool.execute spans; LLM-call payloads
-require Phase 2 proxy mode.
+are not captured.
 
 Auth model: opencode reads creds via ``{env:VAR}`` interpolation in its
 ``opencode.json`` provider block, so we can keep BYOA-pure — the file
@@ -23,7 +23,7 @@ only (no flags), so non-interactive setup must hand-write the JSON.
 
 Model whitelist: pass-through for known providers (pulled from models.dev)
 and fully user-controlled for custom providers via ``provider.<id>.models``.
-Unlike cline/roo, opencode does NOT rewrite gateway-aliased model names.
+Unlike cline, opencode does NOT rewrite gateway-aliased model names.
 
 Batch mode: ``opencode run --dir <path> --dangerously-skip-permissions
 -m <provider/model> <prompt>``.  ``--dir`` is the cwd flag (not ``-C`` /
@@ -111,67 +111,6 @@ def _render_opencode_config(
     return json.dumps(config, indent=2)
 
 
-def _render_opencode_config_proxy(
-    mcp_env: dict,
-    proxy_port: int,
-    opencode_model: str | None,
-) -> str:
-    """Phase-2 proxy-mode opencode.json body.
-
-    All provider routes hit ``http://localhost:<proxy_port>`` regardless
-    of wire protocol — the proxy normalizes both /v1/messages and
-    /v1/chat/completions to the upstream's /chat/completions endpoint.
-    Sentinel API key plants a clear failure mode if a request bypasses
-    the proxy (the user sees 401, not silent leakage).
-
-    Like the BYOA renderer, we register the user's chosen model under
-    ``provider.<id>.models`` so gateway-aliased names not in models.dev
-    don't trip ProviderModelNotFoundError.
-    """
-    from .base import _PROXY_FORWARDED_SENTINEL
-
-    proxy_url = f"http://localhost:{proxy_port}"
-    config: dict = {
-        "$schema": "https://opencode.ai/config.json",
-        "mcp": {},
-    }
-    entry: dict = {
-        "type": "local",
-        "command": ["uv"] + _mcp_server_args(),
-        "enabled": True,
-    }
-    if mcp_env:
-        entry["environment"] = dict(mcp_env)
-    config["mcp"]["dsagt"] = entry
-
-    # Both providers point at the proxy — opencode picks via model prefix.
-    providers: dict = {
-        "openai": {
-            "options": {
-                "apiKey": _PROXY_FORWARDED_SENTINEL,
-                "baseURL": proxy_url,
-            }
-        },
-        "anthropic": {
-            "options": {
-                "apiKey": _PROXY_FORWARDED_SENTINEL,
-                "baseURL": proxy_url,
-            }
-        },
-    }
-
-    if opencode_model and "/" in opencode_model:
-        provider_id, model_id = opencode_model.split("/", 1)
-        if provider_id in providers:
-            providers[provider_id]["models"] = {
-                model_id: {"name": model_id},
-            }
-            config["model"] = opencode_model
-
-    config["provider"] = providers
-    return json.dumps(config, indent=2)
-
-
 class OpenCodeSetup(AgentSetup):
     name = "opencode"
     base_command = ["opencode"]
@@ -189,7 +128,6 @@ class OpenCodeSetup(AgentSetup):
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_BASE_URL",
     )
-    telemetry_env = {}
     credential_hints = (
         (
             "OPENCODE_MODEL",
@@ -206,6 +144,9 @@ class OpenCodeSetup(AgentSetup):
         ("ANTHROPIC_API_KEY", "if your gateway speaks anthropic wire protocol"),
         ("ANTHROPIC_BASE_URL", "anthropic gateway URL"),
     )
+
+    def owned_artifacts(self, working_dir: Path) -> list[Path]:
+        return [working_dir / "AGENTS.md", working_dir / "opencode.json"]
 
     def write_static(self, working_dir: Path) -> list[str]:
         actions: list[str] = []
@@ -263,41 +204,6 @@ class OpenCodeSetup(AgentSetup):
             f"Wrote {config_path} ({len(mcp_env)} MCP env vars, "
             f"{n_providers} provider block(s))"
         )
-        return actions
-
-    def proxy_write_dynamic(
-        self,
-        config: dict,
-        env: dict,
-        working_dir: Path,
-        pdir: Path,
-    ) -> list[str]:
-        """Phase-2 proxy-mode setup.  All provider routes point at
-        ``http://localhost:<proxy_port>``; the user's gateway creds live
-        in the proxy subprocess via ``LLM_API_KEY``.  Same OPENCODE_MODEL
-        env var as BYOA — must be ``<provider>/<name>``.
-        """
-        del env, pdir
-        actions: list[str] = []
-        proxy_port = (config.get("proxy") or {}).get("port")
-        opencode_model = (config.get("llm") or {}).get("model")
-        # opencode_model from config["llm"]["model"] is just a name; the
-        # user's OPENCODE_MODEL ``<provider>/<name>`` form takes precedence
-        # if set, otherwise default to ``openai/<llm.model>`` since the
-        # proxy speaks /chat/completions on every upstream.
-        if opencode_model and "/" not in opencode_model:
-            opencode_model = f"openai/{opencode_model}"
-        if not proxy_port or not opencode_model:
-            raise RuntimeError(
-                "opencode proxy_write_dynamic requires "
-                "config['proxy']['port'] and config['llm']['model']."
-            )
-
-        mcp_env = _mcp_env_block(config)
-        body = _render_opencode_config_proxy(mcp_env, proxy_port, opencode_model)
-        config_path = working_dir / "opencode.json"
-        config_path.write_text(body + "\n")
-        actions.append(f"Wrote {config_path} ({len(mcp_env)} MCP env vars, proxy mode)")
         return actions
 
     def run_script(

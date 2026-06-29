@@ -56,7 +56,8 @@ def test_known_source_genesis_covers_whole_skills_tree():
 def test_persist_source_to_config_appends_and_dedupes(tmp_path):
     import yaml
 
-    cfg = tmp_path / "dsagt_config.yaml"
+    (tmp_path / ".dsagt").mkdir()
+    cfg = tmp_path / ".dsagt" / "config.yaml"
     cfg.write_text(yaml.dump({"project": "p", "skills": {"sources": []}}))
     spec = {
         "name": "anthropic",
@@ -75,7 +76,7 @@ def test_persist_source_to_config_appends_and_dedupes(tmp_path):
 
 def test_resolve_source_known_url_and_shorthand():
     assert (
-        sc.resolve_source("scientific")["url"] == sc.KNOWN_SOURCES["scientific"]["url"]
+        sc.resolve_source("k-dense-ai")["url"] == sc.KNOWN_SOURCES["k-dense-ai"]["url"]
     )
     assert (
         sc.resolve_source("https://github.com/a/b")["url"] == "https://github.com/a/b"
@@ -278,7 +279,6 @@ def test_mirror_truncates_long_description(tmp_path):
         ("claude", ".claude/skills"),
         ("goose", ".agents/skills"),
         ("cline", ".cline/skills"),
-        ("roo", ".roo/skills"),
         ("codex", ".agents/skills"),
     ],
 )

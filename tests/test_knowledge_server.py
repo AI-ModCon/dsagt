@@ -179,8 +179,10 @@ class TestSearch:
         mock_kb.search.assert_called_once_with(
             query="test",
             collection="docs",
+            collections=None,
             top_k=10,
             rerank=False,
+            where=None,
         )
 
     def test_search_defaults(self, server, mock_kb):
@@ -197,8 +199,10 @@ class TestSearch:
         mock_kb.search.assert_called_once_with(
             query="test",
             collection="docs",
+            collections=None,
             top_k=5,
             rerank=None,  # agent didn't specify → kb.default_rerank resolves it
+            where=None,
         )
 
     def test_search_nonexistent_collection(self, server, mock_kb):
@@ -346,12 +350,12 @@ class TestIngest:
         folder = tmp_path / "docs"
         folder.mkdir()
 
-        # Simulate "docs" already exists with a FAISS index from a different source.
+        # Simulate "docs" already exists with a Chroma index from a different source.
         # _collection_exists() requires a marker file, and deconflict only triggers
         # when source.txt records a different folder than the one being ingested.
         existing = mock_kb.index_dir / "docs"
         existing.mkdir()
-        (existing / "index.faiss").write_bytes(b"fake")
+        (existing / "chroma_ids.json").write_bytes(b"fake")
         (existing / "source.txt").write_text("/some/other/folder")
 
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
@@ -377,7 +381,7 @@ class TestIngest:
         # Simulate "docs" is a symlink to a base collection with index
         base_dir = tmp_path / "base_docs"
         base_dir.mkdir()
-        (base_dir / "index.faiss").write_bytes(b"fake")
+        (base_dir / "chroma_ids.json").write_bytes(b"fake")
         (base_dir / "source.txt").write_text("/some/other/folder")
 
         (mock_kb.index_dir / "docs").symlink_to(base_dir)
@@ -455,7 +459,7 @@ class TestAppend:
         # Create a fake existing collection
         coll_dir = mock_kb.index_dir / "docs"
         coll_dir.mkdir(exist_ok=True)
-        (coll_dir / "index.faiss").write_text("fake")
+        (coll_dir / "chroma_ids.json").write_text("fake")
 
         result = call_tool(
             server,
@@ -474,7 +478,7 @@ class TestAppend:
         """Background append job completes successfully."""
         coll_dir = mock_kb.index_dir / "docs"
         coll_dir.mkdir(exist_ok=True)
-        (coll_dir / "index.faiss").write_text("fake")
+        (coll_dir / "chroma_ids.json").write_text("fake")
 
         async def run():
             initial, final = await call_tool_and_await_job(
@@ -604,7 +608,7 @@ class TestSearchErrorHandling:
 
     def test_search_runtime_error(self, mock_kb):
         """Unexpected RuntimeError during search returns error, not crash."""
-        mock_kb.search.side_effect = RuntimeError("FAISS segfault simulation")
+        mock_kb.search.side_effect = RuntimeError("index segfault simulation")
         server = create_knowledge_server(mock_kb)
 
         result = call_tool(
@@ -617,11 +621,11 @@ class TestSearchErrorHandling:
         )
 
         assert result["status"] == "error"
-        assert "FAISS segfault" in result["error"]
+        assert "index segfault" in result["error"]
 
     def test_search_os_error(self, mock_kb):
         """OS-level error (disk, permissions) returns error, not crash."""
-        mock_kb.search.side_effect = OSError("Permission denied: index.faiss")
+        mock_kb.search.side_effect = OSError("Permission denied: chroma.sqlite3")
         server = create_knowledge_server(mock_kb)
 
         result = call_tool(
@@ -656,7 +660,7 @@ class TestSetupRuntimeKb:
         base = tmp_path / "base_index"
         coll_dir = base / "my_collection"
         coll_dir.mkdir(parents=True)
-        (coll_dir / "index.faiss").write_text("fake index")
+        (coll_dir / "chroma_ids.json").write_text("fake index")
         (coll_dir / "chunks.jsonl").write_text('{"id": "1"}\n')
         (coll_dir / "DESCRIPTION.md").write_text("Test collection")
 
@@ -667,8 +671,8 @@ class TestSetupRuntimeKb:
         copied = result / "my_collection"
         assert copied.exists()
         assert not copied.is_symlink()  # copy not symlink
-        assert (copied / "index.faiss").exists()
-        assert (copied / "index.faiss").read_text() == "fake index"
+        assert (copied / "chroma_ids.json").exists()
+        assert (copied / "chroma_ids.json").read_text() == "fake index"
         assert (copied / "chunks.jsonl").exists()
         assert (copied / "DESCRIPTION.md").exists()
 
@@ -677,20 +681,20 @@ class TestSetupRuntimeKb:
         base = tmp_path / "base_index"
         coll = base / "tools"
         coll.mkdir(parents=True)
-        (coll / "index.faiss").write_text("v1")
+        (coll / "chroma_ids.json").write_text("v1")
 
         runtime = tmp_path / "runtime"
         setup_runtime_kb(base, runtime)
 
         # Mutate the base — simulating ``dsagt setup-kb --rebuild``.
-        (coll / "index.faiss").write_text("v2 newer")
+        (coll / "chroma_ids.json").write_text("v2 newer")
 
         # Project copy stays at v1.
-        project_copy = runtime / "kb_index" / "tools" / "index.faiss"
+        project_copy = runtime / "kb_index" / "tools" / "chroma_ids.json"
         assert project_copy.read_text() == "v1"
 
     def test_skips_non_collection_dirs(self, tmp_path):
-        """Directories without index.faiss are not copied."""
+        """Directories without chroma_ids.json are not copied."""
         base = tmp_path / "base_index"
         (base / "random_dir").mkdir(parents=True)
         (base / "random_dir" / "notes.txt").write_text("not a collection")
@@ -713,16 +717,16 @@ class TestSetupRuntimeKb:
         base = tmp_path / "base_index"
         coll = base / "docs"
         coll.mkdir(parents=True)
-        (coll / "index.faiss").write_text("base version")
+        (coll / "chroma_ids.json").write_text("base version")
 
         runtime = tmp_path / "runtime"
         runtime_coll = runtime / "kb_index" / "docs"
         runtime_coll.mkdir(parents=True)
-        (runtime_coll / "index.faiss").write_text("runtime version")
+        (runtime_coll / "chroma_ids.json").write_text("runtime version")
 
         setup_runtime_kb(base, runtime)
 
-        assert (runtime_coll / "index.faiss").read_text() == "runtime version"
+        assert (runtime_coll / "chroma_ids.json").read_text() == "runtime version"
 
 
 # ---------------------------------------------------------------------------
@@ -732,8 +736,8 @@ class TestSetupRuntimeKb:
 
 class TestOpenMPWorkaround:
     """Importing the knowledge tools module must set KMP_DUPLICATE_LIB_OK to
-    prevent a fatal OpenMP crash when FAISS and sentence-transformers (PyTorch)
-    both bundle libomp.
+    prevent a fatal OpenMP crash when multiple native deps (e.g. ChromaDB and
+    sentence-transformers / PyTorch) both bundle libomp.
 
     Without this, kb_search with rerank=true kills
     the server process, producing 'transport closed' in MCP clients."""
@@ -791,8 +795,10 @@ class TestRerankSchemaDefault:
         mock_kb.search.assert_called_once_with(
             query="test",
             collection="docs",
+            collections=None,
             top_k=5,
             rerank=None,
+            where=None,
         )
 
 
@@ -818,7 +824,11 @@ class TestKbSearchMultiCollection:
         mock_kb.search.assert_called_once()
 
     def test_multi_collection_fanout(self, server, mock_kb):
-        """Searching multiple collections calls search for each."""
+        """Multi-collection search delegates once to kb.search with collections=.
+
+        Fan-out + fusion across collections is kb.search's job (covered by
+        TestFederatedSearch in test_knowledge_base.py); the handler just forwards.
+        """
         mock_kb.search.return_value = [
             make_search_result("result", "/file.md", 0, 0.9),
         ]
@@ -833,7 +843,14 @@ class TestKbSearchMultiCollection:
         )
 
         assert result["status"] == "ok"
-        assert mock_kb.search.call_count == 2
+        mock_kb.search.assert_called_once_with(
+            query="test",
+            collection=None,
+            collections=["docs", "papers"],
+            top_k=5,
+            rerank=None,
+            where=None,
+        )
 
     def test_no_collection_returns_error(self, server):
         result = call_tool(
@@ -847,21 +864,12 @@ class TestKbSearchMultiCollection:
         assert result["status"] == "error"
 
     def test_multi_collection_merges_results(self, server, mock_kb):
-        """Results from multiple collections are merged and sorted."""
-        call_count = [0]
-
-        def varying_results(**kwargs):
-            call_count[0] += 1
-            score = 0.9 if call_count[0] == 1 else 0.7
-            return [
-                make_search_result(
-                    f"result_{call_count[0]}",
-                    f"/file_{call_count[0]}.md",
-                    score=score,
-                )
-            ]
-
-        mock_kb.search.side_effect = varying_results
+        """The handler returns kb.search's already-fused, sorted results."""
+        # kb.search owns fusion now; it returns one merged, descending list.
+        mock_kb.search.return_value = [
+            make_search_result("result_1", "/file_1.md", score=0.9),
+            make_search_result("result_2", "/file_2.md", score=0.7),
+        ]
 
         result = call_tool(
             server,
@@ -876,28 +884,6 @@ class TestKbSearchMultiCollection:
         assert result["result_count"] == 2
         scores = [r["score"] for r in result["results"]]
         assert scores == sorted(scores, reverse=True)
-
-    def test_missing_collection_skipped(self, server, mock_kb):
-        """A missing collection logs a warning but doesn't fail the search."""
-
-        def search_with_error(**kwargs):
-            if kwargs["collection"] == "missing":
-                raise ValueError("Collection 'missing' not found")
-            return [make_search_result("result", "/file.md")]
-
-        mock_kb.search.side_effect = search_with_error
-
-        result = call_tool(
-            server,
-            "kb_search",
-            {
-                "query": "test",
-                "collections": ["docs", "missing"],
-            },
-        )
-
-        assert result["status"] == "ok"
-        assert result["result_count"] == 1
 
 
 class TestKbSearchSchema:

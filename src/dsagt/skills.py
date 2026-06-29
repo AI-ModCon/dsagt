@@ -1,38 +1,39 @@
 """Skill discovery — catalog data plane, keyword scorer, and the router facade.
 
-One module for all the importable skill-discovery logic that is *not* an entry
-point (entry points — the MCP tool handlers — stay in
-``commands/registry_server.py`` and ``commands/knowledge_server.py``).  Three
-cohesive concerns, in dependency order:
+DSAGT fetches external Agent-Skills repos, indexes each per-source into a
+``skills_catalog__<slug>`` KB collection, and searches/installs them into a
+project.  This is the one job native skill discovery can't do: a *catalog* skill
+stays searchable without being copied locally or held in the agent's context
+(you can't hold thousands of skill descriptions in context), while an
+*installed* skill is copied into ``<project>/skills/<name>/`` and mirrored into
+the agent's native skills dir (``agents.base.setup_skills``).  It backs the MCP
+``search_skills`` tool and the ``dsagt skills`` CLI through the one
+:class:`SkillRouter` facade, so search/install policy can't diverge between them.
+Design-wise it stays cheap and degradable: :class:`SkillsCatalog` composes over
+the host server's :class:`~dsagt.knowledge.KnowledgeBase` (shared embedder, no
+second model load), falls back to a Genesis-derived keyword scorer
+(:func:`rank_skills`) when no embedder/KB is configured, and indexes per-source
+so re-sync is an idempotent drop-and-rebuild of just that source's collection.
 
-1. **Keyword scorer** (:func:`score_skill` / :func:`rank_skills`) — a faithful
-   reimplementation of the Genesis Skills ``skill-search`` engine, the
-   zero-dependency fallback ranker used when no embedder / KB is configured.
-2. **Catalog data plane** (:class:`SkillsCatalog` + its module functions) —
-   fetch Agent-Skills repos, index per-source into ``skills_catalog__<slug>``
-   collections, search, and install into a project.
-3. **Router facade** (:class:`SkillRouter`) — the thin render layer the MCP
-   ``search_skills`` tool and the ``dsagt skills`` CLI share.
+Class map — every edge is ``<branch>─<rel> Class`` (``◇`` holds · ``◆`` owns)::
 
-Two tiers (see the skill-management plan):
+    SkillRouter                     render/MCP facade: the search_skills string,
+    │                               the empty-result message, exact-name lookup
+    ├─◇ SkillsCatalog               the catalog data plane (constructed here, or
+    │   │                           shared in via catalog=)
+    │   └─◇ KnowledgeBase           shared vector store + embedder; None selects
+    │                               the keyword fallback over the clone cache
+    └─◇ SkillRegistry               installed-skill registry, exact-name lookup only
 
-* **Catalog** — every skill in a configured source repo, indexed into a
-  per-source ``skills_catalog__<slug>`` KB collection.  Searchable via
-  ``search_skills``, but NOT copied locally and NOT loaded into the agent's
-  context.  This is the one job native skill discovery can't do (you can't hold
-  thousands of skill descriptions in context).
-* **Installed** — a chosen skill copied into ``<project>/skills/<name>/``.  The
-  agent setup mirrors it into the agent's native skills dir for native
-  discovery (see ``agents.base.setup_skills``).
-
-Re-sync is idempotent by dropping the per-source collection directory and
-rebuilding it.  ``clone_github`` is imported lazily inside :func:`sync_source`
-to avoid an import cycle with ``setup_core_kb`` (which calls back into
-:func:`sync_source`).
+    free fns:
+      keyword scorer  score_skill · rank_skills           (Genesis parity)
+      source resolve  resolve_source · _repo_slug · persist_source_to_config
+      sync / index    sync_source · _discover_skill_dirs · index_catalog
+      install         find_catalog_skill · install_into_project · _capture_attribution
+      render          _where_label
 
 Genesis Skills: Apache-2.0, gitlab.osti.gov/genesis/genesis-skills
-(``skill_search/catalog.py``).  See ``design-notes/genesis-skills-comparison.md``
-and ``design-notes/skills-catalog-server-merge.md``.
+(``skill_search/catalog.py``).
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ import logging
 import re
 import shutil
 from pathlib import Path
+
+import yaml
 
 from dsagt.registry import (
     CATALOG_COLLECTION_PREFIX,
@@ -118,9 +121,6 @@ def score_skill(query: str, name: str, description: str) -> float:
     """Token-overlap score of one skill against *query* (0.0 = no match)."""
     qtokens = _tokens(query)
     normalized_query = (query or "").casefold().strip()
-    if not qtokens and not normalized_query:
-        return 0.0
-
     score = 2 * len(qtokens & _tokens(name)) + len(qtokens & _tokens(description))
 
     if normalized_query:
@@ -157,13 +157,13 @@ def rank_skills(
 # ===========================================================================
 
 #: Default source enabled out of the box (matches dsagt_config.yaml default).
-DEFAULT_SOURCE = "scientific"
+DEFAULT_SOURCE = "k-dense-ai"
 
 #: Curated, named skill sources.  ``subdir`` scopes the recursive SKILL.md
 #: walk when set (cheaper clone); when omitted the whole repo is cloned and
 #: walked, which is robust to category-nested layouts.
 KNOWN_SOURCES: dict[str, dict] = {
-    "scientific": {
+    "k-dense-ai": {
         "url": "https://github.com/K-Dense-AI/scientific-agent-skills",
         "branch": "main",
         "subdir": "skills",
@@ -243,9 +243,7 @@ def persist_source_to_config(project_dir: str | Path, spec: dict) -> bool:
     ``dsagt skills add`` CLI so a CLI-added source is re-synced by a later
     config-driven ``dsagt skills sync``.
     """
-    import yaml
-
-    cfg_path = Path(project_dir) / "dsagt_config.yaml"
+    cfg_path = Path(project_dir) / ".dsagt" / "config.yaml"
     if not cfg_path.exists():
         return False
     cfg = yaml.safe_load(cfg_path.read_text()) or {}
@@ -607,26 +605,25 @@ class SkillsCatalog:
         return self._select_keyword(query, top_k, tag)
 
     def _select_kb(self, query, top_k: int, tag) -> list[dict]:
-        """Semantic backend: ChromaDB search across every synced catalog
-        collection, merged + sorted by score into normalized hit dicts.
+        """Semantic backend: rank-fused search across every synced catalog
+        collection, normalized into hit dicts.
 
-        Each ``skills_catalog__*`` collection is queried independently (a
-        missing/corrupt one is skipped, not fatal); when a ``tag`` filter is
-        set we over-fetch (``top_k * 3``) then post-filter so the tag doesn't
-        starve the result set.
+        Fan-out + RRF live in ``KnowledgeBase.search`` (the shared substrate);
+        catalog collections are homogeneous (one embedder) so the fusion is a
+        clean rank merge.  When a ``tag`` filter is set we over-fetch
+        (``top_k * 3``) then post-filter so the tag doesn't starve the results.
         """
         collections = self.synced_collections()
+        if not collections:
+            return []
         fetch_k = top_k * 3 if tag else top_k
-        hits: list[dict] = []
-        for coll in collections:
-            try:
-                hits.extend(
-                    self._kb.search(
-                        query=query or "skill", collection=coll, top_k=fetch_k
-                    )
-                )
-            except (FileNotFoundError, KeyError, ValueError):
-                continue
+        # collections all come from synced_collections() (they exist), and
+        # KnowledgeBase.search already skips a missing collection with a warning
+        # and raises only when every target fails — so a raise here is a real
+        # failure worth surfacing, not a can't-happen state to swallow.
+        hits = self._kb.search(
+            query=query or "skill", collections=collections, top_k=fetch_k
+        )
         out = []
         for r in hits:
             chunk = r.get("chunk", {})
@@ -740,7 +737,7 @@ class SkillsCatalog:
 #
 # Skill *materialization* (mirroring installed skills into each agent's native
 # skills directory) lives in the agent layer (``AgentSetup.setup_skills``), not
-# here: every supported agent (claude/codex/goose/cline/roo) natively
+# here: every supported agent (claude/codex/goose/cline) natively
 # auto-discovers ``SKILL.md`` folders, so there is no agent-facing disclosure
 # tier for the router to own.  ``search_skills`` exists for the *catalog* tier
 # (skills not yet installed, which native discovery can't see) plus the
@@ -814,8 +811,6 @@ class SkillRouter:
     def search(self, query=None, *, top_k: int = 8, tag=None, skill_name=None) -> str:
         """Stage B. Select + render. Stateless — no session/exposure tracking."""
         if skill_name:
-            import yaml
-
             if self._reg is None:
                 return f"No skill named '{skill_name}'."
             spec = self._reg.get_skill(skill_name)

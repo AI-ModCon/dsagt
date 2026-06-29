@@ -47,33 +47,45 @@ def server(mock_kb):
 # Handler: filter threading
 # ---------------------------------------------------------------------------
 
+
 class TestSearchFilterThreading:
 
     def test_no_filters_no_where(self, server, mock_kb):
-        """Search without filter params doesn't pass where to kb.search."""
-        call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "docs",
-        })
+        """Search without filter params passes where=None to kb.search."""
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         mock_kb.search.assert_called_once_with(
             query="test",
             collection="docs",
+            collections=None,
             top_k=5,
             rerank=None,
+            where=None,
         )
 
     def test_tool_name_filter_passed(self, server, mock_kb):
         """tool_name filter is threaded through as where clause."""
-        call_tool(server, "kb_search", {
-            "query": "quality filtering",
-            "collection": "tool_executions",
-            "tool_name": "fastp",
-        })
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "quality filtering",
+                "collection": "tool_executions",
+                "tool_name": "fastp",
+            },
+        )
 
         mock_kb.search.assert_called_once_with(
             query="quality filtering",
             collection="tool_executions",
+            collections=None,
             top_k=5,
             rerank=None,
             where={"tool_name": "fastp"},
@@ -81,15 +93,20 @@ class TestSearchFilterThreading:
 
     def test_session_filter_passed(self, server, mock_kb):
         """session_id filter is threaded through."""
-        call_tool(server, "kb_search", {
-            "query": "pipeline",
-            "collection": "tool_executions",
-            "session_id": "s3",
-        })
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "pipeline",
+                "collection": "tool_executions",
+                "session_id": "s3",
+            },
+        )
 
         mock_kb.search.assert_called_once_with(
             query="pipeline",
             collection="tool_executions",
+            collections=None,
             top_k=5,
             rerank=None,
             where={"session_id": "s3"},
@@ -97,12 +114,16 @@ class TestSearchFilterThreading:
 
     def test_multiple_filters_combined(self, server, mock_kb):
         """Multiple filters produce a compound $and where clause."""
-        call_tool(server, "kb_search", {
-            "query": "parameters",
-            "collection": "tool_executions",
-            "tool_name": "fastp",
-            "session_id": "s1",
-        })
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "parameters",
+                "collection": "tool_executions",
+                "tool_name": "fastp",
+                "session_id": "s1",
+            },
+        )
 
         call_kwargs = mock_kb.search.call_args[1]
         assert "where" in call_kwargs
@@ -111,40 +132,56 @@ class TestSearchFilterThreading:
 
     def test_return_code_filter_passed(self, server, mock_kb):
         """return_code filter is threaded as integer."""
-        call_tool(server, "kb_search", {
-            "query": "failures",
-            "collection": "tool_executions",
-            "return_code": 1,
-        })
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "failures",
+                "collection": "tool_executions",
+                "return_code": 1,
+            },
+        )
 
         mock_kb.search.assert_called_once_with(
             query="failures",
             collection="tool_executions",
+            collections=None,
             top_k=5,
             rerank=None,
             where={"return_code": 1},
         )
 
     def test_filters_with_multi_collection(self, server, mock_kb):
-        """Filters apply to each collection in a multi-collection search."""
+        """Multi-collection search delegates to kb.search once with collections=."""
         mock_kb.search.return_value = [
             make_search_result("result", "/f.md"),
         ]
 
-        call_tool(server, "kb_search", {
-            "query": "test",
-            "collections": ["tool_executions", "episodic_memory"],
-            "tool_name": "fastp",
-        })
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collections": ["tool_executions", "episodic_memory"],
+                "tool_name": "fastp",
+            },
+        )
 
-        assert mock_kb.search.call_count == 2
-        for call in mock_kb.search.call_args_list:
-            assert call[1]["where"] == {"tool_name": "fastp"}
+        # Fan-out lives in kb.search now; the handler makes a single call.
+        mock_kb.search.assert_called_once_with(
+            query="test",
+            collection=None,
+            collections=["tool_executions", "episodic_memory"],
+            top_k=5,
+            rerank=None,
+            where={"tool_name": "fastp"},
+        )
 
 
 # ---------------------------------------------------------------------------
 # Handler: metadata in results
 # ---------------------------------------------------------------------------
+
 
 class TestSearchResultMetadata:
 
@@ -152,16 +189,21 @@ class TestSearchResultMetadata:
         """Search results include extra metadata fields."""
         mock_kb.search.return_value = [
             make_search_result(
-                "fastp ran", "/file.md",
+                "fastp ran",
+                "/file.md",
                 extra_meta={"tool_name": "fastp", "session_id": "s1", "return_code": 0},
             ),
         ]
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "tool_executions",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "tool_executions",
+            },
+        )
 
         hit = result["results"][0]
         assert hit["metadata"]["tool_name"] == "fastp"
@@ -176,10 +218,14 @@ class TestSearchResultMetadata:
         ]
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         meta = result["results"][0]["metadata"]
         assert "source_file" not in meta
@@ -194,10 +240,14 @@ class TestSearchResultMetadata:
         ]
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "docs",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "docs",
+            },
+        )
 
         assert result["results"][0]["metadata"] == {}
 
@@ -205,6 +255,7 @@ class TestSearchResultMetadata:
 # ---------------------------------------------------------------------------
 # Schema: filter params visible to agent
 # ---------------------------------------------------------------------------
+
 
 class TestSearchSchemaFilters:
 
@@ -221,7 +272,13 @@ class TestSearchSchemaFilters:
         """All filter parameters are advertised in the kb_search schema."""
         schema = self._get_kb_search_schema(server)
         props = schema["properties"]
-        for param in ("category", "session_id", "tool_name", "source_type", "return_code"):
+        for param in (
+            "category",
+            "session_id",
+            "tool_name",
+            "source_type",
+            "return_code",
+        ):
             assert param in props, f"Missing filter param: {param}"
 
     def test_filter_params_not_required(self, server):
@@ -234,6 +291,7 @@ class TestSearchSchemaFilters:
 # Handler: error behavior for missing collections
 # ---------------------------------------------------------------------------
 
+
 class TestSearchCollectionErrors:
 
     def test_single_missing_collection_returns_error(self, mock_kb):
@@ -241,55 +299,51 @@ class TestSearchCollectionErrors:
         mock_kb.search.side_effect = ValueError("Collection 'missing' not found")
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "missing",
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collection": "missing",
+            },
+        )
 
         assert result["status"] == "error"
         assert "not found" in result["error"]
 
-    def test_all_multi_collections_missing_returns_error(self, mock_kb):
-        """When every collection in a multi-search fails, return error."""
-        mock_kb.search.side_effect = ValueError("not found")
+    def test_all_collections_missing_passes_through_error(self, mock_kb):
+        """kb.search owns the all-failed aggregation; the handler passes it through."""
+        mock_kb.search.side_effect = ValueError(
+            "All collections failed: Collection 'missing1' not found"
+        )
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collections": ["missing1", "missing2"],
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collections": ["missing1", "missing2"],
+            },
+        )
 
         assert result["status"] == "error"
         assert "All collections failed" in result["error"]
 
-    def test_partial_multi_collection_returns_ok_with_warnings(self, mock_kb):
-        """When some collections fail, return ok with results and warnings."""
-        def search_with_partial_error(**kwargs):
-            if kwargs["collection"] == "missing":
-                raise ValueError("Collection 'missing' not found")
-            return [make_search_result("found it", "/file.md")]
-
-        mock_kb.search.side_effect = search_with_partial_error
+    def test_partial_multi_collection_returns_ok(self, mock_kb):
+        """Partial-skip happens inside kb.search; the handler just returns its
+        (already-fused) results as ok."""
+        mock_kb.search.return_value = [make_search_result("found it", "/file.md")]
         server = create_knowledge_server(mock_kb)
 
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collections": ["docs", "missing"],
-        })
+        result = call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "test",
+                "collections": ["docs", "missing"],
+            },
+        )
 
         assert result["status"] == "ok"
         assert result["result_count"] == 1
-        assert "warnings" in result
-        assert any("not found" in w for w in result["warnings"])
-
-    def test_successful_search_has_no_warnings(self, mock_kb):
-        """Successful search doesn't include a warnings field."""
-        server = create_knowledge_server(mock_kb)
-
-        result = call_tool(server, "kb_search", {
-            "query": "test",
-            "collection": "docs",
-        })
-
-        assert result["status"] == "ok"
-        assert "warnings" not in result

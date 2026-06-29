@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+This cycle restores **observability and episodic memory without a proxy** — both
+recovered by reading each agent's own on-disk session transcript instead of
+intercepting its LLM traffic — and ships episodic memory end to end.
+
+### Added
+- **Trace pipeline + observability (proxy-free).** An in-session heartbeat in
+  `dsagt-server` reads the agent's transcript, translates it to a canonical
+  trace shape, and logs it to the serverless MLflow store — so prompts,
+  responses, tool calls, and token usage land in the trace view for **every**
+  supported agent (claude, codex, goose, opencode, cline), with no proxy, no
+  OTel routing, and no credentials. DSAgt's own `kb.*` / `tool.execute` /
+  registry spans flow to the same store.
+- **Episodic memory (opt-in).** `dsagt init --episodic` (with optional
+  `--domain-tags "a,b"`) turns on automatic session memory: the heartbeat
+  distills each completed turn into a few tagged, ≤1-sentence facts in the
+  per-project `session_memory` collection, retrievable via
+  `kb_search` / `kb_get_memories`. Two tiers — **Tier-1** uses a small **local**
+  LLM judge (`Qwen2.5-1.5B`, grammar-constrained JSON; no API key, ~1 GB GGUF
+  downloaded on first use), **Tier-0** is a mechanical chunk+tag+embed fallback
+  used automatically if the judge fails, so a turn is never lost.
+- **Recency-weighted episodic retrieval** (`episodic.recency_half_life_days`,
+  default 14): a newer fact edges out a stale one as a bounded boost, so a
+  corrected fact wins without contradiction detection while durable old facts
+  keep their relevance.
+- `llama-cpp-python` as a core dependency for the local judge, pinned and
+  installed from a prebuilt CPU wheel index so a plain `uv sync` never compiles
+  llama.cpp (GPU on CUDA HPC is an opt-in reinstall).
+
+### Changed
+- **Tool-use indexing is now incremental.** `dsagt-run` execution records are
+  embedded into the `tool_use` collection by the heartbeat as a session runs
+  (idempotent), and on demand right before `reconstruct_pipeline` — so the
+  pipeline review and tool-use search reflect the calls just made, instead of
+  waiting for the next session's startup catch-up.
+
+### Fixed
+- **Duplicate `tool_use` entries.** Startup catch-up re-indexed the entire
+  `trace_archive` every launch (the idempotency cursor was written but never
+  read), accumulating duplicates each session. Indexing is now idempotent
+  against a persisted ack set shared by the heartbeat and catch-up.
+
+### Removed
+- Dead `provenance.index_execution_record` (the orphaned single-record path,
+  superseded by the heartbeat's batched, idempotent indexer).
+
 ## [0.2.0] - 2026-06-24
 
 This release adds an **external skill-catalog system** and consolidates the

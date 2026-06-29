@@ -476,7 +476,6 @@ def _make_server_with_kb(tmp_path, tools=None):
     kb = KnowledgeBase(
         index_dir=tmp_path / "kb_index",
         default_embedder="local",
-        default_index="chroma",
     )
     reg = ToolRegistry(
         source_tools_dir=str(source_dir),

@@ -57,7 +57,9 @@ def du_total_bytes(directory: Path) -> int:
     return kb * 1024
 
 
-def iter_files_sizes_relative(directory: Path, max_depth: int) -> tuple[list[tuple[int, str]], list[dict]]:
+def iter_files_sizes_relative(
+    directory: Path, max_depth: int
+) -> tuple[list[tuple[int, str]], list[dict]]:
     """
     Enumerate files under `directory` up to `max_depth`, INCLUDING hidden.
     Uses: find + stat (platform-specific flags) via -exec ... {} +
@@ -102,10 +104,17 @@ def iter_files_sizes_relative(directory: Path, max_depth: int) -> tuple[list[tup
                 continue
             items.append((size, rel))
         except Exception:
-            errors.append({"path": str(directory), "error": f"Unparseable stat line: {line[:200]}"})
+            errors.append(
+                {
+                    "path": str(directory),
+                    "error": f"Unparseable stat line: {line[:200]}",
+                }
+            )
 
     if p.returncode != 0:
-        errors.append({"path": str(directory), "error": f"find/stat exited {p.returncode}"})
+        errors.append(
+            {"path": str(directory), "error": f"find/stat exited {p.returncode}"}
+        )
 
     return items, errors
 
@@ -158,24 +167,32 @@ def scan(directory: Path, max_depth: int, top_n: int) -> dict:
             "total_size": v["total_size"],
             "total_size_human": format_size(v["total_size"]),
         }
-        for k, v in sorted(ext_summary.items(), key=lambda x: x[1]["total_size"], reverse=True)
+        for k, v in sorted(
+            ext_summary.items(), key=lambda x: x[1]["total_size"], reverse=True
+        )
     ]
 
-    largest_files = [e for _, _, e in sorted(largest_heap, key=lambda t: (t[0], t[1]), reverse=True)]
+    largest_files = [
+        e for _, _, e in sorted(largest_heap, key=lambda t: (t[0], t[1]), reverse=True)
+    ]
 
-    directory_tree = [{
-        "directory": ".",
-        "size": total_size,
-        "file_count": total_files,
-        "size_human": format_size(total_size),
-    }]
+    directory_tree = [
+        {
+            "directory": ".",
+            "size": total_size,
+            "file_count": total_files,
+            "size_human": format_size(total_size),
+        }
+    ]
     for d in sorted(dir_summary):
-        directory_tree.append({
-            "directory": d,
-            "size": dir_summary[d]["size"],
-            "file_count": dir_summary[d]["file_count"],
-            "size_human": format_size(dir_summary[d]["size"]),
-        })
+        directory_tree.append(
+            {
+                "directory": d,
+                "size": dir_summary[d]["size"],
+                "file_count": dir_summary[d]["file_count"],
+                "size_human": format_size(dir_summary[d]["size"]),
+            }
+        )
 
     report = {
         "directory": str(directory.resolve()),
@@ -195,7 +212,9 @@ def scan(directory: Path, max_depth: int, top_n: int) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Scan directory structure and file sizes")
+    parser = argparse.ArgumentParser(
+        description="Scan directory structure and file sizes"
+    )
     parser.add_argument("directory", help="Path to directory to scan")
     # accept both hyphen and underscore variants (registry runners vary)
     parser.add_argument("--max-depth", "--max_depth", type=int, default=5)
@@ -204,7 +223,9 @@ def main():
 
     directory = Path(args.directory)
     if not directory.exists():
-        print(json.dumps({"error": f"Directory not found: {directory}"}), file=sys.stderr)
+        print(
+            json.dumps({"error": f"Directory not found: {directory}"}), file=sys.stderr
+        )
         sys.exit(1)
     if not directory.is_dir():
         print(json.dumps({"error": f"Not a directory: {directory}"}), file=sys.stderr)

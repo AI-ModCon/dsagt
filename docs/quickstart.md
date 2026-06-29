@@ -1,24 +1,26 @@
 # Quick Start
 
-This guide walks through knowledge ingest, tool registration, provenance, and explicit memory using the mock project in [`tests/smoke_test/`](https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/). The examples use `claude`; substitute another agent (`goose`, `codex`, `opencode`) if you prefer — the prompts are agent-agnostic.
+This guide walks through knowledge ingest, tool registration, provenance, and explicit memory using the mock project in [`tests/smoke_test/`](https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/). The examples use `claude`; substitute another agent (`goose`, `codex`, `opencode`, `roo`, `cline`) if you prefer — the prompts are agent-agnostic.
+
+DSAgt is **BYOA**: your agent talks to its own LLM provider. There is **no proxy and no MLflow daemon** — the trace store is a serverless SQLite file per project.
 
 ## Setup
 
 ```bash
-# Install
-pip install https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip
+# Install (any Python 3.12/3.13 environment)
+pip install "git+https://github.com/AI-ModCon/dsagt.git"
 
 # Set a convenience variable for the smoke test directory (not a normal dsagt step)
 export SMOKE_DIR="$(pwd)/tests/smoke_test"
 
-# 1. Create a new project called quickstart
+# 1. Create a project called quickstart.  Interactive `dsagt init` prompts for the
+#    agent, location, knowledge collections, skill sources, and episodic memory,
+#    and provisions the shared knowledge base on first run.  --agent makes it
+#    non-interactive (a ~130 MB local embedder downloads once):
 dsagt init quickstart --agent claude
 
-# 2. Start MLflow in the background and print the OTel routing exports
-dsagt mlflow quickstart
-
-# 3. Paste the export block from step 2 into this shell, then launch the agent
-cd ~/dsagt-projects/quickstart && claude
+# 2. Launch the agent from the project directory:
+cd ~/dsagt-projects/quickstart && claude     # …or: dsagt start quickstart
 ```
 
 ## Agent Prompts
@@ -32,18 +34,6 @@ Inside the agent, paste these prompts one at a time. Replace `$SMOKE_DIR` with t
 5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
 6. > Tell me what you remember about the samples dataset.
 
-## Teardown
-
-After exiting the agent, distill the session into episodic memory and stop the MLflow daemon:
-
-```bash
-# Distill traces into episodic memory
-dsagt memory --project quickstart
-
-# Stop the MLflow daemon
-dsagt stop quickstart
-```
-
 ## What Was Exercised
 
 | Prompt | DSAgt layer |
@@ -52,17 +42,20 @@ dsagt stop quickstart
 | 2 | `dsagt-server` (`save_tool_spec`) — writes `tools/csvcut.md`, etc. |
 | 3 | `dsagt-run` provenance wrapper — records exec layer to `trace_archive/` |
 | 4 | KB recall via `kb_search` and registered tool execution |
-| 5–6 | Explicit memory (`kb_remember` → `explicit_memories.yaml`) + `kb_get_memories` |
+| 5–6 | Explicit memory (`kb_remember` → `.dsagt/explicit_memories.yaml`) + `kb_get_memories` |
 
 ## Verify the Artifacts
 
-```bash
-dsagt info quickstart
-ls ~/dsagt-projects/quickstart/{tools,trace_archive}
-cat ~/dsagt-projects/quickstart/explicit_memories.yaml
-```
+Exit the agent (`Ctrl+C` or `/exit`), then:
 
-The MLflow UI URL is printed by `dsagt mlflow quickstart`.
+```bash
+dsagt info quickstart                       # config + a session/trace summary
+ls ~/dsagt-projects/quickstart/{tools,trace_archive}
+cat ~/dsagt-projects/quickstart/.dsagt/explicit_memories.yaml
+
+# Traces land in a serverless SQLite store — no server to run.  Browse them with:
+mlflow ui --backend-store-uri sqlite:///$HOME/dsagt-projects/quickstart/mlflow.db
+```
 
 ## Non-Interactive Smoke Test
 
@@ -72,22 +65,22 @@ The same flow runs non-interactively and asserts each artifact is present:
 dsagt smoke-test --agent claude
 ```
 
-## First-Time Knowledge Base Setup
+## Knowledge Base Provisioning
 
-`dsagt setup-kb` builds shared ChromaDB collections under `~/.dsagt/kb_index/` that every project on this machine reuses. Run this once after installation.
+`dsagt init` provisions the project's knowledge base. The shared, machine-wide collections live under `~/dsagt-projects/kb_index/`, built once (the first project on a machine pays the cost) and copied into each project:
+
+- **Tool Specs** — DSAgt's bundled tool specs from `src/dsagt/tools/`, always provisioned so the agent finds them via `search_registry` from the first session.
+- **Skill Catalogs** — the skill-catalog sources you chose at init (default `genesis`), cloned and frontmatter-indexed so `search_skills` returns installable skills.
+- **Knowledge Collections** — optional reference corpora you chose at init (`nemo_curator`, `aidrin`).
+
+`--include` / `--exclude` (asset names, or `all`) select the set non-interactively. The default embedder is a local sentence-transformers model (~130 MB, CPU-side, no API key).
+
+## Optional: Episodic Memory
+
+Pass `--episodic` at init (or choose it in the interactive prompt) to have the MCP server distill each session turn into searchable facts:
 
 ```bash
-dsagt setup-kb                       # all collections (local embedder, no creds)
-dsagt setup-kb --collection nemo_curator
-dsagt setup-kb --embedding-backend api --embedding-base-url ... --embedding-api-key ...
+dsagt init quickstart --agent claude --episodic --domain-tags "genomics,qc"
 ```
 
-Three collections are populated:
-
-- **Tool Specs** — DSAgt's bundled tool specs from `src/dsagt/tools/`, tagged `source: bundled`.
-- **Skills Catalog** — the default external skill source (`scientific`), cloned and frontmatter-indexed so `search_skills` has installable skills out of the box.
-- **Domain Knowledge** — NeMo Curator and AI Data Readiness Inspector reference corpora.
-
-The Tool Specs collection is wiped and rebuilt on every run, so re-run `setup-kb` after upgrading DSAgt. (Bundled skills are not indexed — agents auto-discover them natively.)
-
-The default embedder is a local sentence-transformers model (~130 MB, CPU-only, no API key). Pass `--embedding-backend api` to route through a hosted embedder via LiteLLM.
+This downloads a small local LLM judge (~1 GB GGUF) on first use — no API key. See [Knowledge Base → Episodic Memory](knowledge-base.md#episodic-memory).

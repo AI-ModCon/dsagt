@@ -13,24 +13,29 @@ Provenance for tool executions.
 **Pipeline reconstruction**:
     Reads execution records, builds a dependency graph from input/output
     file overlap, and renders as a bash script or Snakemake workflow.
-
-LLM-call provenance lives in MLflow (each MCP-server / agent process
-autologs LiteLLM calls via ``init_tracing`` post-proxy-removal).
 """
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
-import os
 import subprocess
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
-from dsagt.knowledge import CollectionRoute, KnowledgeBase
+if TYPE_CHECKING:
+    # Annotation-only (this module has ``from __future__ import annotations``, so
+    # the hint is a string).  Importing KnowledgeBase at runtime would drag the
+    # whole retrieval module into ``dsagt-run``, which only writes provenance
+    # records to disk and never touches a KB — the embedding of those records
+    # happens later, in ``session.run_extraction``.
+    from dsagt.knowledge import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +46,6 @@ TOOL_USE_COLLECTION = "tool_use"
 
 #: Backwards-compat alias.  New code should use ``TOOL_USE_COLLECTION``.
 TOOL_EXECUTIONS_COLLECTION = TOOL_USE_COLLECTION
-TOOL_EXECUTIONS_ROUTE = CollectionRoute(
-    embedding_backend="api",
-    vector_db="chroma",
-    description="Indexed tool execution records from trace_archive.",
-)
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ def _resolve_records_dir(explicit: str | None) -> Path:
     """Determine the records directory.
 
     Priority: explicit ``--records-dir`` flag → ``<cwd>/trace_archive``,
-    where cwd must contain ``dsagt_config.yaml`` (the project's
+    where cwd must contain ``.dsagt/config.yaml`` (the project's
     single-source-of-truth config written by ``dsagt init``).  No env-var
     chain, no walking up the tree — if the agent's cwd isn't the project
     dir, that's the bug to fix, not something to recover from silently.
@@ -65,12 +65,30 @@ def _resolve_records_dir(explicit: str | None) -> Path:
     if explicit:
         return Path(explicit)
     cwd = Path.cwd().resolve()
-    if not (cwd / "dsagt_config.yaml").exists():
+    if not (cwd / ".dsagt" / "config.yaml").exists():
         raise ValueError(
-            f"No dsagt_config.yaml in cwd ({cwd}); pass --records-dir or "
+            f"No .dsagt/config.yaml in cwd ({cwd}); pass --records-dir or "
             "run dsagt-run from a project directory."
         )
     return cwd / "trace_archive"
+
+
+def _current_session_tag_from_cwd() -> str | None:
+    """Read the current session tag from ``<cwd>/.dsagt/state.yaml``.
+
+    ``dsagt-run`` runs with cwd == project dir; the MCP server (also a child
+    of the agent) minted the session into ``state.yaml`` at startup.  Lazy
+    import of ``session`` avoids a circular import (``session`` imports this
+    module for ``index_trace_archive``).
+    """
+    from dsagt import session
+
+    cwd = Path.cwd().resolve()
+    cfg = session.read_config_file(cwd)
+    project = cfg.get("project")
+    if not project:
+        return None
+    return session.current_session_tag(cwd, project)
 
 
 def _parse_file_list(raw: str | None) -> list[str]:
@@ -94,13 +112,11 @@ def run_and_record(
 
     record_id = record_id or uuid.uuid4().hex[:12]
     if session_id is None:
-        from dsagt.observability import (
-            find_project_config,
-            _read_session_id_from_runtime,
-        )
-
-        pdir, _ = find_project_config()
-        session_id = _read_session_id_from_runtime(pdir)
+        # The MCP server mints the session at startup and records it in
+        # ``.dsagt/state.yaml``; read the current tag from there so this
+        # tool span buckets with the rest of the session (cwd == project
+        # dir by contract).  ``None`` if no session has been minted yet.
+        session_id = _current_session_tag_from_cwd()
 
     with tool_execute_span(record_id, tool_name):
         timestamp_start = datetime.now(timezone.utc).isoformat()
@@ -286,21 +302,6 @@ def execution_metadata(record: dict) -> dict:
     return meta
 
 
-def index_execution_record(record: dict, kb: KnowledgeBase) -> dict:
-    """Render and store a single tool execution record in the knowledge base."""
-    text = render_execution_text(record)
-    metadata = execution_metadata(record)
-
-    # No ``route=`` — fall through to kb's default route so embedding
-    # backend follows the project's ``embedding.backend`` config (BYOA
-    # default = local sentence-transformers, no API call).
-    return kb.add_entries(
-        texts=[text],
-        collection=TOOL_EXECUTIONS_COLLECTION,
-        metadatas=[metadata],
-    )
-
-
 def index_trace_archive(
     trace_dir: Path,
     kb: KnowledgeBase,
@@ -358,6 +359,63 @@ def index_trace_archive(
         "errors": errors,
         "total_files": len(json_files),
     }
+
+
+class ToolUseIndexer:
+    """Idempotent, incremental indexer of ``dsagt-run`` records into ``tool_use``.
+
+    The tool-execution counterpart to :class:`~dsagt.trace_scan.TraceScan`:
+    ``dsagt-run`` writes one JSON record per call to ``trace_archive/``, and each
+    :meth:`tick` embeds only the records not already indexed — tracked by
+    ``record_id`` in a persisted ack set — so re-ticks and cross-session
+    re-reads can never duplicate (the bug the prior cursor-less batch had).
+
+    One primitive, three triggers, all safe to overlap: the MCP-server heartbeat
+    (current-session freshness), startup catch-up (the previous session's tail),
+    and the ``reconstruct_pipeline`` tool (index-then-reconstruct, so a pipeline
+    review reflects the calls just made).  An OS file lock around
+    load→index→save serializes those callers — distinct instances in one
+    process, or a future cross-process ticker — against the shared ack file.
+    """
+
+    def __init__(self, kb: KnowledgeBase, project_dir: str | Path):
+        self._kb = kb
+        pdir = Path(project_dir)
+        self._trace_dir = pdir / "trace_archive"
+        self._acks_path = pdir / ".dsagt" / "tool_use_acks.json"
+
+    def _load_acks(self) -> set[str]:
+        try:
+            return set(json.loads(self._acks_path.read_text()))
+        except FileNotFoundError:
+            return set()
+
+    def _save_acks(self, acks: set[str]) -> None:
+        self._acks_path.parent.mkdir(parents=True, exist_ok=True)
+        self._acks_path.write_text(json.dumps(sorted(acks)))
+
+    @contextmanager
+    def _lock(self):
+        self._acks_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self._acks_path.with_suffix(".lock")
+        with open(lock_path, "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+
+    def tick(self) -> int:
+        """Index newly-arrived records; return how many were indexed this tick."""
+        with self._lock():
+            acks = self._load_acks()
+            before = len(acks)
+            # index_trace_archive skips record_ids already in ``acks`` and adds
+            # the newly-indexed ones to it (mutates the set we pass).
+            result = index_trace_archive(self._trace_dir, self._kb, indexed_ids=acks)
+            if len(acks) != before:
+                self._save_acks(acks)
+            return result.get("indexed", 0)
 
 
 # ---------------------------------------------------------------------------
@@ -528,115 +586,3 @@ def reconstruct_pipeline(
     if fmt == "snakemake":
         return render_snakemake(records, deps)
     return render_bash(records, deps)
-
-
-# ---------------------------------------------------------------------------
-# Proxy-mode MLflow logger (LiteLLM callback subclass)
-# ---------------------------------------------------------------------------
-
-
-def install_mlflow_logger_with_session_tag() -> None:
-    """Inject a ``MlflowLogger`` subclass that stamps ``mlflow.trace.session``.
-
-    Why a subclass instead of post-hoc tagging from another callback:
-    LiteLLM's MlflowLogger does the entire trace lifecycle (start_trace →
-    set_attributes → end_trace) inside one ``_handle_success`` call.  By
-    the time any sibling success-callback fires, the trace is already
-    exported and ``mlflow.update_current_trace`` has nothing to update.
-    Subclassing lets us slot the metadata write between trace creation and
-    trace export, where the in-memory trace still exists and is mutable.
-
-    Why register via LiteLLM's ``_in_memory_loggers`` cache: when the
-    proxy resolves the string ``"mlflow"`` from ``success_callback``, it
-    iterates ``_in_memory_loggers`` looking for any
-    ``isinstance(_, MlflowLogger)`` and returns it instead of constructing
-    a fresh one.  A subclass passes the isinstance check, so pre-seeding
-    our subclass means the existing string-based registration in
-    ``success_callback``/``failure_callback`` automatically routes through
-    us — no sync-vs-async dispatch quirks to worry about.
-
-    Idempotent: safe to call more than once.
-    """
-    from litellm.integrations.mlflow import MlflowLogger
-    from litellm.litellm_core_utils import litellm_logging as _ll
-
-    from dsagt.observability import _stamp_metadata_on_trace, extract_cache_stats
-
-    class _DSAGTMlflowLogger(MlflowLogger):
-        def _start_span_or_trace(self, kwargs, start_time):
-            span = super()._start_span_or_trace(kwargs, start_time)
-            # span.request_id is MLflow's trace_id; the trace lives in
-            # InMemoryTraceManager until the parent _handle_success calls
-            # _end_span_or_trace, so we have a window here to mutate
-            # trace_metadata before export.
-            #
-            # Agent-turn LLM calls land here (proxy path).  Stamp:
-            #   mlflow.trace.session — session grouping in the UI
-            #   dsagt.source=agent   — distinguishes from extraction/embedding
-            #   dsagt.agent          — which platform (goose, claude, ...)
-            # Non-agent LLM calls (memory extraction, embeddings) go through
-            # llm_source(...) decorators and never touch this subclass, so
-            # hard-coding source="agent" here is safe.
-            if span is None:
-                return span
-            metadata: dict[str, str] = {"dsagt.source": "agent"}
-            if session_id := os.environ.get("DSAGT_SESSION_ID"):
-                metadata["mlflow.trace.session"] = session_id
-            if agent := os.environ.get("DSAGT_AGENT"):
-                metadata["dsagt.agent"] = agent
-            _stamp_metadata_on_trace(span.request_id, metadata)
-            return span
-
-        def _extract_and_set_chat_attributes(self, span, kwargs, response_obj):
-            # Last window to stamp cache stats before _end_span_or_trace
-            # exports the trace.
-            super()._extract_and_set_chat_attributes(span, kwargs, response_obj)
-            if span is None:
-                return
-            usage = (_response_to_usage(response_obj) or {}).get("usage") or {}
-            read, write = extract_cache_stats(usage)
-            if not read and not write:
-                return
-            _stamp_metadata_on_trace(
-                span.request_id,
-                {
-                    "dsagt.cache.read_tokens": str(read),
-                    "dsagt.cache.write_tokens": str(write),
-                },
-            )
-
-    # Already installed? Leave it.
-    for cb in _ll._in_memory_loggers:
-        if type(cb).__name__ == "_DSAGTMlflowLogger":
-            return
-    # Drop any vanilla MlflowLogger that beat us to the cache.
-    _ll._in_memory_loggers[:] = [
-        cb
-        for cb in _ll._in_memory_loggers
-        if not (
-            isinstance(cb, MlflowLogger) and type(cb).__name__ != "_DSAGTMlflowLogger"
-        )
-    ]
-    _ll._in_memory_loggers.append(_DSAGTMlflowLogger())
-
-
-def _response_to_usage(response_obj) -> dict | None:
-    """Best-effort extraction of the ``usage`` dict from a litellm response.
-
-    LiteLLM responses can be dataclass-like (``model_dump()``), pydantic
-    models (``dict()``), or already plain dicts.  We try each, and fall
-    back to ``None`` if nothing yields a usable shape.
-    """
-    if response_obj is None:
-        return None
-    if isinstance(response_obj, dict):
-        return response_obj
-    for method in ("model_dump", "dict"):
-        if hasattr(response_obj, method):
-            try:
-                d = getattr(response_obj, method)()
-                if isinstance(d, dict):
-                    return d
-            except Exception:
-                continue
-    return None

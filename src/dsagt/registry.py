@@ -17,12 +17,20 @@ Both registries support optional KB indexing for semantic search via
 `search_registry` (tools) and `search_skills` (skills) MCP tools.
 """
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
-from dsagt.knowledge import KnowledgeBase
+if TYPE_CHECKING:
+    # Annotation-only.  A runtime import would pull the whole retrieval module
+    # into anything that touches the registry — including ``dsagt-run`` via the
+    # package ``__init__`` — even though the registry only ever holds an
+    # injected KB instance, never references the class.
+    from dsagt.knowledge import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +130,10 @@ def _parse_frontmatter(path: Path) -> dict:
     try:
         return yaml.safe_load(parts[1]) or {}
     except yaml.YAMLError as e:
-        logger.warning(
+        # Benign: the frontmatter is flat ``key: value`` but not strict YAML;
+        # we recover the fields below.  DEBUG, not WARNING — nothing is lost
+        # and it's pure noise during ``dsagt init`` catalog indexing.
+        logger.debug(
             "Frontmatter in %s isn't strict YAML (%s); recovering flat fields.",
             path,
             str(e).splitlines()[0],
@@ -274,7 +285,7 @@ class ToolRegistry:
     * **Bundled tools** ship with the dsagt package at
       ``_PACKAGE_TOOLS_DIR``.  They are read-only; their KB embeddings
       live in the shared ``bundled_tools`` collection (built once per
-      machine per dsagt version by ``dsagt setup-kb``).  Never copied
+      machine per dsagt version by ``dsagt init``).  Never copied
       into projects, so package upgrades automatically reach all
       existing projects.
     * **Project tools** are agent-saved or user-edited specs in
@@ -452,8 +463,8 @@ class ToolRegistry:
         """Reindex project-local tool files into the ``tools`` collection.
 
         Returns count indexed.  Bundled tools are NOT indexed here — they
-        live in the shared ``tools`` collection built by ``dsagt setup-kb``
-        and copied into the project at ``dsagt init`` time.  Search via
+        live in the shared ``tools`` collection built and copied into the
+        project at ``dsagt init`` time.  Search via
         ``search_registry`` queries the merged collection.
         """
         if not self._kb:

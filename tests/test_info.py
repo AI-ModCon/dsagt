@@ -22,18 +22,19 @@ from dsagt.commands.info import (
 )
 
 
-def _metadata(*, session: str, agent: str | None,
-              in_t: int, out_t: int) -> dict:
+def _metadata(*, session: str, agent: str | None, in_t: int, out_t: int) -> dict:
     """Build a trace_metadata dict in MLflow's on-disk shape."""
     md = {"mlflow.trace.session": session}
     if agent is not None:
         md["dsagt.agent"] = agent
     if in_t or out_t:
-        md["mlflow.trace.tokenUsage"] = json.dumps({
-            "input_tokens": in_t,
-            "output_tokens": out_t,
-            "total_tokens": in_t + out_t,
-        })
+        md["mlflow.trace.tokenUsage"] = json.dumps(
+            {
+                "input_tokens": in_t,
+                "output_tokens": out_t,
+                "total_tokens": in_t + out_t,
+            }
+        )
     return md
 
 
@@ -47,6 +48,7 @@ def _spans_for(service_name: str | None) -> list:
     through to ``"unknown"``.
     """
     from types import SimpleNamespace
+
     if service_name is None:
         return []
     return [SimpleNamespace(attributes={"service.name": service_name})]
@@ -66,6 +68,7 @@ def _traces_df(rows: list[dict]) -> pd.DataFrame:
 # _tokens / _fmt_count / _is_error primitives
 # ---------------------------------------------------------------------------
 
+
 def test_tokens_missing_returns_zeros():
     assert _tokens({}) == (0, 0)
 
@@ -79,18 +82,29 @@ def test_tokens_extracts_input_output():
     assert _tokens(md) == (123, 45)
 
 
-@pytest.mark.parametrize("n,expected", [
-    (0, "0"), (999, "999"), (1000, "1.0k"),
-    (12345, "12.3k"), (1_500_000, "1.5M"),
-])
+@pytest.mark.parametrize(
+    "n,expected",
+    [
+        (0, "0"),
+        (999, "999"),
+        (1000, "1.0k"),
+        (12345, "12.3k"),
+        (1_500_000, "1.5M"),
+    ],
+)
 def test_fmt_count(n, expected):
     assert _fmt_count(n) == expected
 
 
-@pytest.mark.parametrize("state,expected", [
-    ("OK", False), ("ERROR", True),
-    ("TraceState.OK", False), ("TraceState.ERROR", True),
-])
+@pytest.mark.parametrize(
+    "state,expected",
+    [
+        ("OK", False),
+        ("ERROR", True),
+        ("TraceState.OK", False),
+        ("TraceState.ERROR", True),
+    ],
+)
 def test_is_error_handles_enum_reprs(state, expected):
     assert _is_error(state) is expected
 
@@ -99,11 +113,14 @@ def test_is_error_handles_enum_reprs(state, expected):
 # _report end-to-end
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def config():
     return {
         "agent": "claude",
-        "llm": {"model": "claude-haiku-test"},
+        # BYOA: dsagt no longer records the agent's LLM model; the info
+        # header surfaces the embedding model dsagt configures.
+        "embedding": {"model": "bge-test"},
     }
 
 
@@ -114,7 +131,7 @@ def test_report_empty_traces(config):
     assert r["by_session"] == []
     assert r["errors"] == []
     assert r["agent"] == "claude"
-    assert r["model"] == "claude-haiku-test"
+    assert r["model"] == "bge-test"
 
 
 def test_report_aggregates_by_source_and_session(config):
@@ -124,44 +141,58 @@ def test_report_aggregates_by_source_and_session(config):
     knowledge-server trace, across two sessions.  Sums + bucket counts
     match expected totals.
     """
-    df = _traces_df([
-        {
-            "trace_id": "t1",
-            "state": "OK",
-            "request_time": 100,
-            "trace_metadata": _metadata(
-                session="sess-A", agent="claude", in_t=1000, out_t=100,
-            ),
-            "spans": _spans_for("claude-code"),
-        },
-        {
-            "trace_id": "t2",
-            "state": "OK",
-            "request_time": 200,
-            "trace_metadata": _metadata(
-                session="sess-A", agent="claude", in_t=500, out_t=50,
-            ),
-            "spans": _spans_for("claude-code"),
-        },
-        {
-            "trace_id": "t3",
-            "state": "OK",
-            "request_time": 150,
-            "trace_metadata": _metadata(
-                session="sess-A", agent="claude", in_t=200, out_t=0,
-            ),
-            "spans": _spans_for("dsagt-server"),
-        },
-        {
-            "trace_id": "t4",
-            "state": "ERROR",
-            "request_time": 300,
-            "trace_metadata": _metadata(
-                session="sess-B", agent="claude", in_t=800, out_t=20,
-            ),
-            "spans": _spans_for("claude-code"),
-        },
-    ])
+    df = _traces_df(
+        [
+            {
+                "trace_id": "t1",
+                "state": "OK",
+                "request_time": 100,
+                "trace_metadata": _metadata(
+                    session="sess-A",
+                    agent="claude",
+                    in_t=1000,
+                    out_t=100,
+                ),
+                "spans": _spans_for("claude-code"),
+            },
+            {
+                "trace_id": "t2",
+                "state": "OK",
+                "request_time": 200,
+                "trace_metadata": _metadata(
+                    session="sess-A",
+                    agent="claude",
+                    in_t=500,
+                    out_t=50,
+                ),
+                "spans": _spans_for("claude-code"),
+            },
+            {
+                "trace_id": "t3",
+                "state": "OK",
+                "request_time": 150,
+                "trace_metadata": _metadata(
+                    session="sess-A",
+                    agent="claude",
+                    in_t=200,
+                    out_t=0,
+                ),
+                "spans": _spans_for("dsagt-server"),
+            },
+            {
+                "trace_id": "t4",
+                "state": "ERROR",
+                "request_time": 300,
+                "trace_metadata": _metadata(
+                    session="sess-B",
+                    agent="claude",
+                    in_t=800,
+                    out_t=20,
+                ),
+                "spans": _spans_for("claude-code"),
+            },
+        ]
+    )
 
     r = _report("proj", config, df)
 
@@ -193,17 +224,22 @@ def test_report_aggregates_by_source_and_session(config):
 
 def test_report_missing_source_falls_back_to_unknown(config):
     """No spans column / no service.name → bucket is "unknown"."""
-    df = _traces_df([
-        {
-            "trace_id": "t1",
-            "state": "OK",
-            "request_time": 100,
-            "trace_metadata": _metadata(
-                session="sess-A", agent=None, in_t=0, out_t=0,
-            ),
-            "spans": _spans_for(None),
-        },
-    ])
+    df = _traces_df(
+        [
+            {
+                "trace_id": "t1",
+                "state": "OK",
+                "request_time": 100,
+                "trace_metadata": _metadata(
+                    session="sess-A",
+                    agent=None,
+                    in_t=0,
+                    out_t=0,
+                ),
+                "spans": _spans_for(None),
+            },
+        ]
+    )
     r = _report("proj", config, df)
     assert r["by_source"][0]["source"] == "unknown"
     assert r["by_session"][0]["agent"] == "-"
@@ -212,6 +248,7 @@ def test_report_missing_source_falls_back_to_unknown(config):
 # ---------------------------------------------------------------------------
 # Config source tracking (config / shell / unresolved)
 # ---------------------------------------------------------------------------
+
 
 def test_mask_secret_short_value():
     assert _mask_secret("short") == "***"
@@ -223,13 +260,13 @@ def test_mask_secret_long_value():
 
 
 def _write_project(tmp_path, monkeypatch, raw_yaml: str):
-    """Register a temp project with the given dsagt_config.yaml content."""
+    """Register a temp project with the given .dsagt/config.yaml content."""
     import yaml as _yaml
     from dsagt.session import register_project
 
     pdir = tmp_path / "proj"
-    pdir.mkdir()
-    (pdir / "dsagt_config.yaml").write_text(raw_yaml)
+    (pdir / ".dsagt").mkdir(parents=True)
+    (pdir / ".dsagt" / "config.yaml").write_text(raw_yaml)
 
     registry_dir = tmp_path / "registry"
     registry_dir.mkdir()
@@ -242,20 +279,30 @@ def _write_project(tmp_path, monkeypatch, raw_yaml: str):
 def test_config_sources_classifies_shell(tmp_path, monkeypatch):
     """${VAR} resolves from os.environ — that's the only source for
     user-provided values now (no .env file is consulted)."""
-    _write_project(tmp_path, monkeypatch,
-        "project: proj\nagent: goose\nllm:\n  provider: ${LLM_PROVIDER}\n  model: ${LLM_MODEL}\n")
+    _write_project(
+        tmp_path,
+        monkeypatch,
+        "project: proj\nagent: goose\nllm:\n  provider: ${LLM_PROVIDER}\n  model: ${LLM_MODEL}\n",
+    )
     monkeypatch.setenv("LLM_PROVIDER", "openai")
     monkeypatch.setenv("LLM_MODEL", "gpt-4")
 
     rows = {r["path"]: r for r in _config_sources("proj")}
-    assert rows["llm.provider"] == {"path": "llm.provider", "value": "openai", "source": "shell"}
+    assert rows["llm.provider"] == {
+        "path": "llm.provider",
+        "value": "openai",
+        "source": "shell",
+    }
     assert rows["llm.model"]["value"] == "gpt-4"
     assert rows["llm.model"]["source"] == "shell"
 
 
 def test_config_sources_classifies_unresolved(tmp_path, monkeypatch):
-    _write_project(tmp_path, monkeypatch,
-        "project: proj\nagent: goose\nllm:\n  provider: ${LLM_PROVIDER}\n")
+    _write_project(
+        tmp_path,
+        monkeypatch,
+        "project: proj\nagent: goose\nllm:\n  provider: ${LLM_PROVIDER}\n",
+    )
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
 
     rows = {r["path"]: r for r in _config_sources("proj")}
@@ -264,16 +311,24 @@ def test_config_sources_classifies_unresolved(tmp_path, monkeypatch):
 
 
 def test_config_sources_classifies_literal(tmp_path, monkeypatch):
-    _write_project(tmp_path, monkeypatch,
-        "project: proj\nagent: goose\nproxy:\n  port: 4000\n")
+    _write_project(
+        tmp_path, monkeypatch, "project: proj\nagent: goose\nmlflow:\n  port: 4000\n"
+    )
 
     rows = {r["path"]: r for r in _config_sources("proj")}
-    assert rows["proxy.port"] == {"path": "proxy.port", "value": "4000", "source": "config"}
+    assert rows["mlflow.port"] == {
+        "path": "mlflow.port",
+        "value": "4000",
+        "source": "config",
+    }
 
 
 def test_config_sources_masks_api_key(tmp_path, monkeypatch):
-    _write_project(tmp_path, monkeypatch,
-        "project: proj\nagent: goose\nllm:\n  api_key: ${LLM_API_KEY}\n")
+    _write_project(
+        tmp_path,
+        monkeypatch,
+        "project: proj\nagent: goose\nllm:\n  api_key: ${LLM_API_KEY}\n",
+    )
     monkeypatch.setenv("LLM_API_KEY", "sk-1234567890abcdef")
 
     rows = {r["path"]: r for r in _config_sources("proj")}
@@ -282,19 +337,22 @@ def test_config_sources_masks_api_key(tmp_path, monkeypatch):
 
 
 def test_config_sources_skips_internal_sections(tmp_path, monkeypatch):
-    _write_project(tmp_path, monkeypatch,
-        "project: proj\nagent: goose\nknowledge:\n  chunk_size: 1024\nextraction:\n  threshold: 0\ncategories:\n  qc: stuff\n")
+    _write_project(
+        tmp_path,
+        monkeypatch,
+        "project: proj\nagent: goose\nknowledge:\n  chunk_size: 1024\n  rerank: false\nskills:\n  populate_native: true\n",
+    )
 
     paths = {r["path"] for r in _config_sources("proj")}
     assert "knowledge.chunk_size" not in paths
-    assert "extraction.threshold" not in paths
-    assert "categories.qc" not in paths
+    assert "skills.populate_native" not in paths
     assert "project" in paths
 
 
 # ---------------------------------------------------------------------------
 # _kb_collections — read chunks.jsonl, count entries, break down by source
 # ---------------------------------------------------------------------------
+
 
 def _write_chunk(path, text="x", source=None):
     """Append one chunks.jsonl line with optional metadata.source."""
@@ -307,6 +365,7 @@ def _write_chunk(path, text="x", source=None):
 
 def test_kb_collections_empty_when_no_kb_index(tmp_path):
     from dsagt.commands.info import _kb_collections
+
     assert _kb_collections(tmp_path) == []
 
 
@@ -355,9 +414,11 @@ def test_kb_collections_skips_dirs_without_chunks_jsonl(tmp_path):
 # _kb_retrieval — pull kb.search spans out of a synthetic traces frame
 # ---------------------------------------------------------------------------
 
+
 def _trace_with_kb_spans(session: str, hits_per_search: list[int]) -> dict:
     """Build a single trace row carrying one kb.search span per hits entry."""
     from types import SimpleNamespace
+
     spans = [
         SimpleNamespace(name="kb.search", attributes={"hits": h})
         for h in hits_per_search
@@ -375,6 +436,7 @@ def _trace_with_kb_spans(session: str, hits_per_search: list[int]) -> dict:
 
 def test_kb_retrieval_empty_when_no_traces():
     from dsagt.commands.info import _kb_retrieval
+
     assert _kb_retrieval(None) == []
     assert _kb_retrieval(pd.DataFrame()) == []
 
@@ -382,11 +444,13 @@ def test_kb_retrieval_empty_when_no_traces():
 def test_kb_retrieval_aggregates_searches_and_hits_by_session():
     from dsagt.commands.info import _kb_retrieval
 
-    df = pd.DataFrame([
-        _trace_with_kb_spans("sess-A", hits_per_search=[3, 5]),
-        _trace_with_kb_spans("sess-A", hits_per_search=[2]),
-        _trace_with_kb_spans("sess-B", hits_per_search=[7]),
-    ])
+    df = pd.DataFrame(
+        [
+            _trace_with_kb_spans("sess-A", hits_per_search=[3, 5]),
+            _trace_with_kb_spans("sess-A", hits_per_search=[2]),
+            _trace_with_kb_spans("sess-B", hits_per_search=[7]),
+        ]
+    )
     rows = {r["session"]: r for r in _kb_retrieval(df)}
     assert rows["sess-A"] == {"session": "sess-A", "searches": 3, "hits": 10}
     assert rows["sess-B"] == {"session": "sess-B", "searches": 1, "hits": 7}
@@ -396,13 +460,17 @@ def test_kb_retrieval_handles_missing_session():
     from dsagt.commands.info import _kb_retrieval
     from types import SimpleNamespace
 
-    df = pd.DataFrame([{
-        "trace_id": "t1",
-        "state": "OK",
-        "request_time": 1,
-        "trace_metadata": {},  # no mlflow.trace.session
-        "spans": [SimpleNamespace(name="kb.search", attributes={"hits": 4})],
-    }])
+    df = pd.DataFrame(
+        [
+            {
+                "trace_id": "t1",
+                "state": "OK",
+                "request_time": 1,
+                "trace_metadata": {},  # no mlflow.trace.session
+                "spans": [SimpleNamespace(name="kb.search", attributes={"hits": 4})],
+            }
+        ]
+    )
     rows = _kb_retrieval(df)
     assert len(rows) == 1
     assert rows[0]["session"] == "(no-session)"
@@ -413,22 +481,27 @@ def test_kb_retrieval_ignores_non_kb_spans():
     from dsagt.commands.info import _kb_retrieval
     from types import SimpleNamespace
 
-    df = pd.DataFrame([{
-        "trace_id": "t1",
-        "state": "OK",
-        "request_time": 1,
-        "trace_metadata": {"mlflow.trace.session": "s"},
-        "spans": [
-            SimpleNamespace(name="kb.embed", attributes={}),
-            SimpleNamespace(name="registry.save_tool_spec", attributes={}),
-        ],
-    }])
+    df = pd.DataFrame(
+        [
+            {
+                "trace_id": "t1",
+                "state": "OK",
+                "request_time": 1,
+                "trace_metadata": {"mlflow.trace.session": "s"},
+                "spans": [
+                    SimpleNamespace(name="kb.embed", attributes={}),
+                    SimpleNamespace(name="registry.save_tool_spec", attributes={}),
+                ],
+            }
+        ]
+    )
     assert _kb_retrieval(df) == []
 
 
 # ---------------------------------------------------------------------------
 # _project_created — best-effort project-start date
 # ---------------------------------------------------------------------------
+
 
 def test_project_created_returns_iso_date_for_existing_dir(tmp_path):
     from dsagt.commands.info import _project_created
@@ -443,4 +516,5 @@ def test_project_created_returns_iso_date_for_existing_dir(tmp_path):
 
 def test_project_created_returns_none_when_dir_missing(tmp_path):
     from dsagt.commands.info import _project_created
+
     assert _project_created(tmp_path / "does-not-exist") is None

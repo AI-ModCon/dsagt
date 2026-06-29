@@ -30,7 +30,7 @@ upgrade note in the README.
 
 import os
 
-# Set before any import that may pull in FAISS / PyTorch / sentence-transformers
+# Set before any import that may pull in PyTorch / sentence-transformers
 # (e.g. ``dsagt.knowledge`` below): prevents a fatal OpenMP crash when multiple
 # libraries each bundle their own libomp.
 os.environ["PYTHONUNBUFFERED"] = "1"
@@ -39,6 +39,7 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import asyncio  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
+import threading  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import yaml  # noqa: E402
@@ -96,20 +97,115 @@ def build_dispatch_server(name: str, tools, handlers) -> Server:
     return server
 
 
-async def _run_stdio(server: Server, name: str) -> None:
+HEARTBEAT_INTERVAL_S = 45.0
+
+
+async def _heartbeat(collector, tool_indexer, interval: float) -> None:
+    """Periodically run the trace collector + tool-use indexer on wall-clock time.
+
+    Runs regardless of tool traffic, so a quiet session (the agent thinking,
+    editing with its own tools, plain chat) is still captured.  Both block on
+    disk (+ MLflow / embedding), so they run in a worker thread to keep handlers
+    responsive; a failure is logged, never fatal.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        if collector is not None:
+            try:
+                n = await asyncio.to_thread(collector.collect)
+                if n:
+                    logger.info("Trace heartbeat: logged %d trace(s)", n)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Trace heartbeat collect failed: %s", e)
+        if tool_indexer is not None:
+            try:
+                n = await asyncio.to_thread(tool_indexer.tick)
+                if n:
+                    logger.info("Tool-use heartbeat: indexed %d record(s)", n)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Tool-use heartbeat tick failed: %s", e)
+
+
+def _episodic_consumers(config, kb, project_dir, session_id):
+    """Build the episodic-memory consumer list from config (empty when off).
+
+    Episodic memory is a compute/storage opt-in (``episodic.enabled``); the
+    Tier-1 ``Judge`` is attached only when a backend is configured, otherwise
+    the consumer runs Tier-0 (mechanical, no LLM).  Best-effort: a build
+    failure leaves the collector with just the MLflow logger.
+    """
+    epi = config.get("episodic", {}) or {}
+    if not epi.get("enabled"):
+        return []
+    try:
+        from dsagt.memory import MemoryExtractor
+
+        judge = None
+        jcfg = epi.get("judge", {}) or {}
+        if jcfg.get("backend"):
+            from dsagt.judge import Judge
+
+            judge = Judge.create(jcfg["backend"], model=jcfg.get("model") or None)
+        return [
+            MemoryExtractor(
+                kb,
+                runtime_dir=str(project_dir),
+                session_id=session_id or "",
+                tags=epi.get("domain_tags") or None,
+                judge=judge,
+                outlier_sensitivity=float(epi.get("outlier_sensitivity", 0.0) or 0.0),
+            )
+        ]
+    except Exception as e:  # noqa: BLE001 — memory is best-effort, never fatal
+        logger.warning("Could not build episodic-memory consumer: %s", e)
+        return []
+
+
+async def _run_stdio(
+    server: Server, name: str, collector=None, tool_indexer=None
+) -> None:
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name=name,
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
+        hb = (
+            asyncio.create_task(
+                _heartbeat(collector, tool_indexer, HEARTBEAT_INTERVAL_S)
+            )
+            if (collector is not None or tool_indexer is not None)
+            else None
         )
+        try:
+            await server.run(
+                read_stream,
+                write_stream,
+                InitializationOptions(
+                    server_name=name,
+                    server_version="0.1.0",
+                    capabilities=server.get_capabilities(
+                        notification_options=NotificationOptions(),
+                        experimental_capabilities={},
+                    ),
+                ),
+            )
+        finally:
+            if hb is not None:
+                hb.cancel()
+                try:
+                    await hb
+                except asyncio.CancelledError:
+                    pass
+                # Best-effort end-of-session flush of the deferred final turn +
+                # any unindexed tool-use.  Non-load-bearing: if killed, the next
+                # session's startup catch-up re-reads the tail (both ack-sets
+                # make it idempotent).
+                if collector is not None:
+                    try:
+                        await asyncio.to_thread(collector.collect, include_last=True)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("Trace heartbeat final flush failed: %s", e)
+                if tool_indexer is not None:
+                    try:
+                        await asyncio.to_thread(tool_indexer.tick)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("Tool-use final flush failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +261,9 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     """
     from dsagt.session import REGISTRY_DIR, setup_runtime_kb
 
-    kb_config = config["knowledge"]
-    emb_config = config["embedding"]
+    # embedding is a backfilled code default (not a written config choice);
+    # chunk_size / rerank default in KnowledgeBase itself.
+    emb_config = config.get("embedding", {})
 
     backend = (emb_config.get("backend") or "local").lower()
     if backend not in ("local", "api"):
@@ -178,46 +275,50 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     # OpenAI-style aliases ("text-embedding-3-small") share the same
     # EMBEDDING_MODEL env var in most setups.  When backend=local but the
     # resolved model is an OpenAI-style alias (no slash), drop the override so
-    # we fall back to the LocalEmbeddingClient default rather than 404 from HF.
+    # we fall back to the LocalEmbedder default rather than 404 from HF.
     raw_model = (emb_config.get("model") or "").strip()
-    embedder_kwargs: dict = {}
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
     if raw_model and not raw_model.startswith("${"):
         looks_hf = "/" in raw_model
         if backend == "local" and not looks_hf:
             logger.warning(
                 "Ignoring embedding.model=%r for backend=local (does not look "
                 "like a HuggingFace identifier).  Falling back to the "
-                "LocalEmbeddingClient default.",
+                "LocalEmbedder default.",
                 raw_model,
             )
         else:
-            embedder_kwargs["model"] = raw_model
+            model = raw_model
     if backend == "api":
         base_url = emb_config.get("base_url") or ""
-        api_key = emb_config.get("api_key") or ""
+        # Credentials are never on disk: the api key comes from the shell env
+        # (EMBEDDING_API_KEY), threaded into MCP children via the env block.
+        api_key = os.environ.get("EMBEDDING_API_KEY") or emb_config.get("api_key") or ""
         if not base_url:
             raise ValueError(
                 "embedding.backend='api' requires embedding.base_url in "
-                "dsagt_config.yaml.  Either set it to your OpenAI-compatible "
+                ".dsagt/config.yaml.  Either set it to your OpenAI-compatible "
                 "endpoint, or change backend to 'local'."
             )
         if not api_key or api_key.startswith("${"):
             raise ValueError(
-                "embedding.backend='api' requires embedding.api_key in "
-                "dsagt_config.yaml.  Either fill it in (or export the "
-                "${EMBEDDING_API_KEY} env var), or change backend to 'local'."
+                "embedding.backend='api' requires the EMBEDDING_API_KEY env "
+                "var (export it in your shell), or change backend to 'local'."
             )
-        embedder_kwargs.update({"base_url": base_url, "api_key": api_key})
+
+    from dsagt.session import _recency_half_life
 
     runtime_kb_dir = setup_runtime_kb(REGISTRY_DIR / "kb_index", project_dir)
     logger.info("Knowledge backend: %s", backend)
     kb = KnowledgeBase(
         index_dir=runtime_kb_dir,
-        chunk_size=kb_config["chunk_size"],
-        default_rerank=kb_config["rerank"],
         default_embedder=backend,
-        default_index=kb_config["vector_db"],
-        embedder_kwargs=embedder_kwargs,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        recency_half_life_days=_recency_half_life(config),
     )
     # Background-load the embedder so the model is ready when the agent's first
     # search / kb call lands (otherwise the first call pays the ~5-10s
@@ -226,28 +327,58 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     return kb
 
 
+def _spawn_catch_up(project_dir: Path, config: dict) -> None:
+    """Run :func:`dsagt.session.catch_up_extraction` in a daemon thread.
+
+    Best-effort background catch-up of the previous session's post-session
+    work (tool-use indexing now; episodic stub later).  Daemon so it never
+    holds the server open; exceptions are logged, never propagated.
+    """
+
+    def _run() -> None:
+        try:
+            from dsagt.session import catch_up_extraction
+
+            result = catch_up_extraction(project_dir, config)
+            logger.info("Background catch-up complete: %s", result)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Background catch-up failed: %s", e)
+
+    threading.Thread(target=_run, name="dsagt-catch-up", daemon=True).start()
+
+
 def main():
     """Entry point for ``dsagt-server``.
 
     All configuration comes from the project directory:
-    - ``./dsagt_config.yaml`` → project path + non-secret settings
+    - ``./.dsagt/config.yaml`` → project path + non-secret settings
     - ``EMBEDDING_*`` env vars → embedding credentials
 
     No CLI arguments.  By contract the agent's launch one-liner is
     ``cd <pdir> && <agent>``, so cwd is project_dir for the MCP children it
     spawns.
+
+    The server owns the session lifecycle: it appends a new entry to
+    ``.dsagt/state.yaml`` (minting the session id) and spawns a background
+    thread that catches up post-session extraction for the *previous*
+    session — no reliable session-end trigger needed.
     """
     from dsagt.observability import (
-        configure_litellm_retries,
         find_project_config,
         init_tracing,
     )
-    from dsagt.session import resolve_env_vars
+    from dsagt.session import (
+        DEFAULTS,
+        _deep_merge,
+        append_session,
+        resolve_env_vars,
+        session_tag,
+    )
 
     project_dir, _cfg = find_project_config()
     if project_dir is None:
         raise RuntimeError(
-            "dsagt-server: no dsagt_config.yaml in cwd "
+            "dsagt-server: no .dsagt/config.yaml in cwd "
             f"({Path.cwd()}).  Launch the agent from the project "
             "directory (`cd <pdir> && <agent>`)."
         )
@@ -269,16 +400,34 @@ def main():
     )
     logger.info("Server starting — project_dir: %s, log: %s", project_dir, log_file)
 
-    config_path = project_dir / "dsagt_config.yaml"
-    config = resolve_env_vars(yaml.safe_load(config_path.read_text()))
+    cfg_file = project_dir / ".dsagt" / "config.yaml"
+    # Backfill code defaults (embedding, etc.) the same way ``load_config``
+    # does — the written config carries only the user's init choices.
+    config = resolve_env_vars(
+        _deep_merge(DEFAULTS, yaml.safe_load(cfg_file.read_text()) or {})
+    )
 
-    init_tracing("dsagt-server")  # session_id picked up from DSAGT_SESSION_ID env
-    configure_litellm_retries()
+    # Own the session lifecycle: mint this session's id into state.yaml and
+    # tag traces with it (replaces the DSAGT_SESSION_ID env minted by the old
+    # ``dsagt start``).  Best-effort — never block startup on state I/O.
+    session_id = None
+    try:
+        entry = append_session(project_dir)
+        session_id = session_tag(config.get("project", ""), entry["id"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not mint session into state.yaml: %s", e)
+
+    init_tracing("dsagt-server", session_id=session_id)
+
+    # Catch up post-session extraction for the previous session in the
+    # background (tool-use indexing now; episodic stub later).  Daemon thread:
+    # best-effort, never blocks or fails server startup.
+    _spawn_catch_up(project_dir, config)
 
     kb = _build_kb_from_config(config, project_dir)
 
     # Bundled tools are pre-embedded in the shared ~/dsagt-projects/kb_index/
-    # by ``dsagt setup-kb`` (or the auto-bootstrap in ``dsagt start``) and
+    # by ``dsagt init`` (shared cache, one-time per machine) and
     # copied into the project's kb_index by ``setup_runtime_kb`` above.  No
     # bundled embedding work happens here; save_tool_spec incurs a single
     # embed at save time.
@@ -294,8 +443,43 @@ def main():
     )
 
     server = create_dsagt_server(registry, kb, skill_reg, runtime_dir=str(project_dir))
+
+    # The in-session trace heartbeat: read the live transcript → MLflow.  The
+    # loop is agent-agnostic; ``make_trace_collector`` returns a collector for any
+    # agent with a registered (reader, translator) pair and ``None`` otherwise (so
+    # agents whose readers haven't landed yet simply run without it).
+    # Best-effort — a collector that can't be built never blocks the server.
+    collector = None
     try:
-        asyncio.run(_run_stdio(server, "dsagt"))
+        from dsagt.observability import resolve_tracking_uri
+        from dsagt.traces import make_trace_collector
+
+        resolve_cfg = dict(config)
+        resolve_cfg["project_dir"] = str(project_dir)
+        collector = make_trace_collector(
+            config.get("agent"),
+            project_dir,
+            config.get("project", ""),
+            session_id or "",
+            resolve_tracking_uri(resolve_cfg),
+            extra_consumers=_episodic_consumers(config, kb, project_dir, session_id),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not start trace heartbeat: %s", e)
+
+    # Tool-use indexer: incremental, idempotent embedding of dsagt-run records
+    # into the ``tool_use`` collection on the same heartbeat (no collector
+    # dependency — it reads trace_archive/, not the transcript).
+    tool_indexer = None
+    try:
+        from dsagt.provenance import ToolUseIndexer
+
+        tool_indexer = ToolUseIndexer(kb, project_dir)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not start tool-use indexer: %s", e)
+
+    try:
+        asyncio.run(_run_stdio(server, "dsagt", collector, tool_indexer))
     finally:
         kb.close()
 

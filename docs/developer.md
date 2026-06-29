@@ -1,46 +1,43 @@
 # Developer Guide
 
-Material for contributors and users who are working beyond the default `dsagt init` → `dsagt mlflow` → agent flow.
+Material for contributors and users working beyond the default `dsagt init` → agent flow.
 
 ## Tests
 
 ```bash
 uv run python -m pytest -m "not integration"     # unit tests, no creds required
-uv run python -m pytest -m integration -v        # integration tests (require .env)
+uv run python -m pytest -m integration -v        # integration tests (require real credentials / models)
 ```
 
-Integration tests read endpoint and key values from `.env` at the repo root. Copy `.env.example` to `.env` and fill in your values.
+Integration tests need real `EMBEDDING_*` / `LLM_*` credentials (and, for the episodic-memory judge test, the local GGUF model, downloaded on first run). Copy `.env.example` to `.env` and fill in your values where applicable.
 
-For per-flow hand-tests (CLI, proxy mode, VS Code extensions), see the scripts under [`tests/smoke_test/manual_runs/`](https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/manual_runs/).
+For per-flow hand-tests (CLI, VS Code extensions), see the scripts under [`tests/smoke_test/manual_runs/`](https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/manual_runs/).
 
-## Proxy Mode
+## Run model
 
-`dsagt init` followed by `dsagt start <project> --enable-proxy` spawns a LiteLLM proxy in front of your agent's LLM calls. This adds:
-
-- Full LLM-call traces (request bodies, tool-use blocks, response payloads) in MLflow for agents whose native OTel does not emit those payloads (codex, opencode).
-- Cache-breakpoint injection on outgoing requests (Anthropic prompt caching).
-- Sidechannel detection for agent-internal title-generator / session-namer calls.
-- Model-name aliasing — useful when an agent CLI hardcodes a model whitelist incompatible with your gateway's served names (cline, roo).
-
-Proxy mode reads upstream LLM credentials from `.env` or the shell. See [`tests/smoke_test/manual_runs/proxy_walkthrough.md`](https://github.com/AI-ModCon/dsagt/blob/main/tests/smoke_test/manual_runs/proxy_walkthrough.md) for the full setup walkthrough.
+DSAgt is **BYOA (bring your own agent)**: the agent talks to its own LLM provider directly — DSAgt never interposes on that traffic (there is no proxy). Trace capture instead reads the agent's own on-disk session transcript via the MCP server's in-session heartbeat, so no credentials are required and the trace store stays serverless (a SQLite file per project). Agent LLM-call history is recovered post-hoc; nothing intercepts the network.
 
 ## Troubleshooting
 
 **Agent command not found.** The agent CLI is not installed or is not on PATH. See the [supported agents table](index.md#supported-agents).
 
-**MCP server not connecting.** Verify uv resolves the server command:
+**MCP server not connecting.** Verify the server command resolves:
 
 ```bash
 uv run which dsagt-server
 ```
 
-If missing, reinstall: `pip install --force-reinstall https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip`.
+If missing, reinstall: `pip install --force-reinstall "git+https://github.com/AI-ModCon/dsagt.git"`.
 
-**MLflow UI empty.** Confirm MLflow is running for the right project:
+**No traces / empty MLflow UI.** The store is a serverless SQLite file — there is no daemon to start. Point the UI at the file directly and confirm the path:
 
 ```bash
-dsagt info <name>           # shows the pinned port
-curl http://localhost:<mlflow_port>
+dsagt info <name>           # shows the resolved tracking URI + a session/trace summary
+mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
 ```
 
+If the file is missing, the agent hasn't run a session in that project yet (the DB is created lazily on the first span).
+
 **Claude keychain conflict.** If `claude` will not authenticate against a non-default gateway, run `claude /logout` to clear the macOS Keychain OAuth token, then re-export `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` and re-launch.
+
+**Episodic memory judge won't load.** Tier-1 episodic memory needs `llama-cpp-python` (a core dependency, installed from a prebuilt CPU wheel) and downloads a ~1 GB GGUF on first use. If it fails, the heartbeat falls back to Tier-0 (mechanical, no LLM) — episodic memory still works, just without LLM distillation. Re-run `uv sync` if the wheel is missing.

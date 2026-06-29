@@ -198,7 +198,7 @@ async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> d
             "then search_skills to browse. search_skills only sees synced sources."
             if any_synced
             else "No catalog synced yet — add_skill_source <name|url> "
-            "(e.g. 'scientific') to enable one, then search_skills to browse."
+            "(e.g. 'k-dense-ai') to enable one, then search_skills to browse."
         ),
     }
 
@@ -309,7 +309,7 @@ def _skill_tools_and_handlers(
             name="add_skill_source",
             description=(
                 "Enable an external agent-skill source (a known name like "
-                "'scientific'/'anthropic'/'antigravity'/'composio', or a GitHub URL). "
+                "'k-dense-ai'/'anthropic'/'antigravity'/'composio', or a GitHub URL). "
                 "Clones it and indexes its skills into the searchable catalog "
                 "(search_skills). Does NOT load them into context."
             ),

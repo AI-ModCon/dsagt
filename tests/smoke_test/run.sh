@@ -5,8 +5,7 @@
 # generation → start_services → agent → run_extraction → stop_services).
 # Only the agent-launch step swaps from `goose session` to `goose run -i`.
 # BYOA: the user's shell must already have the agent's provider creds
-# (per `dsagt init` hints).  No .env handling — that returns with the
-# Phase 2 `--proxy_traces` flag.
+# (per `dsagt init` hints).  No .env handling.
 #
 # Run from anywhere:
 #   bash tests/smoke_test/run.sh
@@ -19,7 +18,7 @@ set -uo pipefail
 AGENT="${DSAGT_SMOKE_AGENT:-${1:-goose}}"   # arg or env var, default goose
 # Per-agent project name so each agent's mlflow.db, trace_archive, and
 # kb_index/ survive across runs — crucial for cross-agent comparison
-# (e.g., why does claude use 10x the tokens roo does?).  Without this,
+# (e.g., why does claude use 10x the tokens codex does?).  Without this,
 # `dsagt rm` at the start of each run wipes the previous agent's state.
 PROJECT="smoke-test-${AGENT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,55 +30,20 @@ SCRIPT_FILE="${SCRIPT_DIR}/script.txt"
 PDIR="${HOME}/dsagt-projects/${PROJECT}"
 
 case "${AGENT}" in
-    goose|claude|cline|roo|codex|opencode) ;;
+    goose|claude|cline|codex|opencode) ;;
     *)
-        echo "ERROR: agent must be one of: goose, claude, cline, roo, codex, opencode (got '${AGENT}')" >&2
+        echo "ERROR: agent must be one of: goose, claude, cline, codex, opencode (got '${AGENT}')" >&2
         exit 2
         ;;
 esac
 
-# Proxy-mode opt-in.  ``DSAGT_SMOKE_PROXY=1`` (or arg #2 == "proxy")
-# routes the run through ``dsagt start --enable-proxy``, which spawns
-# dsagt-proxy and forwards the agent's LLM calls through it — required
-# for cline / roo (their CLIs hardcode model-ID whitelists incompatible
-# with lab-gateway aliases; the proxy translates names back to the
-# upstream's served IDs via _AGENT_PRIMARY_ALIASES).  Default off.
-PROXY_FLAG=""
-if [[ "${DSAGT_SMOKE_PROXY:-${2:-}}" == "1" || "${DSAGT_SMOKE_PROXY:-${2:-}}" == "proxy" ]]; then
-    PROXY_FLAG="--enable-proxy"
-    echo "[smoke] Agent: ${AGENT} (proxy mode)"
-else
-    echo "[smoke] Agent: ${AGENT}"
-fi
-
-# Cline / roo only work in proxy mode (see agents/cline.py + roo.py
-# module docstrings for the model-whitelist + endpoint-lockout reasons).
-if [[ -z "${PROXY_FLAG}" && ( "${AGENT}" == "cline" || "${AGENT}" == "roo" ) ]]; then
-    echo
-    echo "[smoke] ${AGENT} requires proxy mode in BYOA — skipping."
-    echo "[smoke] Re-run with: DSAGT_SMOKE_PROXY=1 dsagt smoke-test --agent ${AGENT}"
-    echo "[smoke] (or pass 'proxy' as the second arg to this script)"
-    exit 0
-fi
+echo "[smoke] Agent: ${AGENT}"
 
 cd "${DSAGT_ROOT}"
-
-# Proxy mode needs LLM_*/EMBEDDING_* in env so the proxy can forward
-# upstream.  Source .env if present (BYOA runs without it; only proxy
-# runs need these vars).  Validation happens at proxy spawn time —
-# session.py:_start_proxy raises if config["llm"] keys are missing.
-if [[ -n "${PROXY_FLAG}" && -f .env ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-    echo "[smoke] Sourced .env for proxy mode"
-fi
 
 # ---------------------------------------------------------------------------
 # 2. Clean slate (idempotent — silent if nothing exists)
 # ---------------------------------------------------------------------------
-dsagt stop "${PROJECT}" >/dev/null 2>&1 || true
 dsagt rm "${PROJECT}" -y >/dev/null 2>&1 || true
 rm -rf "${PDIR}"
 
@@ -101,7 +65,9 @@ fi
 #    that we substitute below so prompt paths resolve regardless of where
 #    PDIR lives.
 # ---------------------------------------------------------------------------
-dsagt init "${PROJECT}" --agent "${AGENT}"
+# Force the non-interactive (flag-driven) init path regardless of TTY by
+# closing stdin — `dsagt init` prompts only when stdin is a TTY.
+dsagt init "${PROJECT}" --agent "${AGENT}" < /dev/null
 
 # Substitute {{SMOKE_DIR}} → absolute smoke_test/ path before the agent
 # sees the script.  Prompts can then reference data/knowledge files via
@@ -124,8 +90,8 @@ WALL_CLOCK_CAP=300   # seconds (5 minutes)
 WALL_CLOCK_GRACE=10  # extra seconds before SIGKILL
 
 echo
-echo "[smoke] Running dsagt start --script ${PROXY_FLAG} (${WALL_CLOCK_CAP}s wall-clock cap)…"
-dsagt start "${PROJECT}" --script "${RENDERED_SCRIPT}" --max-turns 30 ${PROXY_FLAG} &
+echo "[smoke] Running dsagt start --script (${WALL_CLOCK_CAP}s wall-clock cap)…"
+dsagt start "${PROJECT}" --script "${RENDERED_SCRIPT}" --max-turns 30 &
 DSAGT_PID=$!
 (
     sleep "${WALL_CLOCK_CAP}"
@@ -146,13 +112,8 @@ if [[ ${START_EXIT} -ne 0 ]]; then
     echo "WARN: dsagt start exited non-zero (${START_EXIT}) — continuing to artifact checks anyway"
 fi
 
-# Defensive: ensure no stray services if the lifecycle's finally didn't run
-# (timeout SIGKILL skips Python's finally blocks).  Output kept visible —
-# if any port is still in use after this, we want to see the warning so
-# the next run doesn't race a half-shutdown orphan.
-echo
-echo "[smoke] Final cleanup…"
-dsagt stop "${PROJECT}" || true
+# Serverless: ``dsagt start`` runs the agent in the foreground and owns no
+# background services, so there's nothing to reap here.
 
 # ---------------------------------------------------------------------------
 # 5. Artifact checks
@@ -189,23 +150,24 @@ check "knowledge ingested (vectors)" "test -f '${PDIR}/kb_index/knowledge/chroma
 # the YAML's existence + non-empty catches the hallucination case where
 # the agent claims it stored a fact but didn't actually call the tool.
 check "explicit memory recorded"     "test -s '${PDIR}/explicit_memories.yaml'"
-check "mlflow has traces"            "test -s '${PDIR}/mlflow/mlflow.db'"
+check "mlflow store has traces"      "test -s '${PDIR}/mlflow.db'"
 
 # ---------------------------------------------------------------------------
-# 6. Agent LLM-call observability: every agent turn must produce at least
-#    one trace in MLflow with this session's id, tagged with the agent's
-#    service.name.  Replaces the proxy-log parity check from before
-#    proxy removal — the agent now emits OTel directly to MLflow's OTLP
-#    receiver, so MLflow IS the source of truth.  A zero count means
-#    either the agent didn't emit telemetry (e.g. CLAUDE_CODE_ENABLE_TELEMETRY=1
-#    not honored) or the OTel endpoint was misconfigured.
+# 6. Agent LLM-call observability: informational only in Phase 1.
+#    DSAGT no longer forces native agent OTel emission (the OTLP-routing
+#    env + telemetry flags were removed) — agent LLM-call history is
+#    recovered post-hoc from the on-disk transcript, which lands in
+#    Phase 2's TracePipeline.  Until then only claude (via the
+#    ``mlflow autolog claude`` Stop hook over its transcript) and DSAGT's
+#    own MCP / dsagt-run spans populate the serverless ``mlflow.db`` store.
+#    So we report the agent-trace count but never FAIL on it here.
 # ---------------------------------------------------------------------------
 AGENT_OTEL_SUPPORT=$(uv run --quiet python -c "from dsagt.agents import agent_otel_support; print(agent_otel_support('${AGENT}'))" 2>/dev/null)
 AGENT_OTEL_SUPPORT="${AGENT_OTEL_SUPPORT:-unknown}"
 
 AGENT_TRACES=$(uv run --quiet python <<PY 2>/dev/null
 import mlflow
-mlflow.set_tracking_uri("sqlite:///${PDIR}/mlflow/mlflow.db")
+mlflow.set_tracking_uri("sqlite:///${PDIR}/mlflow.db")
 exp = mlflow.get_experiment_by_name("${PROJECT}")
 if exp is None:
     print(0); raise SystemExit
@@ -232,30 +194,13 @@ PY
 )
 AGENT_TRACES="${AGENT_TRACES:-0}"
 
-# Grade by the agent's verified support tier rather than fail-or-pass:
-# agents we know don't emit OTel payloads (cline, roo) get SKIP, agents
-# we know partial-emit (codex) get WARN, agents we know full-emit
-# (claude, goose) get PASS-or-FAIL.  See agents/__init__.py module
-# docstring for the matrix.
-case "${AGENT_OTEL_SUPPORT}" in
-    full)
-        if [[ "${AGENT_TRACES}" -eq 0 ]]; then
-            echo "  FAIL  agent transparency: 0 agent LLM-call traces in MLflow (agent supports full payload but emitted none — env vars not honored?)"
-            FAIL=1
-        else
-            echo "  PASS  agent transparency: ${AGENT_TRACES} agent LLM-call trace(s) visible in MLflow"
-        fi
-        ;;
-    partial)
-        echo "  WARN  agent transparency: ${AGENT} emits only token counts + tool names natively (${AGENT_TRACES} agent trace(s)); use 'dsagt start --enable-proxy' to capture full LLM-call payloads"
-        ;;
-    none)
-        echo "  SKIP  agent transparency: ${AGENT} emits no payload-bearing OTel traces (${AGENT_TRACES} agent trace(s)); use 'dsagt start --enable-proxy' to make agent LLM calls visible in MLflow"
-        ;;
-    *)
-        echo "  WARN  agent transparency: support tier unknown for ${AGENT}; ${AGENT_TRACES} agent trace(s)"
-        ;;
-esac
+# Phase 1: informational only — native OTel harvest was removed, transcript
+# capture lands in Phase 2.  Never FAIL on the agent-trace count here.
+if [[ "${AGENT_TRACES}" -gt 0 ]]; then
+    echo "  INFO  agent transparency: ${AGENT_TRACES} agent trace(s) in the mlflow.db store (claude autolog / Phase-2 transcript capture)"
+else
+    echo "  INFO  agent transparency: 0 agent LLM-call traces yet (${AGENT}, tier=${AGENT_OTEL_SUPPORT}) — restored by Phase 2's transcript pipeline"
+fi
 
 echo
 if [[ ${FAIL} -eq 0 ]]; then

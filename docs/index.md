@@ -35,7 +35,9 @@ DSAgt connects an MCP-compatible AI coding agent to tool registration, a semanti
 Clone the repo and use `uv` (editable install; add `--all-groups` for the test suite):
 
 ```bash
-pip install https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip
+git clone https://github.com/AI-ModCon/dsagt.git
+cd dsagt && uv sync --all-groups
+source .venv/bin/activate
 ```
 
 ## Key Capabilities
@@ -43,10 +45,10 @@ pip install https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip
 | Layer | What it does |
 |-------|-------------|
 | **Tool Registry** | Register CLI tools as markdown specs; the agent discovers and runs them via `search_registry` |
-| **Knowledge Base** | Semantic search over indexed document collections (ChromaDB + FAISS) |
-| **Provenance** | `dsagt-run` wrapper records every tool execution to `trace_archive/` and MLflow |
+| **Knowledge Base** | Hybrid semantic + keyword (BM25) search over indexed ChromaDB collections |
+| **Provenance** | `dsagt-run` wrapper records every tool execution to `trace_archive/`; `reconstruct_pipeline` renders it as a runnable script |
 | **Explicit Memory** | User-confirmed facts persisted to YAML and the knowledge base |
-| **Episodic Memory** | Session distillation via outlier detection over MLflow traces |
-| **Observability** | Full OTLP tracing to a local MLflow instance |
+| **Episodic Memory** | Opt-in: the MCP server distills each session turn into tagged facts via a local LLM judge (recency-weighted retrieval) |
+| **Observability** | Serverless MLflow tracing (a per-project SQLite file) — DSAgt's own spans plus agent traces recovered from the on-disk transcript |
 
 See the [Quick Start](quickstart.md) to try all of these in a single session.

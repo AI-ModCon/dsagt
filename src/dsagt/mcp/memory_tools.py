@@ -53,18 +53,28 @@ async def _handle_kb_remember(
             "error": store_result.get("error", "Failed to store memory"),
         }
 
-    await asyncio.to_thread(
-        kb.add_entries,
-        texts=[text],
-        collection="session_memory",
-        metadatas=[
-            {
-                "source_type": "explicit_memory",
-                "category": category,
-                "session_id": session_id,
-            }
-        ],
-    )
+    # Mirror into the VectorStore for semantic recall — optional infra.
+    # The durable YAML write above already succeeded, so a mirror failure
+    # degrades to pure-YAML explicit memory rather than failing the tool.
+    try:
+        await asyncio.to_thread(
+            kb.add_entries,
+            texts=[text],
+            collection="session_memory",
+            metadatas=[
+                {
+                    "source_type": "explicit_memory",
+                    "category": category,
+                    "session_id": session_id,
+                }
+            ],
+        )
+    except Exception as e:
+        logger.warning(
+            "kb_remember: stored YAML memory %s but vector mirror failed: %s",
+            store_result["entry_id"],
+            e,
+        )
 
     if promoted_from:
         suggestions.dismiss(promoted_from)

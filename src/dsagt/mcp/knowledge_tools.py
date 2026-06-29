@@ -1,13 +1,18 @@
 """MCP tools for knowledge-base retrieval.
 
-Semantic search over document collections, background ingest/append jobs, and
-registration of external vector stores.  Long-running operations (ingest,
-append) run in the background and return immediately with a ``job_id``; poll
-``kb_job_status`` for completion.
+Semantic search over document collections + background ingest/append jobs.
+Long-running operations (ingest, append) run in the background and return
+immediately with a ``job_id``; poll ``kb_job_status`` for completion.
 
-Server configuration (chunk_size, vector_db, rerank) is read from the project's
-dsagt_config.yaml.  Embedding credentials flow through env vars (LLM_API_KEY,
-OPENAI_BASE_URL, EMBEDDING_MODEL) set by ``dsagt start``.
+Multi-collection search fans out and rank-fuses *below* this tool boundary, in
+:meth:`dsagt.knowledge.KnowledgeBase.search` — the agent just names collection(s).
+BYO external vector stores are deferred: ``kb_add_vector_db`` is intentionally
+**not** registered (an external store is a ``VectorStore`` subclass appended to
+the KB's store list, not a tool the agent calls).
+
+Server configuration (chunk_size, rerank) is read from the project's
+dsagt_config.yaml.  Embedding credentials flow through env vars (EMBEDDING_API_KEY,
+EMBEDDING_BASE_URL, EMBEDDING_MODEL) set by ``dsagt start``.
 
 These definitions + handlers run inside the merged ``dsagt-server`` (see
 :mod:`dsagt.mcp.server`); ``create_knowledge_server`` is retained only as a
@@ -18,7 +23,7 @@ test-facing constructor.  Explicit-memory tools (``kb_remember`` / etc.) live in
 
 import os
 
-# Prevent fatal OpenMP crash when multiple libraries (FAISS, PyTorch/
+# Prevent fatal OpenMP crash when multiple libraries (PyTorch /
 # sentence-transformers) each bundle their own libomp.  Must precede the
 # ``dsagt.knowledge`` import below.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -33,66 +38,12 @@ from pathlib import Path  # noqa: E402
 
 import mcp.types as types  # noqa: E402
 
-from dsagt.knowledge import (  # noqa: E402
-    EMBEDDER_REGISTRY,
-    VECTORINDEX_REGISTRY,
-    CollectionRoute,
-    KnowledgeBase,
-)
+from dsagt.knowledge import KnowledgeBase  # noqa: E402
 from dsagt.mcp.server import build_dispatch_server  # noqa: E402
 from dsagt.session import _collection_exists  # noqa: E402
 from dsagt.session import setup_runtime_kb  # noqa: E402, F401  (re-exported for tests)
 
 logger = logging.getLogger(__name__)
-
-
-def _register_external_collection(
-    kb: KnowledgeBase,
-    collection_name: str,
-    vector_db: str,
-    connection_params: dict,
-    embedding_model: str,
-    description: str,
-) -> None:
-    """Wire an already-built external vector store into the routing registry."""
-    coll_dir = kb.index_dir / collection_name
-    coll_dir.mkdir(exist_ok=True)
-
-    if description:
-        (coll_dir / "DESCRIPTION.md").write_text(description)
-
-    if vector_db == "chroma":
-        index_kwargs = {
-            "collection_name": connection_params.get("collection", collection_name),
-            "persist_dir": None,
-            "host": connection_params.get("host", "localhost"),
-            "port": connection_params.get("port", 8000),
-        }
-    elif vector_db == "lancedb":
-        index_kwargs = {
-            "uri": connection_params["uri"],
-            "table": connection_params.get("table", collection_name),
-        }
-    elif vector_db == "qdrant":
-        index_kwargs = {
-            "url": connection_params["url"],
-            "collection": connection_params.get("collection", collection_name),
-            "api_key": connection_params.get("api_key"),
-        }
-    else:
-        raise ValueError(
-            f"Unsupported vector DB '{vector_db}'. "
-            f"Choose from: chroma, lancedb, qdrant"
-        )
-
-    route = CollectionRoute(
-        embedding_backend="api",
-        vector_db=vector_db,
-        embedder_kwargs={"model": embedding_model},
-        index_kwargs=index_kwargs,
-        description=description,
-    )
-    kb.register_route(collection_name, route)
 
 
 # ---------------------------------------------------------------------------
@@ -189,36 +140,23 @@ async def _handle_kb_search(
     if len(where) > 1:
         where = {"$and": [{k: v} for k, v in where.items()]}
 
-    target_collections = collections_arg or [collection_arg]
-    all_results = []
-    search_errors = []
+    # Fan-out + rank-fusion across collections lives in KnowledgeBase.search;
+    # the tool just names collection(s).  A single internal collection routes
+    # straight to its store; multiple/external targets federate by RRF.
+    try:
+        all_results = await asyncio.to_thread(
+            kb.search,
+            query=query,
+            collection=collection_arg,
+            collections=collections_arg,
+            top_k=top_k,
+            rerank=rerank,
+            where=where or None,
+        )
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
 
-    for coll_name in target_collections:
-        try:
-            search_kwargs = dict(
-                query=query, collection=coll_name, top_k=top_k, rerank=rerank
-            )
-            if where:
-                search_kwargs["where"] = where
-            coll_results = await asyncio.to_thread(kb.search, **search_kwargs)
-            all_results.extend(coll_results)
-        except ValueError as e:
-            logger.warning("Search failed for '%s': %s", coll_name, e)
-            search_errors.append(str(e))
-
-    if search_errors and not all_results:
-        if len(target_collections) == 1:
-            return {"status": "error", "error": search_errors[0]}
-        return {
-            "status": "error",
-            "error": f"All collections failed: {'; '.join(search_errors)}",
-        }
-
-    score_key = "rerank_score" if rerank else "score"
-    all_results.sort(key=lambda r: r.get(score_key, r["score"]), reverse=True)
-    all_results = all_results[:top_k]
-
-    result = {
+    return {
         "status": "ok",
         "query": query,
         "collection": collection_arg or ",".join(collections_arg),
@@ -240,9 +178,6 @@ async def _handle_kb_search(
             for r in all_results
         ],
     }
-    if search_errors:
-        result["warnings"] = search_errors
-    return result
 
 
 async def _handle_kb_ingest(
@@ -254,9 +189,6 @@ async def _handle_kb_ingest(
     folder_path = Path(arguments["folder_path"])
     collection_name = arguments.get("collection_name")
     file_types = arguments.get("file_types")
-    embedding_backend = arguments.get("embedding_backend")
-    embedding_model = arguments.get("embedding_model")
-    vector_db = arguments.get("vector_db")
 
     if not folder_path.exists():
         return {"status": "error", "error": f"Folder not found: {folder_path}"}
@@ -298,21 +230,9 @@ async def _handle_kb_ingest(
                 f"different folder; using '{target_name}'."
             )
 
-    route = None
-    if embedding_backend or embedding_model or vector_db:
-        default = kb._default_route
-        inherited_model = embedding_model or default.embedder_kwargs.get("model")
-        route = CollectionRoute(
-            embedding_backend=embedding_backend or default.embedding_backend,
-            vector_db=vector_db or default.vector_db,
-            embedder_kwargs={"model": inherited_model} if inherited_model else {},
-        )
-
     ingest_kwargs: dict = {"collection_name": target_name}
     if file_types:
         ingest_kwargs["file_types"] = file_types
-    if route is not None:
-        ingest_kwargs["route"] = route
 
     async def _ingest_with_logging():
         import traceback as _tb
@@ -379,43 +299,6 @@ async def _handle_kb_append(
     }
 
 
-async def _handle_kb_add_vector_db(arguments: dict, *, kb: KnowledgeBase) -> dict:
-    collection_name = arguments["collection_name"]
-    vector_db = arguments["vector_db"]
-    connection_params = arguments["connection_params"]
-    embedding_model = arguments["embedding_model"]
-    description = arguments.get("description", "")
-
-    if (kb.index_dir / collection_name).exists():
-        return {
-            "status": "error",
-            "error": (
-                f"Collection '{collection_name}' already exists. "
-                "Choose a different name or delete the existing collection."
-            ),
-        }
-
-    await asyncio.to_thread(
-        _register_external_collection,
-        kb,
-        collection_name,
-        vector_db,
-        connection_params,
-        embedding_model,
-        description,
-    )
-    return {
-        "status": "ok",
-        "collection": collection_name,
-        "vector_db": vector_db,
-        "embedding_model": embedding_model,
-        "message": (
-            f"External collection '{collection_name}' registered. "
-            "Use search to query it."
-        ),
-    }
-
-
 async def _handle_kb_job_status(arguments: dict, *, job_tracker: _JobTracker) -> dict:
     job_id = arguments["job_id"]
     if job_id not in job_tracker.jobs:
@@ -462,7 +345,6 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
         "kb_search": partial(_handle_kb_search, kb=kb),
         "kb_ingest": partial(_handle_kb_ingest, kb=kb, job_tracker=job_tracker),
         "kb_append": partial(_handle_kb_append, kb=kb, job_tracker=job_tracker),
-        "kb_add_vector_db": partial(_handle_kb_add_vector_db, kb=kb),
         "kb_job_status": partial(_handle_kb_job_status, job_tracker=job_tracker),
     }
 
@@ -558,20 +440,6 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                         "items": {"type": "string"},
                         "description": "File extensions to include, e.g. ['pdf', 'md', 'py']. Defaults to common types.",
                     },
-                    "embedding_backend": {
-                        "type": "string",
-                        "enum": list(EMBEDDER_REGISTRY.keys()),
-                        "description": "Embedding backend override for this collection.",
-                    },
-                    "embedding_model": {
-                        "type": "string",
-                        "description": "Embedding model override for this collection.",
-                    },
-                    "vector_db": {
-                        "type": "string",
-                        "enum": list(VECTORINDEX_REGISTRY.keys()),
-                        "description": "Vector database override for this collection.",
-                    },
                 },
                 "required": ["folder_path"],
             },
@@ -602,45 +470,6 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                     },
                 },
                 "required": ["collection", "paths"],
-            },
-        ),
-        types.Tool(
-            name="kb_add_vector_db",
-            description=(
-                "Register an already-built external vector store as a collection. "
-                "Queries will be embedded via the API using the specified model."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "collection_name": {
-                        "type": "string",
-                        "description": "Unique name for this collection",
-                    },
-                    "vector_db": {
-                        "type": "string",
-                        "enum": ["chroma", "lancedb", "qdrant"],
-                        "description": "Vector store backend type",
-                    },
-                    "connection_params": {
-                        "type": "object",
-                        "description": "Backend-specific connection parameters.",
-                    },
-                    "embedding_model": {
-                        "type": "string",
-                        "description": "The API model used to build this index",
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Human-readable description for agent discovery",
-                    },
-                },
-                "required": [
-                    "collection_name",
-                    "vector_db",
-                    "connection_params",
-                    "embedding_model",
-                ],
             },
         ),
         types.Tool(
