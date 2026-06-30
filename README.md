@@ -103,13 +103,15 @@ The default embedder is a local sentence-transformers model (~130 MB of weights 
 
 ## Use Case Examples
 
-End-to-end walkthroughs for representative scientific domains live in [`use_cases/`](use_cases/). Each one covers data acquisition, tool registration, pipeline construction, and agent-driven execution against a real dataset.
+End-to-end walkthroughs for representative scientific and data-readiness scenarios live in [`use_cases/`](use_cases/). Each one covers data acquisition, tool registration, pipeline construction, and agent-driven execution against a real dataset.
 
 | Use case | Domain | Guide |
 |----------|--------|-------|
 | Microbial isolate processing | Genomics — short-read QC and assembly with `fastp` + `megahit` | [isolate_demo.md](use_cases/microbial_isolates/isolate_demo.md) |
 | Cryo-EM data curation | Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP | [cryoem_demo.md](use_cases/cryoem/cryoem_demo.md) |
 | ISAAC / VASP workflows | Materials science — DFT input/output handling with VASP | [use_cases/isaac_vasp/](use_cases/isaac_vasp/) |
+| AIDRIN readiness gate (cryo-EM) | AI data readiness — `aidrin` quality metrics before/after cryo-EM curation | [cryoem_readiness_demo.md](use_cases/aidrin_readiness/cryoem_readiness_demo.md) |
+| AIDRIN full feature tour | AI data readiness — all 15 `aidrin` metrics (quality, fairness, privacy) on UCI Adult | [aidrin_full_tour_demo.md](use_cases/aidrin_readiness/aidrin_full_tour_demo.md) |
 
 ## Project Directory
 
