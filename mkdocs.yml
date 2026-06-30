@@ -58,4 +58,6 @@ nav:
     - Microbial Isolates: use-cases/microbial-isolates.md
     - Cryo-EM: use-cases/cryoem.md
     - VASP / ISAAC: use-cases/vasp.md
+    - AIDRIN Readiness Gate (Cryo-EM): use-cases/aidrin-cryoem.md
+    - AIDRIN Full Feature Tour: use-cases/aidrin-tour.md
   - Developer Guide: developer.md
