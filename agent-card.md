@@ -21,9 +21,9 @@ metrics:
 
 agent_card:
   name: "DSAgt (DataSmith Agent)"
-  description: "AI-assisted data pipeline builder that wraps an MCP-compatible agent CLI with tool registration, a semantic knowledge base, execution provenance, and observability infrastructure."
+  description: "AI-assisted data pipeline builder developed under the DOE Genesis Mission. Wraps an MCP-compatible agent CLI with tool registration, a semantic knowledge base, execution provenance, and observability infrastructure to accelerate AI-ready scientific data preparation."
   provider:
-    organization: "DOE AI ModCon Base Data Team"
+    organization: "DOE AI ModCon Base Data Team (DOE Genesis Mission)"
     url: "https://github.com/AI-ModCon/dsagt"
   version: "0.1.0"
   documentation_url: "https://ai-modcon.github.io/dsagt/"
@@ -113,7 +113,7 @@ DSAgt is an AI-assisted data pipeline builder. It connects an MCP-compatible age
 
 ## Developed by
 
-DOE AI ModCon Base Data Team — a multi-lab collaboration across LBNL, PNNL, ORNL, and PPPL.
+DOE AI ModCon Base Data Team as part of the Genesis Mission.
 
 ## Contributed by
 
@@ -317,8 +317,7 @@ See https://github.com/AI-ModCon/dsagt/graphs/contributors
 
 ## Intended Use
 
-DSAgt is intended to assist researchers and data engineers in building, documenting, and reproducing scientific data pipelines using AI agent platforms. 
-DSAgt assists in AI-LLM assisted preparation and evalution of AI-Ready data using an agentic harness. 
+DSAgt is intended to assist researchers and data engineers in building, documenting, and reproducing scientific data pipelines using AI agent platforms. Developed under the DOE Genesis Mission, DSAgt assists in AI-LLM assisted preparation and evaluation of AI-Ready data using an agentic harness.
 
 ### Primary Intended Users
 
@@ -326,7 +325,7 @@ Researchers and data engineers working on scientific data pipelines, particularl
 
 ### Mission Relevance
 
-DSAgt supports DOE-funded scientific workflows as part of the Genesis Mission. 
+DSAgt was developed as part of the DOE Genesis Mission to enable AI-ready scientific data preparation.
 Tested Use cases include:
 
 - Microbial genomics pipelines (short-read QC and assembly)
