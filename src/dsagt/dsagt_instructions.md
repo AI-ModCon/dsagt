@@ -15,7 +15,7 @@ All data operations must be performed by calling registered codes. The point is 
 **Whenever the user says "what do you remember", "recall", or asks you to retrieve a previously-stored fact, you MUST call `kb_get_memories()` first** and answer based on its result, not from in-context message history.
 
 ### 1b. Registered-Code Invocation: Use the `executable` String Verbatim
-**When invoking a registered code, copy the spec's `executable` field byte-for-byte, including any `dsagt-run --code <name> --` prefix.** The prefix is the wrapper that writes the execution record to `trace_archive/`; bypassing it (e.g. running `python codes/scan_directory.py` directly when the spec says `dsagt-run --code scan_directory -- python codes/scan_directory.py`) loses provenance and breaks pipeline reconstruction. If `dsagt-run` errors with "command not found", surface the error rather than working around it.
+**When invoking a registered code, copy the spec's `executable` field byte-for-byte, including any `dsagt-run --code <name> --` prefix.** The prefix is the wrapper that writes the execution record to `trace_archive/`; bypassing it (e.g. running the bare script directly when the spec says `dsagt-run --code scan-directory -- python -m dsagt.codes.scan_directory`) loses provenance and breaks pipeline reconstruction. If `dsagt-run` errors with "command not found", surface the error rather than working around it.
 
 ### 2. Code and Skill Discovery
 
@@ -27,9 +27,11 @@ Before implementing anything, search for existing capabilities:
 
 **Skills come in two tiers.** *Installed* skills (in this project) are discovered **natively** by your platform — their names/descriptions are already in your context and you auto-invoke them; you do NOT need `search_skills` to find those. Separately there is a much larger *external catalog* of installable skills (entries marked `[catalog]`), NOT loaded into context.
 
+**Registered codes also appear among your native skills** (mirrored at `dsagt start`). A code's SKILL.md is an execution instruction: it opens with the exact shell command to run. When you invoke a code from its native skill entry, copy that command byte-for-byte — the same verbatim-`executable` rule as section 1b.
+
 **The external catalog is opt-in and starts empty — sources must be synced before `search_skills` can see them.** A blank/weak `search_skills` result usually means the relevant source isn't synced yet, NOT that no such skill exists. So before concluding the catalog has nothing, call `list_skill_sources()` — it reports each known source with its `synced` flag and `indexed` count. The flow:
 
-1. `list_skill_sources()` — see which sources are already synced vs only `available` (known name + URL, not yet indexed). For materials/chem/bio/DFT skills, the `scientific` source (K-Dense) is the one to enable.
+1. `list_skill_sources()` — see which sources are already synced vs only `available` (known name + URL, not yet indexed). For materials/chem/bio/DFT skills, the `k-dense-ai` source is the one to enable.
 2. `add_skill_source(source=...)` — sync a source (a known name like `scientific`/`anthropic`, or a GitHub URL). Read-only indexing step; nothing is installed into the project. Only needed for sources whose `synced` is false.
 3. `search_skills(query)` — now browse the synced catalog. Entries marked `[catalog]` are installable.
 4. `install_skill(skill_name=...)` — copy a catalog skill into the project. Its SKILL.md + scripts land on disk immediately, so you can **use it this session** by reading `skills/<name>/SKILL.md` and following it. A restart (next `dsagt start`) is only needed for hands-free *native* auto-invocation, not for use.
@@ -52,7 +54,7 @@ To author a brand-new skill instead of installing one, use the bundled `skill-cr
 
 Booleans render as a bare flag when truthy, nothing when falsy.
 
-When registering a new code via `save_code_spec`, set the `cli` field on every parameter so the next invocation doesn't have to guess.
+When registering a new code via `save_code_spec`, set the `cli` field on every parameter so the next invocation doesn't have to guess. Code names use lowercase letters, digits, and hyphens (e.g. `scan-directory`) — the skill-standard charset, since registered codes are mirrored into your native skills directory.
 
 ### 3. Code Preference Hierarchy
 
@@ -60,7 +62,7 @@ When implementing any data operation, follow this hierarchy:
 
 1. **REGISTERED CODE** — Use an existing code (`search_registry`)
 2. **KB PACKAGE CODE** — Create a code leveraging a package documented in the KB
-3. **CUSTOM IMPLEMENTATION** — Write custom code to `codes/scripts/` and register it
+3. **CUSTOM IMPLEMENTATION** — Write your script to `codes/<name>/scripts/` and register it
 
 Always exhaust higher-preference options before falling to lower ones.
 
@@ -75,7 +77,7 @@ check_[X](output) → audit/step_N_post.json
 All check reports are saved to `audit/` for the audit trail.
 
 ### 5. File Organization
-- All processing code goes in `codes/scripts/`
+- Each registered code is a self-contained dir: spec at `codes/<name>/SKILL.md`, its scripts in `codes/<name>/scripts/`
 - All data output goes in a `data/` subdirectory
 - All audit reports go in `audit/`
 - All session artifacts stay within the project directory
@@ -155,7 +157,7 @@ For each data operation, create TWO codes:
 - Accepts: input data path, output data path, parameters
 - Outputs: Transformed data
 
-Write code scripts to `codes/scripts/` and register them via `save_code_spec`. Python dependencies declared in the spec are handled automatically via `uv run --with`.
+Write each code's script to `codes/<name>/scripts/` and register it via `save_code_spec`. Python dependencies declared in the spec are handled automatically via `uv run --with`.
 
 ## PIPELINE RECONSTRUCTION
 
