@@ -7,6 +7,13 @@ Two parallel registries for agent capabilities:
 name, description, executable, parameters, dependencies, tags. Stored in
 `<project>/codes/`. Agent-written scripts go in `<project>/codes/scripts/`.
 When registered, executables are wrapped with dsagt-run + uv run --with.
+The wrapper lives *inside* the stored shell command by design: execution
+used to be dispatched by MCP-server tools, but agents routinely sidestepped
+those with their own bash tools, losing provenance.  Baking dsagt-run into
+the command the agent copies makes the bash path harmless — the residual
+failure mode is an agent reconstructing the command from memory and
+dropping the wrapper, which is why specs render the exact runnable command
+and agent instructions say to copy it verbatim.
 
 **Skills** (agent instructions) — directories containing a SKILL.md with
 YAML frontmatter (name, description, tags) and optional reference docs.
