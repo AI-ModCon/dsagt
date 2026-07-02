@@ -45,6 +45,9 @@ docs = [
     "mkdocs-include-markdown-plugin>=6.0",
 ]
 
+[project.optional-dependencies]
+fix-certificates = ["truststore>=0.10.4"]
+
 [build-system]
 requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"

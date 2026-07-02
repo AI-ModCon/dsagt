@@ -1,6 +1,7 @@
 import h5py
+import numpy as np
 from pathlib import Path
-from dsagt.tools.hdf5 import list_h5_files, list_h5_variables, repackage_h5
+from hdf5 import list_h5_files, list_h5_variables, read_h5_dataset, read_h5_attrs, repackage_h5
 
 
 def _make_file(path: Path, datasets: dict):
@@ -180,3 +181,82 @@ def test_repackage_attributes_preserved(tmp_path):
 
     with h5py.File(out, 'r') as f:
         assert f["dset"].attrs.get("units") == "m"
+
+
+# ---------------------------------------------------------------------------
+# read_h5_dataset
+# ---------------------------------------------------------------------------
+
+def test_read_h5_dataset_basic(tmp_path):
+    src = tmp_path / "src.h5"
+    data = np.array([1.0, 2.0, 3.0])
+    _make_file(src, {"mydata": data})
+    result = read_h5_dataset(src, "mydata")
+    np.testing.assert_array_equal(result, data)
+
+
+def test_read_h5_dataset_nested(tmp_path):
+    src = tmp_path / "src.h5"
+    data = np.array([[1, 2], [3, 4]])
+    _make_file(src, {"group/nested": data})
+    result = read_h5_dataset(src, "group/nested")
+    np.testing.assert_array_equal(result, data)
+
+
+def test_read_h5_dataset_missing_key_raises(tmp_path):
+    src = tmp_path / "src.h5"
+    _make_file(src, {"existing": [1]})
+    import pytest
+    with pytest.raises(KeyError):
+        read_h5_dataset(src, "nonexistent")
+
+
+def test_read_h5_dataset_preserves_dtype(tmp_path):
+    src = tmp_path / "src.h5"
+    data = np.array([1, 2, 3], dtype=np.float32)
+    _make_file(src, {"vals": data})
+    result = read_h5_dataset(src, "vals")
+    assert result.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# read_h5_attrs
+# ---------------------------------------------------------------------------
+
+def test_read_h5_attrs_root(tmp_path):
+    src = tmp_path / "src.h5"
+    with h5py.File(src, "w") as f:
+        f.attrs["version"] = np.int32(45)
+        f.attrs["time"] = np.float64(1.5)
+    result = read_h5_attrs(src)
+    assert result["version"] == 45
+    assert isinstance(result["version"], int)
+    assert abs(result["time"] - 1.5) < 1e-10
+    assert isinstance(result["time"], float)
+
+
+def test_read_h5_attrs_group(tmp_path):
+    src = tmp_path / "src.h5"
+    with h5py.File(src, "w") as f:
+        grp = f.create_group("mygroup")
+        grp.attrs["label"] = "hello"
+        grp.attrs["count"] = np.int32(7)
+    result = read_h5_attrs(src, "mygroup")
+    assert result["label"] == "hello"
+    assert result["count"] == 7
+
+
+def test_read_h5_attrs_empty(tmp_path):
+    src = tmp_path / "src.h5"
+    with h5py.File(src, "w") as f:
+        f.create_group("empty")
+    result = read_h5_attrs(src, "empty")
+    assert result == {}
+
+
+def test_read_h5_attrs_missing_group_raises(tmp_path):
+    src = tmp_path / "src.h5"
+    _make_file(src, {"x": [1]})
+    import pytest
+    with pytest.raises(KeyError):
+        read_h5_attrs(src, "nosuchgroup")
