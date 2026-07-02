@@ -39,11 +39,12 @@ PDIR="${HOME}/dsagt-projects/${PROJECT}"
 case "${AGENT}" in
     goose|claude|codex|opencode) ;;
     cline)
-        # dsagt start --script hard-errors for cline (its anthropic provider
-        # rewrites unrecognized model names, so batch mode is unsupported —
-        # see agents/cline.py).  Skip rather than report 15 red checks; drop
-        # this arm when that guard is lifted.
-        echo "[smoke] SKIP: cline batch mode is unsupported (see agents/cline.py) — hand-test via tests/manual_walkthroughs/ instead"
+        # dsagt start --script hard-errors for cline: its headless CLI
+        # (verified 3.0.34) never loads MCP servers, so a scripted session
+        # has no dsagt tools to exercise — see agents/cline.py.  Skip rather
+        # than report red checks; drop this arm when cline ships MCP in
+        # headless mode.
+        echo "[smoke] SKIP: cline headless CLI loads no MCP servers (see agents/cline.py) — hand-test via tests/manual_walkthroughs/ instead"
         exit 0
         ;;
     *)

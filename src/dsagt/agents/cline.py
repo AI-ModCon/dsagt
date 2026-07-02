@@ -9,27 +9,30 @@ writes to ``$CLINE_DIR/data/``.  Provider auth is cline's own
 by the user before dsagt — dsagt never writes cline auth state, since
 doing so can clobber an existing provider integration.
 
-**Batch / smoke-test status: NOT SUPPORTED.** Cline's bundled
-``lib.mjs`` ships a hardcoded anthropic-provider model whitelist
-(``claude-haiku-4-5-20251001``, ``claude-sonnet-4-5-20250929``, etc. —
-all without the ``-v1-project`` suffix lab gateways like PNNL require).
-Even when ``cline auth -m claude-haiku-4-5-20251001-v1-project`` stores
-our model name correctly in ``globalState.json``, at request time
-cline's anthropic provider validates against the whitelist, sees the
-unrecognized suffixed name, and silently substitutes its hardcoded
-default (``claude-sonnet-4-5-20250929``) — which the gateway then 401s
-because PNNL only serves the suffixed variant.
+**Batch / smoke-test status: NOT SUPPORTED (re-verified against cline
+3.0.34).** Batch itself now works (``cline "prompt"`` runs act-mode
+with auto-approve, honoring the user's pre-configured auth — the old
+model-whitelist blocker is moot), but the headless CLI session path
+never loads MCP servers: a probe session with a registered dsagt entry
+exposed zero MCP tools (the ``@cline/core`` MCP machinery exists, but
+the hub/headless path doesn't invoke it).  Without MCP tools there is
+nothing for a smoke run to exercise, so ``cline.run_script`` raises
+``RuntimeError`` and the smoke test short-circuits in
+``tests/smoke_test/run.sh``.  Re-probe on cline upgrades: if a batch
+session can call an MCP tool, batch support is one small run_script
+away.
 
-The openai-native path has the same problem (whitelisted ``gpt-5.5``,
-``gpt-4o`` etc.; PNNL serves ``-project``-suffixed variants).  Bedrock
-is locked behind ``cline auth``'s interactive setup flow, not the CLI.
-So ``cline.run_script`` raises ``RuntimeError`` and the smoke test
-short-circuits in ``tests/smoke_test/run.sh``.
+A second structural constraint, verified 3.0.34: cline's auth state
+rides with its config directory — ANY per-project ``--config`` /
+``CLINE_DIR`` isolation loses a subscription login (Unauthorized).
+The per-project MCP config written by ``write_dynamic`` therefore only
+works for API-key auth flows; subscription users need the dsagt server
+registered in cline's *global* MCP settings (the server is
+cwd-self-sufficient, so one global entry serves every project).
 
 Interactive use is unaffected — ``dsagt init --agent cline`` still
-writes the project state, and users running cline via VS Code (where
-the UI exposes ``awsBedrockEndpoint`` etc.) can drive the project
-manually.
+writes the project state, and users running cline via VS Code can
+drive the project manually.
 
 OTel support: **none** (verified).
 Cline ships ``@opentelemetry/*`` packages but installs only a
@@ -212,16 +215,14 @@ class ClineSetup(AgentSetup):
     ) -> int:
         """Not supported for cline — see module docstring.
 
-        Cline's bundled anthropic provider hardcodes a model-ID whitelist
-        that doesn't include lab-gateway aliases (``-v1-project`` etc.),
-        so the request silently substitutes a default cline thinks it
-        knows and the gateway 401s.
+        Cline 3.x batch runs fine (act mode, pre-configured auth), but
+        its headless CLI never loads MCP servers, so a scripted session
+        has no dsagt tools to exercise.
         """
         del config, env, working_dir, script_path, max_turns
         raise RuntimeError(
-            "cline batch mode is not supported — cline's anthropic "
-            "provider rewrites unrecognized model names (lab-gateway "
-            "aliases like ``-v1-project``) to its hardcoded default, "
-            "which the gateway then rejects.  See agents/cline.py module "
-            "docstring."
+            "cline batch mode is not supported — cline's headless CLI "
+            "(verified 3.0.34) does not load MCP servers, so a scripted "
+            "session has no dsagt tools.  See agents/cline.py module "
+            "docstring; re-probe on cline upgrades."
         )
