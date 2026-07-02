@@ -1,12 +1,18 @@
 # DSAgt Demo: Cryo-EM Data Curation Pipeline
 
-This guide documents a comprehensive DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, tool registration from third-party code, cross-collection knowledge synthesis, and multi-stage pipeline execution with domain-specific evaluation.
+> **Estimated time:** ~40 minutes — this is the broadest demo (7 stages) and
+> the least quick. It pulls a **~2 GB EMPIAR-10017 download**, an arXiv PDF,
+> and a full CryoPPP repo clone, then KB-ingests the whole repo (minutes on the
+> local embedder) before any pipeline work. Best treated as an advanced,
+> bring-time walkthrough rather than a 10-minute demo.
+
+This guide documents a comprehensive DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, cross-collection knowledge synthesis, and multi-stage pipeline execution with domain-specific evaluation.
 
 ## Prerequisites
 
 - DSAgt installed (`uv sync --all-groups`)
-- An agent platform installed (e.g., `claude` for Claude Code)
-- `test_site_config.yaml` configured with valid API keys and embedding endpoint
+- An agent platform installed and **already authenticated** (e.g., `claude` for Claude Code)
+  — BYOA: dsagt writes no credentials. The default local embedder needs no API key.
 - ~2 GB disk space for the cryo-EM test data
 - Git installed
 
@@ -44,7 +50,9 @@ git clone https://github.com/BioinfoMachineLearning/cryoppp.git demo_repos/cryop
 dsagt init cryoem-pipeline --agent claude
 ```
 
-Edit `~/dsagt-projects/cryoem-pipeline/dsagt_config.yaml` — set your API keys and embedding endpoint.
+(The default local embedder needs no key. To use a hosted embedder instead, set
+`embedding.backend: api` in `~/dsagt-projects/cryoem-pipeline/.dsagt/config.yaml`
+and export `EMBEDDING_API_KEY` in your shell — never written to disk.)
 
 ### 5. Start the session
 
@@ -82,19 +90,19 @@ Search the cryoppp collection for guidance on creating an AI-ready data processi
 
 The agent should return chunks describing quality metrics: CTF resolution, defocus ranges, ice thickness thresholds, and motion statistics.
 
-### 3. Register CryoPPP processing tools
+### 3. Register CryoPPP processing codes
 
 ```text
-Look at the scripts in demo_repos/cryoppp/ and register any data processing or evaluation tools you find. Run --help on each script to discover its interface.
+Look at the scripts in demo_repos/cryoppp/ and register any data-processing or evaluation codes you find. Run --help on each script to discover its interface.
 ```
 
 **Verify:**
 
 ```text
-Search the registry for cryo-EM tools.
+Search the registry for cryo-EM codes.
 ```
 
-### 4. Create a quality scoring tool
+### 4. Create a quality scoring code
 
 ```text
 Write a Python script that scores cryo-EM micrographs based on:
@@ -103,10 +111,10 @@ Write a Python script that scores cryo-EM micrographs based on:
 - Ice thickness
 - Motion statistics
 
-Use the CryoCRAB 0-7 scoring scheme described in the cryoppp collection. The script should read a metadata CSV and output a scored CSV with quality_score and quality_tier (high/medium/low) columns. Save the script under tools/code/ and register it as a tool.
+Use the CryoCRAB 0-7 scoring scheme described in the cryoppp collection. The script should read a metadata CSV and output a scored CSV with quality_score and quality_tier (high/medium/low) columns. Save the script under codes/<name>/scripts/ and register it as a code.
 ```
 
-The agent should search the knowledge base, write the script, and register it via `save_tool_spec`.
+The agent should search the knowledge base, write the script, and register it via `save_code_spec`.
 
 ### 5. Run the pipeline
 
@@ -133,12 +141,12 @@ Reconstruct the pipeline from the execution records as a bash script.
 ## Post-Conditions
 
 1. Knowledge base contains `cryoppp` collection with repo code, docs, and appended paper.
-2. Tool registry includes CryoPPP processing tools and the quality scoring tool.
+2. Code registry includes the CryoPPP processing codes and the quality-scoring code.
 3. Quality-scored CSV exists with tier distribution.
 4. A datacard exists for the processed dataset.
 5. A reconstructed pipeline script is available.
-6. Tool execution records in `trace_archive/` document the full provenance chain.
-7. MLflow traces capture token usage, latency, and full request/response history.
+6. Code execution records in `trace_archive/` document the full provenance chain.
+7. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history.
 
 ## What This Tests
 
@@ -147,15 +155,16 @@ Reconstruct the pipeline from the execution records as a bash script.
 | Knowledge ingestion (folder) | 1 |
 | Knowledge append (single file) | 1 |
 | Semantic search | 2 |
-| Tool discovery via registry | 3 |
-| Tool registration | 3, 4 |
+| Code discovery via registry | 3 |
+| Code registration | 3, 4 |
 | KB-guided code generation | 4 |
-| Tool execution with provenance | 5 |
+| Code execution with provenance | 5 |
 | Skill discovery and use | 6 |
 | Pipeline reconstruction | 7 |
 
 ## Cleanup
 
 ```bash
-rm -rf ~/dsagt-projects/cryoem-pipeline demo_data/cryoem demo_repos/cryoppp
+dsagt rm cryoem-pipeline -y          # unregisters the project and removes its dir
+rm -rf demo_data/cryoem demo_repos/cryoppp
 ```

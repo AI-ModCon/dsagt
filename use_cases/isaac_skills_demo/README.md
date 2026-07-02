@@ -1,5 +1,10 @@
 # DSAgt Demo: Skill-Driven VASP → ISAAC Conversion
 
+> **Estimated time:** ~15 minutes — the agent flow runs in seconds on the
+> bundled few-KB mock data; the one real cost is a one-time
+> `pip install pymatgen` (needed for step 6) plus a shallow clone of the
+> K-Dense catalog from GitHub.
+
 A lightweight mock of the [`isaac_vasp`](../isaac_vasp/) workflow, built to **vet
 the skill-management feature**. It follows the same arc as `isaac_vasp` — install
 the **pymatgen** skill, author a `vasp-to-isaac` converter that parses VASP output
@@ -14,8 +19,8 @@ stand-in.
 
 - **`list_skill_sources`** — the agent discovers what external sources it can
   pull from (curated names + arbitrary git URLs) and which are synced.
-- **`add_skill_source`** — the agent syncs a source (default: K-Dense
-  `scientific-agent-skills`, 140+ skills) into a searchable catalog that is
+- **`add_skill_source`** — the agent syncs a source (here: K-Dense
+  `k-dense-ai`, 140+ skills) into a searchable catalog that is
   **not** loaded into context; with the single `dsagt-server` it's searchable
   immediately, no restart.
 - **`search_skills`** + **`install_skill`** — find a catalog skill (hits marked
@@ -39,24 +44,20 @@ credentials are optional — `search_skills` uses semantic search when
 for sharper relevance).
 
 ```bash
-dsagt setup-kb --no-skill-catalog                # core KB only — the agent syncs the catalog in-session (step 3)
-dsagt init isaac-skills-demo --agent claude
+dsagt init isaac-skills-demo --agent claude --exclude genesis   # core KB + bundled codes/skills, but NO catalog synced
 cp -r use_cases/isaac_skills_demo/mock_data ~/dsagt-projects/isaac-skills-demo/mock_data
 dsagt start isaac-skills-demo                     # mirrors the bundled skill-creator into .claude/skills/ before launch
 ```
 
-The project starts with **no external catalog synced** — that's deliberate: the
-walkthrough has the agent *discover, sync, and search* it from inside the
-session. Now that one `dsagt-server` owns the KB, a source the agent syncs
-mid-session is **immediately searchable, no restart** — which the old two-server
-split (sync in one process, search in another) couldn't do, so it had to be a
-pre-`start` CLI step.
+The project starts with **no external catalog synced** — that's deliberate (the
+`--exclude genesis` drops the default catalog): the walkthrough has the agent
+*discover, sync, and search* it from inside the session. The single
+`dsagt-server` owns the KB, so a source the agent syncs mid-session is
+**immediately searchable, no restart**.
 
-> Plain `dsagt setup-kb` (without `--no-skill-catalog`) instead pre-syncs the
-> default `scientific` source into the shared KB, which `init` then copies in. If
-> you do that, step 3 below becomes an idempotent refresh — or just sync a
-> different source there (e.g. `anthropic`). The `dsagt skills sync <project>` CLI
-> still exists for scripted/headless setups.
+> To instead pre-sync a source at init, pass `--include` with a source name
+> (e.g. `dsagt init … --include k-dense-ai`); `init` provisions it into the KB
+> and step 3 below becomes an idempotent refresh.
 
 ## Walkthrough
 
@@ -80,17 +81,17 @@ reads.
 ### 2 — Where can we find more skills?
 > Where can I get more skills from? List the skill sources you can pull from and which are already synced.
 
-*Expect:* `list_skill_sources` → the known sources (`scientific`, `anthropic`,
+*Expect:* `list_skill_sources` → the known sources (`k-dense-ai`, `anthropic`,
 `antigravity`, `composio`, `genesis`) with URLs, each flagged **available, not
-synced** (nothing is synced yet on a `--no-skill-catalog` setup).
+synced** (nothing is synced yet on an `--exclude genesis` setup).
 
 ### 3 — Sync skills from an external repo
-> Sync the "scientific" source so we can search its catalog.
+> Sync the "k-dense-ai" source so we can search its catalog.
 
-*Expect:* `add_skill_source(source="scientific")` → a shallow clone of K-Dense
+*Expect:* `add_skill_source(source="k-dense-ai")` → a shallow clone of K-Dense
 `scientific-agent-skills`, ~140 skills indexed into
 `skills_catalog__k-dense-ai-scientific-agent-skills`, source persisted to
-`dsagt_config.yaml`. Because it's one `dsagt-server`, the catalog is searchable
+`.dsagt/config.yaml`. Because it's one `dsagt-server`, the catalog is searchable
 **immediately** — the next prompt can hit it with no restart.
 
 ### 4 — Add the relevant skill
@@ -128,8 +129,8 @@ reference. (`pymatgen` must be importable in the project env — see Notes.)
 
 ### 7 — Inspect the tiers (run in a shell)
 ```bash
-dsagt skills list isaac-skills-demo              # installed: skill-creator + pymatgen + vasp-to-isaac
-dsagt skills list isaac-skills-demo --catalog    # catalog: skills_catalog__k-dense-ai-scientific-agent-skills
+dsagt info isaac-skills-demo                      # KB shows the k-dense-ai catalog collection
+ls ~/dsagt-projects/isaac-skills-demo/skills/     # installed: pymatgen + vasp-to-isaac
 ls ~/dsagt-projects/isaac-skills-demo/.claude/skills/
 cat ~/dsagt-projects/isaac-skills-demo/.claude/skills/.dsagt-managed.json
 ```
@@ -155,7 +156,6 @@ native auto-invoked skills.
 ## Cleanup
 
 ```bash
-dsagt stop isaac-skills-demo
 dsagt rm isaac-skills-demo            # add -y to skip the prompt
 ```
 
@@ -180,11 +180,10 @@ reused across projects; delete it to force a fresh clone.
   still correct (pymatgen #1). Switch `embedding.backend` to `api` for sharper
   relevance. With no embedder at all, `search_skills` falls back to keyword
   scoring; `install_skill` and the native mirror are pure filesystem ops.
-- Add **more** sources the same way, in-session or from a shell — e.g. ask the
-  agent to "enable the anthropic source", or run
-  `dsagt skills add isaac-skills-demo antigravity` (or `composio`, `genesis`, or
-  any `https://github.com/owner/repo`). Each lands in its own
-  `skills_catalog__*` collection.
+- Add **more** sources the same way — ask the agent to "enable the anthropic
+  source" (or `antigravity`, `composio`, `genesis`, or any
+  `https://github.com/owner/repo`), which fires `add_skill_source`. Each lands
+  in its own `skills_catalog__*` collection.
 - Sister demo: [`genesis_skills`](../genesis_skills/) flexes the same catalog →
   install → native loop plus KB domain ingest and datacard generation, against
   the Genesis (OSTI GitLab) source.

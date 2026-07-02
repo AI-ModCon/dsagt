@@ -1,5 +1,10 @@
 # DSAgt Demo: AIDRIN Readiness Gate on a Cryo-EM Pipeline
 
+> **Estimated time:** ~30 minutes, dominated by a **~2 GB EMPIAR-10017
+> download** (from `calla.rnet.missouri.edu`) plus the one-time AIDRIN build.
+> The agent portion (register + before/after assessment + datacard) is ~10
+> minutes once the data is staged.
+
 This guide demonstrates DSAgt using [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness
 Inspector) as a **readiness gate** around a cryo-EM data-curation step. The agent registers the
 AIDRIN CLI, then runs the applicable readiness metrics **before and after** particle curation to
@@ -31,9 +36,9 @@ tabular dataset where they do apply.
 
 ## Prerequisites
 
-- DSAgt installed (`uv sync --all-groups`) and an agent platform installed (e.g. `claude`).
-- `dsagt_config.yaml` configured (the default local embedder needs no API key; the agent needs its
-  own LLM credentials).
+- DSAgt installed (`uv sync --all-groups`) and an agent platform installed and **already
+  authenticated** (BYOA — dsagt writes no credentials). The default local embedder needs no
+  API key.
 - **AIDRIN** installed from its `develop` branch in its own Python 3.10 virtual environment
   (see Setup).
 - ~2 GB disk for the EMPIAR-10017 cryo-EM data.
@@ -85,7 +90,6 @@ deactivate
 
 ```bash
 dsagt init cryoem-readiness --agent claude
-# Edit ~/dsagt-projects/cryoem-readiness/dsagt_config.yaml — set the agent's LLM credentials.
 PROJ=~/dsagt-projects/cryoem-readiness
 mkdir -p "$PROJ/data"
 cp demo_data/cryoem/cryoem_before.csv demo_data/cryoem/cryoem_after.csv "$PROJ/data/"
@@ -99,19 +103,19 @@ Paste these prompts into the agent one at a time (substitute the absolute `$AIDR
 ### 1. Register the AIDRIN CLI
 
 ```text
-Register a data-readiness CLI named aidrin into the tool registry. The executable is at
+Register a data-readiness CLI named aidrin into the code registry. The executable is at
 <AIDRIN_BIN>. Run "<AIDRIN_BIN> --help" and "<AIDRIN_BIN> list" to discover its subcommands and the
-15 metrics, then save a tool spec named aidrin describing the run/batch/data-quality subcommands
+15 metrics, then save a code spec named aidrin describing the run/batch/data-quality subcommands
 and their positional arguments.
 ```
 
-**Verify:** `Search the registry for the aidrin data-readiness tool.` →
-`~/dsagt-projects/cryoem-readiness/tools/aidrin.md` should exist.
+**Verify:** `Search the registry for the aidrin data-readiness code.` →
+`~/dsagt-projects/cryoem-readiness/codes/aidrin/SKILL.md` should exist.
 
 ### 2. Readiness assessment BEFORE curation
 
 ```text
-Using the registry aidrin tool, assess the AI data readiness of data/cryoem_before.csv. Run these
+Using the registry aidrin code, assess the AI data readiness of data/cryoem_before.csv. Run these
 metrics through dsagt-run: completeness; duplicity; outliers; correlations on the columns
 "Defocus U,Defocus V,Defocus Angle,CTF B Factor,Origin X (Ang),Origin Y (Ang)"; class-imbalance on
 the Class Number column; and feature-relevance with no categorical columns, those same numerical
@@ -157,7 +161,7 @@ Reconstruct the readiness assessment you just ran from the execution records as 
 
 ## Post-Conditions
 
-1. Tool registry contains the `aidrin` spec (`tools/aidrin.md`).
+1. Code registry contains the `aidrin` spec (`codes/aidrin/SKILL.md`).
 2. `trace_archive/` holds one provenance record per metric run (before and after).
 3. Before/after scores show curation reduced outliers (~0.041 → ~0.029) and class imbalance
    (~22.2 → ~11.1) while completeness and duplicity stayed clean.
@@ -169,18 +173,20 @@ Reconstruct the readiness assessment you just ran from the execution records as 
 
 | DSAgt Capability | Steps |
 |------------------|-------|
-| External-CLI registration (`save_tool_spec`) | 1 |
+| External-CLI registration (`save_code_spec`) | 1 |
 | Registry search | 1 (Verify) |
-| Tool execution with provenance (`dsagt-run` → `trace_archive/`) | 2, 3 |
+| Code execution with provenance (`dsagt-run` → `trace_archive/`) | 2, 3 |
 | Before/after comparison driven by the agent | 3 |
 | Skill discovery and use (datacard generation) | 4 |
 | Pipeline reconstruction from execution records | 5 |
-| Observability (MLflow spans) | all |
+| Observability (MLflow spans in the serverless `mlflow.db` store) | all |
+
+View the traces any time with
+`mlflow ui --backend-store-uri sqlite:///$PROJ/mlflow.db`.
 
 ## Cleanup
 
 ```bash
-dsagt stop cryoem-readiness
 dsagt rm cryoem-readiness -y
 rm -rf demo_data/cryoem AIDRIN aidrin-venv
 ```

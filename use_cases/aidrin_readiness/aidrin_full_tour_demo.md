@@ -1,5 +1,10 @@
 # DSAgt Demo: Full AIDRIN Feature Tour
 
+> **Estimated time:** ~30–40 minutes — this is a long-form tour, not a quick
+> demo. Most of the time is the one-time AIDRIN build (clone + `pip install -e`
+> in a Python 3.10 venv) plus the agent issuing ~15 separate metric runs. The
+> dataset ships with AIDRIN (no large download).
+
 This guide drives **every** [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector)
 metric through DSAgt on a single tabular dataset — exercising all 15 metrics across all four
 categories, with full execution provenance. It is the companion to the
@@ -22,9 +27,9 @@ prediction **target** (`income`).
 
 ## Prerequisites
 
-- DSAgt installed (`uv sync --all-groups`) and an agent platform installed (e.g. `claude`).
-- `dsagt_config.yaml` configured (the default local embedder needs no API key; the agent needs its
-  own LLM credentials).
+- DSAgt installed (`uv sync --all-groups`) and an agent platform installed and **already
+  authenticated** (BYOA — your agent talks to its own LLM provider; dsagt writes no
+  credentials). The default local embedder needs no API key.
 - **AIDRIN** installed from its `develop` branch in its own Python 3.10 virtual environment.
 - Git installed. (No large download — the dataset ships with AIDRIN.)
 
@@ -40,7 +45,6 @@ AIDRIN_BIN="$(pwd)/aidrin-venv/bin/aidrin"; echo "$AIDRIN_BIN"
 deactivate
 
 dsagt init aidrin-tour --agent claude
-# Edit ~/dsagt-projects/aidrin-tour/dsagt_config.yaml — set the agent's LLM credentials.
 PROJ=~/dsagt-projects/aidrin-tour
 mkdir -p "$PROJ/data"
 cp AIDRIN/examples/sample_data/csv/adult.csv "$PROJ/data/"
@@ -54,18 +58,18 @@ Paste these prompts one at a time (substitute the absolute `$AIDRIN_BIN` path).
 ### 1. Register the AIDRIN CLI
 
 ```text
-Register a data-readiness CLI named aidrin into the tool registry. The executable is at
+Register a data-readiness CLI named aidrin into the code registry. The executable is at
 <AIDRIN_BIN>. Run "<AIDRIN_BIN> --help" and "<AIDRIN_BIN> list" to discover its subcommands and the
-15 metrics, then save a tool spec named aidrin describing the run/batch/data-quality subcommands
+15 metrics, then save a code spec named aidrin describing the run/batch/data-quality subcommands
 and their positional arguments.
 ```
 
-**Verify:** `Search the registry for the aidrin data-readiness tool.`
+**Verify:** `Search the registry for the aidrin data-readiness code.`
 
 ### 2. Run all 15 metrics through `dsagt-run`
 
 ```text
-Using the registry aidrin tool, run AIDRIN's full readiness assessment on data/adult.csv, executing
+Using the registry aidrin code, run AIDRIN's full readiness assessment on data/adult.csv, executing
 every metric through dsagt-run so each is recorded. Cover all four categories:
 (1) data-quality: completeness, duplicity, outliers;
 (2) impact-of-data-on-AI: correlations on "age,education.num,sex,race", and feature-relevance with
@@ -129,7 +133,7 @@ quasi-identifiers — bin or suppress before sharing.
 ```text
 Write an aidrin batch config (YAML) that runs completeness, class-imbalance, statistical-rates, and
 representation-rate on data/adult.csv with target income and sensitive attribute sex, then run it
-through the registry aidrin tool.
+through the registry aidrin code.
 ```
 
 Batch config keys: `file-path`, `file-type`, `metrics`, `target-column`,
@@ -153,7 +157,7 @@ Reconstruct the full readiness assessment you just ran from the execution record
 
 ## Post-Conditions
 
-1. Tool registry contains the `aidrin` spec (`tools/aidrin.md`).
+1. Code registry contains the `aidrin` spec (`codes/aidrin/SKILL.md`).
 2. `trace_archive/` holds one provenance record per metric run (15 from step 2).
 3. Results span all four categories, with the gender-fairness gap and the `k = 1` / `l = 1`
    re-identification risks identified.
@@ -165,19 +169,21 @@ Reconstruct the full readiness assessment you just ran from the execution record
 
 | DSAgt Capability | Steps |
 |------------------|-------|
-| External-CLI registration (`save_tool_spec`) | 1 |
+| External-CLI registration (`save_code_spec`) | 1 |
 | Registry search | 1 (Verify) |
-| Tool execution with provenance (`dsagt-run` → `trace_archive/`) | 2 |
+| Code execution with provenance (`dsagt-run` → `trace_archive/`) | 2 |
 | Full-suite (15-metric) orchestration | 2 |
 | Multi-metric / batch execution | 3 |
 | Skill discovery and use (datacard generation) | 4 |
 | Pipeline reconstruction from execution records | 5 |
-| Observability (MLflow spans) | all |
+| Observability (MLflow spans in the serverless `mlflow.db` store) | all |
+
+View the traces any time with
+`mlflow ui --backend-store-uri sqlite:///$PROJ/mlflow.db`.
 
 ## Cleanup
 
 ```bash
-dsagt stop aidrin-tour
 dsagt rm aidrin-tour -y
 rm -rf AIDRIN aidrin-venv
 ```

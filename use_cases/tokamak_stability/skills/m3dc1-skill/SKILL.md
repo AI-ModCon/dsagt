@@ -1,17 +1,17 @@
 ---
 name: m3dc1-skill
-description: Use this skill when working with the python modules `m3dc1_tools.py`, `m3dc1_plots.py`, `hdf5.py` and the tools created from the functions within. Triggers when working with M3D-C1 simulation data or repackaging general HDF5 files.
+description: Use this skill when working with the python modules `m3dc1_tools.py`, `m3dc1_plots.py`, `hdf5.py` and the codes created from the functions within. Triggers when working with M3D-C1 simulation data or repackaging general HDF5 files.
 ---
 
 # m3dc1-skill
 
 
-## Creating CLI tools from M3D-C1 python modules
+## Creating CLI codes from M3D-C1 python modules
 
-Always read the relevant API guide before creating CLI tools --- see the `Reference material` section below.
+Always read the relevant API guide before creating CLI codes --- see the `Reference material` section below.
 
 
-IMPORTANT NOTE FOR AGENTS GENERATING NEW TOOLS FROM m3dc1_tools.py
+IMPORTANT NOTE FOR AGENTS GENERATING NEW CODES FROM m3dc1_tools.py
 ------------------------------------------------------------------
 The functions marked "requires m3dc1 + fpy" in the initial comment
 in `m3dc1_tools.py` call into compiled C/Fortran code that writes diagnostic 
@@ -19,14 +19,14 @@ messages (e.g. "deleting simulation object", "period = 6.28318") directly
 to the OS-level stdout file descriptor. This output bypasses Python's 
 sys.stdout entirely and cannot be suppressed or redirected from Python.
 
-Consequence: any CLI tool that (1) calls one of these functions and (2) prints
+Consequence: any CLI code that (1) calls one of these functions and (2) prints
 its JSON result to stdout will produce contaminated output that cannot be parsed
 as JSON when captured via shell redirect.
 
-Required pattern for any new CLI tool wrapping these functions:
+Required pattern for any new CLI code wrapping these functions:
     - Accept an --output-json FILE argument.
     - Write the JSON result to that file instead of printing to stdout.
-    - Document in the tool spec that the agent MUST use --output-json and read
+    - Document in the code spec that the agent MUST use --output-json and read
       from the file rather than capturing stdout.
 
 Functions that ARE affected:
@@ -40,18 +40,18 @@ Functions NOT affected (h5py / numpy only — no compiled stdout writes):
     `compute_ke_growth_trace`, `compute_growth_rate`, `compute_q95`
 
 
-## When to use these tools
+## When to use these codes
 
-Always use the M3D-C1 tools when processing or investigating datasets created by this code. Only create custom tools when your needs cannot be met by any of the existing tools. Be watchful for synonyms of alternative expressions from those used in the tool descriptions; for example, use of `repackage_hdf5` should also be triggered by calls to repack or reorganize HDF5 data, or to create a new file to hold a new dataset etc.
+Always use the M3D-C1 codes when processing or investigating datasets created by this code. Only create custom codes when your needs cannot be met by any of the existing codes. Be watchful for synonyms of alternative expressions from those used in the tool descriptions; for example, use of `repackage_hdf5` should also be triggered by calls to repack or reorganize HDF5 data, or to create a new file to hold a new dataset etc.
 
-When using any tools that write a temporary JSON file (to circumvent the corruption of stdout by fpy as described above) that temporary file should be deleted as soon as it is no longer needed to connect tool calls. Do not leave unnecessary JSON files in the filesystem.
+When using any codes that write a temporary JSON file (to circumvent the corruption of stdout by fpy as described above) that temporary file should be deleted as soon as it is no longer needed to connect code calls. Do not leave unnecessary JSON files in the filesystem.
 
-If the user's meaning or intent is unclear always ask a clarifying question --- do not silently fail or say that a required tool does not exist.
+If the user's meaning or intent is unclear always ask a clarifying question --- do not silently fail or say that a required code does not exist.
 
 
 ## Note on how M3D-C1 field data is stored
 
-M3D-C1 stores fields using the coefficients of the basis functions rather than the pointwise field values themselves. The field values can be found using the `eval_field` function in the `m3dc1` python module; the `eval_field_on_grid` function in `m3dc1_tools.py` evaluates field values across a spatial grid and either returns a dict or writes an HDF5 file. Use these functions or tools derived from them to evaluate fields. If the user asks for field data (e.g. temperature, density, pressure, magnetic field or current density components) to be repackaged, repacked, extracted, moved, rewritten etc. assume that they are interested in these real evaluated field values rather than the raw coefficient values. Only repackage raw coefficients if the user specifically requests this. If the user's intent is unclear always ask a clarifying question.
+M3D-C1 stores fields using the coefficients of the basis functions rather than the pointwise field values themselves. The field values can be found using the `eval_field` function in the `m3dc1` python module; the `eval_field_on_grid` function in `m3dc1_tools.py` evaluates field values across a spatial grid and either returns a dict or writes an HDF5 file. Use these functions or codes derived from them to evaluate fields. If the user asks for field data (e.g. temperature, density, pressure, magnetic field or current density components) to be repackaged, repacked, extracted, moved, rewritten etc. assume that they are interested in these real evaluated field values rather than the raw coefficient values. Only repackage raw coefficients if the user specifically requests this. If the user's intent is unclear always ask a clarifying question.
 
 
 ## Where to store products
@@ -68,7 +68,7 @@ When asked to make a shell script always check the user's default shell. Create 
 
 ## Reference material
 
-ALWAYS read the relevant API guide before attempting to create CLI tools from one of the python modules.
+ALWAYS read the relevant API guide before attempting to create CLI codes from one of the python modules.
 
 -  `references/m3dc1_output_guide.md`: explains M3D-C1's native output format in detail, including how the field coefficients are stored and evaluated.
 

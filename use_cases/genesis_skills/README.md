@@ -1,5 +1,9 @@
 # DSAgt Demo: Genesis Skills for a Data-Curation Pipeline
 
+> **Estimated time:** ~10 minutes (all data is bundled and tiny; the one
+> external dependency is a shallow clone of the Genesis catalog from OSTI
+> GitLab — needs network access to `gitlab.osti.gov`).
+
 An end-to-end **data-preparation** walkthrough that flexes the skill catalog
 against the **Genesis** source (OSTI GitLab). The agent pulls in the
 BASE-Data/ModCon curation skills, grounds itself in domain context loaded into
@@ -37,15 +41,13 @@ semantic search when `EMBEDDING_*` is set and fall back to a keyword scorer
 otherwise (configure it for sharper relevance over the domain docs).
 
 ```bash
-dsagt setup-kb                                   # bundled tools/skills + core KB
-dsagt init genesis-skills --agent claude
+dsagt init genesis-skills --agent claude          # provisions the bundled codes/skills + core KB
 cp -r use_cases/genesis_skills/mock_data ~/dsagt-projects/genesis-skills/mock_data
 dsagt start genesis-skills                        # mirrors skill-creator into .claude/skills/ before launch
 ```
 
 The Genesis catalog is **project-scoped** and not synced by `init`, so the agent
-enables it in step 1 below (or run `dsagt skills add genesis-skills genesis` from
-a shell first).
+enables it in step 1 below (via the `add_skill_source` MCP tool).
 
 ## Walkthrough
 
@@ -57,13 +59,13 @@ and check the expected behavior.
 
 *Expect:* `add_skill_source(source="genesis")` → a shallow clone of OSTI GitLab,
 **74** skills indexed into `skills_catalog__genesis-genesis-skills`, source
-written to `dsagt_config.yaml`. (Two upstream skills — including
+written to `.dsagt/config.yaml`. (Two upstream skills — including
 `datacard-generator` — have technically-invalid YAML frontmatter; dsagt recovers
 their name/description with a lenient fallback rather than dropping them, so they
 *are* searchable.) Confirm from a shell:
 
 ```bash
-dsagt skills list genesis-skills --catalog       # expect the skills_catalog__genesis-genesis-skills collection
+dsagt info genesis-skills                         # the skills_catalog__genesis-genesis-skills collection appears in the KB summary
 ```
 
 ### 2 — Find and install the datacard skill (catalog, NOT in context)
@@ -122,9 +124,8 @@ schema issues.
 
 ### 8 — Inspect the tiers (run in a shell)
 ```bash
-dsagt skills list genesis-skills                 # installed: skill-creator + generating-datacards + croissant-validator
-dsagt skills list genesis-skills --catalog       # catalog: skills_catalog__genesis-genesis-skills
-dsagt info genesis-skills                         # KB shows methanation_domain
+dsagt info genesis-skills                         # KB shows the genesis catalog collection + methanation_domain
+ls ~/dsagt-projects/genesis-skills/skills/        # installed: generating-datacards + croissant-validator
 ls ~/dsagt-projects/genesis-skills/.claude/skills/
 cat ~/dsagt-projects/genesis-skills/.claude/skills/.dsagt-managed.json
 ls ~/dsagt-projects/genesis-skills/audit/        # catalyst_screening_datacard.md
@@ -150,7 +151,6 @@ Genesis skills as native auto-invoked skills.
 ## Cleanup
 
 ```bash
-dsagt stop genesis-skills
 dsagt rm genesis-skills            # add -y to skip the prompt
 ```
 
@@ -160,8 +160,8 @@ reused across projects; delete it to force a fresh clone.
 ## Notes
 
 - The Genesis catalog is hosted on **OSTI GitLab** (`gitlab.osti.gov`), not
-  GitHub — reached the same way as any other source (`add_skill_source` /
-  `dsagt skills add … genesis`); only the host differs.
+  GitHub — reached the same way as any other source (the `add_skill_source`
+  MCP tool); only the host differs.
 - `generating-datacards` is the frontmatter *name* of the skill whose directory
   is `datacard-generator` in the Genesis repo — `install_skill` accepts either.
   It and `croissant-validator` live under Genesis's `modcon-skills/` category
@@ -172,4 +172,4 @@ reused across projects; delete it to force a fresh clone.
   skill owns the authoritative template.
 - Sister demo: [`isaac_skills_demo`](../isaac_skills_demo/) flexes the same
   catalog → install → native-mirror loop plus authoring a new skill with
-  `skill-creator`, against the K-Dense `scientific` (GitHub) source.
+  `skill-creator`, against the K-Dense `k-dense-ai` (GitHub) source.
