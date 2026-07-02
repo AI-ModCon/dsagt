@@ -183,6 +183,7 @@ class TestSearch:
             top_k=10,
             rerank=False,
             where=None,
+            where_document=None,
         )
 
     def test_search_defaults(self, server, mock_kb):
@@ -203,6 +204,7 @@ class TestSearch:
             top_k=5,
             rerank=None,  # agent didn't specify → kb.default_rerank resolves it
             where=None,
+            where_document=None,
         )
 
     def test_search_nonexistent_collection(self, server, mock_kb):
@@ -815,6 +817,7 @@ class TestKbSearchMultiCollection:
             top_k=5,
             rerank=None,
             where=None,
+            where_document=None,
         )
 
     def test_no_collection_returns_error(self, server):
