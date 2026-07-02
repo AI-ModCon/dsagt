@@ -437,21 +437,25 @@ class ClaudeReader(JsonlReader):
         return max(files, key=lambda p: p.stat().st_mtime) if files else None
 
 
-_CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
-
-
 class CodexReader(JsonlReader):
     """The newest ``rollout-*.jsonl`` whose ``session_meta.cwd`` is this project.
 
-    Codex rollouts live globally under ``~/.codex/sessions/YYYY/MM/DD/``; each
-    opens with a ``session_meta`` record carrying the launch ``cwd``.
+    DSAGT always runs codex with ``CODEX_HOME=<project>/.codex-data`` (its MCP
+    config lives there — see agents/codex.py), so rollouts land under
+    ``<project>/.codex-data/sessions/YYYY/MM/DD/``, not the global
+    ``~/.codex/sessions/``.  Each rollout opens with a ``session_meta`` record
+    carrying the launch ``cwd``; the filter guards against stray files.
     """
 
     agent = "codex"
 
     def __init__(self, project_dir, *, sessions_root: Path | None = None):
         self._project_dir = os.path.abspath(project_dir)
-        self._root = Path(sessions_root) if sessions_root else _CODEX_SESSIONS_ROOT
+        self._root = (
+            Path(sessions_root)
+            if sessions_root
+            else Path(self._project_dir) / ".codex-data" / "sessions"
+        )
 
     def _rollout_cwd(self, path: Path) -> str | None:
         with open(path, encoding="utf-8") as fh:
