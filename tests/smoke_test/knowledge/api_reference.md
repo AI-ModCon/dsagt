@@ -1,35 +1,28 @@
-# csvtool CLI Reference
+# greet CLI Reference
 
-## csvtool filter
-
-Filter rows by column value.
+Generate a JSON greeting for a name.
 
 ```bash
-csvtool filter --input data.csv --column status --value active --output filtered.csv
+python greet.py NAME [--greeting WORD]
 ```
 
 Parameters:
-- `--input` (required) — Input CSV file path
-- `--column` (required) — Column name to filter on
-- `--value` (required) — Value to match
-- `--output` (required) — Output CSV file path
+- `NAME` (positional, required) — Name to greet.
+- `--greeting` (optional) — Greeting word. Default: `Hello`.
 
-## csvtool validate
+## Output
 
-Check a CSV against a schema.
+On success, prints a JSON object to stdout and exits 0:
 
-```bash
-csvtool validate --input data.csv --schema schema.json
+```json
+{
+  "message": "Hello, DSAGT!",
+  "status": "ok"
+}
 ```
 
-Outputs a JSON report with row count, null counts per column, type violations, and an overall pass/fail status.
+## Exit codes
 
-## csvtool summary
-
-Print column statistics.
-
-```bash
-csvtool summary --input data.csv
-```
-
-Outputs: column names, types, null counts, unique value counts, and min/max for numeric columns.
+- `0` — success.
+- `1` — invalid input. The JSON output carries `"status": "error"` and an
+  error `code` field (see troubleshooting).

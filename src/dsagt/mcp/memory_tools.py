@@ -101,12 +101,13 @@ def _memory_tools_and_handlers(
     """Build the explicit-memory ``(tool defs, handler map)``.
 
     Combined with the other concern modules' tools under one MCP ``Server`` by
-    :func:`dsagt.mcp.server.create_dsagt_server`.  ``ExplicitMemory`` is rooted
-    at ``runtime_dir`` (falling back to the KB index's parent), matching the
-    project's ``.dsagt`` memory location.
+    :func:`dsagt.mcp.server.create_dsagt_server`.  ``ExplicitMemory`` lives in
+    ``<project>/.dsagt/`` alongside config.yaml and state.yaml — the
+    server-owned internals — with ``runtime_dir`` (falling back to the KB
+    index's parent) as the project dir.
     """
-    mem_dir = Path(runtime_dir) if runtime_dir else kb.index_dir.parent
-    memory = ExplicitMemory(runtime_dir=mem_dir)
+    project_dir = Path(runtime_dir) if runtime_dir else kb.index_dir.parent
+    memory = ExplicitMemory(runtime_dir=project_dir / ".dsagt")
 
     handlers = {
         "kb_remember": partial(_handle_kb_remember, kb=kb, memory=memory),

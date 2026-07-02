@@ -1,11 +1,12 @@
-# csvtool Installation
+# greet Installation
 
-Install csvtool via pip:
+greet ships as a single-file script (`greet.py`) with the smoke test
+fixtures — there is nothing to install.
+
+Requirements: Python 3.10+, standard library only (argparse, json, sys).
+
+Run it directly:
 
 ```bash
-pip install csvtool
+python greet.py World --greeting Hi
 ```
-
-Requirements: Python 3.10+, pandas >= 2.0.
-
-csvtool provides CLI commands for filtering, validating, and summarizing CSV files.

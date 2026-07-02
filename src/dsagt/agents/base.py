@@ -304,27 +304,6 @@ class AgentSetup(ABC):
     #: that never read env-var credentials.
     credential_env_vars: ClassVar[tuple[str, ...]] = ()
 
-    #: Whether this agent makes its LLM calls visible in MLflow natively.
-    #: Drives whether ``dsagt info`` / live audit / memory extraction see
-    #: the agent's reasoning + tool calls or just see the agent as a
-    #: black box.
-    #:
-    #: ``"full"``        — verified end-to-end (Claude Code, Goose).
-    #:                     Every agent turn lands in MLflow as a trace
-    #:                     with messages + response + tool_use blocks.
-    #: ``"partial"``     — agent emits OTel but spans don't carry
-    #:                     message content (Codex: only token counts +
-    #:                     tool names).
-    #: ``"none"``        — agent emits no payload-bearing OTel traces, or
-    #:                     emits only metrics without payloads (Cline,
-    #:                     Roo Code).  The agent is a black box from
-    #:                     DSAgt's perspective; tool execution + KB
-    #:                     observability still work regardless via
-    #:                     dsagt-run / MCP-server spans.
-    #:
-    #: See agents/<name>.py docstrings for the per-agent investigation.
-    otel_payload_support: ClassVar[str] = "full"
-
     #: Directory (relative to the working dir) the agent natively auto-discovers
     #: ``SKILL.md`` skill folders from.  ``setup_skills`` mirrors installed
     #: (bundled + project) skills here so the agent discovers/auto-invokes them

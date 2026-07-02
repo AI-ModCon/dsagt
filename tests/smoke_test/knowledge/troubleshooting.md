@@ -1,18 +1,25 @@
-# csvtool Troubleshooting
+# greet Troubleshooting
 
-## Encoding errors
+## Error GRT-42: empty name
 
-If csvtool raises a UnicodeDecodeError, the file may not be UTF-8. Use `--encoding latin-1` or detect encoding with `chardet`.
+When the `NAME` argument is empty or whitespace-only, greet prints a JSON
+error object with error code `GRT-42` and exits 1:
 
-## Large file performance
+```json
+{"status": "error", "code": "GRT-42", "error": "empty name"}
+```
 
-For files over 1 GB, csvtool streams rows in chunks. If you still run out of memory, increase the chunk size with `--chunk-size 100000` or filter to specific columns with `--columns col1,col2`.
+Fix: pass a non-empty name. Shell quoting is the usual culprit — an unset
+variable like `"$USER_NAME"` expands to an empty string.
 
-## Schema validation failures
+## Output is not valid JSON
 
-The validate command checks column types against a JSON schema. Common issues:
-- Mixed types in a column (e.g., "123" and "abc" in an integer column)
-- Missing required columns
-- Null values in non-nullable columns
+greet writes only JSON to stdout. If you see extra text mixed in, another
+tool in your pipeline is writing to the same stream — redirect its output
+to stderr.
 
-Fix the data or update the schema to match reality.
+## Wrong greeting word
+
+`--greeting` must come after the name or be joined with `=`
+(`--greeting=Ahoy`); a bare `--greeting` at the end consumes the name as
+its value and fails with a missing-argument error.

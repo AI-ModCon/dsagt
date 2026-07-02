@@ -9,7 +9,7 @@ uv run python -m pytest -m "not integration"     # unit tests, no creds required
 uv run python -m pytest -m integration -v        # integration tests (require real credentials / models)
 ```
 
-For per-flow hand-tests (CLI, VS Code extensions), see the scripts under [`tests/smoke_test/manual_runs/`](https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/manual_runs/).
+For per-flow hand-tests (CLI, VS Code extensions), see the scripts under [`tests/manual_walkthroughs/`](https://github.com/AI-ModCon/dsagt/tree/main/tests/manual_walkthroughs/).
 
 ## Troubleshooting
 

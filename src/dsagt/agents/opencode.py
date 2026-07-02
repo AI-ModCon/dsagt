@@ -116,7 +116,6 @@ class OpenCodeSetup(AgentSetup):
     base_command = ["opencode"]
     static_marker = "AGENTS.md"
     install_hint = "Install with `npm i -g opencode-ai`."
-    otel_payload_support = "none"
     # OpenCode reads provider creds via ``{env:VAR}`` interpolation in
     # its config — the file references these vars, opencode resolves
     # them from the user's shell at runtime.  Same shape as goose's

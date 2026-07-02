@@ -46,7 +46,6 @@ class ClaudeSetup(AgentSetup):
         "ANTHROPIC_BASE_URL",
         "ANTHROPIC_MODEL",
     )
-    otel_payload_support = "full"
     credential_hints = (
         ("ANTHROPIC_API_KEY", "your Anthropic API key (skip if subscription-authed)"),
         ("ANTHROPIC_BASE_URL", "optional gateway / proxy URL"),

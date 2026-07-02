@@ -16,7 +16,7 @@ The user owns model + provider config in ``$CODEX_HOME/config.toml``
 (or via ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL`` env).  We don't write
 a model_providers block.
 
-OTel support: **partial** (verified, ``otel_payload_support = "partial"``).
+OTel support: **partial** (verified).
 Codex's ``codex-otel`` Rust crate emits OTel spans/logs/metrics, BUT:
 
   * LLM-call spans (``stream_request``, ``handle_responses``) carry
@@ -96,7 +96,6 @@ class CodexSetup(AgentSetup):
     install_hint = (
         "Install with `npm i -g @openai/codex` or " "`brew install --cask codex`."
     )
-    otel_payload_support = "partial"
     # Codex is openai-protocol native.
     credential_env_vars = ("OPENAI_API_KEY", "OPENAI_BASE_URL")
     credential_hints = (

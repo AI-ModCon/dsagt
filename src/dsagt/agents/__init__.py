@@ -13,35 +13,10 @@ any MLflow client log to the project's store) and per-project state
 dirs.  Model selection / API keys / provider base URLs are the user's
 responsibility.
 
-The ``otel_payload_support`` class var records each agent's *potential*
-native-OTel fidelity — retained as reference for the Phase 2 trace
-pipeline, which reads transcripts rather than OTel:
-
-  =========  ============  =============================================
-  Agent      Support tier  Native MLflow visibility
-  =========  ============  =============================================
-  claude     full          yes — every turn lands as a trace with
-                           messages, response, tool_use blocks
-                           (gated by 4 ``CLAUDE_CODE_*`` /
-                           ``OTEL_LOG_*`` flags we set)
-  goose      full          yes — native OTel ``dispatch_tool_call`` span
-                           (not consumed; no hook → no DSAGT autolog/memory)
-  codex      partial       limited — Codex OTel spans carry only token
-                           counts and tool names
-  cline      none          no — Cline emits no OTel spans at all;
-                           the agent is a black box from DSAgt's view
-  opencode   none          no — no OTel wired in by default
-  =========  ============  =============================================
-
-Tool execution provenance (``dsagt-run`` ``tool.execute`` spans) and KB
-observability (``kb.*`` / ``registry.*`` spans from MCP servers) always
-work via OTLP — independent of the agent's own LLM-call traces.
-
 Each agent's quirks live in its own module — see ``base.py`` for the
 :class:`AgentSetup` ABC and one of the subclass modules
 (``claude.py``, ``goose.py``, ``cline.py``, ``codex.py``, ``opencode.py``)
-for the platform-specific details and the per-agent investigation
-behind its support tier.
+for the platform-specific details.
 
 Public API exported here:
 
@@ -51,7 +26,6 @@ Public API exported here:
 - :func:`static_agent_files_present` — has the static record been written?
 - :func:`dynamic_agent_record` — write runtime-dependent files.
 - :func:`launch_agent` — fork the agent and block until exit.
-- :func:`agent_otel_support` — query an agent's OTel payload tier.
 """
 
 from __future__ import annotations
@@ -185,17 +159,6 @@ def agent_command(config: dict) -> list[str]:
     return _setup_for(config["agent"]).interactive_command(config)
 
 
-def agent_otel_support(agent_name: str) -> str:
-    """Return the OTel-payload support tier for *agent_name*.
-
-    See the module docstring matrix for the meaning of each tier.
-    Consumers (smoke-test, ``dsagt info``, future warning systems) use
-    this to decide whether to hard-fail or soft-warn when an agent's
-    LLM-call traces don't appear in MLflow.
-    """
-    return _setup_for(agent_name).otel_payload_support
-
-
 def static_agent_record(
     config: dict,
     agent: str,
@@ -280,7 +243,6 @@ __all__ = [
     "AgentSetup",
     "agent_command",
     "agent_env",
-    "agent_otel_support",
     "dynamic_agent_record",
     "launch_agent",
     "static_agent_files_present",

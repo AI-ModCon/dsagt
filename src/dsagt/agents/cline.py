@@ -28,7 +28,7 @@ writes the project state, and users running cline via VS Code (where
 the UI exposes ``awsBedrockEndpoint`` etc.) can drive the project
 manually.
 
-OTel support: **none** (verified, ``otel_payload_support = "none"``).
+OTel support: **none** (verified).
 Cline ships ``@opentelemetry/*`` packages but installs only a
 ``MeterProvider`` + ``LoggerProvider`` — never a ``TracerProvider``;
 zero spans are ever created (``OpenTelemetryClientProvider.ts``).  Its
@@ -72,7 +72,6 @@ class ClineSetup(AgentSetup):
     # is harmless if unused, and search_skills covers the disabled case.
     native_skills_dir = ".cline/skills"
     install_hint = "Install with `npm i -g cline`."
-    otel_payload_support = "none"
     # Cline's CLI nominally supports openai-native + anthropic, but cline
     # auth's ``-b/--baseurl`` flag is openai-only and the openai-native
     # path needs a non-standard model env var.  Anthropic is the only

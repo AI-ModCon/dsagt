@@ -554,8 +554,9 @@ def _cmd_smoke_test(args):
 
     With ``--all``, run the harness in parallel for every agent in
     ``VALID_AGENTS``.  Each agent has its own project name (``smoke-test-X``)
-    so they don't collide on MLflow ports, kb_index, or registry entries.
-    Output is per-agent log files; the summary prints in finish order.
+    so they don't collide on the sqlite MLflow store, kb_index, or registry
+    entries.  Output is per-agent log files; the summary prints in finish
+    order.
     """
     pkg_dir = Path(__file__).resolve().parent.parent.parent.parent
     script = pkg_dir / "tests" / "smoke_test" / "run.sh"

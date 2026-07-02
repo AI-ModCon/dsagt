@@ -45,9 +45,6 @@ class GooseSetup(AgentSetup):
     static_marker = ".goosehints"
     native_skills_dir = ".agents/skills"  # cross-agent standard goose discovers
     install_hint = "See https://github.com/block/goose for installation."
-    # Goose emits OTel natively, but DSAGT no longer forces/consumes it — and
-    # goose has no hook, so it gets no autolog / episodic-memory options.
-    otel_payload_support = "full"
     # Goose's openai/anthropic providers read ``OPENAI_HOST`` / ``ANTHROPIC_HOST``
     # for the base URL (goose-specific naming), plus its own GOOSE_PROVIDER /
     # GOOSE_MODEL routing selectors.

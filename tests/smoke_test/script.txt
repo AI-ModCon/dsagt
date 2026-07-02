@@ -1,11 +1,15 @@
 Ingest the docs in {{SMOKE_DIR}}/knowledge/ into a collection named knowledge.
 
-I have a CSV utility called csvtool. Its reference is at {{SMOKE_DIR}}/knowledge/api_reference.md — please register the filter subcommand so we can reuse it later. Use an underscore in the name, not a hyphen.
+I have a small CLI utility at {{SMOKE_DIR}}/greet.py — its reference doc is in the knowledge collection you just ingested. Register it in the code registry as "greet" so we can reuse it later.
 
-Use the scan_directory tool from the registry to scan the {{SMOKE_DIR}}/data/ directory so I can see what's in it.
+Run the registered greet code to greet "DSAGT" with the greeting "Ahoy".
 
-Look at {{SMOKE_DIR}}/data/samples.csv and give me a short summary — columns, row count, any obvious quality issues.
+Use the scan_directory code from the registry to scan the {{SMOKE_DIR}}/data/ directory so I can see what's in it.
+
+Search the knowledge collection: what error code does greet report when the name argument is empty? Reply with the code verbatim.
+
+Reconstruct the pipeline of code executions run in this project so far.
+
+Search the external skill catalog for a skill that helps with literature search, and install the best match into this project.
 
 Put this fact in explicit memory: samples.csv has null values in the status and timestamp columns.
-
-What do you remember about the samples dataset?
