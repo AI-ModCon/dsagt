@@ -9,26 +9,31 @@ writes to ``$CLINE_DIR/data/``.  Provider auth is cline's own
 by the user before dsagt — dsagt never writes cline auth state, since
 doing so can clobber an existing provider integration.
 
-**Batch / smoke-test status: NOT SUPPORTED (re-verified against cline
-3.0.34).** Batch itself now works (``cline "prompt"`` runs act-mode
-with auto-approve, honoring the user's pre-configured auth — the old
-model-whitelist blocker is moot), but the headless CLI session path
-never loads MCP servers: a probe session with a registered dsagt entry
-exposed zero MCP tools (the ``@cline/core`` MCP machinery exists, but
-the hub/headless path doesn't invoke it).  Without MCP tools there is
-nothing for a smoke run to exercise, so ``cline.run_script`` raises
-``RuntimeError`` and the smoke test short-circuits in
-``tests/smoke_test/run.sh``.  Re-probe on cline upgrades: if a batch
+**Batch / smoke-test status: NOT SUPPORTED (verified against cline
+3.0.34).** Batch itself works (``cline "prompt"`` runs act-mode with
+auto-approve, honoring the user's pre-configured auth — the old
+model-whitelist blocker is moot), and headless cline even SPAWNS
+registered MCP servers correctly (cwd = the session dir, full shell
+env — verified with a spawn probe).  But it never bridges their tools
+into the model's toolset: a session asked to enumerate every tool it
+has lists only cline built-ins + team tools, zero MCP entries.  With
+no dsagt tools reachable there is nothing for a smoke run to exercise,
+so ``cline.run_script`` raises ``RuntimeError`` and the smoke test
+short-circuits in ``tests/smoke_test/run.sh``.  Re-probe on cline
+upgrades (the TUI / VS Code paths do bridge MCP): if a headless
 session can call an MCP tool, batch support is one small run_script
 away.
 
-A second structural constraint, verified 3.0.34: cline's auth state
-rides with its config directory — ANY per-project ``--config`` /
-``CLINE_DIR`` isolation loses a subscription login (Unauthorized).
-The per-project MCP config written by ``write_dynamic`` therefore only
-works for API-key auth flows; subscription users need the dsagt server
-registered in cline's *global* MCP settings (the server is
-cwd-self-sufficient, so one global entry serves every project).
+Auth constraint, verified 3.0.34: cline stores provider credentials in
+``providers.json`` INSIDE its settings/config directory, so ANY
+per-project ``--config`` / ``CLINE_DIR`` isolation loses a
+subscription/OAuth login (instant Unauthorized).  The per-project MCP
+config written by ``write_dynamic`` therefore only works for flows
+that re-auth into the project dir; subscription users would need the
+dsagt server in cline's *global* MCP settings — but a global entry
+makes EVERY cline session (any directory) spawn dsagt-server, so it
+must not be wired unless the server no-ops gracefully outside a
+project.
 
 Interactive use is unaffected — ``dsagt init --agent cline`` still
 writes the project state, and users running cline via VS Code can
