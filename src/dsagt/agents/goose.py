@@ -45,35 +45,6 @@ class GooseSetup(AgentSetup):
     static_marker = ".goosehints"
     native_skills_dir = ".agents/skills"  # cross-agent standard goose discovers
     install_hint = "See https://github.com/block/goose for installation."
-    # Goose's openai/anthropic providers read ``OPENAI_HOST`` / ``ANTHROPIC_HOST``
-    # for the base URL (goose-specific naming), plus its own GOOSE_PROVIDER /
-    # GOOSE_MODEL routing selectors.
-    credential_env_vars = (
-        "GOOSE_PROVIDER",
-        "GOOSE_MODEL",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_HOST",
-        "ANTHROPIC_MODEL",
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "OPENAI_HOST",
-    )
-    credential_hints = (
-        (
-            "GOOSE_PROVIDER",
-            "anthropic, openai, etc. (skip if global ~/.config/goose configured)",
-        ),
-        ("GOOSE_MODEL", "the model name your provider serves"),
-        ("ANTHROPIC_API_KEY", "if GOOSE_PROVIDER=anthropic"),
-        ("ANTHROPIC_HOST", "if GOOSE_PROVIDER=anthropic and on a gateway"),
-        ("OPENAI_API_KEY", "if GOOSE_PROVIDER=openai"),
-        (
-            "OPENAI_HOST",
-            "if GOOSE_PROVIDER=openai and on a gateway "
-            "(NOT OPENAI_BASE_URL — goose ignores that)",
-        ),
-    )
 
     def write_static(self, working_dir: Path) -> list[str]:
         actions: list[str] = []

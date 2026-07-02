@@ -96,12 +96,6 @@ class CodexSetup(AgentSetup):
     install_hint = (
         "Install with `npm i -g @openai/codex` or " "`brew install --cask codex`."
     )
-    # Codex is openai-protocol native.
-    credential_env_vars = ("OPENAI_API_KEY", "OPENAI_BASE_URL")
-    credential_hints = (
-        ("OPENAI_API_KEY", "your OpenAI API key (skip if subscription-authed)"),
-        ("OPENAI_BASE_URL", "optional gateway / proxy URL"),
-    )
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
         return [working_dir / "AGENTS.md", working_dir / ".codex-data"]

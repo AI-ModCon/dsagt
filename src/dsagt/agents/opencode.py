@@ -118,33 +118,6 @@ class OpenCodeSetup(AgentSetup):
     install_hint = "Install with `npm i -g opencode-ai`."
     # The AGENTS.md-convention skills dir codex/goose also use.
     native_skills_dir = ".agents/skills"
-    # OpenCode reads provider creds via ``{env:VAR}`` interpolation in
-    # its config — the file references these vars, opencode resolves
-    # them from the user's shell at runtime.  Same shape as goose's
-    # multi-protocol story, no on-disk credential leakage.
-    credential_env_vars = (
-        "OPENCODE_MODEL",
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-    )
-    credential_hints = (
-        (
-            "OPENCODE_MODEL",
-            "model spec '<provider>/<name>' "
-            "(e.g. 'openai/claude-haiku-4-5-20251001-v1-project' for a PNNL-shape "
-            "openai gateway, or 'anthropic/claude-sonnet-4-5')",
-        ),
-        ("OPENAI_API_KEY", "if your gateway speaks openai wire protocol"),
-        (
-            "OPENAI_BASE_URL",
-            "openai gateway URL "
-            "(referenced by opencode.json's provider.openai.options.baseURL)",
-        ),
-        ("ANTHROPIC_API_KEY", "if your gateway speaks anthropic wire protocol"),
-        ("ANTHROPIC_BASE_URL", "anthropic gateway URL"),
-    )
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
         return [working_dir / "AGENTS.md", working_dir / "opencode.json"]
@@ -232,9 +205,9 @@ class OpenCodeSetup(AgentSetup):
             raise RuntimeError(
                 "opencode batch mode requires OPENCODE_MODEL in the shell "
                 "env, formatted as '<provider>/<name>' (e.g. "
-                "'openai/claude-haiku-4-5-20251001-v1-project').  Plus the "
-                "matching {ANTHROPIC,OPENAI}_API_KEY / _BASE_URL.  See "
-                "agents/opencode.py credential_hints."
+                "'openai/claude-haiku-4-5-20251001-v1-project'), plus the "
+                "matching {ANTHROPIC,OPENAI}_API_KEY / _BASE_URL — BYOA: "
+                "the agent must be pre-configured in the shell."
             )
         cmd = [
             "opencode",

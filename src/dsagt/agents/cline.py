@@ -80,8 +80,6 @@ class ClineSetup(AgentSetup):
     # BEFORE pointing dsagt at it, and dsagt never touches auth state:
     # running `cline auth` from scavenged env vars can clobber an existing
     # provider integration (e.g. an OpenAI subscription login).
-    credential_env_vars = ()
-    credential_hints = ()
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
         return [

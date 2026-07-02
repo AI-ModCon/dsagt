@@ -118,40 +118,7 @@ def agent_env(config: dict) -> dict:
     # user's shell.
     env.update(setup.runtime_env(config))
 
-    # Transparency: surface what credential env vars the agent will
-    # actually pick up from the user's shell, so a missing or wrong
-    # value isn't silently consumed.
-    _warn_on_preconfigured_creds(setup, env)
-
     return env
-
-
-def _warn_on_preconfigured_creds(setup: AgentSetup, env: dict) -> None:
-    """Emit a one-line transparency note listing which of the agent's
-    credential env vars are present in the user's shell.
-
-    Lists the var NAMES (never values — keys are secrets).  Helps the
-    user verify what the agent will actually pick up.  No-op for agents
-    with no credential env vars declared (IDE-only agents).
-    """
-    if not setup.credential_env_vars:
-        return
-
-    from_shell = [k for k in setup.credential_env_vars if env.get(k)]
-    if from_shell:
-        logger.warning(
-            "%s: agent will use preconfigured env vars from the shell: %s",
-            setup.name,
-            ", ".join(from_shell),
-        )
-    else:
-        logger.warning(
-            "%s: none of %s are set in the shell — agent may fall back to "
-            "its own auth flow (claude.ai subscription, codex login, etc.) "
-            "or fail at first call.",
-            setup.name,
-            ", ".join(setup.credential_env_vars),
-        )
 
 
 def agent_command(config: dict) -> list[str]:

@@ -882,56 +882,6 @@ class TestAgentEnv:
             assert flag not in env
 
 
-class TestPreconfiguredCredsWarning:
-    """When the project YAML has no llm credentials, ``agent_env`` warns
-    that the agent will fall back to the user's shell env, listing which
-    of the agent's credential env vars are actually present."""
-
-    def _config(self, agent: str = "claude", **llm) -> dict:
-        return {
-            "project": "test",
-            "agent": agent,
-            "project_dir": "/proj",
-            "mlflow": {"port": 5001},
-            "llm": llm,
-            "embedding": {},
-        }
-
-    def test_warns_when_project_has_no_creds_but_shell_does(self, caplog, monkeypatch):
-        from dsagt.agents import agent_env
-
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "shell-key")
-        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-
-        with caplog.at_level("WARNING", logger="dsagt.agents"):
-            agent_env(self._config(agent="claude"))
-
-        msgs = " ".join(r.getMessage() for r in caplog.records)
-        assert "preconfigured env vars" in msgs
-        assert "ANTHROPIC_API_KEY" in msgs
-        assert "ANTHROPIC_BASE_URL" in msgs
-        # Var names only, never values.
-        assert "shell-key" not in msgs
-
-    def test_warns_with_no_shell_either_lists_expected_vars(self, caplog, monkeypatch):
-        """When neither project nor shell has creds, surface the var names
-        the agent's runtime expects so the user can fix the gap."""
-        from dsagt.agents import agent_env
-
-        for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"):
-            monkeypatch.delenv(var, raising=False)
-
-        with caplog.at_level("WARNING", logger="dsagt.agents"):
-            agent_env(self._config(agent="claude"))
-
-        msgs = " ".join(r.getMessage() for r in caplog.records)
-        assert "fall back to its own auth flow" in msgs
-        assert "ANTHROPIC_API_KEY" in msgs
-        # A clean shell must not trigger the preconfigured-creds warning
-        # (the warning keys off shell env only, never the project YAML).
-        assert "preconfigured env vars" not in msgs
-
-
 # ---------------------------------------------------------------------------
 # CLI: agent_command
 # ---------------------------------------------------------------------------
@@ -1079,80 +1029,6 @@ class TestConfigFlow:
         # Even if a stray session_id is on the config dict, it isn't emitted.
         env2 = _mcp_env_block({**config, "session_id": "test-1"})
         assert "DSAGT_SESSION_ID" not in env2
-
-
-# ---------------------------------------------------------------------------
-# BYOA: per-agent env hints + launch one-liners surfaced by `dsagt init`
-# ---------------------------------------------------------------------------
-
-
-class TestByoaEnvHints:
-    """``dsagt init`` prints provider credentials only.  Internal env
-    (DSAGT_*, MLFLOW_*, OTEL_*, telemetry verbosity flags) goes into
-    the per-project launch shim — the user's shell stays clean."""
-
-    @pytest.mark.parametrize(
-        "agent_name", ["claude", "goose", "cline", "codex", "opencode"]
-    )
-    def test_returns_only_credential_hints(self, agent_name, tmp_path):
-        from dsagt.agents import AGENTS
-
-        setup = AGENTS[agent_name]()
-        hints = setup.byoa_env_hints()
-        # Only credential hints come back; no DSAGT/MLflow/OTel routing.
-        names = [n for n, _ in hints]
-        assert "DSAGT_PROJECT" not in names
-        assert "MLFLOW_TRACKING_URI" not in names
-        assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in names
-
-    @pytest.mark.parametrize(
-        "agent_name", ["claude", "goose", "cline", "codex", "opencode"]
-    )
-    def test_credentials_match_credential_hints(self, agent_name, tmp_path):
-        from dsagt.agents import AGENTS
-
-        setup = AGENTS[agent_name]()
-        hints = setup.byoa_env_hints()
-        assert hints == list(setup.credential_hints)
-
-    def test_goose_credentials_include_host_not_base_url(self, tmp_path):
-        """Goose's Rust client reads OPENAI_HOST / ANTHROPIC_HOST, NOT
-        OPENAI_BASE_URL — surfacing this gotcha to the user up front
-        avoids the silent 'agent hits api.openai.com regardless of
-        gateway' bug."""
-        from dsagt.agents import AGENTS
-
-        names = [n for n, _ in AGENTS["goose"]().byoa_env_hints()]
-        assert "OPENAI_HOST" in names
-        assert "ANTHROPIC_HOST" in names
-
-    @pytest.mark.parametrize(
-        "agent_name,gateway_var",
-        [
-            ("claude", "ANTHROPIC_BASE_URL"),
-            ("codex", "OPENAI_BASE_URL"),
-            # opencode emits both — its provider config supports both wire
-            # protocols via {env:VAR} interpolation in opencode.json.
-            ("opencode", "OPENAI_BASE_URL"),
-            ("opencode", "ANTHROPIC_BASE_URL"),
-        ],
-    )
-    def test_gateway_url_in_credential_hints(self, agent_name, gateway_var, tmp_path):
-        """Lab gateway / proxy URL hint is surfaced for every agent that
-        speaks the standard BASE_URL convention."""
-        from dsagt.agents import AGENTS
-
-        names = [n for n, _ in AGENTS[agent_name]().byoa_env_hints()]
-        assert gateway_var in names
-
-    def test_cline_emits_no_credential_hints(self, tmp_path):
-        """Cline owns its provider auth (subscription login / cline auth /
-        the VS Code extension) — dsagt surfaces no env-var hints and never
-        writes cline auth state, since doing so can clobber an existing
-        provider integration."""
-        from dsagt.agents import AGENTS
-
-        assert AGENTS["cline"]().byoa_env_hints() == []
 
 
 class TestNoLaunchShim:

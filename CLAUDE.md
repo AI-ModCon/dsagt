@@ -28,7 +28,7 @@ uv run ruff check .                                                    # lint
 
 **`python -m pytest`, not bare `pytest`.** The bare binary picks up the wrong pytest on this machine and crashes with `ModuleNotFoundError: dsagt`.
 
-**Don't run the full suite by default** — ~50s for ~590 tests is too slow for an iteration loop. Run only the test file relevant to the change. `tests/test_config.py` covers session, init, agents, BYOA hints, serverless-store resolution, and the no-launch-shim/no-OTel invariants. Skip `test_integration.py`, `test_*_integration.py`, `test_server_startup.py`, `test_dependency_integration.py` unless relevant — they hit the network or spawn subprocesses.
+**Don't run the full suite by default** — ~50s for ~590 tests is too slow for an iteration loop. Run only the test file relevant to the change. `tests/test_config.py` covers session, init, agents, serverless-store resolution, and the no-launch-shim/no-OTel invariants. Skip `test_integration.py`, `test_*_integration.py`, `test_server_startup.py`, `test_dependency_integration.py` unless relevant — they hit the network or spawn subprocesses.
 
 ## Code Organization
 
@@ -44,7 +44,7 @@ The codebase separates **commands** (entry points with argparse, launched as CLI
 
 **Modules** (`src/dsagt/`):
 - `session.py` — Project init, agent config generation, env-var resolution, config load/validate, session-id minting (`new_session_id`), end-of-session extraction (`run_extraction`), and startup **catch-up** (`catch_up_extraction`): code-use indexing + a chat-trace re-collect (`_catch_up_traces`) of the *previous* session (pinned to the `trace_source` token in `state.yaml`) so turns lost to an ungraceful shutdown still reach MLflow + episodic memory — uniform across all agents.
-- `agents/` — Per-agent-platform setup (`base.py` ABC + `claude.py` / `goose.py` / `cline.py` / `codex.py` / `opencode.py`). Each subclass owns its `write_static`, `write_dynamic`, `runtime_env`, `byoa_env_hints`, `vscode_hint`. Shared helpers (`_mcp_env_block`, `_build_mcp_servers_dict`) in `base.py`. DSAGT sets no telemetry/OTel env and writes no launch shim.
+- `agents/` — Per-agent-platform setup (`base.py` ABC + `claude.py` / `goose.py` / `cline.py` / `codex.py` / `opencode.py`). Each subclass owns its `write_static`, `write_dynamic`, `runtime_env`, `vscode_hint`. Shared helpers (`_mcp_env_block`, `_build_mcp_servers_dict`) in `base.py`. DSAGT sets no telemetry/OTel env, writes no launch shim, and never touches provider credentials — agents are expected pre-authenticated (shell env / their own auth flows) before dsagt is pointed at them; dsagt prints no credential hints and never troubleshoots auth.
 - `knowledge.py` — ChromaDB document retrieval, embedding backends, per-collection routing (the reference example of the house style).
 - `registry.py` — `CodeRegistry` (CLI codes) + `SkillRegistry` (agent instruction skills), KB indexing.
 - `provenance.py` — Code execution records (`run_and_record`), execution-record indexing into ChromaDB (`CodeUseIndexer` → `code_use` collection), pipeline reconstruction (`reconstruct_pipeline`, dependency graph).

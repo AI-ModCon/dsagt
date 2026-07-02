@@ -296,14 +296,6 @@ class AgentSetup(ABC):
     static_marker: ClassVar[str]
     install_hint: ClassVar[str] = "Install the agent CLI first."
 
-    #: Env vars the agent's runtime reads for provider credentials /
-    #: endpoint routing.  Used by ``agent_env`` to surface a transparency
-    #: note about what the agent will pick up from the user's shell: we
-    #: list which of these are actually present so a missing or wrong
-    #: value isn't silently consumed.  Empty for IDE-extension agents
-    #: that never read env-var credentials.
-    credential_env_vars: ClassVar[tuple[str, ...]] = ()
-
     #: Directory (relative to the working dir) the agent natively auto-discovers
     #: ``SKILL.md`` skill folders from.  ``setup_skills`` mirrors installed
     #: (bundled + project) skills AND registered codes here so the agent
@@ -409,21 +401,6 @@ class AgentSetup(ABC):
         """
         del config
         return list(self.base_command)
-
-    #: Per-agent provider-credential hints surfaced by ``byoa_env_hints``.
-    #: List of ``(env_var_name, hint)`` tuples shown to the user with a
-    #: "skip if already configured" note.
-    credential_hints: ClassVar[tuple[tuple[str, str], ...]] = ()
-
-    def byoa_env_hints(self) -> list[tuple[str, str]]:
-        """Provider-credential env vars the user should set in their shell.
-
-        BYOA design: DSAGT writes no agent-affecting env (no OTel routing,
-        no telemetry flags).  The user owns provider credentials —
-        exported in their shell — and this returns one hint string each so
-        ``dsagt init`` can remind them what their agent needs.
-        """
-        return list(self.credential_hints)
 
     @abstractmethod
     def run_script(

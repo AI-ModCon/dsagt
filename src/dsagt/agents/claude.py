@@ -40,17 +40,6 @@ class ClaudeSetup(AgentSetup):
     static_marker = "CLAUDE.md"
     native_skills_dir = ".claude/skills"
     install_hint = "Install with `npm i -g @anthropic-ai/claude-code`."
-    # Anthropic-protocol native.
-    credential_env_vars = (
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_MODEL",
-    )
-    credential_hints = (
-        ("ANTHROPIC_API_KEY", "your Anthropic API key (skip if subscription-authed)"),
-        ("ANTHROPIC_BASE_URL", "optional gateway / proxy URL"),
-        ("ANTHROPIC_MODEL", "optional model override"),
-    )
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
         return [
