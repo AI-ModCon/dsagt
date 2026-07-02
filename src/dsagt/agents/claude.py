@@ -2,7 +2,7 @@
 Claude Code agent setup.
 
 Install: ``npm i -g @anthropic-ai/claude-code``.
-Generates: ``.mcp.json``, ``CLAUDE.md``, ``.claude/settings.json``.
+Generates: ``CLAUDE.md`` (instructions) and ``.mcp.json`` (MCP config).
 
 The user brings ``ANTHROPIC_API_KEY`` (and optionally ``ANTHROPIC_MODEL``,
 ``ANTHROPIC_BASE_URL``) themselves and Claude Code talks directly to its

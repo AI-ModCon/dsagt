@@ -23,14 +23,14 @@ from dsagt.provenance import (
 def _write_record(trace_dir: Path, record: dict) -> Path:
     trace_dir.mkdir(parents=True, exist_ok=True)
     rid = record.get("record_id", "r0")
-    tool = record.get("tool_name", "tool")
+    tool = record.get("code_name", "tool")
     path = trace_dir / f"{tool}_{rid}.json"
     path.write_text(json.dumps(record))
     return path
 
 
 def _make_record(
-    tool_name: str,
+    code_name: str,
     command: list[str],
     input_files: list[str] | None = None,
     output_files: list[str] | None = None,
@@ -41,7 +41,7 @@ def _make_record(
 ) -> dict:
     return {
         "record_id": record_id,
-        "tool_name": tool_name,
+        "code_name": code_name,
         "session_id": session_id,
         "execution": {
             "exact_command": command,
@@ -69,13 +69,13 @@ class TestLoadPipelineRecords:
 
         records = load_pipeline_records(tmp_path)
         assert len(records) == 1
-        assert records[0]["tool_name"] == "fastp"
+        assert records[0]["code_name"] == "fastp"
 
     def test_skips_proxy_only_records(self, tmp_path):
         """Records without execution layer are skipped."""
         proxy_record = {
             "record_id": "r1",
-            "tool_name": "fastp",
+            "code_name": "fastp",
             "session_id": "s1",
             "intent": {"command": "fastp", "parameters": {}},
             "execution": None,
@@ -96,7 +96,7 @@ class TestLoadPipelineRecords:
 
         records = load_pipeline_records(tmp_path, session_id="s1")
         assert len(records) == 1
-        assert records[0]["tool_name"] == "a"
+        assert records[0]["code_name"] == "a"
 
     def test_sorted_by_timestamp(self, tmp_path):
         _write_record(
@@ -113,8 +113,8 @@ class TestLoadPipelineRecords:
         )
 
         records = load_pipeline_records(tmp_path)
-        assert records[0]["tool_name"] == "early"
-        assert records[1]["tool_name"] == "late"
+        assert records[0]["code_name"] == "early"
+        assert records[1]["code_name"] == "late"
 
     def test_empty_directory(self, tmp_path):
         tmp_path.mkdir(exist_ok=True)
@@ -315,8 +315,10 @@ class TestReconstructPipeline:
         )
 
         script = reconstruct_pipeline(tmp_path, session_id="s1", fmt="bash")
+        # Only the s1 record survives the filter: exactly one step (tool "a"),
+        # the s2 record ("b") is excluded — so there is no second step.
         assert "Step 1: a" in script
-        assert "b" not in script.split("Step")[1] if "Step" in script else True
+        assert "Step 2:" not in script
 
     def test_full_pipeline_with_deps(self, tmp_path):
         """Three-step pipeline: fastp → megahit → quast."""

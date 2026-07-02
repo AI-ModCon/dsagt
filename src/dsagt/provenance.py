@@ -1,13 +1,13 @@
 """
-Provenance for tool executions.
+Provenance for code executions.
 
 **Execution capture** (dsagt-run wrapper):
     Wraps a shell command, captures exact execution data (command, exit
     code, stdout/stderr, input/output files), and writes a JSON record
-    to ``trace_archive/<tool>_<ts>_<id>.json``.
+    to ``trace_archive/<code>_<ts>_<id>.json``.
 
 **Record indexing** (ChromaDB):
-    Indexes execution records into a ``tool_executions`` collection for
+    Indexes execution records into a ``code_use`` collection for
     semantic search and metadata filtering.
 
 **Pipeline reconstruction**:
@@ -39,13 +39,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Project-local collection of indexed tool-execution records.
-#: Renamed from ``tool_executions`` to match the user-facing
-#: terminology ("tool_use index").
-TOOL_USE_COLLECTION = "tool_use"
-
-#: Backwards-compat alias.  New code should use ``TOOL_USE_COLLECTION``.
-TOOL_EXECUTIONS_COLLECTION = TOOL_USE_COLLECTION
+#: Project-local collection of indexed code-execution records.
+CODE_USE_COLLECTION = "code_use"
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +94,7 @@ def _parse_file_list(raw: str | None) -> list[str]:
 
 
 def run_and_record(
-    tool_name: str,
+    code_name: str,
     command: list[str],
     records_dir: Path,
     session_id: str | None = None,
@@ -108,17 +103,17 @@ def run_and_record(
     output_files: list[str] | None = None,
 ) -> int:
     """Execute a command, write an execution record, return the exit code."""
-    from dsagt.observability import obs, tool_execute_span, truncate
+    from dsagt.observability import obs, code_execute_span, truncate
 
     record_id = record_id or uuid.uuid4().hex[:12]
     if session_id is None:
         # The MCP server mints the session at startup and records it in
         # ``.dsagt/state.yaml``; read the current tag from there so this
-        # tool span buckets with the rest of the session (cwd == project
+        # code span buckets with the rest of the session (cwd == project
         # dir by contract).  ``None`` if no session has been minted yet.
         session_id = _current_session_tag_from_cwd()
 
-    with tool_execute_span(record_id, tool_name):
+    with code_execute_span(record_id, code_name):
         timestamp_start = datetime.now(timezone.utc).isoformat()
         start_perf = time.perf_counter()
 
@@ -160,14 +155,14 @@ def run_and_record(
         if stderr.strip():
             obs.set("stderr_truncated", truncate(stderr, 256))
         if return_code != 0:
-            obs.event("tool_failed", exit_code=return_code)
+            obs.event("code_failed", exit_code=return_code)
 
         # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
-        # ~4KB per side so big tool results don't bloat the trace store
+        # ~4KB per side so big code results don't bloat the trace store
         # (the full payload is on disk in trace_archive/<record_id>.json).
         obs.set_inputs(
             {
-                "tool": tool_name,
+                "code": code_name,
                 "command": list(command),
                 "input_files": input_files or [],
             }
@@ -184,7 +179,7 @@ def run_and_record(
 
     record = {
         "record_id": record_id,
-        "tool_name": tool_name,
+        "code_name": code_name,
         "session_id": session_id,
         "execution": {
             "exact_command": command,
@@ -213,7 +208,7 @@ def _write_record(record: dict, records_dir: Path) -> Path:
     records_dir.mkdir(parents=True, exist_ok=True)
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    filename = f"{record['tool_name']}_{ts}_{record['record_id']}.json"
+    filename = f"{record['code_name']}_{ts}_{record['record_id']}.json"
     path = records_dir / filename
 
     path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
@@ -226,31 +221,22 @@ def _write_record(record: dict, records_dir: Path) -> Path:
 
 
 def render_execution_text(record: dict) -> str:
-    """Convert a tool execution record into embeddable natural-language text."""
-    tool_name = record.get("tool_name", "unknown")
-    intent = record.get("intent") or {}
+    """Convert a code execution record into embeddable natural-language text."""
+    code_name = record.get("code_name", "unknown")
     execution = record.get("execution")
-    report = record.get("report") or {}
 
-    parts = [f"Tool: {tool_name}"]
+    parts = [f"Code: {code_name}"]
 
     if execution and execution.get("exact_command"):
         cmd = execution["exact_command"]
         if isinstance(cmd, list):
             cmd = " ".join(cmd)
         parts.append(f"Command: {cmd}")
-    elif intent.get("parameters"):
-        parts.append(f"Parameters: {json.dumps(intent['parameters'])}")
 
     if execution and execution.get("return_code") is not None:
         rc = execution["return_code"]
         status = "succeeded" if rc == 0 else f"failed (exit code {rc})"
         parts.append(f"Outcome: {status}")
-    elif report.get("agent_output"):
-        output = report["agent_output"]
-        if len(output) > 500:
-            output = output[:500] + "..."
-        parts.append(f"Agent report: {output}")
 
     if execution:
         start = execution.get("timestamp_start", "")
@@ -274,26 +260,18 @@ def render_execution_text(record: dict) -> str:
 
 
 def execution_metadata(record: dict) -> dict:
-    """Extract ChromaDB-filterable metadata from a tool execution record."""
+    """Extract ChromaDB-filterable metadata from a code execution record."""
     execution = record.get("execution")
-    intent = record.get("intent") or {}
 
     meta: dict = {}
-    meta["tool_name"] = record.get("tool_name", intent.get("command", "unknown"))
-    meta["session_id"] = record.get("session_id", intent.get("session_id", "unknown"))
+    meta["code_name"] = record.get("code_name", "unknown")
+    meta["session_id"] = record.get("session_id", "unknown")
 
     if execution and execution.get("return_code") is not None:
         meta["return_code"] = execution["return_code"]
 
-    meta["wrapper_used"] = 1 if execution is not None else 0
-
-    timestamp = None
     if execution and execution.get("timestamp_start"):
-        timestamp = execution["timestamp_start"]
-    elif intent.get("timestamp_requested"):
-        timestamp = intent["timestamp_requested"]
-    if timestamp:
-        meta["timestamp"] = timestamp
+        meta["timestamp"] = execution["timestamp_start"]
 
     record_id = record.get("record_id", "")
     if record_id:
@@ -307,7 +285,7 @@ def index_trace_archive(
     kb: KnowledgeBase,
     indexed_ids: set[str] | None = None,
 ) -> dict:
-    """Batch-index all tool execution records in a trace archive directory."""
+    """Batch-index all code execution records in a trace archive directory."""
     if indexed_ids is None:
         indexed_ids = set()
 
@@ -332,10 +310,8 @@ def index_trace_archive(
             skipped += 1
             continue
 
-        has_intent = "intent" in record
-        has_execution = record.get("execution") is not None
-        if not has_intent and not has_execution:
-            logger.warning("Skipping %s: no intent or execution layer", path.name)
+        if record.get("execution") is None:
+            logger.warning("Skipping %s: no execution layer", path.name)
             errors += 1
             continue
 
@@ -349,7 +325,7 @@ def index_trace_archive(
     if texts:
         kb.add_entries(
             texts=texts,
-            collection=TOOL_EXECUTIONS_COLLECTION,
+            collection=CODE_USE_COLLECTION,
             metadatas=metadatas,
         )
 
@@ -361,10 +337,10 @@ def index_trace_archive(
     }
 
 
-class ToolUseIndexer:
-    """Idempotent, incremental indexer of ``dsagt-run`` records into ``tool_use``.
+class CodeUseIndexer:
+    """Idempotent, incremental indexer of ``dsagt-run`` records into ``code_use``.
 
-    The tool-execution counterpart to :class:`~dsagt.trace_scan.TraceScan`:
+    The code-execution counterpart to :class:`~dsagt.trace_scan.TraceScan`:
     ``dsagt-run`` writes one JSON record per call to ``trace_archive/``, and each
     :meth:`tick` embeds only the records not already indexed — tracked by
     ``record_id`` in a persisted ack set — so re-ticks and cross-session
@@ -372,7 +348,7 @@ class ToolUseIndexer:
 
     One primitive, three triggers, all safe to overlap: the MCP-server heartbeat
     (current-session freshness), startup catch-up (the previous session's tail),
-    and the ``reconstruct_pipeline`` tool (index-then-reconstruct, so a pipeline
+    and the ``reconstruct_pipeline`` code (index-then-reconstruct, so a pipeline
     review reflects the calls just made).  An OS file lock around
     load→index→save serializes those callers — distinct instances in one
     process, or a future cross-process ticker — against the shared ack file.
@@ -382,7 +358,7 @@ class ToolUseIndexer:
         self._kb = kb
         pdir = Path(project_dir)
         self._trace_dir = pdir / "trace_archive"
-        self._acks_path = pdir / ".dsagt" / "tool_use_acks.json"
+        self._acks_path = pdir / ".dsagt" / "code_use_acks.json"
 
     def _load_acks(self) -> set[str]:
         try:
@@ -474,20 +450,20 @@ def render_bash(records: list[dict], deps: dict[int, list[int]]) -> str:
     ]
 
     for i, record in enumerate(records):
-        tool = record["tool_name"]
+        code = record["code_name"]
         execution = record["execution"]
         cmd = execution["exact_command"]
         rc = execution.get("return_code", 0)
         inputs = execution.get("input_files", [])
         outputs = execution.get("output_files", [])
 
-        lines.append(f"# Step {i + 1}: {tool}")
+        lines.append(f"# Step {i + 1}: {code}")
         if inputs:
             lines.append(f"#   inputs:  {', '.join(inputs)}")
         if outputs:
             lines.append(f"#   outputs: {', '.join(outputs)}")
         if deps[i]:
-            dep_names = [records[d]["tool_name"] for d in deps[i]]
+            dep_names = [records[d]["code_name"] for d in deps[i]]
             lines.append(f"#   depends: {', '.join(dep_names)}")
         if rc != 0:
             lines.append(f"#   WARNING: original run exited with code {rc}")
@@ -508,8 +484,8 @@ def render_snakemake(records: list[dict], deps: dict[int, list[int]]) -> str:
 
     rule_names = []
     for i, record in enumerate(records):
-        tool = record["tool_name"]
-        rule_name = f"{tool}_{i + 1}"
+        code = record["code_name"]
+        rule_name = f"{code}_{i + 1}"
         rule_names.append(rule_name)
 
     all_outputs = []

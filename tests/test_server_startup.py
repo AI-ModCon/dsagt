@@ -5,23 +5,16 @@ The single merged server (``dsagt.mcp.server:main``) is spawned as a subprocess
 to verify the entry point is wired and fails fast + clearly on a misconfigured
 project — without needing a live MLflow backend or network access.
 
-The full boot (init_tracing → shared KB → 23-tool MCP handshake) requires a
+The full boot (init_tracing → shared KB → 20-tool MCP handshake) requires a
 running MLflow server, so it is exercised by ``dsagt smoke-test`` (real agent),
-not here.  The 23-tool composition + dispatch contract is unit-tested in-process
+not here.  The 20-tool composition + dispatch contract is unit-tested in-process
 by ``test_dsagt_server.py``; ``_build_kb_from_config``'s credential validation by
 ``test_dsagt_server.py::TestBuildKbFromConfig``.
 """
 
-import shutil
 import sys
 
-import pytest
-
 from mcp_helpers import start_server
-
-_uv_available = shutil.which("uv") is not None
-
-pytestmark = pytest.mark.skipif(not _uv_available, reason="uv not available")
 
 _SERVER_CMD = [sys.executable, "-m", "dsagt.mcp.server"]
 

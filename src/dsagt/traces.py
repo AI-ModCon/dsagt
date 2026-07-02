@@ -1,7 +1,7 @@
 """
 Trace pipeline — read each agent's on-disk session, normalize it to one common
 ``Trace``, and hand that to whatever consumes traces (the MLflow logger in
-:mod:`dsagt.observability`, the episodic-memory distiller in :mod:`dsagt.memory`).
+:mod:`dsagt.observability`, the episodic-memory indexer in :mod:`dsagt.memory`).
 
 While a session runs, the MCP server wakes on a timer and, for the running agent:
 a **Reader** finds and reads the platform's session files on disk into raw
@@ -41,7 +41,7 @@ Class map — ``▷`` inherits · ``◆`` owns · ``◇`` holds  (``*`` = many):
     └─▷ ClineTranslator          fills parse hooks
 
     TraceCollector              the driver: read → translate → hand to consumers
-                                (MLflow logger, memory distiller); a per-consumer
+                                (MLflow logger, memory indexer); a per-consumer
                                 ack set makes repeated passes idempotent
 """
 
@@ -316,12 +316,14 @@ class Trace:
     def to_exchanges(self) -> list[dict]:
         """Project the ``llm`` spans onto memory's conversational shape.
 
-        One ``llm`` span → one ``{timestamp, new_messages, response}`` exchange;
-        ``request`` is already the windowed message list, ``response`` the output
-        blocks — so this is a straight projection, no diffing.
+        One ``llm`` span → one ``{turn_id, timestamp, new_messages, response}``
+        exchange; ``turn_id`` is the span id (groups a turn's chunks back
+        together downstream), ``request`` is already the windowed message list,
+        ``response`` the output blocks — so this is a straight projection.
         """
         return [
             {
+                "turn_id": s["span_id"],
                 "timestamp": s["start_time"],
                 "new_messages": s["request"],
                 "response": s["response"],
@@ -337,9 +339,33 @@ class Trace:
 
 
 class Reader(ABC):
-    """Find this project's active session for an agent and read its records."""
+    """Find this project's active session for an agent and read its records.
+
+    Each reader resolves *the latest session for this project* and reads it.  A
+    reader can also be pinned (:meth:`pin`) to a specific session — the startup
+    catch-up does this to re-read the *previous* session rather than whatever is
+    newest now.  :meth:`active_source` returns an opaque, agent-shaped token for
+    the session being read — a transcript path (claude/codex), a DB session id
+    (goose/opencode), or a session-dir name (cline) — which the server records
+    in ``state.yaml`` so the next session's catch-up can pin it back.  The token
+    round-trips through YAML, so its native type (str/int) is preserved.
+    """
 
     agent: str
+    _pinned = None
+
+    def pin(self, source) -> None:
+        """Pin to a specific session token (as returned by :meth:`active_source`)."""
+        self._pinned = source
+
+    def active_source(self):
+        """Token identifying the session being read, or ``None`` if none.
+
+        Subclasses override to resolve the latest session when unpinned; the
+        base returns the pinned token (``None`` when neither pinned nor
+        overridden).
+        """
+        return self._pinned
 
     @abstractmethod
     def read(self) -> list[dict]:
@@ -352,13 +378,24 @@ class JsonlReader(Reader):
 
     A trailing half-written line is dropped (picked up next pass).  Subclasses
     supply :meth:`active_file`; the framing is identical for claude and codex.
+    A pinned reader reads that exact file instead of the newest.
     """
 
     @abstractmethod
     def active_file(self) -> Path | None: ...
 
+    def _file(self) -> Path | None:
+        if self._pinned is not None:
+            p = Path(self._pinned)
+            return p if p.is_file() else None
+        return self.active_file()
+
+    def active_source(self) -> str | None:
+        f = self._file()
+        return str(f) if f else None
+
     def read(self) -> list[dict]:
-        f = self.active_file()
+        f = self._file()
         if f is None:
             return []
         with open(f, "rb") as fh:
@@ -452,24 +489,41 @@ class GooseReader(Reader):
         self._project_dir = os.path.abspath(project_dir)
         self._db = Path(db_path) if db_path else _GOOSE_DB
 
+    def _latest_session(self, con):
+        row = con.execute(
+            "SELECT id FROM sessions WHERE working_dir = ? "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (self._project_dir,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def active_source(self):
+        if self._pinned is not None:
+            return self._pinned
+        if not self._db.exists():
+            return None
+        con = sqlite3.connect(f"file:{self._db}?mode=ro", uri=True)
+        try:
+            return self._latest_session(con)
+        finally:
+            con.close()
+
     def read(self) -> list[dict]:
         if not self._db.exists():
             return []
         con = sqlite3.connect(f"file:{self._db}?mode=ro", uri=True)
         try:
-            row = con.execute(
-                "SELECT id FROM sessions WHERE working_dir = ? "
-                "ORDER BY updated_at DESC LIMIT 1",
-                (self._project_dir,),
-            ).fetchone()
-            if row is None:
+            sid = (
+                self._pinned if self._pinned is not None else self._latest_session(con)
+            )
+            if sid is None:
                 return []
             return [
                 {"role": role, "content": _loads_list(cj), "ts": ts}
                 for role, cj, ts in con.execute(
                     "SELECT role, content_json, created_timestamp FROM messages "
                     "WHERE session_id = ? ORDER BY id",
-                    (row[0],),
+                    (sid,),
                 )
             ]
         finally:
@@ -494,19 +548,35 @@ class OpenCodeReader(Reader):
         self._project_dir = os.path.abspath(project_dir)
         self._db = Path(db_path) if db_path else _OPENCODE_DB
 
+    def _latest_session(self, con):
+        row = con.execute(
+            "SELECT id FROM session WHERE directory = ? "
+            "ORDER BY time_updated DESC LIMIT 1",
+            (self._project_dir,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def active_source(self):
+        if self._pinned is not None:
+            return self._pinned
+        if not self._db.exists():
+            return None
+        con = sqlite3.connect(f"file:{self._db}?mode=ro", uri=True)
+        try:
+            return self._latest_session(con)
+        finally:
+            con.close()
+
     def read(self) -> list[dict]:
         if not self._db.exists():
             return []
         con = sqlite3.connect(f"file:{self._db}?mode=ro", uri=True)
         try:
-            row = con.execute(
-                "SELECT id FROM session WHERE directory = ? "
-                "ORDER BY time_updated DESC LIMIT 1",
-                (self._project_dir,),
-            ).fetchone()
-            if row is None:
+            sid = (
+                self._pinned if self._pinned is not None else self._latest_session(con)
+            )
+            if sid is None:
                 return []
-            sid = row[0]
             messages = {
                 mid: _loads_dict(d)
                 for mid, d in con.execute(
@@ -564,8 +634,18 @@ class ClineReader(Reader):
                 return d
         return None
 
+    def _dir(self) -> Path | None:
+        if self._pinned is not None:
+            d = self._root / str(self._pinned)
+            return d if d.is_dir() else None
+        return self._active_dir()
+
+    def active_source(self) -> str | None:
+        d = self._dir()
+        return d.name if d else None
+
     def read(self) -> list[dict]:
-        d = self._active_dir()
+        d = self._dir()
         if d is None:
             return []
         msgs_path = d / f"{d.name}.messages.json"
@@ -1162,17 +1242,25 @@ def make_trace_collector(
     *,
     projects_root: Path | None = None,
     extra_consumers: list | None = None,
+    source=None,
 ) -> "TraceCollector | None":
     """Build the collector for ``agent``, or ``None`` if no pipeline is registered.
 
     The MLflow logger is always the first consumer (observability is universal);
     ``extra_consumers`` (e.g. a :class:`~dsagt.memory.MemoryExtractor` when
     episodic memory is enabled) are appended, each acking independently.
+
+    ``source`` pins the reader to a specific session (the startup catch-up passes
+    the *previous* session's recorded :meth:`Reader.active_source` token), so it
+    re-reads that exact session instead of whatever is newest now — uniformly
+    across all agents (transcript path, DB session id, or session-dir name).
     """
     builder = _PIPELINES.get(agent)
     if builder is None:
         return None
     reader, translator = builder(project_dir, projects_root)
+    if source is not None:
+        reader.pin(source)
     # Imported here (not at module top) so traces stays a lean leaf — the MLflow
     # logger drags in mlflow, the heaviest thing in the pipeline.
     from dsagt.observability import MLflowSink
@@ -1192,8 +1280,10 @@ class TraceCollector:
     """Periodically read the session, translate it, and hand it to consumers.
 
     A *consumer* is anything with a ``name`` and a ``write(trace)`` — the MLflow
-    logger and the memory distiller both qualify (no shared base needed).  Each
-    consumer keeps its own ack set (``.dsagt/trace_acks_<name>.json``), so a
+    logger and the memory indexer both qualify (no shared base needed).  Each
+    consumer keeps its own ack set (``.dsagt/trace_acks_<name>.json``), keyed by
+    session-qualified turn id (``<session_id>:<span_id>``) so the per-transcript
+    ``turn-N`` indices can't collide across sessions in the shared file.  A
     re-pass or an N+1 catch-up can only waste work, never double-log or lose a
     turn, and a failing consumer holds back only its own mark.
 
@@ -1214,6 +1304,16 @@ class TraceCollector:
         self._consumers = list(consumers)
         self._dsagt_dir = self._project_dir / ".dsagt"
         self._lock = threading.Lock()
+
+    def active_source(self):
+        """The reader's session token (see :meth:`Reader.active_source`), or
+        ``None``.  Recorded in ``state.yaml`` so the next session's catch-up can
+        pin this exact session — uniform across all agents.
+        """
+        try:
+            return self._reader.active_source()
+        except Exception:  # noqa: BLE001 — best-effort; never break the heartbeat
+            return None
 
     def _acks_path(self, name: str) -> Path:
         return self._dsagt_dir / f"trace_acks_{name}.json"
@@ -1261,14 +1361,22 @@ class TraceCollector:
 
             roots = trace.roots()
             candidates = roots if include_last else roots[:-1]
-            candidate_ids = [r["span_id"] for r in candidates]
-            if not candidate_ids:
+            # Ack keys are session-qualified.  span_id is a per-transcript record
+            # index ("turn-N"), so the same ids recur in every session's
+            # transcript; a bare span_id would collide across sessions in the
+            # shared, never-reset ack file and suppress every turn after the
+            # first session.  Qualifying by session id matches the key MLflowSink
+            # already uses for its own idempotency (``{trace_id}:{span_id}``).
+            key_by_span = {
+                r["span_id"]: f"{self._session_id}:{r['span_id']}" for r in candidates
+            }
+            if not key_by_span:
                 return 0
 
             emitted: set[str] = set()
             for consumer in self._consumers:
                 acks = self._load_acks(consumer.name)
-                emit_ids = {i for i in candidate_ids if i not in acks}
+                emit_ids = {s for s, key in key_by_span.items() if key not in acks}
                 if not emit_ids:
                     continue
                 try:
@@ -1276,6 +1384,8 @@ class TraceCollector:
                 except Exception as e:  # noqa: BLE001 — per-consumer isolation
                     logger.warning("Trace consumer %r failed: %s", consumer.name, e)
                     continue
-                self._save_acks(consumer.name, acks | emit_ids)
+                self._save_acks(
+                    consumer.name, acks | {key_by_span[s] for s in emit_ids}
+                )
                 emitted |= emit_ids
             return len(emitted)

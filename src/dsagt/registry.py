@@ -1,11 +1,11 @@
 """
-Tool and Skill Registries.
+Code and Skill Registries.
 
 Two parallel registries for agent capabilities:
 
-**Tools** (CLI executables) — markdown files with YAML frontmatter specifying
+**Codes** (CLI executables) — markdown files with YAML frontmatter specifying
 name, description, executable, parameters, dependencies, tags. Stored in
-`<project>/tools/`. Agent-written scripts go in `<project>/tools/code/`.
+`<project>/codes/`. Agent-written scripts go in `<project>/codes/scripts/`.
 When registered, executables are wrapped with dsagt-run + uv run --with.
 
 **Skills** (agent instructions) — directories containing a SKILL.md with
@@ -14,7 +14,7 @@ Stored in `<project>/skills/`. The agent reads SKILL.md and follows the
 workflow instructions.
 
 Both registries support optional KB indexing for semantic search via
-`search_registry` (tools) and `search_skills` (skills) MCP tools.
+`search_registry` (codes) and `search_skills` (skills) MCP tools.
 """
 
 from __future__ import annotations
@@ -35,11 +35,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Single project-local collection holding both bundled (package-shipped)
-#: and registered (agent-saved) tools.  Bundled entries carry
+#: and registered (agent-saved) codes.  Bundled entries carry
 #: ``metadata.source = "bundled"`` and ``metadata.dsagt_version`` so
 #: they can be evicted and refreshed on dsagt upgrade without touching
 #: agent-registered entries.
-TOOLS_COLLECTION = "tools"
+CODES_COLLECTION = "codes"
 #: Legacy installed-skills collection.  No longer written or read: installed
 #: skills are natively auto-discovered by every supported agent, so skill
 #: search covers only the *catalog* tier below.  Kept as a name for back-compat
@@ -61,12 +61,12 @@ def catalog_collection(slug: str) -> str:
 
 #: Backwards-compat aliases — kept so external code that imported the
 #: previous names still resolves.  New code should use the names above.
-TOOL_REGISTRY_COLLECTION = TOOLS_COLLECTION
+TOOL_REGISTRY_COLLECTION = CODES_COLLECTION
 SKILL_REGISTRY_COLLECTION = SKILLS_COLLECTION
 
 
 # ---------------------------------------------------------------------------
-# Helpers (tools only)
+# Helpers (codes only)
 # ---------------------------------------------------------------------------
 
 
@@ -80,16 +80,16 @@ def _uv_run_prefix(deps: list[str]) -> str:
 def _wrap_executable(name: str, executable: str, deps: list[str] | None = None) -> str:
     """Wrap an executable with uv run (for Python deps) and dsagt-run (for provenance).
 
-    Result: dsagt-run --tool <name> -- [uv run --with deps --] <executable>
+    Result: dsagt-run --code <name> -- [uv run --with deps --] <executable>
     """
     if "dsagt-run" in executable:
         return executable
     inner = f"{_uv_run_prefix(deps or [])}{executable}"
-    return f"dsagt-run --tool {name} -- {inner}"
+    return f"dsagt-run --code {name} -- {inner}"
 
 
-def _generate_tool_body(spec: dict) -> str:
-    """Generate a markdown body for a new tool file from its spec."""
+def _generate_code_body(spec: dict) -> str:
+    """Generate a markdown body for a new code file from its spec."""
     lines = [
         f"\n# {spec['name']}\n\n{spec['description']}\n\n",
         "## Shell Command\n\n```bash\n",
@@ -119,7 +119,7 @@ def _parse_frontmatter(path: Path) -> dict:
     mapping. Rather than silently dropping such skills from discovery, fall back
     to a best-effort flat parse (:func:`_lenient_frontmatter`) on YAML error so
     ``name`` / ``description`` / ``tags`` are still recovered. dsagt-authored
-    tool/skill specs are valid YAML, so the fallback never fires for them.
+    code/skill specs are valid YAML, so the fallback never fires for them.
     """
     text = path.read_text()
     if not text.startswith("---"):
@@ -186,7 +186,7 @@ def _lenient_frontmatter(block: str) -> dict:
 # CLI rendering
 # ---------------------------------------------------------------------------
 #
-# Each parameter in a tool spec may declare a `cli` field that pins how its
+# Each parameter in a code spec may declare a `cli` field that pins how its
 # value should be placed on the command line.  Supported forms:
 #
 #   positional         — first positional slot
@@ -272,32 +272,32 @@ def render_arguments(parameters: dict, values: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Tool Registry
+# Code Registry
 # ---------------------------------------------------------------------------
 
 
-class ToolRegistry:
+class CodeRegistry:
     """
-    Manages CLI tool spec files and optional KB indexing.
+    Manages CLI code spec files and optional KB indexing.
 
     Two layers:
 
-    * **Bundled tools** ship with the dsagt package at
-      ``_PACKAGE_TOOLS_DIR``.  They are read-only; their KB embeddings
+    * **Bundled codes** ship with the dsagt package at
+      ``_PACKAGE_CODES_DIR``.  They are read-only; their KB embeddings
       live in the shared ``bundled_tools`` collection (built once per
       machine per dsagt version by ``dsagt init``).  Never copied
       into projects, so package upgrades automatically reach all
       existing projects.
-    * **Project tools** are agent-saved or user-edited specs in
-      ``<project>/tools/``.  Embeddings go into the project-local
+    * **Project codes** are agent-saved or user-edited specs in
+      ``<project>/codes/``.  Embeddings go into the project-local
       ``registered_tools`` collection on save.
 
     Listing / lookup methods merge both layers (project wins on name
-    collision so agents can override a bundled tool).  Search the
+    collision so agents can override a bundled code).  Search the
     KB-side via ``search_registry`` which queries both collections.
     """
 
-    _PACKAGE_TOOLS_DIR = Path(__file__).parent / "tools"
+    _PACKAGE_CODES_DIR = Path(__file__).parent / "codes"
 
     def __init__(
         self,
@@ -306,7 +306,7 @@ class ToolRegistry:
         kb: KnowledgeBase | None = None,
     ):
         self.runtime_dir = Path(runtime_dir)
-        self.tools_dir = self.runtime_dir / "tools"
+        self.codes_dir = self.runtime_dir / "codes"
         self._kb = kb
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         # Optional override of the package-bundled directory (used by
@@ -315,55 +315,55 @@ class ToolRegistry:
         self._bundled_dir = (
             Path(source_tools_dir)
             if source_tools_dir and Path(source_tools_dir).exists()
-            else self._PACKAGE_TOOLS_DIR
+            else self._PACKAGE_CODES_DIR
         )
 
-        # Project tool dir is always agent-writable.  We no longer
-        # pre-populate it with bundled tools — they're served directly
-        # from the package via the merge in list_tools / get_tool.
-        self.tools_dir.mkdir(parents=True, exist_ok=True)
-        # Ensure code/ subdirectory exists for agent-written scripts.
-        (self.tools_dir / "code").mkdir(exist_ok=True)
+        # Project code dir is always agent-writable.  We no longer
+        # pre-populate it with bundled codes — they're served directly
+        # from the package via the merge in list_codes / get_code.
+        self.codes_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure scripts/ subdirectory exists for agent-written scripts.
+        (self.codes_dir / "scripts").mkdir(exist_ok=True)
 
-    def _bundled_tool_paths(self) -> list[Path]:
-        """Return .md tool spec paths shipped with the package."""
+    def _bundled_code_paths(self) -> list[Path]:
+        """Return .md code spec paths shipped with the package."""
         if not self._bundled_dir.exists():
             return []
         return sorted(self._bundled_dir.glob("*.md"))
 
-    def _project_tool_paths(self) -> list[Path]:
-        """Return .md tool spec paths the agent has saved into this project."""
-        return sorted(self.tools_dir.glob("*.md"))
+    def _project_code_paths(self) -> list[Path]:
+        """Return .md code spec paths the agent has saved into this project."""
+        return sorted(self.codes_dir.glob("*.md"))
 
-    def list_tools_raw(self) -> list[dict]:
-        """Return full frontmatter dicts for all tools.
+    def list_codes_raw(self) -> list[dict]:
+        """Return full frontmatter dicts for all codes.
 
-        Merges bundled (package) + project (``<project>/tools/``).
-        Project tools win on name collision so agents can override a
-        bundled tool with their own implementation.
+        Merges bundled (package) + project (``<project>/codes/``).
+        Project codes win on name collision so agents can override a
+        bundled code with their own implementation.
         """
         seen: dict[str, dict] = {}
-        for p in self._bundled_tool_paths():
+        for p in self._bundled_code_paths():
             spec = _parse_frontmatter(p)
             name = spec.get("name")
             if name:
                 seen[name] = spec
-        for p in self._project_tool_paths():
+        for p in self._project_code_paths():
             spec = _parse_frontmatter(p)
             name = spec.get("name")
             if name:
                 seen[name] = spec  # project layer overrides bundled
         return [seen[name] for name in sorted(seen)]
 
-    def list_tools(self) -> list[dict]:
-        """List all tools with MCP-compatible schemas."""
-        tools = []
-        for tool in self.list_tools_raw():
-            if not tool.get("name"):
+    def list_codes(self) -> list[dict]:
+        """List all codes with MCP-compatible schemas."""
+        codes = []
+        for code in self.list_codes_raw():
+            if not code.get("name"):
                 continue
             properties = {}
             required = []
-            for param_name, param_def in tool.get("parameters", {}).items():
+            for param_name, param_def in code.get("parameters", {}).items():
                 properties[param_name] = {
                     "type": param_def.get("type", "string"),
                     "description": param_def.get("description", ""),
@@ -372,10 +372,10 @@ class ToolRegistry:
                     properties[param_name]["default"] = param_def["default"]
                 if param_def.get("required", False):
                     required.append(param_name)
-            tools.append(
+            codes.append(
                 {
-                    "name": tool["name"],
-                    "description": tool["description"],
+                    "name": code["name"],
+                    "description": code["description"],
                     "inputSchema": {
                         "type": "object",
                         "properties": properties,
@@ -383,32 +383,32 @@ class ToolRegistry:
                     },
                 }
             )
-        return tools
+        return codes
 
-    def get_tool(self, name: str) -> dict | None:
-        """Look up a tool spec by name.  Project layer overrides bundled."""
-        project_path = self.tools_dir / f"{name}.md"
+    def get_code(self, name: str) -> dict | None:
+        """Look up a code spec by name.  Project layer overrides bundled."""
+        project_path = self.codes_dir / f"{name}.md"
         if project_path.exists():
-            tool = _parse_frontmatter(project_path)
-            if tool.get("name") == name:
-                return tool
+            code = _parse_frontmatter(project_path)
+            if code.get("name") == name:
+                return code
         bundled_path = self._bundled_dir / f"{name}.md"
         if bundled_path.exists():
-            tool = _parse_frontmatter(bundled_path)
-            if tool.get("name") == name:
-                return tool
+            code = _parse_frontmatter(bundled_path)
+            if code.get("name") == name:
+                return code
         return None
 
     def save_tool(self, spec: dict) -> str:
-        """Write or update a tool file. Returns 'added' or 'updated'.
+        """Write or update a code file. Returns 'added' or 'updated'.
 
         Automatically wraps the executable:
         - With `uv run --with <deps>` if Python dependencies are specified
-        - With `dsagt-run --tool <name>` for provenance capture
+        - With `dsagt-run --code <name>` for provenance capture
 
-        If a KnowledgeBase is available, indexes the tool for semantic search.
+        If a KnowledgeBase is available, indexes the code for semantic search.
         """
-        path = self.tools_dir / f"{spec['name']}.md"
+        path = self.codes_dir / f"{spec['name']}.md"
         action = "updated" if path.exists() else "added"
 
         spec = dict(spec)
@@ -427,27 +427,27 @@ class ToolRegistry:
                 body = parts[2]
 
         if not body:
-            body = _generate_tool_body(spec)
+            body = _generate_code_body(spec)
 
         frontmatter = yaml.dump(spec, default_flow_style=False, sort_keys=False)
         path.write_text(f"---\n{frontmatter}---\n{body}")
 
         if self._kb:
-            self._index_tool(spec, path)
+            self._index_code(spec, path)
 
         return action
 
-    def _index_tool(self, spec: dict, tool_path: Path) -> None:
-        """Index a tool file into the ``tools`` KB collection.
+    def _index_code(self, spec: dict, tool_path: Path) -> None:
+        """Index a code file into the ``codes`` KB collection.
 
-        Errors propagate to the caller — a tool that lives on disk but
+        Errors propagate to the caller — a code that lives on disk but
         isn't searchable in the KB is a half-broken state that the agent
         cannot recover from (it would write a duplicate next time it
         searched).  Atomic registration: in the index or not registered.
         """
         text = tool_path.read_text()
         metadata = {
-            "tool_name": spec["name"],
+            "code_name": spec["name"],
             "tags": ",".join(spec.get("tags", [])),
             "executable": spec["executable"],
             "has_dependencies": str(bool(spec.get("dependencies"))),
@@ -455,25 +455,25 @@ class ToolRegistry:
         }
         self._kb.add_entries(
             texts=[text],
-            collection=TOOLS_COLLECTION,
+            collection=CODES_COLLECTION,
             metadatas=[metadata],
         )
 
     def reindex_all(self) -> int:
-        """Reindex project-local tool files into the ``tools`` collection.
+        """Reindex project-local code files into the ``codes`` collection.
 
-        Returns count indexed.  Bundled tools are NOT indexed here — they
-        live in the shared ``tools`` collection built and copied into the
+        Returns count indexed.  Bundled codes are NOT indexed here — they
+        live in the shared ``codes`` collection built and copied into the
         project at ``dsagt init`` time.  Search via
         ``search_registry`` queries the merged collection.
         """
         if not self._kb:
             return 0
         count = 0
-        for path in self._project_tool_paths():
+        for path in self._project_code_paths():
             spec = _parse_frontmatter(path)
             if spec.get("name"):
-                self._index_tool(spec, path)
+                self._index_code(spec, path)
                 count += 1
         return count
 
@@ -487,7 +487,7 @@ class SkillRegistry:
     """
     Manages instruction-based agent skills and optional KB indexing.
 
-    Two layers (mirroring ToolRegistry):
+    Two layers (mirroring CodeRegistry):
 
     * **Bundled skills** ship with the dsagt package at
       ``_PACKAGE_SKILLS_DIR``.  Read-only; embeddings live in shared
@@ -586,7 +586,7 @@ class SkillRegistry:
 
         skill_md = skill_dir / "SKILL.md"
         # Preserve hand-edited body when updating, unless caller passed
-        # an explicit replacement — same contract as ToolRegistry.save_tool.
+        # an explicit replacement — same contract as CodeRegistry.save_tool.
         if body is None and skill_md.exists():
             existing = skill_md.read_text()
             parts = existing.split("---", 2)

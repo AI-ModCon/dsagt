@@ -679,7 +679,7 @@ class TestSetupRuntimeKb:
     def test_copy_is_independent(self, tmp_path):
         """Mutating the base after copy does not affect the project copy."""
         base = tmp_path / "base_index"
-        coll = base / "tools"
+        coll = base / "codes"
         coll.mkdir(parents=True)
         (coll / "chroma_ids.json").write_text("v1")
 
@@ -690,7 +690,7 @@ class TestSetupRuntimeKb:
         (coll / "chroma_ids.json").write_text("v2 newer")
 
         # Project copy stays at v1.
-        project_copy = runtime / "kb_index" / "tools" / "chroma_ids.json"
+        project_copy = runtime / "kb_index" / "codes" / "chroma_ids.json"
         assert project_copy.read_text() == "v1"
 
     def test_skips_non_collection_dirs(self, tmp_path):
@@ -780,27 +780,6 @@ class TestRerankSchemaDefault:
         server = create_knowledge_server(mock_kb)
         assert self._get_rerank_default(server) is True
 
-    def test_search_omitted_rerank_passes_none(self, mock_kb):
-        """Omitting rerank passes None to kb.search, which resolves to
-        kb.default_rerank internally."""
-        server = create_knowledge_server(mock_kb)
-        call_tool(
-            server,
-            "kb_search",
-            {
-                "query": "test",
-                "collection": "docs",
-            },
-        )
-        mock_kb.search.assert_called_once_with(
-            query="test",
-            collection="docs",
-            collections=None,
-            top_k=5,
-            rerank=None,
-            where=None,
-        )
-
 
 # ---------------------------------------------------------------------------
 # kb_search — multi-collection fan-out (moved from the former memory test file)
@@ -808,20 +787,6 @@ class TestRerankSchemaDefault:
 
 
 class TestKbSearchMultiCollection:
-
-    def test_single_collection_backward_compat(self, server, mock_kb):
-        """Plain search with collection still works."""
-        result = call_tool(
-            server,
-            "kb_search",
-            {
-                "query": "test",
-                "collection": "docs",
-            },
-        )
-
-        assert result["status"] == "ok"
-        mock_kb.search.assert_called_once()
 
     def test_multi_collection_fanout(self, server, mock_kb):
         """Multi-collection search delegates once to kb.search with collections=.

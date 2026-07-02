@@ -18,7 +18,7 @@ import mcp.types as types
 import pytest
 
 from dsagt.mcp.server import _build_kb_from_config, create_dsagt_server
-from dsagt.registry import SkillRegistry, ToolRegistry
+from dsagt.registry import SkillRegistry, CodeRegistry
 
 
 def _make_merged_server(tmp_path: Path):
@@ -28,7 +28,7 @@ def _make_merged_server(tmp_path: Path):
     kb.default_rerank = True
     kb.collections = []
     runtime = str(tmp_path / "runtime")
-    reg = ToolRegistry(source_tools_dir=None, runtime_dir=runtime, kb=None)
+    reg = CodeRegistry(source_tools_dir=None, runtime_dir=runtime, kb=None)
     sreg = SkillRegistry(source_skills_dir=None, runtime_dir=runtime, kb=None)
     return create_dsagt_server(reg, kb, sreg, runtime_dir=runtime)
 
@@ -53,18 +53,34 @@ def test_merged_server_exposes_all_tools(tmp_path):
     """Both concern modules' tools land under one server with no collision."""
     server = _make_merged_server(tmp_path)
     names = _list_tools(server)
-    # 8 registry + 5 knowledge + 4 memory + 5 skill = 22 distinct tools.
-    # (kb_add_vector_db is gated off until BYO lands — see knowledge_tools.py.)
-    assert len(names) == 22
-    assert len(set(names)) == len(names)  # no name collision
-    # Representative tools from each side.
-    for expected in (
+    # 8 registry + 5 knowledge + 2 memory + 5 skill = 20 distinct tools.
+    assert set(names) == {
+        # registry / provenance (8)
         "get_registry",
-        "search_skills",
+        "search_registry",
+        "save_code_spec",
+        "install_dependencies",
+        "run_command",
+        "read_file",
+        "http_request",
+        "reconstruct_pipeline",
+        # knowledge (5)
         "kb_search",
+        "kb_ingest",
+        "kb_list_collections",
+        "kb_job_status",
+        "kb_append",
+        # memory (2)
+        "kb_remember",
+        "kb_get_memories",
+        # skills (5)
+        "search_skills",
+        "install_skill",
+        "save_skill",
+        "add_skill_source",
         "list_skill_sources",
-    ):
-        assert expected in names
+    }
+    assert len(set(names)) == len(names)  # no name collision
 
 
 def test_registry_tool_returns_plain_string(tmp_path):
@@ -74,11 +90,11 @@ def test_registry_tool_returns_plain_string(tmp_path):
     # Not JSON — the registry contract is a human-readable string.
     with pytest.raises(json.JSONDecodeError):
         json.loads(out)
-    assert "tools:" in out
+    assert "codes:" in out
 
 
-def test_knowledge_tool_returns_json(tmp_path):
-    """Knowledge handlers return a dict — JSON-encoded by the wrapper."""
+def test_dict_returning_handler_is_json_encoded(tmp_path):
+    """Dict-returning handlers (knowledge/memory/skill) are JSON-encoded by the wrapper."""
     server = _make_merged_server(tmp_path)
     out = _call(server, "list_skill_sources", {})
     parsed = json.loads(out)

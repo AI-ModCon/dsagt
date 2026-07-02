@@ -1,15 +1,14 @@
 """Fixture tests for the canonical trace waist + Claude translator (Phase 2).
 
 Pure, no disk / no network.  Two things under test:
-- ``to_exchanges`` projects LLM spans onto the conversational shape the existing
-  Phase-3 extractor (``memory.build_extraction_prompt``) consumes — the seam.
+- ``to_exchanges`` projects LLM spans onto the conversational shape the episodic
+  indexer chunks + embeds (carrying ``turn_id`` + content) — the seam.
 - ``ClaudeTranslator`` turns raw transcript records into a ``Trace``
   with the autolog-style AGENT/LLM/TOOL span layout.
 """
 
 import json
 
-from dsagt.memory import build_extraction_prompt
 from dsagt.traces import (
     ClaudeReader,
     ClaudeTranslator,
@@ -86,14 +85,16 @@ def test_to_exchanges_uses_request_window_directly():
     assert ex2["response"] == [{"type": "text", "text": "The file has 1000 rows."}]
 
 
-def test_projection_feeds_the_real_extraction_prompt():
-    """The waist's whole justification: exchanges render through the existing
-    Phase-3 prompt builder with no adapter, carrying the real content."""
-    prompt = build_extraction_prompt(_windowed_trace().to_exchanges())
-    assert "Profile sales.csv" in prompt
-    assert "profile" in prompt  # tool_use name (in the assistant response)
-    assert "1000 rows" in prompt  # tool_result, via _extract_block_text
-    assert "The file has 1000 rows." in prompt  # final answer
+def test_projection_carries_turn_id_and_content():
+    """The waist's whole justification: to_exchanges carries ``turn_id`` (groups
+    a turn's chunks) and the real content the episodic indexer embeds."""
+    exchanges = _windowed_trace().to_exchanges()
+    assert all(ex["turn_id"] for ex in exchanges)  # span id, for chunk grouping
+    flat = json.dumps(exchanges)
+    assert "Profile sales.csv" in flat
+    assert "profile" in flat  # tool_use name (in the assistant response)
+    assert "1000 rows" in flat  # tool_result content
+    assert "The file has 1000 rows." in flat  # final answer
 
 
 def test_none_tolerant_usage_and_timing():
@@ -103,7 +104,7 @@ def test_none_tolerant_usage_and_timing():
     )
     assert span["usage"] is None and span["start_time"] is None
     assert trace.to_exchanges() == [
-        {"timestamp": None, "new_messages": [], "response": []}
+        {"turn_id": "s1", "timestamp": None, "new_messages": [], "response": []}
     ]
 
 

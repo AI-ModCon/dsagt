@@ -243,14 +243,14 @@ def _skill_tools_and_handlers(
                 "Register a skill (agent workflow / instructions) into "
                 "<project>/skills/<name>/SKILL.md, where the agent natively "
                 "auto-discovers it after the next `dsagt start`.  Symmetric "
-                "with save_tool_spec — use this when you've designed a "
+                "with save_code_spec — use this when you've designed a "
                 "reusable instruction set you want future sessions to load "
                 "automatically."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    # ``anyOf`` for spec mirrors save_tool_spec — accept
+                    # ``anyOf`` for spec mirrors save_code_spec — accept
                     # both structured object and JSON-encoded string for
                     # MCP clients that serialize nested args.
                     "spec": {
@@ -383,4 +383,6 @@ def create_skill_server(
     :func:`_skill_tools_and_handlers` directly instead of this wrapper.
     """
     tools, handlers = _skill_tools_and_handlers(skill_registry, kb, runtime_dir)
-    return build_dispatch_server("skills", tools, handlers)
+    return build_dispatch_server(
+        "skills", tools, handlers, {t: "skill" for t in handlers}
+    )

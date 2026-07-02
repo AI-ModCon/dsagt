@@ -12,7 +12,7 @@ Asset namespace (the ``--include`` / ``--exclude`` selectors on ``dsagt init``):
 
 :data:`DEFAULT_ASSETS` (bundled tools + the genesis skill catalog) is the
 cheap set installed automatically on a machine's first project.  Embedding
-config comes from the project's ``dsagt_config.yaml`` (local backend by
+config comes from the project's ``.dsagt/config.yaml`` (local backend by
 default — no credentials needed).
 """
 
@@ -286,7 +286,7 @@ def _current_dsagt_version() -> str:
 #
 # Three kinds, all built into the shared ``~/dsagt-projects/kb_index/`` and
 # copied per-project:
-#   "tools"        bundled tool specs (package data; cheap, fully local)
+#   "codes"        bundled tool specs (package data; cheap, fully local)
 #   <catalog>      a skill-catalog source from ``skills.KNOWN_SOURCES``
 #                  (e.g. "genesis", "k-dense-ai", "composio", "antigravity")
 #   <collection>   a heavy scientific doc collection from ``COLLECTIONS``
@@ -299,23 +299,23 @@ def _current_dsagt_version() -> str:
 #: The default per-project / first-init asset set: bundled tools + the
 #: genesis skill catalog.  Kept deliberately cheap (one small local embed +
 #: one git clone) so onboarding needs no manual step.
-DEFAULT_ASSETS: tuple[str, ...] = ("tools", "genesis")
+DEFAULT_ASSETS: tuple[str, ...] = ("codes", "genesis")
 
 
 def all_assets() -> list[str]:
     """Every installable asset name, in canonical install order (cheap → heavy)."""
     from dsagt.skills import KNOWN_SOURCES
 
-    return ["tools", *KNOWN_SOURCES, *COLLECTIONS]
+    return ["codes", *KNOWN_SOURCES, *COLLECTIONS]
 
 
 def asset_collection_name(asset: str) -> str:
     """The ``kb_index`` collection directory a given asset materializes as."""
-    from dsagt.registry import TOOLS_COLLECTION, CATALOG_COLLECTION_PREFIX
+    from dsagt.registry import CODES_COLLECTION, CATALOG_COLLECTION_PREFIX
     from dsagt.skills import KNOWN_SOURCES, _repo_slug
 
-    if asset == "tools":
-        return TOOLS_COLLECTION
+    if asset == "codes":
+        return CODES_COLLECTION
     if asset in KNOWN_SOURCES:
         return CATALOG_COLLECTION_PREFIX + _repo_slug(KNOWN_SOURCES[asset]["url"])
     if asset in COLLECTIONS:
@@ -387,38 +387,38 @@ def _build_bundled_tools(kb, index_dir: Path) -> int:
     Each spec file is one chunk with rich metadata.  Wipe-and-rebuild so a
     dsagt upgrade refreshes the bundled set.  Returns the number indexed.
     """
-    from dsagt.registry import TOOLS_COLLECTION, ToolRegistry, _parse_frontmatter
+    from dsagt.registry import CODES_COLLECTION, CodeRegistry, _parse_frontmatter
 
-    coll_dir = index_dir / TOOLS_COLLECTION
+    coll_dir = index_dir / CODES_COLLECTION
     if coll_dir.exists():
         shutil.rmtree(coll_dir)
 
-    tool_paths = [
+    code_paths = [
         p
-        for p in sorted(ToolRegistry._PACKAGE_TOOLS_DIR.glob("*.md"))
+        for p in sorted(CodeRegistry._PACKAGE_CODES_DIR.glob("*.md"))
         if _parse_frontmatter(p).get("name")
     ]
-    if not tool_paths:
+    if not code_paths:
         return 0
 
     current_version = _current_dsagt_version()
-    tool_specs = [_parse_frontmatter(p) for p in tool_paths]
+    code_specs = [_parse_frontmatter(p) for p in code_paths]
     kb.add_entries(
-        texts=[p.read_text() for p in tool_paths],
-        collection=TOOLS_COLLECTION,
+        texts=[p.read_text() for p in code_paths],
+        collection=CODES_COLLECTION,
         metadatas=[
             {
-                "tool_name": s["name"],
+                "code_name": s["name"],
                 "tags": ",".join(s.get("tags", [])),
                 "executable": s.get("executable", ""),
                 "has_dependencies": str(bool(s.get("dependencies"))),
                 "source": "bundled",
                 "dsagt_version": current_version,
             }
-            for s in tool_specs
+            for s in code_specs
         ],
     )
-    return len(tool_paths)
+    return len(code_paths)
 
 
 def ensure_assets(
@@ -487,7 +487,7 @@ def ensure_assets(
                 print("  Downloading embedding model (one-time) …", flush=True)
 
         for asset in to_build:
-            if asset == "tools":
+            if asset == "codes":
                 print("  Indexing bundled tools …", flush=True)
                 _build_bundled_tools(kb, index_dir)
                 built.append(asset)

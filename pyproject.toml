@@ -27,24 +27,11 @@ dependencies = [
     "sentence-transformers==5.4.0",    # local embeddings & reranking
     "transformers==4.47.0",            # pin for sentence-transformers
     "rank-bm25>=0.2.2",                # sparse keyword retrieval
-    # Local GGUF judge for episodic Tier-1 distillation (the default Judge
-    # backend; see memory-plan.md §3 — under BYOA, DSAGT holds no LLM key, so a
-    # local model is the only zero-config option).  Pinned EXACTLY on purpose:
-    # abetlen's self-hosted wheels are the only prebuilt source (PyPI is
-    # sdist-only → would compile llama.cpp), and they are intermittently
-    # zip-corrupt in a way uv hard-rejects (0.3.25/.27/.28/.30 all fail;
-    # extraction errors like "Bad uncompressed size").  0.3.29 verified intact
-    # on macOS arm64, manylinux x86_64, and win_amd64 (2026-06-28) — RE-VERIFY
-    # integrity across those platforms before bumping this pin.  No macOS
-    # x86_64 wheel exists upstream at any version, so Intel Macs are excluded by
-    # the marker (no LocalJudge there; Tier-0 mechanical memory still works).
-    # CPU wheel index + CUDA-HPC opt-in are wired in [tool.uv] below.
-    "llama-cpp-python==0.3.29; sys_platform != 'darwin' or platform_machine != 'x86_64'",
 ]
 
 [project.scripts]
 dsagt = "dsagt.commands.cli:main"
-dsagt-run = "dsagt.commands.run_tool:main"
+dsagt-run = "dsagt.commands.run_code:main"
 dsagt-server = "dsagt.mcp.server:main"
 
 [dependency-groups]
@@ -72,7 +59,7 @@ version = {attr = "dsagt.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-dsagt = ["py.typed", "tools/*.md", "tools/*.py", "skills/**/*", "dsagt_instructions.md"]
+dsagt = ["py.typed", "codes/*.md", "codes/*.py", "skills/**/*", "dsagt_instructions.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -102,22 +89,3 @@ required-environments = [
 constraint-dependencies = [
     "numpy<2.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
-
-# llama-cpp-python ships prebuilt wheels only at this self-hosted index (PyPI
-# carries the sdist alone → a source build needing cmake + a C compiler).  Point
-# uv at the CPU wheel index for this one package so ``uv sync`` fetches a binary
-# on macOS arm64, Linux x86_64 (incl. HPC nodes), and Windows amd64.
-#
-# GPU on CUDA HPC is an opt-in (uv maps a package to one index, and the CPU
-# wheel is the cross-platform baseline): reinstall the CUDA build with e.g.
-#   uv pip install llama-cpp-python==0.3.29 \
-#     --index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
-# (match cuNNN to the node's toolkit).  CPU inference of a 1.5B judge on the
-# batched, background heartbeat is fine, so GPU stays optional.
-[[tool.uv.index]]
-name = "llama-cpp-cpu"
-url = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-llama-cpp-python = { index = "llama-cpp-cpu" }

@@ -4,18 +4,16 @@ Shared test fixtures for DSAGT.
 Integration-test credentials come from the project-root ``.env`` file — the
 same file smoke_test/run.sh sources.  One source of truth beats two.
 
-Tests that need real APIs use the ``embedding_config``, ``llm_config``, or
-``integration_config`` fixtures.  They FAIL loudly when ``.env`` is missing a
-required variable, since an integration test with empty creds is worse than
-a skipped one (silent false positive).
+Tests that need real APIs use the ``embedding_config`` or ``llm_config``
+fixtures.  They FAIL loudly when ``.env`` is missing a required variable,
+since an integration test with empty creds is worse than a skipped one
+(silent false positive).
 """
 
-import os
 import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 # Ensure tests/ is on sys.path so mcp_helpers can be imported
 sys.path.insert(0, str(Path(__file__).parent))
@@ -77,47 +75,3 @@ def llm_config():
         "base_url": _require(env, "LLM_BASE_URL"),
         "api_key": _require(env, "LLM_API_KEY"),
     }
-
-
-@pytest.fixture
-def integration_config(tmp_path, monkeypatch):
-    """Full DSAGT config as ``load_config()`` would return it.
-
-    Builds a ``.dsagt/config.yaml`` in a temp project dir from .env values,
-    then patches the registry so ``load_config(project_name)`` resolves to it.
-    """
-    from dsagt.session import load_config
-
-    env = _load_env()
-    project_name = "test-integration"
-    config_data = {
-        "project": project_name,
-        "agent": "claude",
-        "embedding": {
-            "backend": "api",
-            "model": _require(env, "EMBEDDING_MODEL"),
-            "base_url": _require(env, "EMBEDDING_BASE_URL"),
-        },
-    }
-
-    project_dir = tmp_path / project_name
-    project_dir.mkdir(parents=True)
-    for subdir in (
-        "trace_archive",
-        "tools",
-        "tools/code",
-        "skills",
-        "kb_index",
-        ".dsagt",
-    ):
-        (project_dir / subdir).mkdir()
-    (project_dir / ".dsagt" / "config.yaml").write_text(
-        yaml.dump(config_data, default_flow_style=False, sort_keys=False)
-    )
-
-    monkeypatch.setattr(
-        "dsagt.session._load_registry",
-        lambda: {project_name: str(project_dir)},
-    )
-
-    return load_config(project_name)

@@ -1,17 +1,17 @@
 # Knowledge Base
 
-DSAgt maintains six independently-partitioned ChromaDB collections. The first three are machine-wide (built once under `~/dsagt-projects/kb_index/` and copied into each project); the last three are per-project (under `<project>/kb_index/`, populated automatically during use). All are provisioned/used through `dsagt init` and the agent's MCP tools — there is no separate setup command.
+DSAgt maintains independently-partitioned ChromaDB collections, with six core DSAgt collections set up and used through `dsagt init` and the agent's MCP tools:
 
 ## Collections
 
 | Collection | Source | Populated by |
 |---|---|---|
-| **Tool Specs** | Bundled CLI tool specs in `src/dsagt/tools/` | `dsagt init` (always provisioned) |
-| **Skills Catalog** | Installable skills from external repos (one `skills_catalog__<slug>` collection per source), frontmatter-indexed | `dsagt init` (chosen sources) + `add_skill_source` |
-| **Domain Knowledge** | NeMo Curator + AIDRIN reference corpora; user-ingested docs | `dsagt init` (chosen collections) + agent's `kb_ingest` |
+| **Code Specs** | Bundled CLI code specs | `dsagt init` (always set up) |
+| **Skills Catalog** | Installable skills from external repos (one per source) | `dsagt init` (chosen sources) + `add_skill_source` |
+| **Domain Knowledge** | NeMo Curator + AIDRIN reference collections; user-ingested docs | `dsagt init` (chosen collections) + agent's `kb_ingest` |
 | **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/.dsagt/explicit_memories.yaml`) |
-| **Episodic Memory** (`session_memory`) | Distilled session facts | The MCP server's in-session heartbeat (opt-in; see below) |
-| **Tool Use Records** (`tool_use`) | `dsagt-run` execution traces | `dsagt-run` writes JSON to `<project>/trace_archive/`; the heartbeat embeds them incrementally (idempotent) |
+| **Episodic Memory** (`session_memory`) | Chunked session turns | Captured during the session (opt-in; see below) |
+| **Code Execution Records** (`code_use`) | `dsagt-run` execution traces | `dsagt-run` writes JSON to `<project>/trace_archive/`; indexed for search during the session |
 
 ## Explicit Memory
 
@@ -19,19 +19,16 @@ Explicit memories are facts the user confirms during a session. The agent saves 
 
 ## Episodic Memory
 
-Episodic memory is **opt-in** (`dsagt init --episodic`, off by default). When enabled, the MCP server's in-session heartbeat reads the agent's transcript and distills each completed turn into a few tagged, ≤1-sentence facts in the `session_memory` collection. Two tiers:
+When enabled, DSAgt reads the agent's transcript as the session runs and captures each completed turn into the `session_memory` collection — a fast, local chunk-and-embed pass that reuses the same embedder as the rest of the knowledge base.
 
-- **Tier-1 (default when enabled)** — a small **local** LLM judge (`Qwen2.5-1.5B`, grammar-constrained JSON) classifies each fact against a closed tag taxonomy (stock "AI-data-ready" tags plus any project `--domain-tags`) and condenses it. Local-by-default: no API key, no cost. The GGUF model (~1 GB) downloads on first use; inference is CPU-side.
-- **Tier-0 (fallback)** — mechanical chunk + keyword-tag + embed, no LLM; used automatically if the judge fails, so a turn is never lost.
-
-Retrieval over `session_memory` is **recency-weighted** (`episodic.recency_half_life_days`, default 14): a newer fact edges out a stale one as a bounded boost, so a corrected fact wins without contradiction detection while durable old facts keep their relevance. Optional per-category outlier detection (`episodic.outlier_sensitivity`) can queue novel facts for review.
+Retrieval over `session_memory` is filtered to session, and then regex over key query terms prior to a **recency-weighted** ranked semantic-vector retrieval: a newer turn edges out a stale one as a bounded boost, so a corrected fact wins by recency while a strongly-relevant old turn is never buried.
 
 ## Search
 
-The agent searches all collections via `kb_search` and writes via `kb_ingest` / `kb_remember`. Registered tools have their own `search_registry` route over the same backend. Skills are discovered separately — installed ones natively by the agent, installable ones via `search_skills` over the external catalog (see [Tools & Skills](tools-skills.md)).
+The agent searches all collections via `kb_search` and writes via `kb_ingest` / `kb_remember`. Registered codes have their own `search_registry` route over the same backend. Skills are discovered separately — installed ones natively by the agent, installable ones via `search_skills` over the external catalog (see [Codes & Skills](codes-skills.md)).
 
-Hybrid search (dense embeddings + sparse BM25 via Reciprocal Rank Fusion) is on by default per collection. Cross-encoder reranking is optional. The default embedder is a local sentence-transformers model (~130 MB, CPU-side, no API key).
+Hybrid search (semantic embeddings + keyword BM25) is on by default per collection. Optional reranking sharpens the top results. The default embedder is a local sentence-transformers model (~130 MB, CPU-side, no API key).
 
-## Provisioning
+## Setup
 
-`dsagt init` provisions the KB. The shared, machine-wide collections are built once (the first project on a machine pays the cost) under `~/dsagt-projects/kb_index/`, then copied into each project. `--include` / `--exclude` (asset names, or `all`) select which collections to provision; the bundled Tool Specs collection is always included. Re-running `dsagt init` on an existing project reconfigures it in place.
+`dsagt init` sets up the KB. `--include` / `--exclude` (asset names, or `all`) select which collections to include; the bundled Code Specs collection is always included. Re-running `dsagt init` on an existing project reconfigures it in place.

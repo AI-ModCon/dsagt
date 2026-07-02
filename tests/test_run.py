@@ -16,7 +16,7 @@ from dsagt.provenance import (
     _write_record,
     run_and_record,
 )
-from dsagt.commands.run_tool import (
+from dsagt.commands.run_code import (
     _parse_args,
     main,
 )
@@ -29,14 +29,14 @@ from dsagt.commands.run_tool import (
 class TestParseArgs:
 
     def test_basic(self):
-        args, command = _parse_args(["--tool", "fastp", "--", "fastp", "-q", "20"])
-        assert args.tool == "fastp"
+        args, command = _parse_args(["--code", "fastp", "--", "fastp", "-q", "20"])
+        assert args.code == "fastp"
         assert command == ["fastp", "-q", "20"]
 
     def test_all_flags(self):
         args, command = _parse_args(
             [
-                "--tool",
+                "--code",
                 "megahit",
                 "--session",
                 "sess-1",
@@ -54,7 +54,7 @@ class TestParseArgs:
                 "a.fq",
             ]
         )
-        assert args.tool == "megahit"
+        assert args.code == "megahit"
         assert args.session == "sess-1"
         assert args.record_id == "rec-42"
         assert args.records_dir == "/tmp/records"
@@ -65,10 +65,10 @@ class TestParseArgs:
     def test_no_separator_exits(self):
         """Missing '--' separator causes a SystemExit (from argparse --help)."""
         with pytest.raises(SystemExit):
-            _parse_args(["--tool", "fastp", "fastp", "-q", "20"])
+            _parse_args(["--code", "fastp", "fastp", "-q", "20"])
 
     def test_defaults(self):
-        args, _ = _parse_args(["--tool", "x", "--", "echo"])
+        args, _ = _parse_args(["--code", "x", "--", "echo"])
         assert args.session is None
         assert args.record_id is None
         assert args.records_dir is None
@@ -137,7 +137,7 @@ class TestWriteRecord:
         records_dir = tmp_path / "nested" / "records"
         record = {
             "record_id": "abc123",
-            "tool_name": "fastp",
+            "code_name": "fastp",
             "session_id": None,
             "execution": {
                 "exact_command": ["fastp", "-q", "20"],
@@ -158,13 +158,13 @@ class TestWriteRecord:
         assert "abc123" in path.name
 
         data = json.loads(path.read_text())
-        assert data["tool_name"] == "fastp"
+        assert data["code_name"] == "fastp"
         assert data["execution"]["return_code"] == 0
 
     def test_record_is_valid_json(self, tmp_path):
         record = {
             "record_id": "x",
-            "tool_name": "t",
+            "code_name": "t",
             "session_id": None,
             "execution": {
                 "exact_command": ["echo"],
@@ -192,7 +192,7 @@ class TestRunAndRecord:
     def test_successful_command(self, tmp_path):
         """Runs echo, captures output, writes record, returns 0."""
         exit_code = run_and_record(
-            tool_name="echo_test",
+            code_name="echo_test",
             command=["echo", "hello world"],
             records_dir=tmp_path,
             record_id="test-001",
@@ -204,7 +204,7 @@ class TestRunAndRecord:
         assert len(records) == 1
 
         data = json.loads(records[0].read_text())
-        assert data["tool_name"] == "echo_test"
+        assert data["code_name"] == "echo_test"
         assert data["record_id"] == "test-001"
         assert data["execution"]["return_code"] == 0
         assert "hello world" in data["execution"]["stdout"]
@@ -213,7 +213,7 @@ class TestRunAndRecord:
     def test_failing_command(self, tmp_path):
         """A command that fails returns non-zero and captures stderr."""
         exit_code = run_and_record(
-            tool_name="false_test",
+            code_name="false_test",
             command=["bash", "-c", "echo oops >&2; exit 42"],
             records_dir=tmp_path,
             record_id="test-002",
@@ -228,7 +228,7 @@ class TestRunAndRecord:
     def test_command_not_found(self, tmp_path):
         """A missing command returns exit code 127."""
         exit_code = run_and_record(
-            tool_name="missing",
+            code_name="missing",
             command=["this_command_does_not_exist_xyz"],
             records_dir=tmp_path,
             record_id="test-003",
@@ -250,7 +250,7 @@ class TestRunAndRecord:
         append_session(tmp_path)  # mints session id 1 → tag "t-1"
         monkeypatch.chdir(tmp_path)
         run_and_record(
-            tool_name="t",
+            code_name="t",
             command=["echo"],
             records_dir=tmp_path,
             record_id="test-004",
@@ -267,7 +267,7 @@ class TestRunAndRecord:
         append_session(tmp_path)
         monkeypatch.chdir(tmp_path)
         run_and_record(
-            tool_name="t",
+            code_name="t",
             command=["echo"],
             records_dir=tmp_path,
             session_id="explicit-session",
@@ -280,7 +280,7 @@ class TestRunAndRecord:
     def test_file_lists_recorded(self, tmp_path):
         """Input and output file lists appear in the record."""
         run_and_record(
-            tool_name="t",
+            code_name="t",
             command=["echo"],
             records_dir=tmp_path,
             input_files=["in1.fq", "in2.fq"],
@@ -295,7 +295,7 @@ class TestRunAndRecord:
     def test_timestamps_are_populated(self, tmp_path):
         """Start and end timestamps are non-empty ISO strings."""
         run_and_record(
-            tool_name="t",
+            code_name="t",
             command=["echo"],
             records_dir=tmp_path,
             record_id="test-007",
@@ -311,7 +311,7 @@ class TestRunAndRecord:
     def test_auto_generates_record_id(self, tmp_path):
         """Omitting record_id auto-generates one."""
         run_and_record(
-            tool_name="t",
+            code_name="t",
             command=["echo"],
             records_dir=tmp_path,
         )
@@ -358,7 +358,7 @@ class TestMain:
         """main() runs a command and returns its exit code."""
         exit_code = main(
             [
-                "--tool",
+                "--code",
                 "echo_tool",
                 "--records-dir",
                 str(tmp_path),
@@ -376,7 +376,7 @@ class TestMain:
         """No command after '--' returns exit code 1."""
         exit_code = main(
             [
-                "--tool",
+                "--code",
                 "empty",
                 "--records-dir",
                 str(tmp_path),
@@ -389,7 +389,7 @@ class TestMain:
         """main() returns the wrapped command's exit code."""
         exit_code = main(
             [
-                "--tool",
+                "--code",
                 "fail",
                 "--records-dir",
                 str(tmp_path),

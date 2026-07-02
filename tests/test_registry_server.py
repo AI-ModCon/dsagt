@@ -1,7 +1,7 @@
 """
 Tests for the registry MCP server.
 
-Tests tool handlers: save_tool_spec, get_registry, search_registry,
+Tests tool handlers: save_code_spec, get_registry, search_registry,
 read_file, run_command, install_dependencies.
 """
 
@@ -13,7 +13,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
-from dsagt.registry import ToolRegistry
+from dsagt.registry import CodeRegistry
 from dsagt.mcp.registry_tools import create_registry_server
 from mcp_helpers import call_tool_sync as call_tool
 
@@ -42,8 +42,8 @@ def make_spec(
     return spec
 
 
-def _write_tool(tools_dir: Path, spec: dict) -> None:
-    path = tools_dir / f"{spec['name']}.md"
+def _write_tool(codes_dir: Path, spec: dict) -> None:
+    path = codes_dir / f"{spec['name']}.md"
     fm = yaml.dump(spec, default_flow_style=False, sort_keys=False)
     path.write_text(f"---\n{fm}---\n\n# {spec['name']}\n")
 
@@ -60,11 +60,11 @@ def _make_server(tmp_path, tools=None):
     source_dir = tmp_path / "source_skills"
     source_dir.mkdir()
     runtime_dir = tmp_path / "runtime"
-    project_tools_dir = runtime_dir / "tools"
+    project_tools_dir = runtime_dir / "codes"
     project_tools_dir.mkdir(parents=True, exist_ok=True)
     for spec in tools or []:
         _write_tool(project_tools_dir, spec)
-    reg = ToolRegistry(
+    reg = CodeRegistry(
         source_tools_dir=str(source_dir),
         runtime_dir=str(runtime_dir),
     )
@@ -109,7 +109,7 @@ def populated_server(populated):
 
 
 # ---------------------------------------------------------------------------
-# save_tool_spec
+# save_code_spec
 # ---------------------------------------------------------------------------
 
 
@@ -118,37 +118,37 @@ class TestSaveToolSpec:
     def test_add_new_tool(self, server, registry):
         """Saving a new spec creates a skill file and reports added."""
         spec = make_spec("my_tool")
-        text = call_tool(server, "save_tool_spec", {"spec": spec})
+        text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
         assert "1 tools" in text
-        assert registry.get_tool("my_tool") is not None
+        assert registry.get_code("my_tool") is not None
 
     def test_update_existing_tool(self, server, registry):
         """Saving a spec with the same name updates rather than duplicates."""
         call_tool(
             server,
-            "save_tool_spec",
+            "save_code_spec",
             {"spec": make_spec("my_tool", description="Version 1")},
         )
         text = call_tool(
             server,
-            "save_tool_spec",
+            "save_code_spec",
             {"spec": make_spec("my_tool", description="Version 2")},
         )
 
         assert "updated" in text
         assert "1 tools" in text
-        assert registry.get_tool("my_tool")["description"] == "Version 2"
+        assert registry.get_code("my_tool")["description"] == "Version 2"
 
     def test_add_multiple_tools(self, server, registry):
         """Multiple distinct tools accumulate as separate skill files."""
-        call_tool(server, "save_tool_spec", {"spec": make_spec("tool_a")})
-        text = call_tool(server, "save_tool_spec", {"spec": make_spec("tool_b")})
+        call_tool(server, "save_code_spec", {"spec": make_spec("tool_a")})
+        text = call_tool(server, "save_code_spec", {"spec": make_spec("tool_b")})
 
         assert "2 tools" in text
-        assert registry.get_tool("tool_a") is not None
-        assert registry.get_tool("tool_b") is not None
+        assert registry.get_code("tool_a") is not None
+        assert registry.get_code("tool_b") is not None
 
     def test_accepts_stringified_spec(self, server, registry):
         """Some MCP clients (Claude Sonnet/Haiku 4.x) send nested-object args as
@@ -156,14 +156,14 @@ class TestSaveToolSpec:
         import json
 
         spec = make_spec("stringy_tool")
-        text = call_tool(server, "save_tool_spec", {"spec": json.dumps(spec)})
+        text = call_tool(server, "save_code_spec", {"spec": json.dumps(spec)})
 
         assert "added" in text
-        assert registry.get_tool("stringy_tool") is not None
+        assert registry.get_code("stringy_tool") is not None
 
     def test_rejects_invalid_stringified_spec(self, server, registry):
         """Non-JSON strings produce a clear error rather than crashing."""
-        text = call_tool(server, "save_tool_spec", {"spec": "not valid json {"})
+        text = call_tool(server, "save_code_spec", {"spec": "not valid json {"})
 
         assert "Error" in text
         assert "JSON object" in text
@@ -186,8 +186,8 @@ class TestGetRegistry:
         text = call_tool(populated_server, "get_registry", {})
 
         data = yaml.safe_load(text)
-        assert len(data["tools"]) == 2
-        names = [t["name"] for t in data["tools"]]
+        assert len(data["codes"]) == 2
+        names = [t["name"] for t in data["codes"]]
         assert "tool_alpha" in names
         assert "tool_beta" in names
 
@@ -209,23 +209,29 @@ class TestSearchRegistryNoKB:
     """
 
     def test_exact_name_lookup_works_without_kb(self, populated_server):
-        """tool_name lookup is KB-free and must keep working."""
+        """code_name lookup is KB-free and must keep working."""
         text = call_tool(
-            populated_server, "search_registry", {"tool_name": "tool_alpha"}
+            populated_server, "search_registry", {"code_name": "tool_alpha"}
         )
         assert "tool_alpha" in text
 
     def test_exact_name_miss_without_kb(self, populated_server):
-        """tool_name with a non-existent name returns a clean 'no tool' message."""
+        """code_name with a non-existent name returns a clean 'no tool' message."""
         text = call_tool(
-            populated_server, "search_registry", {"tool_name": "nonexistent"}
+            populated_server, "search_registry", {"code_name": "nonexistent"}
         )
         assert "No tool named 'nonexistent'" in text
 
     def test_query_search_without_kb_returns_helpful_error(self, populated_server):
         """A semantic search request when no KB is configured must surface
-        the missing-KB condition clearly, not silently degrade."""
+        the missing-KB condition clearly, not silently degrade.
+
+        The query "alpha" is a substring of the registered ``tool_alpha``;
+        the deleted string-matching fallback would have returned it, so the
+        ``not in`` assertion pins that the fallback stays gone.
+        """
         text = call_tool(populated_server, "search_registry", {"query": "alpha"})
+        assert "tool_alpha" not in text  # no silent substring fallback
         assert "knowledge base" in text.lower()
         assert "embedding" in text.lower()
 
@@ -302,7 +308,7 @@ class TestRunCommand:
 
 
 # ---------------------------------------------------------------------------
-# save_tool_spec — dependency installation
+# save_code_spec — dependency installation
 # ---------------------------------------------------------------------------
 
 
@@ -315,7 +321,7 @@ class TestSaveToolSpecDependencies:
             returncode=0, stdout="Successfully installed pandas-2.1.0", stderr=""
         )
         spec = make_spec("tool_with_deps", dependencies=["pandas>=2.0", "numpy"])
-        text = call_tool(server, "save_tool_spec", {"spec": spec})
+        text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
         assert "Successfully installed" in text
@@ -338,11 +344,11 @@ class TestSaveToolSpecDependencies:
             returncode=1, stdout="", stderr="No matching distribution for bogus-pkg"
         )
         spec = make_spec("tool_bad_deps", dependencies=["bogus-pkg"])
-        text = call_tool(server, "save_tool_spec", {"spec": spec})
+        text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
         assert "Installation failed" in text
-        tool = registry.get_tool("tool_bad_deps")
+        tool = registry.get_code("tool_bad_deps")
         assert tool is not None
         assert tool["dependencies"] == ["bogus-pkg"]
 
@@ -351,7 +357,7 @@ class TestSaveToolSpecDependencies:
         """Timeout during install is reported, spec is still saved."""
         mock_run.side_effect = subprocess.TimeoutExpired("uv", 120)
         spec = make_spec("tool_slow_deps", dependencies=["heavy-pkg"])
-        text = call_tool(server, "save_tool_spec", {"spec": spec})
+        text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
         assert "timed out" in text
@@ -359,7 +365,7 @@ class TestSaveToolSpecDependencies:
     def test_no_deps_no_install_message(self, server, registry):
         """When no dependencies are provided, no install message appears."""
         spec = make_spec("tool_no_deps")
-        text = call_tool(server, "save_tool_spec", {"spec": spec})
+        text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
         assert "Dependency" not in text
@@ -369,9 +375,9 @@ class TestSaveToolSpecDependencies:
         """Dependencies are stored in the skill file frontmatter."""
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         spec = make_spec("dep_tool", dependencies=["requests>=2.28"])
-        call_tool(server, "save_tool_spec", {"spec": spec})
+        call_tool(server, "save_code_spec", {"spec": spec})
 
-        tool = registry.get_tool("dep_tool")
+        tool = registry.get_code("dep_tool")
         assert tool["dependencies"] == ["requests>=2.28"]
 
     @patch("dsagt.mcp.registry_tools.subprocess.run")
@@ -379,7 +385,7 @@ class TestSaveToolSpecDependencies:
         """FileNotFoundError from missing uv is reported gracefully."""
         mock_run.side_effect = FileNotFoundError("uv")
         spec = make_spec("tool_no_uv", dependencies=["pandas"])
-        text = call_tool(server, "save_tool_spec", {"spec": spec})
+        text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
         assert "'uv' command not found" in text
@@ -394,7 +400,7 @@ class TestInstallDependencies:
 
     @patch("dsagt.mcp.registry_tools.subprocess.run")
     def test_install_all(self, mock_run, tmp_path):
-        """install_dependencies with no tool_name installs all unique deps."""
+        """install_dependencies with no code_name installs all unique deps."""
         server, reg = _make_server(
             tmp_path,
             tools=[
@@ -422,7 +428,7 @@ class TestInstallDependencies:
 
     @patch("dsagt.mcp.registry_tools.subprocess.run")
     def test_install_single_tool(self, mock_run, tmp_path):
-        """install_dependencies with tool_name targets only that tool."""
+        """install_dependencies with code_name targets only that tool."""
         server, reg = _make_server(
             tmp_path,
             tools=[
@@ -432,7 +438,7 @@ class TestInstallDependencies:
         )
 
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-        text = call_tool(server, "install_dependencies", {"tool_name": "tool_b"})
+        text = call_tool(server, "install_dependencies", {"code_name": "tool_b"})
 
         cmd = mock_run.call_args[0][0]
         assert cmd == ["uv", "pip", "install", "--python", sys.executable, "scipy"]
@@ -468,7 +474,7 @@ def _make_server_with_kb(tmp_path, tools=None):
     source_dir = tmp_path / "source_skills"
     source_dir.mkdir()
     runtime_dir = tmp_path / "runtime"
-    project_tools_dir = runtime_dir / "tools"
+    project_tools_dir = runtime_dir / "codes"
     project_tools_dir.mkdir(parents=True, exist_ok=True)
     for spec in tools or []:
         _write_tool(project_tools_dir, spec)
@@ -477,7 +483,7 @@ def _make_server_with_kb(tmp_path, tools=None):
         index_dir=tmp_path / "kb_index",
         default_embedder="local",
     )
-    reg = ToolRegistry(
+    reg = CodeRegistry(
         source_tools_dir=str(source_dir),
         runtime_dir=str(runtime_dir),
         kb=kb,
@@ -497,7 +503,7 @@ class TestToolIndexing:
 
         call_tool(
             server,
-            "save_tool_spec",
+            "save_code_spec",
             {
                 "spec": make_spec(
                     name="csv_filter",
@@ -510,27 +516,12 @@ class TestToolIndexing:
         assert len(results) > 0
         assert any("csv_filter" in r["chunk"].get("text", "") for r in results)
 
-    def test_search_registry_by_name(self, tmp_path):
-        """Exact tool_name lookup returns the tool."""
-        server, reg, kb = _make_server_with_kb(tmp_path)
-        call_tool(server, "save_tool_spec", {"spec": make_spec(name="fastp")})
-
-        text = call_tool(server, "search_registry", {"tool_name": "fastp"})
-        assert "fastp" in text
-
-    def test_search_registry_by_name_not_found(self, tmp_path):
-        """Exact lookup for nonexistent tool returns not found."""
-        server, reg, kb = _make_server_with_kb(tmp_path)
-
-        text = call_tool(server, "search_registry", {"tool_name": "nonexistent"})
-        assert "No tool" in text
-
     def test_search_registry_semantic(self, tmp_path):
         """Semantic search finds tools by description similarity."""
         server, reg, kb = _make_server_with_kb(tmp_path)
         call_tool(
             server,
-            "save_tool_spec",
+            "save_code_spec",
             {
                 "spec": make_spec(
                     name="csv_filter",
@@ -550,11 +541,11 @@ class TestToolIndexing:
 
         spec_genomics = make_spec(name="fastp", description="FASTQ preprocessor")
         spec_genomics["tags"] = ["genomics", "data_processing"]
-        call_tool(server, "save_tool_spec", {"spec": spec_genomics})
+        call_tool(server, "save_code_spec", {"spec": spec_genomics})
 
         spec_other = make_spec(name="csvtool", description="CSV processor")
         spec_other["tags"] = ["data_processing"]
-        call_tool(server, "save_tool_spec", {"spec": spec_other})
+        call_tool(server, "save_code_spec", {"spec": spec_other})
 
         text = call_tool(
             server, "search_registry", {"query": "tool", "tag": "genomics"}
@@ -579,24 +570,3 @@ class TestToolIndexing:
 
         results = kb.search("registered", collection=TOOL_REGISTRY_COLLECTION)
         assert len(results) > 0
-
-    def test_no_kb_query_search_returns_explicit_error(self, tmp_path):
-        """Without a configured KB, query-based search MUST NOT silently
-        fall back to substring matching.  It must return an explicit
-        error so the user knows the KB is missing.
-
-        Regression test for the deletion of the string-matching fallback
-        in search_registry.  The old fallback hid embedding/KB failures
-        and produced dramatically worse search results without telling
-        anyone.
-        """
-        server, reg = _make_server(
-            tmp_path,
-            tools=[
-                make_spec(name="csv_filter", description="Filter CSV rows"),
-            ],
-        )
-
-        text = call_tool(server, "search_registry", {"query": "csv"})
-        assert "csv_filter" not in text  # the substring match must NOT happen
-        assert "knowledge base" in text.lower()

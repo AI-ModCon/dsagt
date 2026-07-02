@@ -1,8 +1,8 @@
 """
-dsagt-run: Tool execution wrapper for provenance capture.
+dsagt-run: registered-code execution wrapper for provenance capture.
 
 Usage:
-    dsagt-run --tool fastp -- fastp -q 20 -l 50 --in1 reads.fq.gz
+    dsagt-run --code fastp -- fastp -q 20 -l 50 --in1 reads.fq.gz
 """
 
 import argparse
@@ -14,10 +14,10 @@ from dsagt.provenance import _resolve_records_dir, _parse_file_list, run_and_rec
 def _make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dsagt-run",
-        description="Wrap a tool command and capture execution provenance.",
+        description="Wrap a code command and capture execution provenance.",
     )
     parser.add_argument(
-        "--tool", required=True, help="Name of the tool being executed."
+        "--code", required=True, help="Name of the code being executed."
     )
     parser.add_argument(
         "--session",
@@ -68,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     records_dir = _resolve_records_dir(args.records_dir)
 
     return run_and_record(
-        tool_name=args.tool,
+        code_name=args.code,
         command=command,
         records_dir=records_dir,
         session_id=args.session,

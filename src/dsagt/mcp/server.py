@@ -50,7 +50,8 @@ from mcp.server.lowlevel import Server, NotificationOptions  # noqa: E402
 from mcp.server.models import InitializationOptions  # noqa: E402
 
 from dsagt.knowledge import KnowledgeBase  # noqa: E402
-from dsagt.registry import SkillRegistry, ToolRegistry  # noqa: E402
+from dsagt.observability import open_span  # noqa: E402
+from dsagt.registry import SkillRegistry, CodeRegistry  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def build_dispatch_server(name: str, tools, handlers) -> Server:
+def build_dispatch_server(
+    name: str, tools, handlers, tool_category: dict[str, str] | None = None
+) -> Server:
     """Wrap a ``(tools, handlers)`` pair in a configured MCP ``Server``.
 
     One dispatch contract for every concern module: catch + wrap errors, then
@@ -70,7 +73,16 @@ def build_dispatch_server(name: str, tools, handlers) -> Server:
     per-server behavior (registry handlers returned ``str`` and never raised;
     knowledge handlers returned ``dict`` and raised ``ValueError`` on bad
     input), so it is behavior-preserving for both.
+
+    ``tool_category`` maps tool name → concern (``memory`` / ``skill`` /
+    ``knowledge`` / ``registry``).  Each call opens one categorization-root span
+    (named for the tool) tagged ``dsagt.source=<category>``; the subsystem spans
+    the handler opens (``kb.*`` / ``registry.*``) nest under it — and inherit the
+    category, so the source reflects the tool the agent called, not whichever
+    subsystem did the work.  Tracing no-ops outside a project, so this is inert
+    in the single-concern test servers / one-shot tools.
     """
+    tool_category = tool_category or {}
     server = Server(name)
 
     @server.list_tools()
@@ -80,13 +92,14 @@ def build_dispatch_server(name: str, tools, handlers) -> Server:
     @server.call_tool()
     async def call_tool(tool_name: str, arguments: dict) -> list[types.TextContent]:
         handler = handlers[tool_name]  # KeyError = bug in list_tools schema
-        try:
-            result = await handler(arguments)
-        except ValueError as e:
-            result = {"status": "error", "error": str(e)}
-        except Exception as e:
-            logger.exception("Unexpected error in tool '%s'", tool_name)
-            result = {"status": "error", "error": f"Unexpected error: {e}"}
+        with open_span(tool_name, source=tool_category.get(tool_name)):
+            try:
+                result = await handler(arguments)
+            except ValueError as e:
+                result = {"status": "error", "error": str(e)}
+            except Exception as e:
+                logger.exception("Unexpected error in tool '%s'", tool_name)
+                result = {"status": "error", "error": f"Unexpected error: {e}"}
         text = (
             result
             if isinstance(result, str)
@@ -100,14 +113,20 @@ def build_dispatch_server(name: str, tools, handlers) -> Server:
 HEARTBEAT_INTERVAL_S = 45.0
 
 
-async def _heartbeat(collector, tool_indexer, interval: float) -> None:
+async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> None:
     """Periodically run the trace collector + tool-use indexer on wall-clock time.
 
     Runs regardless of tool traffic, so a quiet session (the agent thinking,
     editing with its own tools, plain chat) is still captured.  Both block on
     disk (+ MLflow / embedding), so they run in a worker thread to keep handlers
     responsive; a failure is logged, never fatal.
+
+    It also records the live session's trace-source token into ``state.yaml``
+    once resolved, so the *next* session's startup catch-up can pin this exact
+    session even if this one is killed ungracefully (the deferred final-turn
+    flush never runs).  Uniform across agents — JSONL or SQLite.
     """
+    recorded = False
     while True:
         await asyncio.sleep(interval)
         if collector is not None:
@@ -117,6 +136,16 @@ async def _heartbeat(collector, tool_indexer, interval: float) -> None:
                     logger.info("Trace heartbeat: logged %d trace(s)", n)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Trace heartbeat collect failed: %s", e)
+            if not recorded:
+                try:
+                    source = collector.active_source()
+                    if source is not None:
+                        from dsagt.session import record_trace_source
+
+                        record_trace_source(project_dir, source)
+                        recorded = True
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Could not record trace source: %s", e)
         if tool_indexer is not None:
             try:
                 n = await asyncio.to_thread(tool_indexer.tick)
@@ -126,48 +155,15 @@ async def _heartbeat(collector, tool_indexer, interval: float) -> None:
                 logger.warning("Tool-use heartbeat tick failed: %s", e)
 
 
-def _episodic_consumers(config, kb, project_dir, session_id):
-    """Build the episodic-memory consumer list from config (empty when off).
-
-    Episodic memory is a compute/storage opt-in (``episodic.enabled``); the
-    Tier-1 ``Judge`` is attached only when a backend is configured, otherwise
-    the consumer runs Tier-0 (mechanical, no LLM).  Best-effort: a build
-    failure leaves the collector with just the MLflow logger.
-    """
-    epi = config.get("episodic", {}) or {}
-    if not epi.get("enabled"):
-        return []
-    try:
-        from dsagt.memory import MemoryExtractor
-
-        judge = None
-        jcfg = epi.get("judge", {}) or {}
-        if jcfg.get("backend"):
-            from dsagt.judge import Judge
-
-            judge = Judge.create(jcfg["backend"], model=jcfg.get("model") or None)
-        return [
-            MemoryExtractor(
-                kb,
-                runtime_dir=str(project_dir),
-                session_id=session_id or "",
-                tags=epi.get("domain_tags") or None,
-                judge=judge,
-                outlier_sensitivity=float(epi.get("outlier_sensitivity", 0.0) or 0.0),
-            )
-        ]
-    except Exception as e:  # noqa: BLE001 — memory is best-effort, never fatal
-        logger.warning("Could not build episodic-memory consumer: %s", e)
-        return []
-
-
 async def _run_stdio(
-    server: Server, name: str, collector=None, tool_indexer=None
+    server: Server, name: str, collector=None, tool_indexer=None, project_dir=None
 ) -> None:
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         hb = (
             asyncio.create_task(
-                _heartbeat(collector, tool_indexer, HEARTBEAT_INTERVAL_S)
+                _heartbeat(
+                    collector, tool_indexer, HEARTBEAT_INTERVAL_S, project_dir
+                )
             )
             if (collector is not None or tool_indexer is not None)
             else None
@@ -193,9 +189,12 @@ async def _run_stdio(
                 except asyncio.CancelledError:
                     pass
                 # Best-effort end-of-session flush of the deferred final turn +
-                # any unindexed tool-use.  Non-load-bearing: if killed, the next
-                # session's startup catch-up re-reads the tail (both ack-sets
-                # make it idempotent).
+                # any unindexed tool-use — covers the graceful-exit case.  If
+                # this is killed before it runs, the next session's startup
+                # catch-up re-collects the previous session's transcript
+                # (session.catch_up_extraction → _catch_up_traces, pinned to the
+                # recorded transcript path); session-qualified acks make both
+                # paths idempotent.  Tool-use likewise re-indexes via its ack set.
                 if collector is not None:
                     try:
                         await asyncio.to_thread(collector.collect, include_last=True)
@@ -214,7 +213,7 @@ async def _run_stdio(
 
 
 def create_dsagt_server(
-    registry: ToolRegistry,
+    registry: CodeRegistry,
     kb: KnowledgeBase | None,
     skill_registry: SkillRegistry | None,
     runtime_dir: str | Path | None = None,
@@ -232,16 +231,19 @@ def create_dsagt_server(
     from dsagt.mcp.registry_tools import _registry_tools_and_handlers
     from dsagt.mcp.skill_tools import _skill_tools_and_handlers
 
+    # (category, group) — the category is the dsagt.source bucket stamped on
+    # every trace rooted at one of that group's tools.
     groups = [
-        _registry_tools_and_handlers(registry, kb),
-        _knowledge_tools_and_handlers(kb),
-        _memory_tools_and_handlers(kb, runtime_dir),
-        _skill_tools_and_handlers(skill_registry, kb, runtime_dir),
+        ("registry", _registry_tools_and_handlers(registry, kb)),
+        ("knowledge", _knowledge_tools_and_handlers(kb)),
+        ("memory", _memory_tools_and_handlers(kb, runtime_dir)),
+        ("skill", _skill_tools_and_handlers(skill_registry, kb, runtime_dir)),
     ]
 
     tools: list[types.Tool] = []
     handlers: dict = {}
-    for g_tools, g_handlers in groups:
+    tool_category: dict[str, str] = {}
+    for category, (g_tools, g_handlers) in groups:
         overlap = set(handlers) & set(g_handlers)
         if overlap:
             raise RuntimeError(
@@ -249,8 +251,10 @@ def create_dsagt_server(
             )
         tools += g_tools
         handlers.update(g_handlers)
+        for tool_name in g_handlers:
+            tool_category[tool_name] = category
 
-    return build_dispatch_server("dsagt", tools, handlers)
+    return build_dispatch_server("dsagt", tools, handlers, tool_category)
 
 
 def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
@@ -429,9 +433,9 @@ def main():
     # Bundled tools are pre-embedded in the shared ~/dsagt-projects/kb_index/
     # by ``dsagt init`` (shared cache, one-time per machine) and
     # copied into the project's kb_index by ``setup_runtime_kb`` above.  No
-    # bundled embedding work happens here; save_tool_spec incurs a single
+    # bundled embedding work happens here; save_code_spec incurs a single
     # embed at save time.
-    registry = ToolRegistry(
+    registry = CodeRegistry(
         source_tools_dir=None,
         runtime_dir=str(project_dir),
         kb=kb,
@@ -451,6 +455,7 @@ def main():
     # Best-effort — a collector that can't be built never blocks the server.
     collector = None
     try:
+        from dsagt.memory import episodic_consumers
         from dsagt.observability import resolve_tracking_uri
         from dsagt.traces import make_trace_collector
 
@@ -462,7 +467,7 @@ def main():
             config.get("project", ""),
             session_id or "",
             resolve_tracking_uri(resolve_cfg),
-            extra_consumers=_episodic_consumers(config, kb, project_dir, session_id),
+            extra_consumers=episodic_consumers(config, kb, project_dir, session_id),
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("Could not start trace heartbeat: %s", e)
@@ -472,14 +477,16 @@ def main():
     # dependency — it reads trace_archive/, not the transcript).
     tool_indexer = None
     try:
-        from dsagt.provenance import ToolUseIndexer
+        from dsagt.provenance import CodeUseIndexer
 
-        tool_indexer = ToolUseIndexer(kb, project_dir)
+        tool_indexer = CodeUseIndexer(kb, project_dir)
     except Exception as e:  # noqa: BLE001
         logger.warning("Could not start tool-use indexer: %s", e)
 
     try:
-        asyncio.run(_run_stdio(server, "dsagt", collector, tool_indexer))
+        asyncio.run(
+            _run_stdio(server, "dsagt", collector, tool_indexer, project_dir)
+        )
     finally:
         kb.close()
 

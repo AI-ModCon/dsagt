@@ -18,21 +18,15 @@ intercepting its LLM traffic — and ships episodic memory end to end.
   supported agent (claude, codex, goose, opencode, cline), with no proxy, no
   OTel routing, and no credentials. DSAgt's own `kb.*` / `tool.execute` /
   registry spans flow to the same store.
-- **Episodic memory (opt-in).** `dsagt init --episodic` (with optional
-  `--domain-tags "a,b"`) turns on automatic session memory: the heartbeat
-  distills each completed turn into a few tagged, ≤1-sentence facts in the
-  per-project `session_memory` collection, retrievable via
-  `kb_search` / `kb_get_memories`. Two tiers — **Tier-1** uses a small **local**
-  LLM judge (`Qwen2.5-1.5B`, grammar-constrained JSON; no API key, ~1 GB GGUF
-  downloaded on first use), **Tier-0** is a mechanical chunk+tag+embed fallback
-  used automatically if the judge fails, so a turn is never lost.
+- **Episodic memory (opt-in).** `dsagt init --episodic` turns on automatic
+  session memory: the heartbeat mechanically chunks, keyword-tags (against a
+  closed "AI-data-ready" taxonomy), and embeds each completed turn into the
+  per-project `session_memory` collection — no LLM, no credentials —
+  retrievable via `kb_search` / `kb_get_memories`.
 - **Recency-weighted episodic retrieval** (`episodic.recency_half_life_days`,
-  default 14): a newer fact edges out a stale one as a bounded boost, so a
-  corrected fact wins without contradiction detection while durable old facts
-  keep their relevance.
-- `llama-cpp-python` as a core dependency for the local judge, pinned and
-  installed from a prebuilt CPU wheel index so a plain `uv sync` never compiles
-  llama.cpp (GPU on CUDA HPC is an opt-in reinstall).
+  default 14): a newer turn edges out a stale one as a bounded boost, so a more
+  recent turn wins without contradiction detection while durable old turns keep
+  their relevance.
 
 ### Changed
 - **Tool-use indexing is now incremental.** `dsagt-run` execution records are
@@ -50,6 +44,17 @@ intercepting its LLM traffic — and ships episodic memory end to end.
 ### Removed
 - Dead `provenance.index_execution_record` (the orphaned single-record path,
   superseded by the heartbeat's batched, idempotent indexer).
+- **Episodic LLM-judge distillation layer** (`judge.py`: `Judge` / `LocalJudge`
+  / `APIJudge` + `llama-cpp-python`) and the **outlier-suggestion** feature
+  (`CategoryCentroids` / `SuggestionQueue` + the `kb_get_suggestions` /
+  `kb_dismiss_suggestion` MCP tools, 23 → 21 tools). Episodic memory keeps only
+  the mechanical capture path so a Tier-0 baseline can be measured before the
+  judge's runtime/dependency cost is justified; the design notes and parked code
+  live in `design-notes/judge.md` and `scratch/`.
+- `dsagt init` no longer prompts for an LLM judge or solicits a per-project
+  memory taxonomy; the `--domain-tags` flag and the `episodic.judge` /
+  `episodic.domain_tags` / `episodic.outlier_sensitivity` config keys are gone.
+  The stock taxonomy is the fixed tag set.
 
 ## [0.2.0] - 2026-06-24
 

@@ -2,7 +2,7 @@
 
 **D**ata**S**mith **Ag**en**t** — AI-assisted data pipeline builder.
 
-DSAgt connects an MCP-compatible AI coding agent to tool registration, a semantic knowledge base, execution provenance, and observability infrastructure. It provides data-pipeline scaffolding around your existing agent CLI or VS Code extension (Claude Code, Goose, Codex, and others).
+DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, execution provenance, and observability infrastructure. It provides data-pipeline scaffolding around your existing agent CLI or VS Code extension (Claude Code, Goose, Codex, and others).
 
 ## Supported Agents
 
@@ -42,13 +42,14 @@ source .venv/bin/activate
 
 ## Key Capabilities
 
-| Layer | What it does |
+| Capability | What it does |
 |-------|-------------|
-| **Tool Registry** | Register CLI tools as markdown specs; the agent discovers and runs them via `search_registry` |
+| **Code Registry** | Register CLI codes as markdown specs; the agent discovers and runs them via `search_registry` |
 | **Knowledge Base** | Hybrid semantic + keyword (BM25) search over indexed ChromaDB collections |
-| **Provenance** | `dsagt-run` wrapper records every tool execution to `trace_archive/`; `reconstruct_pipeline` renders it as a runnable script |
+| **Skills Discovery** | Search external GitHub skill catalogs and install workflow skills on demand via `search_skills` / `install_skill`, without flooding the agent's context |
+| **Provenance** | `dsagt-run` wrapper records every code execution to `trace_archive/`; `reconstruct_pipeline` renders it as a runnable script |
 | **Explicit Memory** | User-confirmed facts persisted to YAML and the knowledge base |
-| **Episodic Memory** | Opt-in: the MCP server distills each session turn into tagged facts via a local LLM judge (recency-weighted retrieval) |
+| **Episodic Memory** | Opt-in: the MCP server mechanically chunks and embeds each session turn into a searchable `session_memory` collection (recency-weighted retrieval) |
 | **Observability** | Serverless MLflow tracing (a per-project SQLite file) — DSAgt's own spans plus agent traces recovered from the on-disk transcript |
 
 See the [Quick Start](quickstart.md) to try all of these in a single session.

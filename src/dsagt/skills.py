@@ -156,7 +156,7 @@ def rank_skills(
 # Catalog data plane — sources, sync/index, lookup/install, SkillsCatalog
 # ===========================================================================
 
-#: Default source enabled out of the box (matches dsagt_config.yaml default).
+#: Default source enabled out of the box (matches .dsagt/config.yaml default).
 DEFAULT_SOURCE = "k-dense-ai"
 
 #: Curated, named skill sources.  ``subdir`` scopes the recursive SKILL.md

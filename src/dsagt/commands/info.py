@@ -11,16 +11,16 @@ command is the triage layer that tells you *where* to look first.
 
 Aggregation reads ``trace_metadata`` for token totals + session id
 (MLflow stamps per-trace token usage as a JSON blob under
-``mlflow.trace.tokenUsage``; the OTLP receiver promotes our
-``session.id`` span attribute to ``mlflow.trace.session``).
+``mlflow.trace.tokenUsage``; the live tracer stamps ``mlflow.trace.session``).
 
-Source bucketing comes from the OTel ``service.name`` resource attribute
-on each trace's root span (set per emitting process by ``init_tracing``
-and the agent's own OTel SDK).  Possible values:
-  - ``claude-code`` / ``goose`` / ``cline`` / ``codex`` —
-    agent-emitted LLM-call traces (the bulk of traffic)
-  - ``dsagt-server`` — merged MCP server spans (``kb.*``, ``registry.*``)
-  - ``dsagt-run`` — tool-execute spans
+Source bucketing reads the metadata DSAGT itself stamps on each trace — no
+span inspection:
+  - ``memory`` / ``skill`` / ``knowledge`` / ``registry`` — internal debug
+    traces, from the ``dsagt.source`` tag (the MCP tool category the agent
+    invoked, set on the trace root by the dispatch shell).
+  - ``execution`` — dsagt-run tool-execute traces (``dsagt.source``).
+  - ``claude`` / ``goose`` / ``cline`` / ``codex`` — agent traces, from the
+    ``dsagt.agent`` metadata stamped by ``MLflowSink`` (the bulk of traffic).
 """
 
 from __future__ import annotations
@@ -225,102 +225,23 @@ def _fmt_count(n: int) -> str:
     return f"{n / 1_000_000:.1f}M"
 
 
-#: Map root-span name prefix → human-readable source bucket.  Claude's
-#: native OTel emission uses ``claude_code.*``; goose uses ``goose.*`` /
-#: ``dispatch_tool_call``; our internal services use the prefixes their
-#: ``init_tracing`` calls assign.  Used as the canonical bucket because
-#: MLflow's OTLP receiver doesn't surface the ``service.name`` resource
-#: attribute on the span data ``mlflow.search_traces`` returns — the
-#: name-prefix mapping is reliable across MLflow versions and gives the
-#: same answer (which emitting process produced this trace).
-_SPAN_NAME_TO_SOURCE: tuple[tuple[str, str], ...] = (
-    ("claude_code.", "claude"),
-    ("goose.", "goose"),
-    # Goose's Rust runtime emits root spans named after agent/provider
-    # operations (no namespace prefix): ``reply`` (agent turn),
-    # ``complete_with_model`` (provider LLM call), ``dispatch_tool_call``
-    # (tool invocation).  Verified against goose 1.7+ spans in
-    # crates/goose/src/agents/agent.rs and providers/openai.rs.
-    ("dispatch_tool_call", "goose"),
-    ("complete_with_model", "goose"),
-    ("reply", "goose"),
-    ("kb.", "dsagt-server"),
-    ("registry.", "dsagt-server"),
-    ("tool.execute", "dsagt-run"),
-)
+def _row_source_for(tags: dict, metadata: dict) -> str:
+    """Bucket a trace by who emitted it, from the metadata DSAGT itself stamps.
 
-
-def _bucket_from_span_name(name: str | None) -> str | None:
-    if not name:
-        return None
-    for prefix, bucket in _SPAN_NAME_TO_SOURCE:
-        if name.startswith(prefix):
-            return bucket
-    return None
-
-
-def _source_from_spans(spans) -> str | None:
-    """Bucket a trace by who emitted it.
-
-    Tries ``service.name`` on span attributes / resource first (works for
-    dsagt-internal services that stamp it explicitly), then falls back to
-    mapping the root span's NAME prefix to a source bucket — necessary for
-    native claude / goose OTel because MLflow's OTLP receiver drops the
-    ``service.name`` resource attribute in the data ``mlflow.search_traces``
-    exposes.
-
-    ``mlflow.search_traces`` returns a ``spans`` column whose entries
-    vary in shape across MLflow versions (Span object, dict, or pandas
-    Series of dicts); we defend against both attribute and item access.
+    No span inspection: internal debug traces carry an explicit ``dsagt.source``
+    tag (the MCP tool category — ``memory`` / ``skill`` / ``knowledge`` /
+    ``registry`` — or ``execution`` for dsagt-run), set on the trace root by the
+    MCP dispatch shell / ``code_execute_span``.  Agent traces carry ``dsagt.agent``
+    metadata, stamped by ``MLflowSink``.  Neither overlaps, so the bucket is a
+    direct lookup; anything else (a stray trace with neither) is ``"unknown"``.
     """
-    if spans is None:
-        return None
-    try:
-        for span in spans:
-            attrs = getattr(span, "attributes", None)
-            if attrs is None and isinstance(span, dict):
-                attrs = span.get("attributes")
-            if attrs and "service.name" in attrs:
-                return attrs["service.name"]
-            resource = getattr(span, "resource", None) or (
-                span.get("resource") if isinstance(span, dict) else None
-            )
-            if resource:
-                rattrs = getattr(resource, "attributes", None) or (
-                    resource.get("attributes") if isinstance(resource, dict) else None
-                )
-                if rattrs and "service.name" in rattrs:
-                    return rattrs["service.name"]
-        # No service.name anywhere — fall back to span-name-prefix
-        # bucketing on the root span (the one without a parent) first.
-        for span in spans:
-            parent = (
-                getattr(span, "parent_id", None)
-                or (span.get("parent_id") if isinstance(span, dict) else None)
-                or getattr(span, "parent_span_id", None)
-                or (span.get("parent_span_id") if isinstance(span, dict) else None)
-            )
-            if parent:
-                continue
-            name = getattr(span, "name", None) or (
-                span.get("name") if isinstance(span, dict) else None
-            )
-            bucket = _bucket_from_span_name(name)
-            if bucket:
-                return bucket
-        # No root present (rare — some emitters produce spans whose
-        # parent_span_id points outside their own trace).  Try any span
-        # whose name we recognize.
-        for span in spans:
-            name = getattr(span, "name", None) or (
-                span.get("name") if isinstance(span, dict) else None
-            )
-            bucket = _bucket_from_span_name(name)
-            if bucket:
-                return bucket
-    except (TypeError, AttributeError):
-        return None
-    return None
+    src = (tags or {}).get("dsagt.source")
+    if src:
+        return src
+    agent = (metadata or {}).get("dsagt.agent")
+    if agent and agent != "-":
+        return agent
+    return "unknown"
 
 
 def _is_error(state) -> bool:
@@ -510,21 +431,22 @@ def _report(project_name: str, config: dict, traces) -> dict:
     # column once up front keeps pandas from re-parsing the dict on every
     # groupby.
     md = traces["trace_metadata"].apply(lambda m: m or {})
+    tags = (
+        traces["tags"].apply(lambda t: t or {})
+        if "tags" in traces.columns
+        else md.apply(lambda _: {})
+    )
     session = md.apply(lambda m: m.get("mlflow.trace.session") or "(no-session)")
     agent = md.apply(lambda m: m.get("dsagt.agent") or "-")
     errored = traces["state"].apply(_is_error)
 
-    # Source + tokens both walk the spans column.  Fall back to span data
-    # because MLflow's OTLP receiver doesn't surface ``service.name`` (so
-    # metadata-only bucketing returns "unknown" for everything) and not all
-    # traces carry ``mlflow.trace.tokenUsage`` (so token totals would be
-    # zero without this fallback).
+    # Source comes from the metadata DSAGT stamps (dsagt.source tag /
+    # dsagt.agent), no span inspection.  Tokens still walk the spans column as
+    # a fallback because not all traces carry ``mlflow.trace.tokenUsage``.
     spans_col = traces["spans"] if "spans" in traces.columns else None
 
     def _row_source(idx: int) -> str:
-        if spans_col is not None:
-            return _source_from_spans(spans_col.iloc[idx]) or "unknown"
-        return "unknown"
+        return _row_source_for(tags.iloc[idx], md.iloc[idx])
 
     def _row_tokens(idx: int) -> tuple[int, int]:
         # Trace metadata first (when tokenUsage is present), then aggregate

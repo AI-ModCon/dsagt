@@ -50,26 +50,6 @@ def server(mock_kb):
 
 class TestSearchFilterThreading:
 
-    def test_no_filters_no_where(self, server, mock_kb):
-        """Search without filter params passes where=None to kb.search."""
-        call_tool(
-            server,
-            "kb_search",
-            {
-                "query": "test",
-                "collection": "docs",
-            },
-        )
-
-        mock_kb.search.assert_called_once_with(
-            query="test",
-            collection="docs",
-            collections=None,
-            top_k=5,
-            rerank=None,
-            where=None,
-        )
-
     def test_tool_name_filter_passed(self, server, mock_kb):
         """tool_name filter is threaded through as where clause."""
         call_tool(
@@ -89,6 +69,7 @@ class TestSearchFilterThreading:
             top_k=5,
             rerank=None,
             where={"tool_name": "fastp"},
+            where_document=None,
         )
 
     def test_session_filter_passed(self, server, mock_kb):
@@ -110,6 +91,7 @@ class TestSearchFilterThreading:
             top_k=5,
             rerank=None,
             where={"session_id": "s3"},
+            where_document=None,
         )
 
     def test_multiple_filters_combined(self, server, mock_kb):
@@ -125,10 +107,12 @@ class TestSearchFilterThreading:
             },
         )
 
-        call_kwargs = mock_kb.search.call_args[1]
-        assert "where" in call_kwargs
-        where = call_kwargs["where"]
-        assert "$and" in where
+        # The handler emits one single-key dict per filter, in the fixed
+        # source key order (category, session_id, source_type, tool_name) —
+        # so session_id precedes tool_name. Pin the exact payload: a dropped
+        # or duplicated filter must fail here.
+        where = mock_kb.search.call_args[1]["where"]
+        assert where == {"$and": [{"session_id": "s1"}, {"tool_name": "fastp"}]}
 
     def test_return_code_filter_passed(self, server, mock_kb):
         """return_code filter is threaded as integer."""
@@ -149,6 +133,7 @@ class TestSearchFilterThreading:
             top_k=5,
             rerank=None,
             where={"return_code": 1},
+            where_document=None,
         )
 
     def test_filters_with_multi_collection(self, server, mock_kb):
@@ -175,7 +160,47 @@ class TestSearchFilterThreading:
             top_k=5,
             rerank=None,
             where={"tool_name": "fastp"},
+            where_document=None,
         )
+
+
+class TestDocumentFilterThreading:
+    """The 'regex' / 'contains' args build a where_document passed to kb.search."""
+
+    def test_regex_threaded_as_where_document(self, server, mock_kb):
+        call_tool(
+            server,
+            "kb_search",
+            {"query": "q", "collection": "session_memory", "regex": "(?i)parser"},
+        )
+        assert mock_kb.search.call_args[1]["where_document"] == {"$regex": "(?i)parser"}
+
+    def test_contains_threaded_as_where_document(self, server, mock_kb):
+        call_tool(
+            server,
+            "kb_search",
+            {"query": "q", "collection": "session_memory", "contains": "Q30"},
+        )
+        assert mock_kb.search.call_args[1]["where_document"] == {"$contains": "Q30"}
+
+    def test_regex_and_contains_combined_with_and(self, server, mock_kb):
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "q",
+                "collection": "session_memory",
+                "regex": "fastp",
+                "contains": "Q30",
+            },
+        )
+        assert mock_kb.search.call_args[1]["where_document"] == {
+            "$and": [{"$regex": "fastp"}, {"$contains": "Q30"}]
+        }
+
+    def test_no_document_filter_is_none(self, server, mock_kb):
+        call_tool(server, "kb_search", {"query": "q", "collection": "session_memory"})
+        assert mock_kb.search.call_args[1]["where_document"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +303,8 @@ class TestSearchSchemaFilters:
             "tool_name",
             "source_type",
             "return_code",
+            "regex",
+            "contains",
         ):
             assert param in props, f"Missing filter param: {param}"
 

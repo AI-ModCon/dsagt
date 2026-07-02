@@ -11,7 +11,7 @@ BYO external vector stores are deferred: ``kb_add_vector_db`` is intentionally
 the KB's store list, not a tool the agent calls).
 
 Server configuration (chunk_size, rerank) is read from the project's
-dsagt_config.yaml.  Embedding credentials flow through env vars (EMBEDDING_API_KEY,
+.dsagt/config.yaml.  Embedding credentials flow through env vars (EMBEDDING_API_KEY,
 EMBEDDING_BASE_URL, EMBEDDING_MODEL) set by ``dsagt start``.
 
 These definitions + handlers run inside the merged ``dsagt-server`` (see
@@ -131,7 +131,7 @@ async def _handle_kb_search(
     # would be invalid, so we only pass where when there are real filters.
     where = {
         key: arguments[key]
-        for key in ("category", "session_id", "source_type", "tool_name")
+        for key in ("category", "session_id", "source_type", "code_name", "tool_name")
         if arguments.get(key) is not None
     }
     return_code = arguments.get("return_code")
@@ -139,6 +139,21 @@ async def _handle_kb_search(
         where["return_code"] = int(return_code)
     if len(where) > 1:
         where = {"$and": [{k: v} for k, v in where.items()]}
+
+    # Document-content filter (over the chunk text itself, complementary to the
+    # metadata ``where``).  ``regex`` is the powerful leg — ChromaDB ``$regex``,
+    # with ``(?i)`` for case-insensitive; ``contains`` is a case-sensitive
+    # substring.  Both narrow the candidate pool before vector ranking.
+    doc_filters = []
+    if arguments.get("regex"):
+        doc_filters.append({"$regex": arguments["regex"]})
+    if arguments.get("contains"):
+        doc_filters.append({"$contains": arguments["contains"]})
+    where_document = (
+        doc_filters[0]
+        if len(doc_filters) == 1
+        else {"$and": doc_filters} if doc_filters else None
+    )
 
     # Fan-out + rank-fusion across collections lives in KnowledgeBase.search;
     # the tool just names collection(s).  A single internal collection routes
@@ -152,6 +167,7 @@ async def _handle_kb_search(
             top_k=top_k,
             rerank=rerank,
             where=where or None,
+            where_document=where_document,
         )
     except ValueError as e:
         return {"status": "error", "error": str(e)}
@@ -336,7 +352,7 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
 
     Combined with the other concern modules' tools under one MCP ``Server`` by
     :func:`dsagt.mcp.server.create_dsagt_server`.  The rerank default is on
-    ``kb.default_rerank`` (set from ``knowledge.rerank`` in dsagt_config.yaml).
+    ``kb.default_rerank`` (set from ``knowledge.rerank`` in .dsagt/config.yaml).
     """
     job_tracker = _JobTracker()
 
@@ -363,7 +379,10 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
             description=(
                 "Search knowledge base collections using semantic similarity. "
                 "Returns relevant chunks with source metadata. "
-                "Supports multi-collection search."
+                "Supports multi-collection search. Narrow results with metadata "
+                "filters (session_id, code_name, tool_name, source_type, ...) and/or a "
+                "document-text filter ('regex' / 'contains') over the chunk text "
+                "itself — useful for pulling specific session-memory context."
             ),
             inputSchema={
                 "type": "object",
@@ -399,9 +418,13 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                         "type": "string",
                         "description": "Filter by session ID (ChromaDB collections only)",
                     },
+                    "code_name": {
+                        "type": "string",
+                        "description": "Filter by registered-code name — code execution records (ChromaDB collections only)",
+                    },
                     "tool_name": {
                         "type": "string",
-                        "description": "Filter by tool name (ChromaDB collections only)",
+                        "description": "Filter by agent tool-call name — session memory (ChromaDB collections only)",
                     },
                     "source_type": {
                         "type": "string",
@@ -410,6 +433,21 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                     "return_code": {
                         "type": "integer",
                         "description": "Filter by tool exit code (ChromaDB collections only)",
+                    },
+                    "regex": {
+                        "type": "string",
+                        "description": (
+                            "Require chunk text to match this regular expression "
+                            "(ChromaDB $regex). Use (?i) for case-insensitive, "
+                            "e.g. '(?i)parser'. Narrows before semantic ranking."
+                        ),
+                    },
+                    "contains": {
+                        "type": "string",
+                        "description": (
+                            "Require chunk text to contain this case-sensitive "
+                            "substring (ChromaDB $contains)."
+                        ),
                     },
                 },
                 "required": ["query"],
@@ -498,4 +536,6 @@ def create_knowledge_server(kb: KnowledgeBase):
     :func:`_knowledge_tools_and_handlers` directly instead of this wrapper.
     """
     tools, handlers = _knowledge_tools_and_handlers(kb)
-    return build_dispatch_server("knowledge", tools, handlers)
+    return build_dispatch_server(
+        "knowledge", tools, handlers, {t: "knowledge" for t in handlers}
+    )

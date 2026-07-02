@@ -27,6 +27,6 @@ _os.environ.setdefault("MKL_NUM_THREADS", _default_threads)
 _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 del _os, _default_threads
 
-from dsagt.registry import ToolRegistry
+from dsagt.registry import CodeRegistry
 
-__all__ = ["ToolRegistry", "__version__"]
+__all__ = ["CodeRegistry", "__version__"]

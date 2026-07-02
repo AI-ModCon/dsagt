@@ -33,12 +33,10 @@ Codex's ``codex-otel`` Rust crate emits OTel spans/logs/metrics, BUT:
   * Tool *results* go to ``codex.tool_result`` log events with full
     args + output (``session_telemetry.rs:962-1000``).
 
-Conversation history *is* recoverable from
+Conversation history is recovered from
 ``$CODEX_HOME/sessions/rollout-<ts>-<uuid>.jsonl`` (full assistant text
-+ tool calls + responses).  Reading that side-channel into
-``extract_session`` is a TODO — not yet wired.  Until then, memory
-extraction will see only token counts and tool names from Codex
-turns.
++ tool calls + responses) by the trace pipeline's Codex reader/translator
+on the heartbeat — feeding MLflow and episodic memory like every other agent.
 
 Open Codex issues tracking richer OTel: openai/codex#12913,
 #10277, #6153, #16248.

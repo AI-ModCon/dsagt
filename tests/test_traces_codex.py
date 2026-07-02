@@ -209,4 +209,6 @@ def test_end_to_end_through_the_sink(mlflow_sqlite):
     assert len(traces) == 2
     # the tool-bearing turn rendered llm + tool spans under its agent root
     shapes = {len(t.data.spans) for t in traces}
-    assert 5 in shapes  # root + 2 llm + 2 tool
+    # tool-bearing turn: root + 2 llm + 2 tool = 5; second turn: root + 1 llm = 2.
+    # Pin both — `5 in shapes` alone would pass even if turn 2 collapsed.
+    assert shapes == {5, 2}

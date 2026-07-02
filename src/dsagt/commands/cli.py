@@ -145,46 +145,31 @@ def _skills_block_for(source_names: list[str]) -> dict:
     return {"sources": sources}
 
 
-def _parse_domain_tags(raw: str) -> dict[str, str]:
-    """Comma-separated tag names → ``{name: name}`` (self-described closed-set tags).
-
-    Domain tags merge onto the stock taxonomy in :class:`MemoryExtractor`; the
-    name doubles as the description shown to the judge (no separate prompt for
-    descriptions — keeps init to one free-text line per the plan §4).
-    """
-    return {t: t for t in (p.strip() for p in raw.split(",")) if t}
-
-
-def _episodic_block(enabled: bool, domain_tags: dict[str, str]) -> dict | None:
+def _episodic_block(enabled: bool) -> dict | None:
     """The ``episodic`` config block, or ``None`` when the user didn't opt in.
 
-    Enabling defaults the Tier-1 ``local`` judge (LocalJudge distills facts; the
-    first heartbeat downloads ~1GB) — the chosen init default.  ``None`` keeps a
-    disabled project's config minimal (``enabled: false`` is backfilled on read).
+    Enabling captures each completed turn into ``session_memory`` (mechanical
+    chunk + tag + embed).  ``None`` keeps a disabled project's config minimal
+    (``enabled: false`` is backfilled on read).
     """
     if not enabled:
         return None
-    return {
-        "enabled": True,
-        "judge": {"backend": "local", "model": ""},
-        "domain_tags": domain_tags,
-        "outlier_sensitivity": 0.0,
-    }
+    return {"enabled": True}
 
 
 def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None):
     """Resolve the init choices (the 1:1 mirror of the config).
 
     Selection questions: agent platform, packaged KB document *collections*,
-    skill-catalog *sources*, and the episodic-memory opt-in (+ its domain tags).
-    The bundled ``tools`` collection is always provisioned and is NOT a
-    per-project choice.  Project name + folder location are resolved by the
-    caller.  Embedding / chunk_size / rerank are code defaults, not init choices.
+    skill-catalog *sources*, and the episodic-memory opt-in.  The bundled
+    ``tools`` collection is always provisioned and is NOT a per-project choice.
+    Project name + folder location are resolved by the caller.  Embedding /
+    chunk_size / rerank are code defaults, not init choices.
 
-    Interactive: questionary select/checkbox menus + y/N + free-text, pre-filled
-    with the project's current choices on re-init.  Non-interactive (no TTY):
-    drive from ``--include`` / ``--exclude`` / ``--episodic`` / ``--domain-tags``
-    flags — the automation/test path.
+    Interactive: questionary select/checkbox menus + y/N, pre-filled with the
+    project's current choices on re-init.  Non-interactive (no TTY): drive from
+    ``--include`` / ``--exclude`` / ``--episodic`` flags — the automation/test
+    path.
     """
     from dsagt.commands.setup_core_kb import COLLECTIONS, resolve_assets
     from dsagt.skills import KNOWN_SOURCES
@@ -216,23 +201,14 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
             [(s, s, s in cur_srcs) for s in skill_choices],
         )
 
-        # Episodic memory (opt-in): captures session facts into session_memory.
+        # Episodic memory (opt-in): captures session turns into session_memory.
         cur_epi = existing.get("episodic", {}) or {}
         enable_epi = _confirm(
-            "Enable episodic memory? (distills session facts with a local LLM; "
-            "downloads ~1GB on first use)",
+            "Enable episodic memory? (captures session turns into searchable "
+            "memory)",
             default=bool(cur_epi.get("enabled")),
         )
-        domain_tags: dict[str, str] = {}
-        if enable_epi:
-            cur_tags = cur_epi.get("domain_tags") or {}
-            domain_tags = _parse_domain_tags(
-                _prompt(
-                    "Domain-specific memory tags, comma-separated (optional)",
-                    default=", ".join(cur_tags),
-                )
-            )
-        episodic = _episodic_block(enable_epi, domain_tags)
+        episodic = _episodic_block(enable_epi)
     else:
         agent = args.agent or existing.get("agent")
         if not agent:
@@ -244,15 +220,12 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
         # Episodic is flag-driven here (automation); omit --episodic to leave it
         # off.  Re-pass it on re-init — like --include/--exclude, flags are
         # authoritative on the non-interactive path.
-        episodic = _episodic_block(
-            getattr(args, "episodic", False),
-            _parse_domain_tags(getattr(args, "domain_tags", "") or ""),
-        )
+        episodic = _episodic_block(getattr(args, "episodic", False))
 
     return {
         "agent": agent,
         # The bundled ``tools`` collection is always provisioned.
-        "assets": ["tools", *collections, *skill_names],
+        "assets": ["codes", *collections, *skill_names],
         "knowledge": {"collections": collections},
         "skills": _skills_block_for(skill_names),
         "episodic": episodic,
@@ -272,7 +245,7 @@ def _handle_destructive(
     """
     from dsagt.commands.setup_core_kb import asset_collection_name
 
-    protected = {"tool_use", "session_memory"}
+    protected = {"code_use", "session_memory"}
 
     # Agent switch → old platform's files are now stale.
     old_agent = existing.get("agent")
@@ -702,15 +675,8 @@ def main(argv=None):
     p_init.add_argument(
         "--episodic",
         action="store_true",
-        help="Enable episodic memory (Tier-1 local-LLM distillation; downloads "
-        "~1GB on first use).  Off by default.",
-    )
-    p_init.add_argument(
-        "--domain-tags",
-        metavar="TAGS",
-        default="",
-        help="Comma-separated project-specific memory tags, merged onto the "
-        "stock taxonomy (only with --episodic).",
+        help="Enable episodic memory (captures session turns into searchable "
+        "memory).  Off by default.",
     )
 
     p_start = sub.add_parser("start", help="Start a project session")

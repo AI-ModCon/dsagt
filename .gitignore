@@ -151,3 +151,6 @@ cline_mcp.json
 *.bak
 *.swp
 .*.swp
+
+# Local scratch for removed/parked code (not tracked)
+scratch/

@@ -302,12 +302,11 @@ class TestCollectSettings:
         assert s["agent"] == "claude"
         assert s["knowledge"] == {"collections": []}
         assert [src["name"] for src in s["skills"]["sources"]] == ["genesis"]
-        assert s["assets"] == ["tools", "genesis"]  # tools always provisioned
+        assert s["assets"] == ["codes", "genesis"]  # tools always provisioned
         assert s["episodic"] is None  # opt-in, off by default
 
     def test_interactive_episodic_enabled(self):
-        """Enabling episodic at the prompt yields a Tier-1 local-judge block
-        with the free-text domain tags merged in."""
+        """Enabling episodic at the prompt yields the opt-in block."""
         import types
         import questionary
         from unittest.mock import patch
@@ -325,16 +324,10 @@ class TestCollectSettings:
             patch.object(questionary, "select", lambda *a, **k: _Ask("claude")),
             patch.object(questionary, "checkbox", lambda *a, **k: _Ask([])),
             patch.object(cli, "_confirm", lambda *a, **k: True),
-            patch.object(cli, "_prompt", lambda *a, **k: "assembly, variant_calling"),
         ):
             s = cli._collect_settings(args, interactive=True, existing={}, pdir=None)
 
-        assert s["episodic"]["enabled"] is True
-        assert s["episodic"]["judge"]["backend"] == "local"
-        assert s["episodic"]["domain_tags"] == {
-            "assembly": "assembly",
-            "variant_calling": "variant_calling",
-        }
+        assert s["episodic"] == {"enabled": True}
 
     def test_non_interactive_splits_assets(self):
         """No-TTY path splits --include into collections vs skill sources;
@@ -343,34 +336,28 @@ class TestCollectSettings:
         from dsagt.commands import cli
 
         args = types.SimpleNamespace(
-            agent="goose", include=["tools", "nemo_curator", "anthropic"], exclude=None
+            agent="goose", include=["codes", "nemo_curator", "anthropic"], exclude=None
         )
         s = cli._collect_settings(args, interactive=False, existing={}, pdir=None)
         assert s["agent"] == "goose"
         assert s["knowledge"]["collections"] == ["nemo_curator"]
         assert [src["name"] for src in s["skills"]["sources"]] == ["anthropic"]
-        assert s["assets"] == ["tools", "nemo_curator", "anthropic"]
+        assert s["assets"] == ["codes", "nemo_curator", "anthropic"]
         assert s["episodic"] is None
 
     def test_non_interactive_episodic_flag(self):
-        """--episodic + --domain-tags build the Tier-1 block on the no-TTY path."""
+        """--episodic builds the opt-in block on the no-TTY path."""
         import types
         from dsagt.commands import cli
 
         args = types.SimpleNamespace(
             agent="goose",
-            include=["tools"],
+            include=["codes"],
             exclude=None,
             episodic=True,
-            domain_tags="proteomics, qc_metrics",
         )
         s = cli._collect_settings(args, interactive=False, existing={}, pdir=None)
-        assert s["episodic"]["enabled"] is True
-        assert s["episodic"]["judge"]["backend"] == "local"
-        assert s["episodic"]["domain_tags"] == {
-            "proteomics": "proteomics",
-            "qc_metrics": "qc_metrics",
-        }
+        assert s["episodic"] == {"enabled": True}
 
 
 # ---------------------------------------------------------------------------
@@ -389,9 +376,9 @@ class TestInitProject:
         assert (pdir / "skills").is_dir()
         assert (pdir / "kb_index").is_dir()
         assert (pdir / ".dsagt").is_dir()
-        # `tools/` is intentionally NOT created by init_project — ToolRegistry
+        # `tools/` is intentionally NOT created by init_project — CodeRegistry
         # creates it on first server startup so bundled tools get copied in.
-        assert not (pdir / "tools").exists()
+        assert not (pdir / "codes").exists()
         # Serverless: no MLflow store is pre-created; ``mlflow.db`` is
         # written lazily by the MLflow client on first span.
         assert not (pdir / "mlflow.db").exists()
@@ -433,7 +420,7 @@ class TestInitProject:
             init_project("myproj", "goose")
             mock_ensure.assert_called_once()
             requested = mock_ensure.call_args.args[0]
-            assert requested == ["tools", "genesis"]
+            assert requested == ["codes", "genesis"]
 
     def test_reinit_is_idempotent_update(self):
         """``dsagt init`` is re-runnable: a second init on the same project
@@ -450,16 +437,10 @@ class TestInitProject:
     def test_episodic_block_round_trips_through_config(self):
         """init_project writes the opted-in episodic block; load_config reads it
         back.  A project without it backfills ``enabled: False`` from DEFAULTS."""
-        epi = {
-            "enabled": True,
-            "judge": {"backend": "local", "model": ""},
-            "domain_tags": {"assembly": "assembly"},
-            "outlier_sensitivity": 0.0,
-        }
+        epi = {"enabled": True}
         init_project("withmem", "goose", exclude=["all"], episodic=epi)
         cfg = load_config("withmem")
         assert cfg["episodic"]["enabled"] is True
-        assert cfg["episodic"]["domain_tags"] == {"assembly": "assembly"}
 
         init_project("nomem", "goose", exclude=["all"])
         cfg2 = load_config("nomem")
@@ -932,23 +913,6 @@ class TestPreconfiguredCredsWarning:
         # Var names only, never values.
         assert "shell-key" not in msgs
 
-    def test_no_warning_when_project_supplies_creds(self, caplog):
-        from dsagt.agents import agent_env
-
-        cfg = self._config(
-            agent="claude",
-            provider="anthropic",
-            api_key="project-key",
-            base_url="https://api.anthropic.com",
-            model="claude-haiku",
-        )
-
-        with caplog.at_level("WARNING", logger="dsagt.agents"):
-            agent_env(cfg)
-
-        msgs = " ".join(r.getMessage() for r in caplog.records)
-        assert "preconfigured env vars" not in msgs
-
     def test_warns_with_no_shell_either_lists_expected_vars(self, caplog, monkeypatch):
         """When neither project nor shell has creds, surface the var names
         the agent's runtime expects so the user can fix the gap."""
@@ -963,6 +927,9 @@ class TestPreconfiguredCredsWarning:
         msgs = " ".join(r.getMessage() for r in caplog.records)
         assert "fall back to its own auth flow" in msgs
         assert "ANTHROPIC_API_KEY" in msgs
+        # A clean shell must not trigger the preconfigured-creds warning
+        # (the warning keys off shell env only, never the project YAML).
+        assert "preconfigured env vars" not in msgs
 
 
 # ---------------------------------------------------------------------------
@@ -1021,12 +988,7 @@ class TestConfigFlow:
     def test_episodic_written_only_when_enabled(self):
         """An opted-in episodic block is written verbatim; absent otherwise
         (and ``load_config`` backfills ``enabled: false`` for the absent case)."""
-        epi = {
-            "enabled": True,
-            "judge": {"backend": "local", "model": ""},
-            "domain_tags": {"assembly": "assembly"},
-            "outlier_sensitivity": 0.0,
-        }
+        epi = {"enabled": True}
         parsed = yaml.safe_load(default_config_content("t", "claude", episodic=epi))
         assert parsed["episodic"] == epi
         # Omitted when None.

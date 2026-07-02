@@ -206,7 +206,7 @@ class LocalEmbedder(Embedder):
     #: ``bge-base`` variant we used previously, with ~2 nDCG@10 points
     #: lower MTEB retrieval score — a hard-to-notice difference for
     #: typical DSAGT KB sizes (single-digit thousands of chunks).
-    #: Override via ``embedding.model`` in ``dsagt_config.yaml`` (e.g.
+    #: Override via ``embedding.model`` in ``.dsagt/config.yaml`` (e.g.
     #: ``BAAI/bge-large-en-v1.5`` for higher quality at the cost of
     #: ~10× memory and ~5× CPU).
     DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
@@ -522,7 +522,12 @@ class ChromaIndex:
 
     # ChromaDB stores ids internally; we maintain a positional list so that
     # returned integer indices are consistent with the chunk list.
-    def add(self, embeddings: np.ndarray, metadatas: list[dict] | None = None) -> None:
+    def add(
+        self,
+        embeddings: np.ndarray,
+        metadatas: list[dict] | None = None,
+        documents: list[str] | None = None,
+    ) -> None:
         start = len(self._ids)
         new_ids = [str(start + i) for i in range(len(embeddings))]
         self._ids.extend(new_ids)
@@ -540,10 +545,18 @@ class ChromaIndex:
             }
             if metadatas is not None:
                 kwargs["metadatas"] = metadatas[i : i + batch_size]
+            # Store the chunk text as the Chroma *document* too — that's what
+            # ``where_document`` ($contains / $regex) matches against.
+            if documents is not None:
+                kwargs["documents"] = documents[i : i + batch_size]
             self._col.add(**kwargs)
 
     def search(
-        self, query_vec: np.ndarray, k: int, where: dict | None = None
+        self,
+        query_vec: np.ndarray,
+        k: int,
+        where: dict | None = None,
+        where_document: dict | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         k = min(k, len(self._ids))
         if k == 0:
@@ -551,6 +564,8 @@ class ChromaIndex:
         query_kwargs: dict = {"query_embeddings": [query_vec.tolist()], "n_results": k}
         if where is not None:
             query_kwargs["where"] = where
+        if where_document is not None:
+            query_kwargs["where_document"] = where_document
         results = self._col.query(**query_kwargs)
         chroma_ids = results["ids"][0]
         distances = results["distances"][0]  # cosine distance (0=identical)
@@ -843,7 +858,12 @@ class VectorStore(ABC):
 
     @abstractmethod
     def search(
-        self, query: str, collection: str, top_k: int, where: dict | None = None
+        self,
+        query: str,
+        collection: str,
+        top_k: int,
+        where: dict | None = None,
+        where_document: dict | None = None,
     ) -> list[dict]:
         """Single-collection hybrid search → ``[{chunk, score}, ...]``."""
 
@@ -985,7 +1005,7 @@ class ChromaVectorStore(VectorStore):
             existing_chunks = []
 
         try:
-            index.add(embeddings, metadatas=metadatas)
+            index.add(embeddings, metadatas=metadatas, documents=texts)
         except Exception as e:
             hint = self._stale_index_message(collection, e)
             if hint:
@@ -1043,14 +1063,20 @@ class ChromaVectorStore(VectorStore):
     # -- single-collection hybrid search ------------------------------------
 
     def search(
-        self, query: str, collection: str, top_k: int, where: dict | None = None
+        self,
+        query: str,
+        collection: str,
+        top_k: int,
+        where: dict | None = None,
+        where_document: dict | None = None,
     ) -> list[dict]:
         index, chunks = self._load(collection)
         query_emb = self.embed([query])[0]
 
-        # ``where`` (metadata filter) disables the BM25 leg — BM25 has no
-        # metadata-filter equivalent, so a filtered search is dense-only.
-        filtered = where is not None
+        # A ``where`` (metadata) or ``where_document`` (text content) filter
+        # disables the BM25 leg — BM25 has no filter equivalent, so a filtered
+        # search is dense-only.
+        filtered = where is not None or where_document is not None
         do_hybrid = not filtered
         # Oversample the per-ranker pools so RRF has depth on small top_k.
         candidate_k = min(
@@ -1062,7 +1088,10 @@ class ChromaVectorStore(VectorStore):
             try:
                 if filtered:
                     dense_scores, dense_indices = index.search(
-                        query_emb, candidate_k, where=where
+                        query_emb,
+                        candidate_k,
+                        where=where,
+                        where_document=where_document,
                     )
                 else:
                     dense_scores, dense_indices = index.search(query_emb, candidate_k)
@@ -1472,6 +1501,7 @@ class KnowledgeBase:
         top_k: int = 5,
         rerank: bool | None = None,
         where: dict | None = None,
+        where_document: dict | None = None,
     ) -> list[dict]:
         """Search one or many collections, fusing across them by rank.
 
@@ -1507,7 +1537,15 @@ class KnowledgeBase:
         for coll in targets:
             try:
                 store = self._store_for(coll)
-                per_coll.append(store.search(query, coll, candidate_k, where=where))
+                per_coll.append(
+                    store.search(
+                        query,
+                        coll,
+                        candidate_k,
+                        where=where,
+                        where_document=where_document,
+                    )
+                )
             except (ValueError, FileNotFoundError, KeyError) as e:
                 logger.warning("Search failed for '%s': %s", coll, e)
                 errors.append(str(e))

@@ -1,5 +1,5 @@
 """
-Tests for ToolRegistry and SkillRegistry.
+Tests for CodeRegistry and SkillRegistry.
 
 Covers tool listing, MCP schema conversion, tool lookup, tool file writing,
 dsagt-run wrapping, runtime isolation, and skill discovery.
@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from dsagt.registry import (
-    ToolRegistry,
+    CodeRegistry,
     SkillRegistry,
     _wrap_executable,
     _uv_run_prefix,
@@ -94,21 +94,21 @@ TOOL_NO_PARAMS = {
 }
 
 
-def _write_tool(tools_dir, spec: dict) -> None:
+def _write_tool(codes_dir, spec: dict) -> None:
     """Write a minimal skill file for the given spec dict."""
-    path = tools_dir / f"{spec['name']}.md"
+    path = codes_dir / f"{spec['name']}.md"
     frontmatter = yaml.dump(spec, default_flow_style=False, sort_keys=False)
     path.write_text(f"---\n{frontmatter}---\n\n# {spec['name']}\n")
 
 
-def make_registry(tmp_path, tools: list[dict]) -> ToolRegistry:
-    """Create a ToolRegistry with the given tool definitions."""
-    tools_dir = tmp_path / "source_skills"
-    tools_dir.mkdir()
+def make_registry(tmp_path, tools: list[dict]) -> CodeRegistry:
+    """Create a CodeRegistry with the given tool definitions."""
+    codes_dir = tmp_path / "source_skills"
+    codes_dir.mkdir()
     for tool in tools:
-        _write_tool(tools_dir, tool)
-    return ToolRegistry(
-        source_tools_dir=str(tools_dir),
+        _write_tool(codes_dir, tool)
+    return CodeRegistry(
+        source_tools_dir=str(codes_dir),
         runtime_dir=str(tmp_path / "runtime"),
     )
 
@@ -126,7 +126,7 @@ def empty_registry(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# list_tools
+# list_codes
 # ---------------------------------------------------------------------------
 
 
@@ -134,7 +134,7 @@ class TestListTools:
 
     def test_schema_structure(self, registry):
         """MCP schema has name, description, and well-formed inputSchema."""
-        tools = registry.list_tools()
+        tools = registry.list_codes()
         assert len(tools) == 1
 
         tool = tools[0]
@@ -148,7 +148,7 @@ class TestListTools:
 
     def test_required_vs_optional(self, registry):
         """Required params appear in 'required', optional ones don't."""
-        tool = registry.list_tools()[0]
+        tool = registry.list_codes()[0]
         required = tool["inputSchema"]["required"]
 
         assert "input_file" in required
@@ -157,7 +157,7 @@ class TestListTools:
 
     def test_default_values_propagate(self, registry):
         """Default values from the skill file appear in the MCP schema."""
-        tool = registry.list_tools()[0]
+        tool = registry.list_codes()[0]
         props = tool["inputSchema"]["properties"]
 
         assert props["threshold"]["default"] == 0.5
@@ -165,12 +165,12 @@ class TestListTools:
 
     def test_empty_registry(self, empty_registry):
         """An empty skills directory gives an empty tool list."""
-        assert empty_registry.list_tools() == []
+        assert empty_registry.list_codes() == []
 
     def test_multiple_tools(self, tmp_path):
         """Multiple tools are listed in alphabetical filename order."""
         reg = make_registry(tmp_path, [TOOL_WITH_MIXED_PARAMS, TOOL_NO_PARAMS])
-        tools = reg.list_tools()
+        tools = reg.list_codes()
 
         assert len(tools) == 2
         names = {t["name"] for t in tools}
@@ -179,14 +179,14 @@ class TestListTools:
     def test_no_params_tool(self, tmp_path):
         """Tool with empty parameters gives empty properties and required."""
         reg = make_registry(tmp_path, [TOOL_NO_PARAMS])
-        tool = reg.list_tools()[0]
+        tool = reg.list_codes()[0]
 
         assert tool["inputSchema"]["properties"] == {}
         assert tool["inputSchema"]["required"] == []
 
 
 # ---------------------------------------------------------------------------
-# get_tool
+# get_code
 # ---------------------------------------------------------------------------
 
 
@@ -194,14 +194,14 @@ class TestGetTool:
 
     def test_found(self, registry):
         """Returns the raw tool definition for an existing tool."""
-        tool = registry.get_tool("process")
+        tool = registry.get_code("process")
         assert tool is not None
         assert tool["name"] == "process"
         assert tool["executable"] == "python process.py"
 
     def test_not_found(self, registry):
         """Returns None for a nonexistent tool."""
-        assert registry.get_tool("nonexistent") is None
+        assert registry.get_code("nonexistent") is None
 
 
 # ---------------------------------------------------------------------------
@@ -215,10 +215,10 @@ class TestSaveTool:
         """Saving a new tool creates a skill file with dsagt-run wrapping."""
         empty_registry.save_tool(TOOL_NO_PARAMS)
 
-        tool = empty_registry.get_tool("ping")
+        tool = empty_registry.get_code("ping")
         assert tool is not None
         assert tool["name"] == "ping"
-        assert tool["executable"] == "dsagt-run --tool ping -- echo pong"
+        assert tool["executable"] == "dsagt-run --code ping -- echo pong"
 
     def test_wraps_executable_with_dsagt_run(self, empty_registry):
         """save_tool automatically wraps the executable with dsagt-run."""
@@ -230,8 +230,8 @@ class TestSaveTool:
                 "parameters": {},
             }
         )
-        tool = empty_registry.get_tool("mytool")
-        assert tool["executable"] == "dsagt-run --tool mytool -- python mytool.py"
+        tool = empty_registry.get_code("mytool")
+        assert tool["executable"] == "dsagt-run --code mytool -- python mytool.py"
 
     def test_does_not_double_wrap(self, empty_registry):
         """If executable already has dsagt-run, don't wrap again."""
@@ -239,11 +239,11 @@ class TestSaveTool:
             {
                 "name": "mytool",
                 "description": "test",
-                "executable": "dsagt-run --tool mytool -- python mytool.py",
+                "executable": "dsagt-run --code mytool -- python mytool.py",
                 "parameters": {},
             }
         )
-        tool = empty_registry.get_tool("mytool")
+        tool = empty_registry.get_code("mytool")
         assert tool["executable"].count("dsagt-run") == 1
 
     def test_python_deps_use_uv_run(self, empty_registry):
@@ -257,9 +257,9 @@ class TestSaveTool:
                 "dependencies": ["pandas>=2.0", "numpy"],
             }
         )
-        tool = empty_registry.get_tool("analyzer")
+        tool = empty_registry.get_code("analyzer")
         assert tool["executable"] == (
-            "dsagt-run --tool analyzer -- uv run --with pandas>=2.0,numpy -- python analyzer.py"
+            "dsagt-run --code analyzer -- uv run --with pandas>=2.0,numpy -- python analyzer.py"
         )
 
     def test_no_deps_no_uv_run(self, empty_registry):
@@ -272,9 +272,9 @@ class TestSaveTool:
                 "parameters": {},
             }
         )
-        tool = empty_registry.get_tool("simple")
+        tool = empty_registry.get_code("simple")
         assert "uv run" not in tool["executable"]
-        assert tool["executable"] == "dsagt-run --tool simple -- echo hi"
+        assert tool["executable"] == "dsagt-run --code simple -- echo hi"
 
     def test_add_returns_added(self, empty_registry):
         """save_tool returns 'added' for new tools."""
@@ -287,7 +287,7 @@ class TestSaveTool:
 
     def test_update_preserves_body(self, empty_registry):
         """Updating a tool preserves any hand-edited markdown body."""
-        skill_path = empty_registry.tools_dir / "ping.md"
+        skill_path = empty_registry.codes_dir / "ping.md"
         spec = TOOL_NO_PARAMS
         fm = __import__("yaml").dump(spec, default_flow_style=False, sort_keys=False)
         skill_path.write_text(f"---\n{fm}---\n\n# Custom docs written by hand.\n")
@@ -304,7 +304,7 @@ class TestSaveTool:
         updated = {**TOOL_NO_PARAMS, "description": "New description"}
         empty_registry.save_tool(updated)
 
-        tool = empty_registry.get_tool("ping")
+        tool = empty_registry.get_code("ping")
         assert tool["description"] == "New description"
 
 
@@ -322,7 +322,7 @@ class TestRuntimeIsolation:
         _write_tool(source_dir, TOOL_NO_PARAMS)
 
         runtime_dir = tmp_path / "runtime"
-        reg = ToolRegistry(
+        reg = CodeRegistry(
             source_tools_dir=str(source_dir),
             runtime_dir=str(runtime_dir),
         )
@@ -336,7 +336,7 @@ class TestRuntimeIsolation:
         assert source_files[0].stem == "ping"
 
         # Runtime should have both tools
-        assert len(reg.list_tools()) == 2
+        assert len(reg.list_codes()) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -349,12 +349,12 @@ class TestDefaultTools:
 
     def test_tools_directory_exists(self):
         """The package ships a tools directory."""
-        assert ToolRegistry._PACKAGE_TOOLS_DIR.exists()
-        assert ToolRegistry._PACKAGE_TOOLS_DIR.is_dir()
+        assert CodeRegistry._PACKAGE_CODES_DIR.exists()
+        assert CodeRegistry._PACKAGE_CODES_DIR.is_dir()
 
     def test_tools_are_valid(self):
         """Every tool file must parse cleanly and have required fields."""
-        tool_files = list(ToolRegistry._PACKAGE_TOOLS_DIR.glob("*.md"))
+        tool_files = list(CodeRegistry._PACKAGE_CODES_DIR.glob("*.md"))
         assert len(tool_files) > 0, "No tool files found in package"
 
         for path in tool_files:
@@ -365,9 +365,9 @@ class TestDefaultTools:
             assert "parameters" in tool, f"{path.name}: missing 'parameters'"
 
     def test_default_init_fallback(self, tmp_path):
-        """ToolRegistry with no source_tools_dir falls back to package skills."""
-        reg = ToolRegistry(source_tools_dir=None, runtime_dir=str(tmp_path / "rt"))
-        tools = reg.list_tools()
+        """CodeRegistry with no source_tools_dir falls back to package skills."""
+        reg = CodeRegistry(source_tools_dir=None, runtime_dir=str(tmp_path / "rt"))
+        tools = reg.list_codes()
         assert len(tools) > 0
         names = [t["name"] for t in tools]
         assert "scan_directory" in names

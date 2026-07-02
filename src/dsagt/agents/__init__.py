@@ -2,7 +2,7 @@
 Agent platform configuration and launch.
 
 Generates platform-specific config files (MCP server entries, agent
-instructions, env vars) from the single ``dsagt_config.yaml``.  Launches
+instructions, env vars) from the single ``.dsagt/config.yaml``.  Launches
 the agent process in the foreground and blocks until it exits.
 
 BYOA: each agent talks directly to its own provider.  DSAGT forces no

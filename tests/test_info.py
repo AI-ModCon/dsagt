@@ -38,20 +38,14 @@ def _metadata(*, session: str, agent: str | None, in_t: int, out_t: int) -> dict
     return md
 
 
-def _spans_for(service_name: str | None) -> list:
-    """Build the ``spans`` column entry: one root span carrying service.name.
+def _tags_for(source: str | None) -> dict:
+    """Build the ``tags`` column entry carrying the ``dsagt.source`` bucket.
 
-    ``_source_from_spans`` reads ``service.name`` off the root span's
-    attributes (MLflow's OTLP receiver flows the OTel resource attribute
-    through to span attributes), so a single SimpleNamespace is enough
-    for the report-side test.  ``None`` → empty spans list, source falls
-    through to ``"unknown"``.
+    Internal debug traces are bucketed from this tag (the MCP tool category /
+    ``execution``); ``None`` → no tag, so the trace falls back to the
+    ``dsagt.agent`` metadata (agent traces) or ``"unknown"``.
     """
-    from types import SimpleNamespace
-
-    if service_name is None:
-        return []
-    return [SimpleNamespace(attributes={"service.name": service_name})]
+    return {"dsagt.source": source} if source else {}
 
 
 def _traces_df(rows: list[dict]) -> pd.DataFrame:
@@ -135,11 +129,11 @@ def test_report_empty_traces(config):
 
 
 def test_report_aggregates_by_source_and_session(config):
-    """Source bucketing comes from the root span's ``service.name``.
+    """Source bucketing: agent traces from ``dsagt.agent`` metadata, internal
+    traces from the ``dsagt.source`` tag.
 
-    Three claude-code agent traces (one of which errored) + one
-    knowledge-server trace, across two sessions.  Sums + bucket counts
-    match expected totals.
+    Three claude agent traces (one of which errored) + one internal
+    knowledge-tool trace, across two sessions.  Sums + bucket counts match.
     """
     df = _traces_df(
         [
@@ -153,7 +147,7 @@ def test_report_aggregates_by_source_and_session(config):
                     in_t=1000,
                     out_t=100,
                 ),
-                "spans": _spans_for("claude-code"),
+                "tags": _tags_for(None),
             },
             {
                 "trace_id": "t2",
@@ -165,7 +159,7 @@ def test_report_aggregates_by_source_and_session(config):
                     in_t=500,
                     out_t=50,
                 ),
-                "spans": _spans_for("claude-code"),
+                "tags": _tags_for(None),
             },
             {
                 "trace_id": "t3",
@@ -177,7 +171,7 @@ def test_report_aggregates_by_source_and_session(config):
                     in_t=200,
                     out_t=0,
                 ),
-                "spans": _spans_for("dsagt-server"),
+                "tags": _tags_for("knowledge"),
             },
             {
                 "trace_id": "t4",
@@ -189,7 +183,7 @@ def test_report_aggregates_by_source_and_session(config):
                     in_t=800,
                     out_t=20,
                 ),
-                "spans": _spans_for("claude-code"),
+                "tags": _tags_for(None),
             },
         ]
     )
@@ -202,12 +196,15 @@ def test_report_aggregates_by_source_and_session(config):
     assert r["output_tokens"] == 170
 
     sources = {row["source"]: row for row in r["by_source"]}
-    assert sources["claude-code"]["traces"] == 3
-    assert sources["claude-code"]["input_tokens"] == 2300
-    assert sources["claude-code"]["output_tokens"] == 170
-    assert sources["claude-code"]["errors"] == 1
-    assert sources["dsagt-server"]["traces"] == 1
-    assert sources["dsagt-server"]["errors"] == 0
+    # t1/t2/t4 have no dsagt.source tag → bucket by dsagt.agent ("claude").
+    assert sources["claude"]["traces"] == 3
+    assert sources["claude"]["input_tokens"] == 2300
+    assert sources["claude"]["output_tokens"] == 170
+    assert sources["claude"]["errors"] == 1
+    # t3 carries dsagt.source=knowledge → its own bucket even though it also
+    # has dsagt.agent (the tag wins for internal traces).
+    assert sources["knowledge"]["traces"] == 1
+    assert sources["knowledge"]["errors"] == 0
 
     assert [s["session"] for s in r["by_session"]] == ["sess-B", "sess-A"]
     sess_a = next(s for s in r["by_session"] if s["session"] == "sess-A")
@@ -218,12 +215,12 @@ def test_report_aggregates_by_source_and_session(config):
     assert len(r["errors"]) == 1
     err = r["errors"][0]
     assert err["session"] == "sess-B"
-    assert err["source"] == "claude-code"
+    assert err["source"] == "claude"
     assert err["trace_id"] == "t4"
 
 
 def test_report_missing_source_falls_back_to_unknown(config):
-    """No spans column / no service.name → bucket is "unknown"."""
+    """No dsagt.source tag and no dsagt.agent → bucket is "unknown"."""
     df = _traces_df(
         [
             {
@@ -236,7 +233,7 @@ def test_report_missing_source_falls_back_to_unknown(config):
                     in_t=0,
                     out_t=0,
                 ),
-                "spans": _spans_for(None),
+                "tags": _tags_for(None),
             },
         ]
     )
@@ -261,7 +258,6 @@ def test_mask_secret_long_value():
 
 def _write_project(tmp_path, monkeypatch, raw_yaml: str):
     """Register a temp project with the given .dsagt/config.yaml content."""
-    import yaml as _yaml
     from dsagt.session import register_project
 
     pdir = tmp_path / "proj"
@@ -373,14 +369,14 @@ def test_kb_collections_counts_chunks_and_breaks_down_sources(tmp_path):
     from dsagt.commands.info import _kb_collections
 
     kb = tmp_path / "kb_index"
-    (kb / "tools").mkdir(parents=True)
+    (kb / "codes").mkdir(parents=True)
     (kb / "skills").mkdir(parents=True)
     (kb / "research").mkdir(parents=True)
 
     # Tools: 2 bundled, 1 project
     for _ in range(2):
-        _write_chunk(kb / "tools" / "chunks.jsonl", source="bundled")
-    _write_chunk(kb / "tools" / "chunks.jsonl", source="project")
+        _write_chunk(kb / "codes" / "chunks.jsonl", source="bundled")
+    _write_chunk(kb / "codes" / "chunks.jsonl", source="project")
 
     # Skills: 1 bundled
     _write_chunk(kb / "skills" / "chunks.jsonl", source="bundled")
@@ -390,8 +386,8 @@ def test_kb_collections_counts_chunks_and_breaks_down_sources(tmp_path):
         _write_chunk(kb / "research" / "chunks.jsonl")
 
     rows = {r["collection"]: r for r in _kb_collections(tmp_path)}
-    assert rows["tools"] == {
-        "collection": "tools",
+    assert rows["codes"] == {
+        "collection": "codes",
         "chunks": 3,
         "by_source": {"bundled": 2, "project": 1},
     }
@@ -490,7 +486,7 @@ def test_kb_retrieval_ignores_non_kb_spans():
                 "trace_metadata": {"mlflow.trace.session": "s"},
                 "spans": [
                     SimpleNamespace(name="kb.embed", attributes={}),
-                    SimpleNamespace(name="registry.save_tool_spec", attributes={}),
+                    SimpleNamespace(name="registry.save_code_spec", attributes={}),
                 ],
             }
         ]

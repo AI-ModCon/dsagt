@@ -1,13 +1,13 @@
-"""End-to-end episodic-memory integration: heartbeat → judge → session_memory.
+"""End-to-end episodic-memory integration: heartbeat → session_memory.
 
-The full Phase-3 chain with nothing faked: a real Claude transcript on disk →
-``TraceCollector`` (the heartbeat) → the ``MemoryExtractor`` consumer built by the
-server's own ``_episodic_consumers`` wiring → the real ``LocalJudge`` (GGUF
-inference) → distilled facts embedded into the ``session_memory`` collection of a
-real ``KnowledgeBase`` → retrieved by ``kb.search``.
+The full episodic chain with nothing faked: a real Claude transcript on
+disk → ``TraceCollector`` (the heartbeat) → the ``MemoryExtractor`` consumer
+built by the shared ``memory.episodic_consumers`` wiring → mechanically tagged
+turns embedded into the ``session_memory`` collection of a real
+``KnowledgeBase`` → retrieved by ``kb.search``.
 
-Marked ``integration``: loads the local embedder and downloads/loads the ~1GB
-GGUF judge, so it's deselected from the fast suite (``-m 'not integration'``).
+Marked ``integration``: loads the local embedder, so it's deselected from the
+fast suite (``-m 'not integration'``).
 """
 
 import json
@@ -42,26 +42,19 @@ def _user(ts, text, uuid):
 
 
 @pytest.mark.integration
-def test_heartbeat_distills_a_fact_into_session_memory(tmp_path):
+def test_heartbeat_indexes_turn_into_session_memory(tmp_path):
     project_dir = tmp_path / "proj"
     (project_dir / ".dsagt").mkdir(parents=True)
 
     # A real KB with the local embedder (the project's session_memory lives here).
     kb = KnowledgeBase(index_dir=project_dir / "kb_index", default_embedder="local")
 
-    # Episodic enabled with the Tier-1 local judge — exactly what `dsagt init
-    # --episodic` writes — fed through the server's real subscriber builder.
-    from dsagt.mcp.server import _episodic_consumers
+    # Episodic enabled — exactly what `dsagt init --episodic` writes — fed
+    # through the server's real subscriber builder.
+    from dsagt.memory import episodic_consumers
 
-    config = {
-        "episodic": {
-            "enabled": True,
-            "judge": {"backend": "local", "model": ""},
-            "domain_tags": {},
-            "outlier_sensitivity": 0.0,
-        }
-    }
-    subs = _episodic_consumers(config, kb, project_dir, "proj:s")
+    config = {"episodic": {"enabled": True}}
+    subs = episodic_consumers(config, kb, project_dir, "proj:s")
     assert subs and subs[0].name == "memory"
 
     # A real Claude transcript with one clearly fact-bearing completed turn,
@@ -97,7 +90,7 @@ def test_heartbeat_distills_a_fact_into_session_memory(tmp_path):
         extra_consumers=subs,
     )
 
-    # include_last=True flushes both turns; the memory consumer distills them.
+    # include_last=True flushes both turns; the memory consumer indexes them.
     n = collector.collect(include_last=True)
     assert n >= 1
 
@@ -105,18 +98,52 @@ def test_heartbeat_distills_a_fact_into_session_memory(tmp_path):
     assert collector._load_acks("mlflow")  # observability sink
     assert collector._load_acks("memory")  # episodic consumer
 
-    # The distilled fact is retrievable from session_memory, tagged as a Tier-1
-    # fact from this session.
+    # A mechanically-indexed block-chunk is retrievable from session_memory,
+    # tagged with its producer + turn from this session.
     hits = kb.search(
         "fastp quality filtering Q30", collection=SESSION_MEMORY_COLLECTION, top_k=5
     )
-    assert hits, "expected at least one distilled fact in session_memory"
+    assert hits, "expected at least one indexed chunk in session_memory"
     chunk = hits[0]["chunk"]
     text = chunk["text"].lower()
     assert "fastp" in text or "q30" in text or "qc" in text
     meta = chunk["metadata"]
-    assert meta.get("source_type") == "fact"
-    assert meta.get("tier") == "1"
+    assert meta.get("source_type") == "turn"
     assert meta.get("session_id") == "proj:s"
+    assert meta.get("producer") in {"user", "llm", "tool"}
+    assert meta.get("turn_id")  # groups chunks back into their turn
+
+    kb.close()
+
+
+@pytest.mark.integration
+def test_where_document_regex_and_contains_filter_session_memory(tmp_path):
+    """The metadata-filter + regex strategy: a document-text filter narrows the
+    candidate pool before semantic ranking, end-to-end through a real KB."""
+    kb = KnowledgeBase(index_dir=tmp_path / "kb_index", default_embedder="local")
+    kb.add_entries(
+        texts=["fastp filtered reads at Q30", "bowtie2 aligned the reads"],
+        collection=SESSION_MEMORY_COLLECTION,
+        metadatas=[{"producer": "llm"}, {"producer": "llm"}],
+    )
+
+    # $regex narrows to the fastp chunk (case-insensitive) despite both being
+    # about "reads"; the metadata-filter path is dense-only but still ranks.
+    hits = kb.search(
+        "reads",
+        collection=SESSION_MEMORY_COLLECTION,
+        top_k=5,
+        where_document={"$regex": "(?i)FASTP"},
+    )
+    assert [h["chunk"]["text"] for h in hits] == ["fastp filtered reads at Q30"]
+
+    # $contains is a case-sensitive substring.
+    hits2 = kb.search(
+        "reads",
+        collection=SESSION_MEMORY_COLLECTION,
+        top_k=5,
+        where_document={"$contains": "bowtie2"},
+    )
+    assert [h["chunk"]["text"] for h in hits2] == ["bowtie2 aligned the reads"]
 
     kb.close()

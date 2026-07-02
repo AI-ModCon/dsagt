@@ -151,17 +151,17 @@ def test_default_exclude_patterns_keeps_packaging_metadata():
 class TestResolveAssets:
 
     def test_default_is_tools_plus_genesis(self):
-        assert resolve_assets() == list(DEFAULT_ASSETS) == ["tools", "genesis"]
+        assert resolve_assets() == list(DEFAULT_ASSETS) == ["codes", "genesis"]
 
     def test_include_all_is_everything(self):
         assert resolve_assets(include=["all"]) == all_assets()
 
     def test_include_subset_returns_canonical_order(self):
         # input order shouldn't matter — cheap assets always built first.
-        assert resolve_assets(include=["aidrin", "tools"]) == ["tools", "aidrin"]
+        assert resolve_assets(include=["aidrin", "codes"]) == ["codes", "aidrin"]
 
     def test_exclude_trims_the_default_set(self):
-        assert resolve_assets(exclude=["genesis"]) == ["tools"]
+        assert resolve_assets(exclude=["genesis"]) == ["codes"]
 
     def test_exclude_all_is_empty(self):
         assert resolve_assets(exclude=["all"]) == []
@@ -172,13 +172,13 @@ class TestResolveAssets:
 
     def test_include_exclude_mutually_exclusive(self):
         with pytest.raises(ValueError, match="mutually exclusive"):
-            resolve_assets(include=["tools"], exclude=["genesis"])
+            resolve_assets(include=["codes"], exclude=["genesis"])
 
 
 class TestAssetCollectionName:
 
     def test_tools(self):
-        assert asset_collection_name("tools") == "tools"
+        assert asset_collection_name("codes") == "codes"
 
     def test_catalog_uses_catalog_prefix(self):
         name = asset_collection_name("genesis")
@@ -205,16 +205,16 @@ class TestEnsureAssetsTools:
         with patch(
             "dsagt.knowledge.Embedder.create", return_value=self._fake_embedder()
         ):
-            result = ensure_assets(["tools"], tmp_path)
-        assert "tools" in result["built"]
+            result = ensure_assets(["codes"], tmp_path)
+        assert "codes" in result["built"]
         # ChromaIndex.save writes chroma_ids.json — the collection marker.
-        assert (tmp_path / "tools" / "chroma_ids.json").exists()
+        assert (tmp_path / "codes" / "chroma_ids.json").exists()
 
     def test_is_idempotent(self, tmp_path):
         with patch(
             "dsagt.knowledge.Embedder.create", return_value=self._fake_embedder()
         ):
-            ensure_assets(["tools"], tmp_path)
-            second = ensure_assets(["tools"], tmp_path)
-        assert second["skipped"] == ["tools"]
+            ensure_assets(["codes"], tmp_path)
+            second = ensure_assets(["codes"], tmp_path)
+        assert second["skipped"] == ["codes"]
         assert second["built"] == []

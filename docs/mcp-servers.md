@@ -1,21 +1,21 @@
 # MCP Server
 
-DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.) and launched automatically when the agent starts. It bundles four concern areas — a tool registry, a knowledge base, explicit memory, and skill discovery — behind one process with one shared embedder and one ChromaDB owner.
+DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.) and launched automatically when the agent starts. It bundles four capabilities — a code registry, a knowledge base, explicit memory, and skill discovery — behind one process with one shared embedder and one ChromaDB.
 
 > Earlier versions ran two separate servers (`dsagt-registry-server` + `dsagt-knowledge-server`), merged in 0.2.0. Re-run `dsagt start <project>` on an existing project to regenerate its config against the single server (for cline, delete `<project>/.cline-data` first).
 
 ## Registry tools
 
-Tool registration, dependency installation, and tool discovery.
+Code registration, dependency installation, and code discovery.
 
 | Tool | Description |
 |------|-------------|
-| `search_registry` | Semantic search over registered tool specs |
-| `save_tool_spec` | Register a new CLI tool as a markdown file with YAML frontmatter |
-| `install_dependencies` | Install tool dependencies via `uv run --with` |
+| `search_registry` | Semantic search over registered code specs |
+| `save_code_spec` | Register a new CLI code as a markdown file with YAML frontmatter |
+| `install_dependencies` | Install code dependencies via `uv run --with` |
 | `reconstruct_pipeline` | Render the trace archive as a bash script or Snakemake workflow |
 
-Tools are markdown files with YAML frontmatter under `<project>/tools/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies.
+Codes are markdown files with YAML frontmatter under `<project>/codes/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies.
 
 ## Knowledge tools
 

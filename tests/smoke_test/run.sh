@@ -131,7 +131,7 @@ check() {
     fi
 }
 
-check "csvtool_filter spec written"  "test -f '${PDIR}/tools/csvtool_filter.md'"
+check "csvtool_filter spec written"  "test -f '${PDIR}/codes/csvtool_filter.md'"
 check "trace_archive has records"    "ls '${PDIR}/trace_archive/'*.json | grep -q ."
 check "scan_directory record"        "ls '${PDIR}/trace_archive/'*scan_directory*.json | grep -q ."
 # Both files are written by dsagt-server's kb_ingest MCP tool — chroma.sqlite3
@@ -179,7 +179,7 @@ n = 0
 for _, row in df.iterrows():
     spans = row.get("spans") or []
     # Match by service.name on root span — agent-emitted traces only.
-    # MCP-server traces (kb.*, registry.*, tool.execute) carry
+    # MCP-server traces (kb.*, registry.*, code.execute) carry
     # service.name = "dsagt-server" / "dsagt-run" and shouldn't count
     # toward agent turn parity.
     for s in spans:

@@ -15,7 +15,6 @@ Usage:
 
 import asyncio
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -91,7 +90,7 @@ def kb_server(tmp_path, smoke_test_dir, embedding_config):
     result = kb.ingest(smoke_test_dir)
     assert result["chunks"] > 0, "Ingest produced no chunks"
 
-    server = create_knowledge_server(kb, use_rerank=False)
+    server = create_knowledge_server(kb)
     yield server
     kb.close()
 
@@ -106,7 +105,7 @@ class TestIngestIntegration:
     def test_ingest_smoke_test_docs(self, tmp_path, smoke_test_dir, embedding_config):
         """Ingest smoke test documents through the MCP handler."""
         kb = _make_kb(tmp_path, embedding_config)
-        server = create_knowledge_server(kb, use_rerank=False)
+        server = create_knowledge_server(kb)
 
         async def run():
             initial, final = await call_tool_and_await_job(
@@ -188,12 +187,15 @@ class TestSearchIntegration:
         )
 
         assert result["status"] == "ok"
-        if result["result_count"] > 0:
-            hit = result["results"][0]
-            assert "text" in hit
-            assert "score" in hit
-            assert "source_file" in hit
-            assert "chunk_index" in hit
+        # The smoke-test corpus is fixed and owned by this test, so a known
+        # query must return at least one hit — then the shape is checked
+        # unconditionally (a zero-hit regression must not pass vacuously).
+        assert result["result_count"] > 0
+        hit = result["results"][0]
+        assert "text" in hit
+        assert "score" in hit
+        assert "source_file" in hit
+        assert "chunk_index" in hit
 
 
 # ---------------------------------------------------------------------------
@@ -214,37 +216,21 @@ class TestListCollectionsIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Setup runtime KB with symlinks
+# Setup runtime KB (copies base collections into the project runtime)
 # ---------------------------------------------------------------------------
 
 
 class TestSetupRuntimeKB:
 
-    def test_symlinks_base_collections(
-        self, tmp_path, smoke_test_dir, embedding_config
-    ):
-        """setup_runtime_kb symlinks base collections into runtime."""
-        base_dir = tmp_path / "base_kb"
-        base_dir.mkdir()
-        kb = _make_kb(tmp_path, embedding_config)
-        # Point KB at base_dir for this test
-        kb.index_dir = base_dir
-        kb.index_dir.mkdir(exist_ok=True)
-        kb.ingest(smoke_test_dir)
-        kb.close()
+    def test_runtime_search_after_setup(self, tmp_path, smoke_test_dir, embedding_config):
+        """End-to-end: a KB pointed at a runtime dir provisioned by
+        setup_runtime_kb can search the copied collections with real embeddings.
 
-        runtime_dir = tmp_path / "runtime"
-        runtime_kb_dir = setup_runtime_kb(base_dir, runtime_dir)
-
-        knowledge_link = runtime_kb_dir / "knowledge"
-        assert knowledge_link.exists()
-        assert knowledge_link.is_symlink()
-        assert (knowledge_link / "chroma_ids.json").exists()
-
-    def test_runtime_search_via_symlink(
-        self, tmp_path, smoke_test_dir, embedding_config
-    ):
-        """A KB pointing at runtime symlinks can search successfully."""
+        Copy-vs-symlink structure is unit-tested network-free in
+        test_knowledge_server.py::TestSetupRuntimeKb; this is the only place
+        that exercises a real embedding search *through* the provisioned
+        runtime KB, so it stays an integration test.
+        """
         base_dir = tmp_path / "base_kb"
         base_dir.mkdir()
         kb = _make_kb(tmp_path, embedding_config)

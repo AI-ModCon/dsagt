@@ -11,11 +11,11 @@ Project directory layout::
         .dsagt/
             config.yaml     # project configuration (MCP-server object settings)
             state.yaml      # session log + memory cursor (owned by the MCP server)
-            explicit_memories.yaml, suggestions.json, ...   # explicit memory
+            explicit_memories.yaml, ...   # explicit memory
         trace_archive/      # tool execution records
         mlflow.db           # serverless MLflow SQLite trace store (created lazily)
         tools/              # registered CLI tools
-        tools/code/         # agent-written tool scripts
+        codes/scripts/         # agent-written tool scripts
         skills/             # instruction-based agent skills
         kb_index/           # knowledge base collections
 """
@@ -29,9 +29,8 @@ from pathlib import Path
 
 import yaml
 
-from dsagt.memory import extract_session
 from dsagt.knowledge import KnowledgeBase
-from dsagt.provenance import ToolUseIndexer
+from dsagt.provenance import CodeUseIndexer
 
 logger = logging.getLogger(__name__)
 
@@ -97,20 +96,14 @@ DEFAULTS = {
             },
         ],
     },
-    # Episodic memory (Phase 3): the heartbeat's MemoryExtractor subscriber.
-    # ``enabled`` is a compute/storage opt-in (Tier-0 needs no credentials);
-    # ``judge`` selects the Tier-1 distillation backend (``local`` = LocalJudge,
-    # the no-API-key default — left empty/disabled until Tier-1 is wired on).
-    # ``domain_tags`` are the user's project-specific tags, merged onto the
-    # stock taxonomy.  ``outlier_sensitivity`` 0 disables novelty queueing.
+    # Episodic memory: the heartbeat's MemoryExtractor subscriber.  ``enabled``
+    # is a compute/storage opt-in that mechanically chunks/tags/embeds each
+    # completed turn into session_memory (no credentials).
     "episodic": {
         "enabled": False,
-        "judge": {"backend": "", "model": ""},
-        "domain_tags": {},
-        "outlier_sensitivity": 0.0,
-        # Recency weighting for session_memory retrieval: a newer fact edges out
+        # Recency weighting for session_memory retrieval: a newer turn edges out
         # a stale one without contradiction detection.  Half-life in days (a
-        # *boost*, never a penalty — durable old facts keep full relevance).
+        # *boost*, never a penalty — durable old turns keep full relevance).
         "recency_half_life_days": 14,
     },
 }
@@ -229,9 +222,9 @@ def list_projects() -> dict[str, str]:
 def kb_from_config(config: dict, index_dir: Path | None = None) -> "KnowledgeBase":
     """Build a KnowledgeBase from a resolved project config.
 
-    Mirrors the embedding-backend resolution used by ``extract_session`` so
-    callers (CLI ``skills`` group, catalog sync) get a KB wired to the same
-    embedder the project uses.  Defaults to ``<project_dir>/kb_index``.
+    Resolves the project's embedding backend so callers (CLI ``skills`` group,
+    catalog sync) get a KB wired to the same embedder the project uses.
+    Defaults to ``<project_dir>/kb_index``.
     """
     pdir = Path(config["project_dir"])
     emb = config.get("embedding", {})
@@ -411,6 +404,26 @@ def update_cursor(pdir: Path, **fields) -> None:
     """Merge fields into ``state.yaml``'s ``memory_cursor`` map."""
     state = read_state(pdir)
     state.setdefault("memory_cursor", {}).update(fields)
+    write_state(pdir, state)
+
+
+def record_trace_source(pdir: Path, source) -> None:
+    """Stamp the current session's trace-source token into ``state.yaml``.
+
+    ``source`` is the agent-shaped session token from
+    :meth:`dsagt.traces.Reader.active_source` (a transcript path, DB session id,
+    or session-dir name).  The MCP server records it once the live collector
+    resolves a session, so the *next* session's catch-up can pin this exact
+    session — for *every* agent — when re-collecting turns an ungraceful
+    shutdown left unlogged.  No-op if no session has been minted yet.
+    """
+    state = read_state(pdir)
+    sessions = state.get("sessions") or []
+    if not sessions:
+        return
+    if sessions[-1].get("trace_source") == source:
+        return  # already recorded — avoid churning the file
+    sessions[-1]["trace_source"] = source
     write_state(pdir, state)
 
 
@@ -608,7 +621,7 @@ def init_project(
     pdir = (location or DEFAULT_PROJECTS_BASE) / project_name
 
     pdir.mkdir(parents=True, exist_ok=True)
-    # `tools/` and `tools/code/` are created by ToolRegistry on first server
+    # `tools/` and `codes/scripts/` are created by CodeRegistry on first server
     # startup so bundled tools get copied in (it short-circuits if tools/
     # already exists).  ``mlflow.db`` is created lazily by the MLflow client
     # on first span.
@@ -711,51 +724,81 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
 
     1. **Tool-execution indexing** (always): embed the previous session's
        ``<pdir>/trace_archive/`` records into the ``tool_use`` collection via
-       the shared :class:`~dsagt.provenance.ToolUseIndexer` — idempotent against
-       the same ``.dsagt/tool_use_acks.json`` the live heartbeat uses, so the
+       the shared :class:`~dsagt.provenance.CodeUseIndexer` — idempotent against
+       the same ``.dsagt/code_use_acks.json`` the live heartbeat uses, so the
        startup catch-up and the heartbeat never double-index.  No LLM, no
        credentials (local-backend default).
-    2. **Episodic LLM extraction** (gated on ``DSAGT_MEMORY_*``): forward-
-       looking plumbing.  ``memory.extract_session`` is a no-op stub, so this
-       reports as unavailable even when the env is set.
+    2. **Chat-trace catch-up** (:func:`_catch_up_traces`): re-collect the
+       previous session so any turns the heartbeat missed before an ungraceful
+       shutdown still reach MLflow (and episodic memory).  Pinned to the
+       trace-source token recorded in ``state.yaml`` (uniform across agents);
+       session-qualified acks dedupe against the live pass, so only dangling
+       turns emit.
     """
     pdir = Path(pdir)
     config = {**config, "project_dir": str(pdir)}
     kb = kb_from_config(config)
 
-    tool_use_indexed = 0
     try:
-        tool_use_indexed = ToolUseIndexer(kb, pdir).tick()
-    except Exception as e:  # noqa: BLE001 — never let a background task crash
-        logger.warning("Tool execution indexing failed: %s", e)
+        tool_use_indexed = 0
+        try:
+            tool_use_indexed = CodeUseIndexer(kb, pdir).tick()
+        except Exception as e:  # noqa: BLE001 — never let a background task crash
+            logger.warning("Tool execution indexing failed: %s", e)
 
-    # Episodic-memory extraction (stub until Phase 3).  Skip silently if not
-    # configured.
-    api_key = os.environ.get("DSAGT_MEMORY_API_KEY", "")
-    model = os.environ.get("DSAGT_MEMORY_MODEL", "")
-    if not api_key or not model:
-        kb.close()
-        return {"status": "tool_use_only", "tool_use_indexed": tool_use_indexed}
+        traces_caught_up = 0
+        try:
+            traces_caught_up = _catch_up_traces(pdir, config, kb)
+        except Exception as e:  # noqa: BLE001 — never let a background task crash
+            logger.warning("Trace catch-up failed: %s", e)
 
-    from dsagt.observability import resolve_tracking_uri
-
-    try:
-        result = extract_session(
-            project_name=config.get("project", ""),
-            kb=kb,
-            api_key=api_key,
-            model=model,
-            base_url=os.environ.get("DSAGT_MEMORY_BASE_URL") or None,
-            provider=os.environ.get("DSAGT_MEMORY_PROVIDER") or None,
-            session_id=current_session_tag(pdir, config.get("project", "")),
-            categories=None,
-            runtime_dir=pdir,
-            outlier_sensitivity=float(
-                os.environ.get("DSAGT_MEMORY_OUTLIER_SENSITIVITY", "0") or 0
-            ),
-            mlflow_uri=resolve_tracking_uri(config),
-        )
-        result["tool_use_indexed"] = tool_use_indexed
-        return result
+        return {
+            "status": "ok",
+            "tool_use_indexed": tool_use_indexed,
+            "traces_caught_up": traces_caught_up,
+        }
     finally:
         kb.close()
+
+
+def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
+    """Re-collect the previous session's transcript; return turns newly emitted.
+
+    Builds a trace collector pinned to the previous session's recorded
+    trace-source token (and tagged with its session id), then runs one
+    ``collect(include_last=True)``.  The collector's session-qualified ack files
+    are shared with the live pass, so already-logged turns are skipped and only
+    those lost to an ungraceful shutdown are emitted to MLflow + episodic memory.
+    Uniform across agents — JSONL or SQLite — since the pin is the agent's own
+    session token, not a transcript-file assumption.
+
+    Returns 0 (a no-op) when there is no previous session, or it stamped no
+    trace-source (a session too short for the heartbeat to record one), where
+    guessing would risk reading the *new* session's records.
+    """
+    from dsagt.memory import episodic_consumers
+    from dsagt.observability import resolve_tracking_uri
+    from dsagt.traces import make_trace_collector
+
+    sessions = read_state(pdir).get("sessions") or []
+    if len(sessions) < 2:
+        return 0
+    prev = sessions[-2]
+    source = prev.get("trace_source")
+    if source is None:
+        return 0
+
+    project = config.get("project", "")
+    prev_tag = session_tag(project, prev["id"])
+    collector = make_trace_collector(
+        config.get("agent"),
+        pdir,
+        project,
+        prev_tag,
+        resolve_tracking_uri(config),
+        extra_consumers=episodic_consumers(config, kb, pdir, prev_tag),
+        source=source,
+    )
+    if collector is None:
+        return 0
+    return collector.collect(include_last=True)

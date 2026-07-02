@@ -1,7 +1,7 @@
 """MCP tools for the tool registry, execution, and provenance.
 
 The "tool lifecycle" surface of ``dsagt-server``: define a tool spec
-(``save_tool_spec``), discover tools (``get_registry`` / ``search_registry``),
+(``save_code_spec``), discover tools (``get_registry`` / ``search_registry``),
 execute / gather (``read_file`` / ``http_request`` / ``run_command`` /
 ``install_dependencies``), and reconstruct a reproducible pipeline from the
 recorded executions (``reconstruct_pipeline``).
@@ -35,10 +35,10 @@ from dsagt.observability import (
     obs,
     registry_install_deps_span,
     registry_reconstruct_pipeline_span,
-    registry_save_tool_span,
+    registry_save_code_span,
 )
-from dsagt.provenance import ToolUseIndexer, reconstruct_pipeline
-from dsagt.registry import TOOLS_COLLECTION, ToolRegistry
+from dsagt.provenance import CodeUseIndexer, reconstruct_pipeline
+from dsagt.registry import CODES_COLLECTION, CodeRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -125,10 +125,10 @@ async def _handle_run_command(arguments: dict) -> str:
     return output
 
 
-async def _handle_save_tool_spec(
+async def _handle_save_code_spec(
     arguments: dict,
     *,
-    registry: ToolRegistry,
+    registry: CodeRegistry,
 ) -> str:
     spec = arguments["spec"]
     # Some MCP clients (notably Claude Sonnet/Haiku 4.x) serialize nested
@@ -138,7 +138,7 @@ async def _handle_save_tool_spec(
             spec = json.loads(spec)
         except json.JSONDecodeError as e:
             return f"Error: spec must be a JSON object (or string-encoded JSON object): {e}"
-    with registry_save_tool_span(spec.get("name")):
+    with registry_save_code_span(spec.get("name")):
         obs.set("language", spec.get("language"))
         obs.set("n_dependencies", len(spec.get("dependencies") or []))
         obs.set("n_tags", len(spec.get("tags") or []))
@@ -148,7 +148,7 @@ async def _handle_save_tool_spec(
             obs.event("save_tool_failed", error=str(e)[:256])
             return f"Error saving tool spec: {e}"
 
-        tool_count = len(registry.list_tools_raw())
+        tool_count = len(registry.list_codes_raw())
         obs.set("action", action)
         obs.set("registry_size", tool_count)
         message = (
@@ -171,46 +171,46 @@ async def _handle_save_tool_spec(
 async def _handle_get_registry(
     arguments: dict,
     *,
-    registry: ToolRegistry,
+    registry: CodeRegistry,
 ) -> str:
-    tools = registry.list_tools_raw()
+    tools = registry.list_codes_raw()
     if not tools:
         return "Registry is empty. No tools registered yet."
-    return yaml.dump({"tools": tools}, default_flow_style=False, sort_keys=False)
+    return yaml.dump({"codes": tools}, default_flow_style=False, sort_keys=False)
 
 
 async def _handle_search_registry(
     arguments: dict,
     *,
-    registry: ToolRegistry,
+    registry: CodeRegistry,
     kb: KnowledgeBase | None,
 ) -> str:
-    tool_name = arguments.get("tool_name")
+    code_name = arguments.get("code_name")
     query = arguments.get("query", "")
     tag = arguments.get("tag")
     top_k = arguments.get("top_k", 10)
 
-    if tool_name:
-        tool = registry.get_tool(tool_name)
+    if code_name:
+        tool = registry.get_code(code_name)
         if tool:
-            return f"Found tool '{tool_name}':\n\n" + yaml.dump(
+            return f"Found tool '{code_name}':\n\n" + yaml.dump(
                 tool, default_flow_style=False, sort_keys=False
             )
-        return f"No tool named '{tool_name}'."
+        return f"No tool named '{code_name}'."
 
     if kb is None:
         return (
             "search_registry requires a configured knowledge base "
             "(set embedding.api_key + embedding.base_url + embedding.model "
-            "in dsagt_config.yaml).  Use search_registry with an exact "
-            "tool_name for KB-free lookups."
+            "in .dsagt/config.yaml).  Use search_registry with an exact "
+            "code_name for KB-free lookups."
         )
 
     # Single ``tools`` collection — bundled and registered entries
     # coexist, distinguished by ``metadata.source`` if needed.
     results = kb.search(
         query=query or "tool",
-        collection=TOOLS_COLLECTION,
+        collection=CODES_COLLECTION,
         top_k=top_k * 3 if tag else top_k,
     )
     if tag and results:
@@ -227,7 +227,7 @@ async def _handle_search_registry(
         chunk = r.get("chunk", {})
         meta = chunk.get("metadata", {})
         summaries.append(
-            f"- **{meta.get('tool_name', 'unknown')}** "
+            f"- **{meta.get('code_name', 'unknown')}** "
             f"(score: {r.get('score', 0):.2f})\n"
             f"  {chunk.get('text', '')[:200]}"
         )
@@ -245,10 +245,10 @@ async def _handle_reconstruct_pipeline(
     # Index the session's tool-use first: reconstruct is the moment the pipeline
     # is "done enough" to review, so make the just-run executions searchable now
     # rather than waiting on the heartbeat.  Idempotent + file-locked, so this
-    # is safe to fire alongside the heartbeat's own ToolUseIndexer.
+    # is safe to fire alongside the heartbeat's own CodeUseIndexer.
     if kb is not None:
         try:
-            ToolUseIndexer(kb, runtime_dir).tick()
+            CodeUseIndexer(kb, runtime_dir).tick()
         except Exception as e:  # noqa: BLE001 — indexing is best-effort here
             logger.warning("tool_use indexing before reconstruct failed: %s", e)
     with registry_reconstruct_pipeline_span(fmt):
@@ -264,40 +264,40 @@ async def _handle_reconstruct_pipeline(
 async def _handle_install_dependencies(
     arguments: dict,
     *,
-    registry: ToolRegistry,
+    registry: CodeRegistry,
 ) -> str:
-    tool_name = arguments.get("tool_name")
-    tools = registry.list_tools_raw()
+    code_name = arguments.get("code_name")
+    tools = registry.list_codes_raw()
     if not tools:
         return "Registry is empty. No tools registered yet."
 
     all_deps = []
-    tools_with_deps = []
+    codes_with_deps = []
     for tool in tools:
-        if tool_name and tool.get("name") != tool_name:
+        if code_name and tool.get("name") != code_name:
             continue
-        tool_deps = tool.get("dependencies", [])
-        if tool_deps:
-            all_deps.extend(tool_deps)
-            tools_with_deps.append(tool["name"])
+        code_deps = tool.get("dependencies", [])
+        if code_deps:
+            all_deps.extend(code_deps)
+            codes_with_deps.append(tool["name"])
 
     if not all_deps:
-        scope = f"tool '{tool_name}'" if tool_name else "registry"
+        scope = f"tool '{code_name}'" if code_name else "registry"
         return f"No dependencies declared in {scope}."
 
     seen = set()
     unique_deps = [d for d in all_deps if not (d in seen or seen.add(d))]
 
     with registry_install_deps_span(unique_deps):
-        obs.set("scope_tool", tool_name)
-        obs.set("n_tools_with_deps", len(tools_with_deps))
+        obs.set("scope_code", code_name)
+        obs.set("n_tools_with_deps", len(codes_with_deps))
         result = _install_dependencies(unique_deps)
         if result.startswith("Successfully installed:"):
             obs.set("status", "ok")
         else:
             obs.set("status", "failed")
             obs.event("install_failed", message=result[:256])
-        return f"Installing dependencies for: {', '.join(tools_with_deps)}\n\n{result}"
+        return f"Installing dependencies for: {', '.join(codes_with_deps)}\n\n{result}"
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +306,7 @@ async def _handle_install_dependencies(
 
 
 def _registry_tools_and_handlers(
-    registry: ToolRegistry,
+    registry: CodeRegistry,
     kb: KnowledgeBase | None = None,
 ):
     """Build the registry/execution/provenance ``(tool defs, handler map)``.
@@ -320,7 +320,7 @@ def _registry_tools_and_handlers(
         "read_file": _handle_read_file,
         "http_request": _handle_http_request,
         "run_command": _handle_run_command,
-        "save_tool_spec": partial(_handle_save_tool_spec, registry=registry),
+        "save_code_spec": partial(_handle_save_code_spec, registry=registry),
         "get_registry": partial(_handle_get_registry, registry=registry),
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
         "reconstruct_pipeline": partial(
@@ -388,7 +388,7 @@ def _registry_tools_and_handlers(
             },
         ),
         types.Tool(
-            name="save_tool_spec",
+            name="save_code_spec",
             description="Save a tool specification to the registry as a skill file",
             inputSchema={
                 "type": "object",
@@ -483,7 +483,7 @@ def _registry_tools_and_handlers(
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "tag": {"type": "string", "description": "Filter by tag"},
-                    "tool_name": {
+                    "code_name": {
                         "type": "string",
                         "description": "Exact tool name lookup",
                     },
@@ -511,7 +511,7 @@ def _registry_tools_and_handlers(
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "tool_name": {
+                    "code_name": {
                         "type": "string",
                         "description": "Install deps for a specific tool (omit for all)",
                     },
@@ -523,7 +523,7 @@ def _registry_tools_and_handlers(
 
 
 def create_registry_server(
-    registry: ToolRegistry,
+    registry: CodeRegistry,
     kb: KnowledgeBase | None = None,
 ):
     """Create a standalone MCP server exposing only the registry/exec/provenance tools.
@@ -533,4 +533,6 @@ def create_registry_server(
     :func:`_registry_tools_and_handlers` directly instead of this wrapper.
     """
     tools, handlers = _registry_tools_and_handlers(registry, kb)
-    return build_dispatch_server("registry", tools, handlers)
+    return build_dispatch_server(
+        "registry", tools, handlers, {t: "registry" for t in handlers}
+    )

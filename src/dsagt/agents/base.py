@@ -44,9 +44,7 @@ _DSAGT_MCP_ALWAYS_ALLOW = [
     "install_dependencies",
     "install_skill",
     "kb_append",
-    "kb_dismiss_suggestion",
     "kb_get_memories",
-    "kb_get_suggestions",
     "kb_ingest",
     "kb_job_status",
     "kb_list_collections",
@@ -57,7 +55,7 @@ _DSAGT_MCP_ALWAYS_ALLOW = [
     "reconstruct_pipeline",
     "run_command",
     "save_skill",
-    "save_tool_spec",
+    "save_code_spec",
     "search_registry",
     "search_skills",
 ]
@@ -72,7 +70,7 @@ def _mcp_server_args() -> list[str]:
     """Build the argv tail for ``uv run dsagt-server``.
 
     The single merged server reads all configuration from the project's
-    ``dsagt_config.yaml`` (located via cwd-walk) — no CLI args needed.
+    ``.dsagt/config.yaml`` (located via cwd-walk) — no CLI args needed.
     """
     return ["run", "dsagt-server"]
 
@@ -280,7 +278,7 @@ class AgentSetup(ABC):
 
     Class attributes (set by every subclass):
 
-    - ``name``           — agent identifier as used in ``dsagt_config.yaml``
+    - ``name``           — agent identifier as used in ``.dsagt/config.yaml``
                           (e.g. ``"claude"``, ``"goose"``).
     - ``base_command``   — argv list that launches the agent interactively.
                           Subclasses may override :meth:`interactive_command`

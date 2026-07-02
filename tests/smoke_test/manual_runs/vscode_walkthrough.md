@@ -53,7 +53,7 @@ Close the extension chat / VS Code session when done.
 
 ```bash
 dsagt info smoke-<AGENT>
-ls ~/dsagt-projects/smoke-<AGENT>/tools/
+ls ~/dsagt-projects/smoke-<AGENT>/codes/
 ls ~/dsagt-projects/smoke-<AGENT>/trace_archive/
 test -s ~/dsagt-projects/smoke-<AGENT>/explicit_memories.yaml && echo OK
 ```
