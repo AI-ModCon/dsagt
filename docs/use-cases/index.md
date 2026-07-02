@@ -1,6 +1,6 @@
 # Use Cases
 
-End-to-end walkthroughs for representative scientific and data-readiness scenarios live in [`use_cases/`](https://github.com/AI-ModCon/dsagt/tree/main/use_cases/). Each covers data acquisition, tool registration, pipeline construction, and agent-driven execution against a real dataset.
+End-to-end walkthroughs for representative scientific and data-readiness scenarios live in [`use_cases/`](https://github.com/AI-ModCon/dsagt/tree/main/use_cases/). Each covers data acquisition, code registration, pipeline construction, and agent-driven execution against a real dataset.
 
 | Use case | Domain | Guide |
 |----------|--------|-------|

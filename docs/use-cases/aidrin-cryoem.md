@@ -2,7 +2,7 @@
 
 **Domain:** AI data readiness — quality assessment of a scientific pipeline
 
-**Tools:** [`aidrin`](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector CLI)
+**Codes:** [`aidrin`](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector CLI)
 
 **Dataset:** EMPIAR-10017 cryo-EM particle tables (via CryoPPP)
 

@@ -8,7 +8,7 @@
 
 ## Overview
 
-This use case demonstrates DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive. The agent registers curation tools, ingests domain knowledge about cryo-EM data quality, and builds a pipeline for micrograph preprocessing.
+This use case demonstrates DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive. The agent registers curation codes, ingests domain knowledge about cryo-EM data quality, and builds a pipeline for micrograph preprocessing.
 
 ## Guides
 

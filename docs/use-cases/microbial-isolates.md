@@ -2,7 +2,7 @@
 
 **Domain:** Genomics — short-read QC and assembly
 
-**Tools:** `fastp`, `megahit`
+**Codes:** `fastp`, `megahit`
 
 **Source:** [`use_cases/microbial_isolates/`](https://github.com/AI-ModCon/dsagt/tree/main/use_cases/microbial_isolates/)
 

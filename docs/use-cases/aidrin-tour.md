@@ -2,7 +2,7 @@
 
 **Domain:** AI data readiness — quality, fairness, and privacy assessment
 
-**Tools:** [`aidrin`](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector CLI)
+**Codes:** [`aidrin`](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector CLI)
 
 **Dataset:** UCI Adult census (bundled with AIDRIN)
 

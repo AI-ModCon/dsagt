@@ -2,13 +2,13 @@
 
 **Domain:** Materials science — density functional theory
 
-**Tools:** VASP, ISAAC
+**Codes:** VASP, ISAAC
 
 **Source:** [`use_cases/isaac_vasp/`](https://github.com/AI-ModCon/dsagt/tree/main/use_cases/isaac_vasp/)
 
 ## Overview
 
-This use case covers DFT input/output handling with VASP using DSAgt and the ISAAC workflow system. The agent registers VASP pre/post-processing tools and transfers NEB calculation results into the ISAAC database.
+This use case covers DFT input/output handling with VASP using DSAgt and the ISAAC workflow system. The agent registers a VASP-to-ISAAC converter as a code and turns NEB calculation results into an ISAAC AI-Ready Record.
 
 ## Guides
 
