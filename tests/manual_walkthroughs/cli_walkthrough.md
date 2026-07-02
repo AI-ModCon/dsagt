@@ -46,9 +46,9 @@ cd ~/dsagt-projects/smoke-<AGENT> && <agent-launch-command>
 
    **Expect:** `save_code_spec` MCP call; `~/dsagt-projects/smoke-<AGENT>/codes/csvtool_filter.md` exists.
 
-3. > Use the `scan_directory` tool from the registry to scan `$SMOKE_DIR/data/`.
+3. > Use the `scan-directory` tool from the registry to scan `$SMOKE_DIR/data/`.
 
-   **Expect:** Agent invokes `dsagt-run --code scan_directory ...`; one record in `~/dsagt-projects/smoke-<AGENT>/trace_archive/scan_directory_*.json`.
+   **Expect:** Agent invokes `dsagt-run --code scan-directory ...`; one record in `~/dsagt-projects/smoke-<AGENT>/trace_archive/scan-directory_*.json`.
 
 4. > Look at `$SMOKE_DIR/data/samples.csv` and summarize — columns, row count, quality issues.
 

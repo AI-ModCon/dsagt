@@ -14,8 +14,7 @@ Project directory layout::
             explicit_memories.yaml, ...   # explicit memory
         trace_archive/      # tool execution records
         mlflow.db           # serverless MLflow SQLite trace store (created lazily)
-        tools/              # registered CLI tools
-        codes/scripts/         # agent-written tool scripts
+        codes/<name>/       # registered codes (skill-standard dirs: SKILL.md + scripts/)
         skills/             # instruction-based agent skills
         kb_index/           # knowledge base collections
 """
@@ -621,10 +620,8 @@ def init_project(
     pdir = (location or DEFAULT_PROJECTS_BASE) / project_name
 
     pdir.mkdir(parents=True, exist_ok=True)
-    # `tools/` and `codes/scripts/` are created by CodeRegistry on first server
-    # startup so bundled tools get copied in (it short-circuits if tools/
-    # already exists).  ``mlflow.db`` is created lazily by the MLflow client
-    # on first span.
+    # `codes/` is created by CodeRegistry on first server startup.
+    # ``mlflow.db`` is created lazily by the MLflow client on first span.
     for subdir in ("trace_archive", "skills", CONFIG_DIRNAME):
         (pdir / subdir).mkdir(parents=True, exist_ok=True)
 

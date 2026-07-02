@@ -40,7 +40,7 @@ Inside VS Code:
 
 1. > Ingest the docs in `$SMOKE_DIR/knowledge/` into a collection named `knowledge`.
 2. > I have a CSV utility called `csvtool`. Its reference is at `$SMOKE_DIR/knowledge/api_reference.md` — register the `filter` subcommand. Use an underscore in the name.
-3. > Use the `scan_directory` tool from the registry to scan `$SMOKE_DIR/data/`.
+3. > Use the `scan-directory` tool from the registry to scan `$SMOKE_DIR/data/`.
 4. > Look at `$SMOKE_DIR/data/samples.csv` and summarize — columns, row count, quality issues.
 5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
 6. > What do you remember about the samples dataset?

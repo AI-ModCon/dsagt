@@ -92,10 +92,11 @@ TOOL_NO_PARAMS = {
 
 
 def _write_tool(codes_dir, spec: dict) -> None:
-    """Write a minimal skill file for the given spec dict."""
-    path = codes_dir / f"{spec['name']}.md"
+    """Write a minimal skill-standard code dir for the given spec dict."""
+    code_dir = codes_dir / spec["name"]
+    code_dir.mkdir(parents=True, exist_ok=True)
     frontmatter = yaml.dump(spec, default_flow_style=False, sort_keys=False)
-    path.write_text(f"---\n{frontmatter}---\n\n# {spec['name']}\n")
+    (code_dir / "SKILL.md").write_text(f"---\n{frontmatter}---\n\n# {spec['name']}\n")
 
 
 def make_registry(tmp_path, tools: list[dict]) -> CodeRegistry:
@@ -284,7 +285,8 @@ class TestSaveTool:
 
     def test_update_preserves_body(self, empty_registry):
         """Updating a tool preserves any hand-edited markdown body."""
-        skill_path = empty_registry.codes_dir / "ping.md"
+        skill_path = empty_registry.codes_dir / "ping" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
         spec = TOOL_NO_PARAMS
         fm = __import__("yaml").dump(spec, default_flow_style=False, sort_keys=False)
         skill_path.write_text(f"---\n{fm}---\n\n# Custom docs written by hand.\n")
@@ -328,9 +330,9 @@ class TestRuntimeIsolation:
         reg.save_tool(TOOL_WITH_MIXED_PARAMS)
 
         # Source should be unchanged
-        source_files = list(source_dir.glob("*.md"))
+        source_files = list(source_dir.glob("*/SKILL.md"))
         assert len(source_files) == 1
-        assert source_files[0].stem == "ping"
+        assert source_files[0].parent.name == "ping"
 
         # Runtime should have both tools
         assert len(reg.list_codes()) == 2
@@ -351,7 +353,7 @@ class TestDefaultTools:
 
     def test_tools_are_valid(self):
         """Every tool file must parse cleanly and have required fields."""
-        tool_files = list(CodeRegistry._PACKAGE_CODES_DIR.glob("*.md"))
+        tool_files = list(CodeRegistry._PACKAGE_CODES_DIR.glob("*/SKILL.md"))
         assert len(tool_files) > 0, "No tool files found in package"
 
         for path in tool_files:
@@ -367,7 +369,7 @@ class TestDefaultTools:
         tools = reg.list_codes()
         assert len(tools) > 0
         names = [t["name"] for t in tools]
-        assert "scan_directory" in names
+        assert "scan-directory" in names
 
 
 # ---------------------------------------------------------------------------

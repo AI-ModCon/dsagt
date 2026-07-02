@@ -28,7 +28,7 @@ Inside the agent, paste these prompts one at a time. Replace `$SMOKE_DIR` with t
 
 1. > Ingest the docs in `$SMOKE_DIR/knowledge/` into a collection named `knowledge`.
 2. > Register the csvkit CLI codes `csvcut`, `csvgrep`, `csvstat`, and `csvlook`.
-3. > Use the `scan_directory` code from the registry to scan `$SMOKE_DIR/data/`.
+3. > Use the `scan-directory` code from the registry to scan `$SMOKE_DIR/data/`.
 4. > Summarize `samples.csv` — columns, row count, quality issues using csvkit codes from the registry.
 5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
 6. > Tell me what you remember about the samples dataset.

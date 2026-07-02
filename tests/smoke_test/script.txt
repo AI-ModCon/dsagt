@@ -4,7 +4,7 @@ I have a small CLI utility at {{SMOKE_DIR}}/greet.py — its reference doc is in
 
 Run the registered greet code with the name argument "DSAGT" and the greeting argument "Ahoy". Use the exact shell command from its registered spec (the dsagt-run wrapper) so the execution is recorded in the trace archive.
 
-Use the scan_directory code from the registry to scan the {{SMOKE_DIR}}/data/ directory so I can see what's in it.
+Use the scan-directory code from the registry to scan the {{SMOKE_DIR}}/data/ directory so I can see what's in it.
 
 Search the knowledge collection: what error code does greet report when the name argument is empty? Reply with the code verbatim.
 

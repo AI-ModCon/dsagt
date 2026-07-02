@@ -116,6 +116,8 @@ class OpenCodeSetup(AgentSetup):
     base_command = ["opencode"]
     static_marker = "AGENTS.md"
     install_hint = "Install with `npm i -g opencode-ai`."
+    # The AGENTS.md-convention skills dir codex/goose also use.
+    native_skills_dir = ".agents/skills"
     # OpenCode reads provider creds via ``{env:VAR}`` interpolation in
     # its config — the file references these vars, opencode resolves
     # them from the user's shell at runtime.  Same shape as goose's

@@ -3,10 +3,12 @@ DSAgt CLI — project initialization and session management.
 
 ``dsagt init`` is the single, interactive, re-runnable place a user expresses
 every choice; the prompts mirror ``.dsagt/config.yaml`` 1:1 and it writes the
-per-agent instructions + MCP config.  ``dsagt start <project>`` is pure
-convenience — ``cd <project> && <agent>`` and nothing else (the MCP server
-owns the session lifecycle, minting session ids into ``.dsagt/state.yaml`` and
-catching up post-session extraction in the background at startup).
+per-agent instructions + MCP config.  ``dsagt start <project>`` refreshes the
+dynamic agent record (MCP config + native-skills mirror, idempotent) and then
+launches the agent — ``cd <project> && <agent>`` plus the refresh (the MCP
+server owns the session lifecycle, minting session ids into
+``.dsagt/state.yaml`` and catching up post-session extraction in the
+background at startup).
 
 The agent talks to its provider directly — DSAGT never interposes on its
 traffic.  Self-logging goes to a serverless ``sqlite:///<pdir>/mlflow.db``
@@ -402,17 +404,19 @@ def _cmd_init(args):
 
 
 def _cmd_start(args):
-    """Pure convenience: ``cd <project> && <agent>``.
+    """Refresh the dynamic agent record, then ``cd <project> && <agent>``.
 
-    Nothing more — the agent is launched in the foreground at the project
-    dir.  All configuration is owned by ``dsagt init``; the session
-    lifecycle (session-id minting, post-session extraction catch-up) is
-    owned by the MCP server at startup.  ``dsagt start`` has no behavior the
-    user couldn't get by hand with ``cd <pdir> && <agent>``.
+    The refresh (``dynamic_agent_record``: per-agent MCP config +
+    native-skills mirror, all idempotent) is what makes ``install_skill`` /
+    ``save_code_spec`` results appear natively "after the next dsagt start",
+    and lets a credential-dependent step skipped at init (cline auth) pick
+    up once the vars are in the shell.  Session lifecycle (session-id
+    minting, post-session extraction catch-up) is owned by the MCP server
+    at startup.
 
     The per-project runtime env (e.g. ``CLINE_DIR`` / ``CODEX_HOME`` that
-    point an agent at its init-written config) is still applied so the
-    launched agent finds what ``init`` set up.
+    point an agent at its init-written config) is applied so the launched
+    agent finds what ``init`` set up.
     """
     config = load_config(args.project)
     pdir = Path(config["project_dir"])
@@ -421,6 +425,9 @@ def _cmd_start(args):
     print(f"  Agent:    {config['agent']}")
     print(f"  Dir:      {pdir}")
     print()
+
+    for action in dynamic_agent_record(config, env=dict(os.environ), working_dir=pdir):
+        print(f"  {action}")
 
     env = agent_env(config)
     return launch_agent(

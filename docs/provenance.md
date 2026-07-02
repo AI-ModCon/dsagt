@@ -26,7 +26,7 @@ Prints descriptive statistics for all columns in a CSV file.
 Usage: csvstat [options] [FILE]
 ```
 
-DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. It ships one bundled code, `scan_directory`, indexed for search by `dsagt init`.
+DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. It ships one bundled code, `scan-directory`, indexed for search by `dsagt init`.
 
 ## Execution capture
 

@@ -395,7 +395,7 @@ def _build_bundled_tools(kb, index_dir: Path) -> int:
 
     code_paths = [
         p
-        for p in sorted(CodeRegistry._PACKAGE_CODES_DIR.glob("*.md"))
+        for p in sorted(CodeRegistry._PACKAGE_CODES_DIR.glob("*/SKILL.md"))
         if _parse_frontmatter(p).get("name")
     ]
     if not code_paths:

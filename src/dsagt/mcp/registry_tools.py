@@ -389,7 +389,11 @@ def _registry_tools_and_handlers(
         ),
         types.Tool(
             name="save_code_spec",
-            description="Save a tool specification to the registry as a skill file",
+            description=(
+                "Register a CLI code: writes a skill-standard spec dir "
+                "(codes/<name>/SKILL.md) the agent also auto-discovers "
+                "natively after the next dsagt start"
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -406,11 +410,20 @@ def _registry_tools_and_handlers(
                                 "properties": {
                                     "name": {
                                         "type": "string",
-                                        "description": "Unique tool identifier",
+                                        "description": (
+                                            "Unique code name — lowercase "
+                                            "letters, digits, hyphens (e.g. "
+                                            "'scan-directory')"
+                                        ),
                                     },
                                     "description": {
                                         "type": "string",
-                                        "description": "What the tool does",
+                                        "description": (
+                                            "What the code does and when to "
+                                            "use it — phrase as 'Use when "
+                                            "…' so native skill routing can "
+                                            "match it"
+                                        ),
                                     },
                                     "executable": {
                                         "type": "string",

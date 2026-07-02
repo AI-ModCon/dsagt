@@ -58,7 +58,7 @@ The codebase separates **commands** (entry points with argparse, launched as CLI
 Entry points (`pyproject.toml` `[project.scripts]`): `dsagt` → `dsagt.commands.cli:main`, `dsagt-run` → `dsagt.commands.run_code:main`, `dsagt-server` → `dsagt.mcp.server:main`.
 
 **Bundled assets** (shipped as `package-data`):
-- `src/dsagt/codes/` — built-in code specs (markdown + YAML frontmatter) copied into new projects.
+- `src/dsagt/codes/` — built-in codes as skill-standard dirs (`<name>/SKILL.md`), served from the package (never copied into projects).
 - `src/dsagt/skills/` — built-in skills (e.g., `skill-creator`) the agent discovers via `search_skills`.
 - `src/dsagt/dsagt_instructions.md` — agent-agnostic system instructions injected into per-agent files at init.
 
@@ -122,7 +122,7 @@ A single merged `dsagt-server` (`src/dsagt/mcp/`) exposes 20 tools across four c
 
 - **Agent-agnostic**: DSAGT is infrastructure, not an agent. Capabilities are MCP services.
 - **Session isolation**: each project gets its own directory with config, tools, skills, kb_index, trace_archive, and the `mlflow.db` sqlite store.
-- **Codes vs Skills**: Codes are CLI executables in `<project>/codes/` (specs with parameters, wrapped by dsagt-run). Skills are agent instruction workflows in `<project>/skills/` (SKILL.md + reference docs). Both are discoverable via ChromaDB-backed semantic search.
+- **Codes vs Skills**: Codes are CLI executables in `<project>/codes/<name>/` (skill-standard dirs whose SKILL.md frontmatter adds executable/parameters; wrapped by dsagt-run). Skills are agent instruction workflows in `<project>/skills/` (SKILL.md + reference docs). Both share the skill envelope, so both mirror into the agent's native skills dir; both are also discoverable via ChromaDB-backed semantic search (`search_registry` / `search_skills`).
 
 ## DSAGT Pipeline Builder Workflow
 

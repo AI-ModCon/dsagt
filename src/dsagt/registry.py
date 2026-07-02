@@ -3,9 +3,16 @@ Code and Skill Registries.
 
 Two parallel registries for agent capabilities:
 
-**Codes** (CLI executables) — markdown files with YAML frontmatter specifying
-name, description, executable, parameters, dependencies, tags. Stored in
-`<project>/codes/`. Agent-written scripts go in `<project>/codes/scripts/`.
+**Codes** (CLI executables) — skill-standard directories
+(`<project>/codes/<name>/SKILL.md`) whose frontmatter carries the machine
+fields (name, description, executable, parameters, dependencies, tags) on
+top of the skill-required name/description.  Agent-written scripts live
+beside their spec in `<project>/codes/<name>/scripts/`, making each
+registered code a self-contained, portable directory.  The skill-standard
+envelope means codes mirror into the agent's native skills dir unchanged
+(see ``AgentSetup.setup_skills``) — native discovery puts the exact
+runnable command in context at invocation time, alongside MCP discovery
+via ``search_registry``.
 When registered, executables are wrapped with dsagt-run + uv run --with.
 The wrapper lives *inside* the stored shell command by design: execution
 used to be dispatched by MCP-server tools, but agents routinely sidestepped
@@ -27,6 +34,7 @@ Both registries support optional KB indexing for semantic search via
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -84,6 +92,11 @@ def _uv_run_prefix(deps: list[str]) -> str:
     return f"uv run --with {','.join(deps)} -- "
 
 
+#: Skill-standard name charset — agent native skill loaders (claude et al.)
+#: require lowercase-hyphen names, and codes mirror into those dirs.
+_CODE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
 def _wrap_executable(name: str, executable: str, deps: list[str] | None = None) -> str:
     """Wrap an executable with uv run (for Python deps) and dsagt-run (for provenance).
 
@@ -96,12 +109,21 @@ def _wrap_executable(name: str, executable: str, deps: list[str] | None = None) 
 
 
 def _generate_code_body(spec: dict) -> str:
-    """Generate a markdown body for a new code file from its spec."""
+    """Generate a markdown body for a new code file from its spec.
+
+    The exact runnable command leads the body: native skill discovery
+    injects SKILL.md at invocation time, and the thing the agent must copy
+    verbatim (the dsagt-run-wrapped command) belongs at the top, not after
+    prose it may stop reading.
+    """
     lines = [
-        f"\n# {spec['name']}\n\n{spec['description']}\n\n",
-        "## Shell Command\n\n```bash\n",
+        f"\n# {spec['name']}\n\n",
+        "Run this registered code with the exact shell command below — copy "
+        "it byte-for-byte (the `dsagt-run` prefix writes the execution "
+        "record to `trace_archive/`):\n\n```bash\n",
         f"{spec['executable']} [options]\n",
-        "```\n\n## Parameters\n\n",
+        "```\n\n",
+        f"{spec['description']}\n\n## Parameters\n\n",
     ]
     params = spec.get("parameters", {})
     if params:
@@ -328,19 +350,27 @@ class CodeRegistry:
         # Project code dir is always agent-writable.  We no longer
         # pre-populate it with bundled codes — they're served directly
         # from the package via the merge in list_codes / get_code.
+        # Each code is a self-contained skill-standard directory
+        # (``codes/<name>/SKILL.md`` + optional ``scripts/``), so there is
+        # no shared scripts/ dir to pre-create.
         self.codes_dir.mkdir(parents=True, exist_ok=True)
-        # Ensure scripts/ subdirectory exists for agent-written scripts.
-        (self.codes_dir / "scripts").mkdir(exist_ok=True)
 
     def _bundled_code_paths(self) -> list[Path]:
-        """Return .md code spec paths shipped with the package."""
+        """Return SKILL.md spec paths shipped with the package."""
         if not self._bundled_dir.exists():
             return []
-        return sorted(self._bundled_dir.glob("*.md"))
+        return sorted(self._bundled_dir.glob("*/SKILL.md"))
 
     def _project_code_paths(self) -> list[Path]:
-        """Return .md code spec paths the agent has saved into this project."""
-        return sorted(self.codes_dir.glob("*.md"))
+        """Return SKILL.md spec paths the agent has saved into this project."""
+        return sorted(self.codes_dir.glob("*/SKILL.md"))
+
+    def code_dirs(self) -> list[Path]:
+        """All code directories, bundled first so project wins downstream
+        name collisions (mirror order — see ``AgentSetup.setup_skills``)."""
+        return [p.parent for p in self._bundled_code_paths()] + [
+            p.parent for p in self._project_code_paths()
+        ]
 
     def list_codes_raw(self) -> list[dict]:
         """Return full frontmatter dicts for all codes.
@@ -394,12 +424,12 @@ class CodeRegistry:
 
     def get_code(self, name: str) -> dict | None:
         """Look up a code spec by name.  Project layer overrides bundled."""
-        project_path = self.codes_dir / f"{name}.md"
+        project_path = self.codes_dir / name / "SKILL.md"
         if project_path.exists():
             code = _parse_frontmatter(project_path)
             if code.get("name") == name:
                 return code
-        bundled_path = self._bundled_dir / f"{name}.md"
+        bundled_path = self._bundled_dir / name / "SKILL.md"
         if bundled_path.exists():
             code = _parse_frontmatter(bundled_path)
             if code.get("name") == name:
@@ -407,7 +437,7 @@ class CodeRegistry:
         return None
 
     def save_tool(self, spec: dict) -> str:
-        """Write or update a code file. Returns 'added' or 'updated'.
+        """Write or update a code's SKILL.md. Returns 'added' or 'updated'.
 
         Automatically wraps the executable:
         - With `uv run --with <deps>` if Python dependencies are specified
@@ -415,8 +445,18 @@ class CodeRegistry:
 
         If a KnowledgeBase is available, indexes the code for semantic search.
         """
-        path = self.codes_dir / f"{spec['name']}.md"
+        # Codes share the skill-standard envelope so they mirror into agent
+        # native skills dirs, whose loaders require lowercase-hyphen names.
+        if not _CODE_NAME_RE.match(spec["name"]):
+            raise ValueError(
+                f"invalid code name {spec['name']!r}: use lowercase letters, "
+                "digits, and hyphens (the skill-standard charset agent native "
+                "skill loaders require), e.g. 'scan-directory'"
+            )
+        code_dir = self.codes_dir / spec["name"]
+        path = code_dir / "SKILL.md"
         action = "updated" if path.exists() else "added"
+        code_dir.mkdir(parents=True, exist_ok=True)
 
         spec = dict(spec)
         spec["executable"] = _wrap_executable(

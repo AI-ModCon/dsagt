@@ -306,11 +306,12 @@ class AgentSetup(ABC):
 
     #: Directory (relative to the working dir) the agent natively auto-discovers
     #: ``SKILL.md`` skill folders from.  ``setup_skills`` mirrors installed
-    #: (bundled + project) skills here so the agent discovers/auto-invokes them
-    #: without an MCP round-trip.  Every supported agent has one — claude
-    #: ``.claude/skills``, codex/goose ``.agents/skills`` (the cross-agent
-    #: standard), cline ``.cline/skills``.  ``None`` would
-    #: mean the agent has no native skill discovery (none currently).
+    #: (bundled + project) skills AND registered codes here so the agent
+    #: discovers/auto-invokes them without an MCP round-trip.  Every supported
+    #: agent has one — claude ``.claude/skills``, codex/goose/opencode
+    #: ``.agents/skills`` (the cross-agent standard), cline ``.cline/skills``.
+    #: ``None`` would mean the agent has no native skill discovery
+    #: (none currently).
     native_skills_dir: ClassVar[str | None] = None
 
     @abstractmethod
@@ -337,8 +338,14 @@ class AgentSetup(ABC):
         """
 
     def setup_skills(self, working_dir: Path, config: dict) -> list[str]:
-        """Mirror installed (bundled + project) skills into the agent's native
-        skills dir so it auto-discovers/auto-invokes them.
+        """Mirror installed skills AND registered codes into the agent's
+        native skills dir so it auto-discovers/auto-invokes them.
+
+        Codes share the skill-standard envelope (``codes/<name>/SKILL.md``),
+        so the same copy serves both: native discovery puts a code's exact
+        dsagt-run command in context at invocation time — a second discovery
+        path alongside ``search_registry``, aimed at the from-memory
+        command-reconstruction failure mode.
 
         Idempotent — the manifest-tracked :func:`_mirror_skills_to` only
         reaps skills dsagt placed, never user-authored ones.  No-op when the
@@ -349,11 +356,16 @@ class AgentSetup(ABC):
             return []
         if not (config.get("skills") or {}).get("populate_native", True):
             return []
-        from dsagt.registry import SkillRegistry
+        from dsagt.registry import CodeRegistry, SkillRegistry
 
+        codes = CodeRegistry(runtime_dir=working_dir, kb=None)
         reg = SkillRegistry(runtime_dir=working_dir, kb=None)
-        # Bundled first, project last → project wins name collisions.
-        src_dirs = reg._bundled_skill_dirs() + reg._project_skill_dirs()
+        # Later entries win name collisions: codes first, then bundled
+        # skills, then project skills — a deliberately installed instruction
+        # skill outranks a registered code of the same name.
+        src_dirs = (
+            codes.code_dirs() + reg._bundled_skill_dirs() + reg._project_skill_dirs()
+        )
         target = working_dir
         for part in self.native_skills_dir.split("/"):
             target = target / part

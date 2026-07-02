@@ -280,6 +280,7 @@ def test_mirror_truncates_long_description(tmp_path):
         ("goose", ".agents/skills"),
         ("cline", ".cline/skills"),
         ("codex", ".agents/skills"),
+        ("opencode", ".agents/skills"),
     ],
 )
 def test_setup_skills_mirrors_into_native_dir(tmp_path, agent, subdir):
@@ -292,6 +293,45 @@ def test_setup_skills_mirrors_into_native_dir(tmp_path, agent, subdir):
         target = target / part
     assert (target / "myskill" / "SKILL.md").exists()
     assert any("kill" in a for a in actions)  # reported a mirror action
+
+
+def test_setup_skills_mirrors_registered_codes(tmp_path):
+    """Registered codes share the skill envelope, so they mirror natively too."""
+    from dsagt.agents import AGENTS
+    from dsagt.registry import CodeRegistry
+
+    CodeRegistry(runtime_dir=tmp_path).save_tool(
+        {
+            "name": "my-code",
+            "description": "Use when testing the native code mirror",
+            "executable": "echo hi",
+            "parameters": {},
+        }
+    )
+    AGENTS["claude"]().setup_skills(tmp_path, {})
+    mirrored = tmp_path / ".claude" / "skills" / "my-code" / "SKILL.md"
+    assert mirrored.exists()
+    # The mirrored copy carries the exact dsagt-run command the agent must run.
+    assert "dsagt-run --code my-code -- echo hi" in mirrored.read_text()
+
+
+def test_setup_skills_project_skill_wins_code_name_collision(tmp_path):
+    """A deliberately installed instruction skill outranks a same-named code."""
+    from dsagt.agents import AGENTS
+    from dsagt.registry import CodeRegistry
+
+    CodeRegistry(runtime_dir=tmp_path).save_tool(
+        {
+            "name": "clash",
+            "description": "the code",
+            "executable": "echo code",
+            "parameters": {},
+        }
+    )
+    _mkskill(tmp_path / "skills" / "clash", "clash")
+    AGENTS["claude"]().setup_skills(tmp_path, {})
+    text = (tmp_path / ".claude" / "skills" / "clash" / "SKILL.md").read_text()
+    assert "dsagt-run" not in text  # the skill copy, not the code copy
 
 
 def test_setup_skills_respects_populate_native_false(tmp_path):

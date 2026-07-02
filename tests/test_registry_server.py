@@ -20,7 +20,7 @@ from mcp_helpers import call_tool_sync as call_tool
 
 
 def make_spec(
-    name="test_tool",
+    name="test-tool",
     description="A test tool",
     executable="echo hello",
     dependencies=None,
@@ -44,9 +44,10 @@ def make_spec(
 
 
 def _write_tool(codes_dir: Path, spec: dict) -> None:
-    path = codes_dir / f"{spec['name']}.md"
+    code_dir = codes_dir / spec["name"]
+    code_dir.mkdir(parents=True, exist_ok=True)
     fm = yaml.dump(spec, default_flow_style=False, sort_keys=False)
-    path.write_text(f"---\n{fm}---\n\n# {spec['name']}\n")
+    (code_dir / "SKILL.md").write_text(f"---\n{fm}---\n\n# {spec['name']}\n")
 
 
 def _make_server(tmp_path, tools=None):
@@ -97,8 +98,8 @@ def populated(tmp_path):
     server, reg = _make_server(
         tmp_path,
         tools=[
-            make_spec("tool_alpha", "Alpha tool", "python alpha.py"),
-            make_spec("tool_beta", "Beta data processor", "python beta.py"),
+            make_spec("tool-alpha", "Alpha tool", "python alpha.py"),
+            make_spec("tool-beta", "Beta data processor", "python beta.py"),
         ],
     )
     return server, reg
@@ -118,49 +119,49 @@ class TestSaveToolSpec:
 
     def test_add_new_tool(self, server, registry):
         """Saving a new spec creates a skill file and reports added."""
-        spec = make_spec("my_tool")
+        spec = make_spec("my-tool")
         text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
         assert "1 tools" in text
-        assert registry.get_code("my_tool") is not None
+        assert registry.get_code("my-tool") is not None
 
     def test_update_existing_tool(self, server, registry):
         """Saving a spec with the same name updates rather than duplicates."""
         call_tool(
             server,
             "save_code_spec",
-            {"spec": make_spec("my_tool", description="Version 1")},
+            {"spec": make_spec("my-tool", description="Version 1")},
         )
         text = call_tool(
             server,
             "save_code_spec",
-            {"spec": make_spec("my_tool", description="Version 2")},
+            {"spec": make_spec("my-tool", description="Version 2")},
         )
 
         assert "updated" in text
         assert "1 tools" in text
-        assert registry.get_code("my_tool")["description"] == "Version 2"
+        assert registry.get_code("my-tool")["description"] == "Version 2"
 
     def test_add_multiple_tools(self, server, registry):
         """Multiple distinct tools accumulate as separate skill files."""
-        call_tool(server, "save_code_spec", {"spec": make_spec("tool_a")})
-        text = call_tool(server, "save_code_spec", {"spec": make_spec("tool_b")})
+        call_tool(server, "save_code_spec", {"spec": make_spec("tool-a")})
+        text = call_tool(server, "save_code_spec", {"spec": make_spec("tool-b")})
 
         assert "2 tools" in text
-        assert registry.get_code("tool_a") is not None
-        assert registry.get_code("tool_b") is not None
+        assert registry.get_code("tool-a") is not None
+        assert registry.get_code("tool-b") is not None
 
     def test_accepts_stringified_spec(self, server, registry):
         """Some MCP clients (Claude Sonnet/Haiku 4.x) send nested-object args as
         JSON strings.  The handler must accept both shapes."""
         import json
 
-        spec = make_spec("stringy_tool")
+        spec = make_spec("stringy-tool")
         text = call_tool(server, "save_code_spec", {"spec": json.dumps(spec)})
 
         assert "added" in text
-        assert registry.get_code("stringy_tool") is not None
+        assert registry.get_code("stringy-tool") is not None
 
     def test_rejects_invalid_stringified_spec(self, server, registry):
         """Non-JSON strings produce a clear error rather than crashing."""
@@ -189,8 +190,8 @@ class TestGetRegistry:
         data = yaml.safe_load(text)
         assert len(data["codes"]) == 2
         names = [t["name"] for t in data["codes"]]
-        assert "tool_alpha" in names
-        assert "tool_beta" in names
+        assert "tool-alpha" in names
+        assert "tool-beta" in names
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +213,9 @@ class TestSearchRegistryNoKB:
     def test_exact_name_lookup_works_without_kb(self, populated_server):
         """code_name lookup is KB-free and must keep working."""
         text = call_tool(
-            populated_server, "search_registry", {"code_name": "tool_alpha"}
+            populated_server, "search_registry", {"code_name": "tool-alpha"}
         )
-        assert "tool_alpha" in text
+        assert "tool-alpha" in text
 
     def test_exact_name_miss_without_kb(self, populated_server):
         """code_name with a non-existent name returns a clean 'no tool' message."""
@@ -232,7 +233,7 @@ class TestSearchRegistryNoKB:
         ``not in`` assertion pins that the fallback stays gone.
         """
         text = call_tool(populated_server, "search_registry", {"query": "alpha"})
-        assert "tool_alpha" not in text  # no silent substring fallback
+        assert "tool-alpha" not in text  # no silent substring fallback
         assert "knowledge base" in text.lower()
         assert "embedding" in text.lower()
 
@@ -387,7 +388,7 @@ class TestSaveToolSpecDependencies:
         mock_run.return_value = MagicMock(
             returncode=0, stdout="Successfully installed pandas-2.1.0", stderr=""
         )
-        spec = make_spec("tool_with_deps", dependencies=["pandas>=2.0", "numpy"])
+        spec = make_spec("tool-with-deps", dependencies=["pandas>=2.0", "numpy"])
         text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
@@ -410,12 +411,12 @@ class TestSaveToolSpecDependencies:
         mock_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="No matching distribution for bogus-pkg"
         )
-        spec = make_spec("tool_bad_deps", dependencies=["bogus-pkg"])
+        spec = make_spec("tool-bad-deps", dependencies=["bogus-pkg"])
         text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
         assert "Installation failed" in text
-        tool = registry.get_code("tool_bad_deps")
+        tool = registry.get_code("tool-bad-deps")
         assert tool is not None
         assert tool["dependencies"] == ["bogus-pkg"]
 
@@ -423,7 +424,7 @@ class TestSaveToolSpecDependencies:
     def test_deps_timeout(self, mock_run, server):
         """Timeout during install is reported, spec is still saved."""
         mock_run.side_effect = subprocess.TimeoutExpired("uv", 120)
-        spec = make_spec("tool_slow_deps", dependencies=["heavy-pkg"])
+        spec = make_spec("tool-slow-deps", dependencies=["heavy-pkg"])
         text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
@@ -431,7 +432,7 @@ class TestSaveToolSpecDependencies:
 
     def test_no_deps_no_install_message(self, server, registry):
         """When no dependencies are provided, no install message appears."""
-        spec = make_spec("tool_no_deps")
+        spec = make_spec("tool-no-deps")
         text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
@@ -441,17 +442,17 @@ class TestSaveToolSpecDependencies:
     def test_deps_persisted_in_skill_file(self, mock_run, server, registry):
         """Dependencies are stored in the skill file frontmatter."""
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-        spec = make_spec("dep_tool", dependencies=["requests>=2.28"])
+        spec = make_spec("dep-tool", dependencies=["requests>=2.28"])
         call_tool(server, "save_code_spec", {"spec": spec})
 
-        tool = registry.get_code("dep_tool")
+        tool = registry.get_code("dep-tool")
         assert tool["dependencies"] == ["requests>=2.28"]
 
     @patch("dsagt.mcp.registry_tools.subprocess.run")
     def test_uv_not_found(self, mock_run, server):
         """FileNotFoundError from missing uv is reported gracefully."""
         mock_run.side_effect = FileNotFoundError("uv")
-        spec = make_spec("tool_no_uv", dependencies=["pandas"])
+        spec = make_spec("tool-no-uv", dependencies=["pandas"])
         text = call_tool(server, "save_code_spec", {"spec": spec})
 
         assert "added" in text
@@ -471,16 +472,16 @@ class TestInstallDependencies:
         server, reg = _make_server(
             tmp_path,
             tools=[
-                make_spec("tool_a", dependencies=["pandas", "numpy"]),
-                make_spec("tool_b", dependencies=["numpy", "scipy"]),
+                make_spec("tool-a", dependencies=["pandas", "numpy"]),
+                make_spec("tool-b", dependencies=["numpy", "scipy"]),
             ],
         )
 
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         text = call_tool(server, "install_dependencies", {})
 
-        assert "tool_a" in text
-        assert "tool_b" in text
+        assert "tool-a" in text
+        assert "tool-b" in text
         cmd = mock_run.call_args[0][0]
         assert cmd == [
             "uv",
@@ -499,18 +500,18 @@ class TestInstallDependencies:
         server, reg = _make_server(
             tmp_path,
             tools=[
-                make_spec("tool_a", dependencies=["pandas"]),
-                make_spec("tool_b", dependencies=["scipy"]),
+                make_spec("tool-a", dependencies=["pandas"]),
+                make_spec("tool-b", dependencies=["scipy"]),
             ],
         )
 
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-        text = call_tool(server, "install_dependencies", {"code_name": "tool_b"})
+        text = call_tool(server, "install_dependencies", {"code_name": "tool-b"})
 
         cmd = mock_run.call_args[0][0]
         assert cmd == ["uv", "pip", "install", "--python", sys.executable, "scipy"]
-        assert "tool_b" in text
-        assert "tool_a" not in text
+        assert "tool-b" in text
+        assert "tool-a" not in text
 
     def test_no_deps_in_registry(self, server):
         """install_dependencies on empty registry reports no tools."""
@@ -573,7 +574,7 @@ class TestToolIndexing:
             "save_code_spec",
             {
                 "spec": make_spec(
-                    name="csv_filter",
+                    name="csv-filter",
                     description="Filter CSV rows by column value",
                 )
             },
@@ -581,7 +582,7 @@ class TestToolIndexing:
 
         results = kb.search("filter", collection=TOOL_REGISTRY_COLLECTION)
         assert len(results) > 0
-        assert any("csv_filter" in r["chunk"].get("text", "") for r in results)
+        assert any("csv-filter" in r["chunk"].get("text", "") for r in results)
 
     def test_search_registry_semantic(self, tmp_path):
         """Semantic search finds tools by description similarity."""
@@ -591,7 +592,7 @@ class TestToolIndexing:
             "save_code_spec",
             {
                 "spec": make_spec(
-                    name="csv_filter",
+                    name="csv-filter",
                     description="Filter and remove rows from a CSV spreadsheet based on column values",
                 )
             },
@@ -600,7 +601,7 @@ class TestToolIndexing:
         text = call_tool(
             server, "search_registry", {"query": "delete rows from tabular data"}
         )
-        assert "csv_filter" in text
+        assert "csv-filter" in text
 
     def test_search_registry_by_tag(self, tmp_path):
         """Tag-based filtering returns only matching tools."""

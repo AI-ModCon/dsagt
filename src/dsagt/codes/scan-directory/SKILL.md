@@ -1,8 +1,8 @@
 ---
-name: scan_directory
+name: scan-directory
 description: Scan a data directory and produce structured report with file counts,
   sizes, and directory tree
-executable: dsagt-run --code scan_directory -- python -m dsagt.codes.scan_directory
+executable: dsagt-run --code scan-directory -- python -m dsagt.codes.scan_directory
 parameters:
   directory:
     type: string
@@ -23,7 +23,7 @@ parameters:
     description: Number of largest files to list
 ---
 
-# scan_directory
+# scan-directory
 
 Scan a data directory and produce a structured report with file counts, sizes, and directory tree. Use this as your first step when exploring a new dataset to understand its layout before deciding how to process it.
 

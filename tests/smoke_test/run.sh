@@ -173,7 +173,12 @@ check() {
 }
 
 # -- registry + execution + provenance --------------------------------------
-check "greet spec written"           "test -f '${PDIR}/codes/greet.md'"
+check "greet spec written"           "test -f '${PDIR}/codes/greet/SKILL.md'"
+# Codes share the skill-standard envelope and mirror into the agent's
+# native skills dir at dsagt start: the bundled scan-directory at
+# session 1's start, greet (registered mid-session-1) at session 2's.
+check "bundled code mirrored natively" "find '${PDIR}' -path '*skills/scan-directory/SKILL.md' | grep -q ."
+check "greet mirrored natively"       "find '${PDIR}' -path '*skills/greet/SKILL.md' | grep -q ."
 # The execution went through dsagt-run iff the record captured greet's
 # actual stdout — an agent that ran the script by hand can't fake the
 # trace_archive record.  Match only the greeting prefix: it proves our
@@ -182,7 +187,7 @@ check "greet spec written"           "test -f '${PDIR}/codes/greet.md'"
 # produced "Ahoy, Ahoy!").
 check "greet executed via dsagt-run" "grep -l 'Ahoy,' '${PDIR}/trace_archive/'*greet*.json"
 check "greet re-run in session 2"    "test \$(ls '${PDIR}/trace_archive/'*greet*.json | wc -l) -ge 2"
-check "scan_directory record"        "ls '${PDIR}/trace_archive/'*scan_directory*.json"
+check "scan-directory record"        "ls '${PDIR}/trace_archive/'*scan-directory*.json"
 
 # -- knowledge base ----------------------------------------------------------
 # Both files are written by dsagt-server's kb_ingest MCP tool — chroma.sqlite3

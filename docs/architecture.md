@@ -32,8 +32,7 @@ DSAgt adds two memory extensions that complement the host agent's own memory (wh
     config.yaml                 # project configuration (set by dsagt init)
     state.yaml                  # session log + memory cursor (owned by the MCP server)
     explicit_memories.yaml      # user-confirmed facts
-  codes/                        # registered CLI code specs (markdown + YAML frontmatter)
-  codes/scripts/                   # agent-written codes
+  codes/<name>/                 # registered codes — skill-standard dirs (SKILL.md + scripts/)
   skills/                       # agent skills (SKILL.md + reference docs)
   trace_archive/                # code execution records (JSON, from dsagt-run)
   mlflow.db                     # serverless MLflow SQLite trace store
