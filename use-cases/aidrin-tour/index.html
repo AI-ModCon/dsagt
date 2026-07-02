@@ -10,29 +10,31 @@
       
       
       
-        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/developer/">
+        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/aidrin-tour/">
       
       
-        <link rel="prev" href="../use-cases/aidrin-tour/">
+        <link rel="prev" href="../aidrin-cryoem/">
       
+      
+        <link rel="next" href="../../developer/">
       
       
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Developer Guide - DSAgt</title>
+        <title>AIDRIN Full Feature Tour - DSAgt</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -51,7 +53,7 @@
       
     
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -76,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#developer-guide" class="md-skip">
+        <a href="#aidrin-full-feature-tour" class="md-skip">
           Skip to content
         </a>
       
@@ -90,7 +92,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="DSAgt" class="md-header__button md-logo" aria-label="DSAgt" data-md-component="logo">
+    <a href="../.." title="DSAgt" class="md-header__button md-logo" aria-label="DSAgt" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Developer Guide
+              AIDRIN Full Feature Tour
             
           </span>
         </div>
@@ -223,7 +225,7 @@
   
   
     <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
+      <a href="../.." class="md-tabs__link">
         
   
   
@@ -242,7 +244,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../quickstart/" class="md-tabs__link">
+      <a href="../../quickstart/" class="md-tabs__link">
         
   
   
@@ -261,7 +263,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../architecture/" class="md-tabs__link">
+      <a href="../../architecture/" class="md-tabs__link">
         
   
   
@@ -280,7 +282,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../mcp-servers/" class="md-tabs__link">
+      <a href="../../mcp-servers/" class="md-tabs__link">
         
   
   
@@ -299,7 +301,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../knowledge-base/" class="md-tabs__link">
+      <a href="../../knowledge-base/" class="md-tabs__link">
         
   
   
@@ -318,7 +320,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../tools-skills/" class="md-tabs__link">
+      <a href="../../tools-skills/" class="md-tabs__link">
         
   
   
@@ -337,7 +339,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../observability/" class="md-tabs__link">
+      <a href="../../observability/" class="md-tabs__link">
         
   
   
@@ -356,7 +358,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../cli/" class="md-tabs__link">
+      <a href="../../cli/" class="md-tabs__link">
         
   
   
@@ -373,11 +375,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../use-cases/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
           
   
   
@@ -393,11 +397,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../../developer/" class="md-tabs__link">
         
   
   
@@ -432,7 +434,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="DSAgt" class="md-nav__button md-logo" aria-label="DSAgt" data-md-component="logo">
+    <a href="../.." title="DSAgt" class="md-nav__button md-logo" aria-label="DSAgt" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -462,7 +464,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -489,7 +491,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../quickstart/" class="md-nav__link">
+      <a href="../../quickstart/" class="md-nav__link">
         
   
   
@@ -516,7 +518,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../architecture/" class="md-nav__link">
+      <a href="../../architecture/" class="md-nav__link">
         
   
   
@@ -543,7 +545,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mcp-servers/" class="md-nav__link">
+      <a href="../../mcp-servers/" class="md-nav__link">
         
   
   
@@ -570,7 +572,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../knowledge-base/" class="md-nav__link">
+      <a href="../../knowledge-base/" class="md-nav__link">
         
   
   
@@ -597,7 +599,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools-skills/" class="md-nav__link">
+      <a href="../../tools-skills/" class="md-nav__link">
         
   
   
@@ -624,7 +626,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../observability/" class="md-nav__link">
+      <a href="../../observability/" class="md-nav__link">
         
   
   
@@ -651,7 +653,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/" class="md-nav__link">
+      <a href="../../cli/" class="md-nav__link">
         
   
   
@@ -675,26 +677,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -712,7 +719,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
@@ -730,7 +737,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -758,7 +765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/microbial-isolates/" class="md-nav__link">
+      <a href="../microbial-isolates/" class="md-nav__link">
         
   
   
@@ -786,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/cryoem/" class="md-nav__link">
+      <a href="../cryoem/" class="md-nav__link">
         
   
   
@@ -814,7 +821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/vasp/" class="md-nav__link">
+      <a href="../vasp/" class="md-nav__link">
         
   
   
@@ -842,7 +849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/aidrin-cryoem/" class="md-nav__link">
+      <a href="../aidrin-cryoem/" class="md-nav__link">
         
   
   
@@ -867,41 +874,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../use-cases/aidrin-tour/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AIDRIN Full Feature Tour
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
     
   
   
@@ -921,7 +893,7 @@
   <span class="md-ellipsis">
     
   
-    Developer Guide
+    AIDRIN Full Feature Tour
   
 
     
@@ -939,7 +911,7 @@
   <span class="md-ellipsis">
     
   
-    Developer Guide
+    AIDRIN Full Feature Tour
   
 
     
@@ -965,10 +937,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
+  <a href="#overview" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Tests
+        Overview
       
     </span>
   </a>
@@ -976,21 +948,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#proxy-mode" class="md-nav__link">
+  <a href="#guides" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Proxy Mode
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Troubleshooting
+        Guides
       
     </span>
   </a>
@@ -1001,6 +962,41 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1032,10 +1028,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
+  <a href="#overview" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Tests
+        Overview
       
     </span>
   </a>
@@ -1043,21 +1039,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#proxy-mode" class="md-nav__link">
+  <a href="#guides" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Proxy Mode
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Troubleshooting
+        Guides
       
     </span>
   </a>
@@ -1084,35 +1069,21 @@
   
 
 
-<h1 id="developer-guide">Developer Guide<a class="headerlink" href="#developer-guide" title="Permanent link">&para;</a></h1>
-<p>Material for contributors and users who are working beyond the default <code>dsagt init</code> → <code>dsagt mlflow</code> → agent flow.</p>
-<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not integration&quot;</span><span class="w">     </span><span class="c1"># unit tests, no creds required</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span>integration<span class="w"> </span>-v<span class="w">        </span><span class="c1"># integration tests (require .env)</span>
-</code></pre></div>
-<p>Integration tests read endpoint and key values from <code>.env</code> at the repo root. Copy <code>.env.example</code> to <code>.env</code> and fill in your values.</p>
-<p>For per-flow hand-tests (CLI, proxy mode, VS Code extensions), see the scripts under <a href="https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/manual_runs/"><code>tests/smoke_test/manual_runs/</code></a>.</p>
-<h2 id="proxy-mode">Proxy Mode<a class="headerlink" href="#proxy-mode" title="Permanent link">&para;</a></h2>
-<p><code>dsagt init</code> followed by <code>dsagt start &lt;project&gt; --enable-proxy</code> spawns a LiteLLM proxy in front of your agent's LLM calls. This adds:</p>
+<h1 id="aidrin-full-feature-tour">AIDRIN Full Feature Tour<a class="headerlink" href="#aidrin-full-feature-tour" title="Permanent link">&para;</a></h1>
+<p><strong>Domain:</strong> AI data readiness — quality, fairness, and privacy assessment</p>
+<p><strong>Tools:</strong> <a href="https://github.com/idtlab/AIDRIN"><code>aidrin</code></a> (AI Data Readiness Inspector CLI)</p>
+<p><strong>Dataset:</strong> UCI Adult census (bundled with AIDRIN)</p>
+<p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/aidrin_readiness/"><code>use_cases/aidrin_readiness/</code></a></p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>This use case drives <strong>every</strong> AIDRIN metric through DSAgt on a single tabular dataset —
+exercising all 15 metrics across data-quality, impact-of-data-on-AI, fairness-and-bias, and
+data-governance, each recorded via <code>dsagt-run</code>. The bundled UCI Adult extract has an ID,
+quasi-identifiers, sensitive attributes, and a prediction target, so the full suite (including the
+fairness and privacy metrics) applies.</p>
+<h2 id="guides">Guides<a class="headerlink" href="#guides" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Full LLM-call traces (request bodies, tool-use blocks, response payloads) in MLflow for agents whose native OTel does not emit those payloads (codex, opencode).</li>
-<li>Cache-breakpoint injection on outgoing requests (Anthropic prompt caching).</li>
-<li>Sidechannel detection for agent-internal title-generator / session-namer calls.</li>
-<li>Model-name aliasing — useful when an agent CLI hardcodes a model whitelist incompatible with your gateway's served names (cline, roo).</li>
+<li><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/aidrin_readiness/aidrin_full_tour_demo.md">Full AIDRIN Feature Tour</a> — full walkthrough (all 15 metrics on UCI Adult).</li>
 </ul>
-<p>Proxy mode reads upstream LLM credentials from <code>.env</code> or the shell. See <a href="https://github.com/AI-ModCon/dsagt/blob/main/tests/smoke_test/manual_runs/proxy_walkthrough.md"><code>tests/smoke_test/manual_runs/proxy_walkthrough.md</code></a> for the full setup walkthrough.</p>
-<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
-<p><strong>Agent command not found.</strong> The agent CLI is not installed or is not on PATH. See the <a href="../#supported-agents">supported agents table</a>.</p>
-<p><strong>MCP servers not connecting.</strong> Verify the server commands are on your PATH:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>which<span class="w"> </span>dsagt-registry-server
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>which<span class="w"> </span>dsagt-knowledge-server
-</code></pre></div>
-<p>If missing, reinstall: <code>pip install --force-reinstall https://github.com/AI-ModCon/dsagt/archive/refs/tags/0.1.0.zip</code>.</p>
-<p><strong>MLflow UI empty.</strong> Confirm MLflow is running for the right project:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>&lt;name&gt;<span class="w">           </span><span class="c1"># shows the pinned port</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>http://localhost:&lt;mlflow_port&gt;
-</code></pre></div>
-<p><strong>Claude keychain conflict.</strong> If <code>claude</code> will not authenticate against a non-default gateway, run <code>claude /logout</code> to clear the macOS Keychain OAuth token, then re-export <code>ANTHROPIC_BASE_URL</code> / <code>ANTHROPIC_API_KEY</code> and re-launch.</p>
 
 
 
@@ -1168,10 +1139,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

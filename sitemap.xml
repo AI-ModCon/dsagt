@@ -2,54 +2,62 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://ai-modcon.github.io/dsagt/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/architecture/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/cli/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/developer/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/knowledge-base/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/mcp-servers/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/observability/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/quickstart/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/tools-skills/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/use-cases/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
+    </url>
+    <url>
+         <loc>https://ai-modcon.github.io/dsagt/use-cases/aidrin-cryoem/</loc>
+         <lastmod>2026-07-02</lastmod>
+    </url>
+    <url>
+         <loc>https://ai-modcon.github.io/dsagt/use-cases/aidrin-tour/</loc>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/use-cases/cryoem/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/use-cases/microbial-isolates/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://ai-modcon.github.io/dsagt/use-cases/vasp/</loc>
-         <lastmod>2026-07-01</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
 </urlset>
