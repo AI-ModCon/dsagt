@@ -52,10 +52,13 @@ nav:
   - Home: index.md
   - Quick Start: quickstart.md
   - Architecture: architecture.md
+  - Capabilities:
+    - Provenance: provenance.md
+    - Knowledge Base: knowledge-base.md
+    - Skills: skills.md
+    - Memory: memory.md
+    - Observability: observability.md
   - MCP Servers: mcp-servers.md
-  - Knowledge Base: knowledge-base.md
-  - Tools & Skills: tools-skills.md
-  - Observability: observability.md
   - CLI Reference: cli.md
   - Use Cases:
     - Overview: use-cases/index.md

@@ -34,6 +34,18 @@ Every span carries the project's session id (minted per launch into `<project>/.
 
 The trace scan runs as a periodic heartbeat inside the long-lived MCP server — the one DSAgt process alive in every launch flow. Each tick reads new transcript records, translates completed turns, and fans out to subscribers (the MLflow sink always; the episodic-memory extractor when enabled). Correctness rests on idempotency: each subscriber keeps its own ack set, so a re-tick or a next-session catch-up can never double-log or lose a turn. The same heartbeat incrementally indexes `dsagt-run` code-execution records into the `code_use` collection.
 
-## Provenance and Reconstruction
+The same heartbeat also indexes `dsagt-run` execution records for search — the on-disk records and pipeline reconstruction are covered under [Provenance](provenance.md).
 
-Code execution records on disk (`trace_archive/<record_id>.json`) provide the canonical provenance chain. The agent calls `reconstruct_pipeline` to render the archive as a reproducible bash script or Snakemake workflow (which also flushes the latest code-use records into the searchable index first).
+## Try it
+
+```bash
+dsagt init            # follow the prompts: name it `demo`, then pick your agent
+dsagt start demo      # …run a prompt or two, then exit the agent
+mlflow ui --backend-store-uri sqlite:///$HOME/dsagt-projects/demo/mlflow.db
+```
+
+Open the MLflow UI to see both feeds in one store: DSAgt's own `kb.*` / `code.execute` spans and the per-turn agent traces recovered from the transcript. `dsagt info demo` prints the same session/trace summary from the command line.
+
+## In practice
+
+See the [Use Cases](use-cases/index.md) to watch a full curation session — every retrieval, code run, and agent turn — land in the trace store as it happens.

@@ -1,34 +1,46 @@
 # Knowledge Base
 
-DSAgt maintains independently-partitioned ChromaDB collections, with six core DSAgt collections set up and used through `dsagt init` and the agent's MCP tools:
+The knowledge base is DSAgt's catalog of **domain knowledge** — reference corpora and your own documents — that the agent searches to ground its work on scientific data-processing and AI-readiness evaluation. Rather than let the agent guess at a library's API or a standard's requirements, it retrieves the relevant passages first, then acts.
 
-## Collections
+## Domain-knowledge collections
 
 | Collection | Source | Populated by |
 |---|---|---|
-| **Code Specs** | Bundled CLI code specs | `dsagt init` (always set up) |
-| **Skills Catalog** | Installable skills from external repos (one per source) | `dsagt init` (chosen sources) + `add_skill_source` |
-| **Domain Knowledge** | NeMo Curator + AIDRIN reference collections; user-ingested docs | `dsagt init` (chosen collections) + agent's `kb_ingest` |
-| **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/.dsagt/explicit_memories.yaml`) |
-| **Episodic Memory** (`session_memory`) | Chunked session turns | Captured during the session (opt-in; see below) |
-| **Code Execution Records** (`code_use`) | `dsagt-run` execution traces | `dsagt-run` writes JSON to `<project>/trace_archive/`; indexed for search during the session |
+| **Reference corpora** | NeMo Curator + AIDRIN (data-curation and AI-data-readiness references) | `dsagt init` (chosen collections) |
+| **Your documents** | Papers, standards, protocols, schemas you ingest | Agent's `kb_ingest` |
 
-## Explicit Memory
+The agent works these with three tools: `kb_ingest` (index a file or directory into a named collection — long ingests run in the background), `kb_search` (retrieve across one or more collections), and `kb_list_collections` (see what's indexed).
 
-Explicit memories are facts the user confirms during a session. The agent saves them via `kb_remember`, which writes to both the ChromaDB collection and `<project>/.dsagt/explicit_memories.yaml`. The agent fetches them via `kb_get_memories` on demand (typically when you ask it to recall something) — they are not auto-loaded at session start. If the vector store is unavailable, explicit memory degrades to pure-YAML.
+## Why hybrid vector search
 
-## Episodic Memory
+Retrieval is **hybrid** — dense semantic embeddings fused with sparse BM25 keyword matching — and it's on by default per collection:
 
-When enabled, DSAgt reads the agent's transcript as the session runs and captures each completed turn into the `session_memory` collection — a fast, local chunk-and-embed pass that reuses the same embedder as the rest of the knowledge base.
+- **Semantic embeddings** catch paraphrase and synonymy: a query about "missing values" finds a passage on "null rates" even with no shared words.
+- **BM25 keyword matching** catches the exact terms embeddings tend to under-rank — identifiers, gene names, parameter flags, standard names — where a literal match matters.
+- **Per-collection partitioning** scopes a search to a domain, so a materials-science query isn't diluted by genomics references.
+- **Optional cross-encoder reranking** re-scores the top candidates for precision when it's worth the extra pass.
 
-Retrieval over `session_memory` is filtered to session, and then regex over key query terms prior to a **recency-weighted** ranked semantic-vector retrieval: a newer turn edges out a stale one as a bounded boost, so a corrected fact wins by recency while a strongly-relevant old turn is never buried.
+The default embedder is a local sentence-transformers model (~130 MB, CPU-side, no API key).
+## One store, many concerns
 
-## Search
-
-The agent searches all collections via `kb_search` and writes via `kb_ingest` / `kb_remember`. Registered codes have their own `search_registry` route over the same backend. Skills are discovered separately — installed ones natively by the agent, installable ones via `search_skills` over the external catalog (see [Codes & Skills](codes-skills.md)).
-
-Hybrid search (semantic embeddings + keyword BM25) is on by default per collection. Optional reranking sharpens the top results. The default embedder is a local sentence-transformers model (~130 MB, CPU-side, no API key).
+The same vector store backs more than domain knowledge. DSAgt's [memory](memory.md) (explicit + episodic), [skills discovery](skills.md) (the installable-skill catalog), and [code execution tracking](provenance.md) (the `code_use` records) each live in it as their own partitioned collections, sharing one embedder and one ChromaDB. This page covers domain-knowledge cataloging; those pages carry the depth on their respective collections.
 
 ## Setup
 
-`dsagt init` sets up the KB. `--include` / `--exclude` (asset names, or `all`) select which collections to include; the bundled Code Specs collection is always included. Re-running `dsagt init` on an existing project reconfigures it in place.
+`dsagt init` sets up the knowledge base from your choices in the interactive menu. Re-running `dsagt init` on an existing project reconfigures it in place.
+
+## Try it
+
+```bash
+dsagt init            # name it `demo`, and enable the AIDRIN collection in the prompts
+dsagt start demo
+```
+
+Then, in the agent:
+
+1. > Ingest the docs in `knowledge/` into a collection named `domain`.
+2. > Search the `domain` and `aidrin` collections for how to assess data completeness.
+
+## In practice
+
+See the [Use Cases](use-cases/index.md), where domain references and ingested protocols guide the agent through curating a real scientific dataset.

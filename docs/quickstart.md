@@ -13,14 +13,13 @@ pip install "git+https://github.com/AI-ModCon/dsagt.git"
 # Set a convenience variable for the smoke test directory (not a normal dsagt step)
 export SMOKE_DIR="$(pwd)/tests/smoke_test"
 
-# 1. Create a project called quickstart.  Interactive `dsagt init` prompts for the
-#    agent, location, knowledge collections, skill sources, and episodic memory,
-#    and sets up the knowledge base on first run.  --agent makes it
-#    non-interactive (a ~130 MB local embedder downloads once):
-dsagt init quickstart --agent claude
+# 1. Create a project.  `dsagt init` is interactive — follow the menu to name it
+#    `quickstart`, pick your agent, and choose knowledge collections + skill sources.
+#    It sets up the knowledge base on first run (a ~130 MB local embedder downloads once).
+dsagt init
 
-# 2. Launch the agent from the project directory:
-cd ~/dsagt-projects/quickstart && claude     # …or: dsagt start quickstart
+# 2. Launch the agent in the project:
+dsagt start quickstart     # …or: cd ~/dsagt-projects/quickstart && <your agent>
 ```
 
 ## Agent Prompts
@@ -77,10 +76,4 @@ dsagt smoke-test --agent claude
 
 ## Optional: Episodic Memory
 
-Pass `--episodic` at init (or choose it in the interactive prompt) to have the MCP server capture each session turn into a searchable `session_memory` collection:
-
-```bash
-dsagt init quickstart --agent claude --episodic
-```
-
-Capture is mechanical (chunk + embed) and reuses the local embedder, so there's nothing extra to download. See [Knowledge Base → Episodic Memory](knowledge-base.md#episodic-memory).
+Answer **yes** to "Enable episodic memory?" in the `dsagt init` prompts to have the MCP server capture each session turn into a searchable `session_memory` collection. Capture is mechanical (chunk + embed) and reuses the local embedder, so there's nothing extra to download. See [Memory → Episodic Memory](memory.md#episodic-memory).

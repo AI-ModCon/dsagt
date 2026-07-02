@@ -43,7 +43,7 @@ Then start your agent from the project directory, use dsagt cli, or open a VS co
 cd ~/dsagt-projects/my-project && claude   # …or: dsagt start my-project
 ```
 
-To upgrade later, reinstall — re-running `dsagt init my-project` reconfigures an existing project in place:
+To upgrade later, reinstall — re-running `dsagt init` reconfigures an existing project in place:
 
 ```bash
 pip install --upgrade "git+https://github.com/AI-ModCon/dsagt.git"
@@ -70,14 +70,13 @@ source .venv/bin/activate    # so `dsagt` is on PATH
 # A convenience variable for the demo paths below (not a normal dsagt step)
 export SMOKE_DIR="$(pwd)/tests/smoke_test"
 
-# 1. Create a project called quickstart.  Interactive `dsagt init` prompts for
-#    the agent, location, knowledge collections, and skill sources, and
-#    sets up the knowledge base on first run (a ~130 MB local
-#    embedder downloads once).  `--agent` makes it non-interactive:
-dsagt init quickstart --agent claude
+# 1. Create a project.  `dsagt init` is interactive — follow the menu to name it
+#    `quickstart`, pick your agent, and choose knowledge collections + skill sources.
+#    It sets up the knowledge base on first run (a ~130 MB local embedder downloads once).
+dsagt init
 
-# 2. Launch the agent from the project directory:
-cd ~/dsagt-projects/quickstart && claude   # …or: dsagt start quickstart
+# 2. Launch the agent in the project:
+dsagt start quickstart   # …or: cd ~/dsagt-projects/quickstart && <your agent>
 ```
 
 Inside the agent, paste these prompts one at a time (substitute the absolute path you exported as `$SMOKE_DIR` — the chat doesn't expand env vars):
@@ -133,14 +132,9 @@ End-to-end walkthroughs for representative scientific domains live in [`use_case
 
 ## Project Directory
 
-Default location: `~/dsagt-projects/<name>/`. Override with `--location`:
+`dsagt init` prompts for the project location, defaulting to `~/dsagt-projects/<name>/` (e.g. enter `/data/runs` to place it at `/data/runs/my-project/`, or `.` for the current directory).
 
-```bash
-dsagt init my-project --agent claude --location /data/runs   # /data/runs/my-project/
-dsagt init my-project --agent claude --location .            # ./my-project/
-```
-
-Projects are registered in `~/dsagt-projects/projects.yaml` so `dsagt info <name>` works from any directory. The project's data — knowledge base, trace store, registered codes, skills, audit records — is agent-agnostic, so re-running `dsagt init <same-name>` and choosing a different agent switches platforms while preserving everything you've accumulated (it prompts before any destructive change).
+Projects are registered in `~/dsagt-projects/projects.yaml` so `dsagt info <name>` works from any directory. The project's data — knowledge base, trace store, registered codes, skills, audit records — is agent-agnostic, so re-running `dsagt init` for the same project and choosing a different agent switches platforms while preserving everything you've accumulated (it prompts before any destructive change).
 
 ```
 ~/dsagt-projects/cheese-metagenome/
@@ -196,7 +190,7 @@ The agent searches these collections semantically:
 | **Knowledge Collections** | NeMo Curator + AIDRIN reference collections; user-ingested docs | `dsagt init` (chosen collections) + agent's `kb_ingest` |
 | **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/.dsagt/explicit_memories.yaml`); the agent fetches via `kb_get_memories` on demand, not auto-loaded at session start |
 | **Code Execution Records** | `dsagt-run` execution traces | `dsagt-run` writes JSON to `<project>/trace_archive/`; indexed for search during the session, and before `reconstruct_pipeline` |
-| **Episodic Memory** | Captured session turns | **Opt-in** (`dsagt init --episodic`): DSAgt captures each completed turn into `session_memory` during the session (mechanical chunk + embed). Retrieval is recency-weighted. |
+| **Episodic Memory** | Captured session turns | **Opt-in** (enabled in the `dsagt init` menu): DSAgt captures each completed turn into `session_memory` during the session (mechanical chunk + embed). Retrieval is recency-weighted. |
 
 The embedding backend is local (sentence-transformers, CPU-side, no API key).
 
@@ -207,7 +201,7 @@ The agent searches via `kb_search` and writes via `kb_ingest` / `kb_remember`. R
 DSAgt has two memory types, both retrievable via `kb_search` / `kb_get_memories`:
 
 - **Explicit memory** — user-confirmed facts the agent writes with `kb_remember` (mirrored to `<project>/.dsagt/explicit_memories.yaml`). Always on; degrades to pure-YAML if the vector store is unavailable.
-- **Episodic memory** — automatic session capture, **opt-in** (`dsagt init --episodic`, off by default). As the session runs, DSAgt reads the agent's transcript and captures each completed turn into the `session_memory` collection — a fast, local chunk-and-embed pass.
+- **Episodic memory** — automatic session capture, **opt-in** (enabled in the `dsagt init` menu, off by default). As the session runs, DSAgt reads the agent's transcript and captures each completed turn into the `session_memory` collection — a fast, local chunk-and-embed pass.
 
   Retrieval is **recency-weighted** (`episodic.recency_half_life_days`): a newer turn edges out a stale one, but as a bounded boost — a strongly-relevant old turn is never buried.
 
@@ -226,14 +220,15 @@ Each launch gets a session id that every span carries, so you can filter the tra
 
 | Command | Description |
 |---------|-------------|
-| `dsagt init [<name>]` | Create or reconfigure a project — interactive: agent, location, knowledge collections, skill sources, and the episodic-memory opt-in; sets up the KB and writes the per-agent MCP config |
-| `dsagt init <name> --agent <platform> [--location <path>] [--include … \| --exclude …] [--episodic]` | Same, non-interactively (for scripts/CI); `--episodic` enables episodic memory (mechanical chunk + embed capture) |
+| `dsagt init` | Create or reconfigure a project — interactive menu for name, location, agent, knowledge collections, skill sources, and the episodic-memory opt-in; sets up the KB and writes the per-agent MCP config |
 | `dsagt start <name>` | Launch the agent in the project directory (equivalent to `cd <project> && <agent>`) |
 | `dsagt info <name> [--json]` | Resolved config (with source per value) and a session/trace summary |
 | `dsagt list` | List all projects with agent and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project (and optionally delete its directory) |
 | `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline]` | End-to-end install verification |
+
+> **Deprecated `dsagt init` flags (backcompat).** The pre-menu flags still work for scripts/CI but are deprecated in favor of the interactive menu: `<name>` (positional), `--agent <platform>`, `--location <path>`, `--include … | --exclude …`, and `--episodic`. Passing any of them skips the corresponding prompt; new usage should prefer bare `dsagt init`.
 
 Skill catalogs are managed from the agent via the MCP tools (`add_skill_source` / `search_skills` / `install_skill`), and traces are viewed with `mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db`.
 

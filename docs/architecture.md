@@ -47,4 +47,4 @@ DSAgt adds two memory extensions that complement the host agent's own memory (wh
   #   cline:    .clinerules/, cline_mcp_settings.json
 ```
 
-Projects are registered in `~/dsagt-projects/projects.yaml` so `dsagt info <name>` works from any directory. The project's data is agent-agnostic — re-running `dsagt init <same-name> --agent <other>` switches agent platforms while preserving all accumulated knowledge and traces.
+Projects are registered in `~/dsagt-projects/projects.yaml` so `dsagt info <name>` works from any directory. The project's data is agent-agnostic — re-running `dsagt init` for the same project and choosing a different agent switches platforms while preserving all accumulated knowledge and traces.
