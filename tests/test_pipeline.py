@@ -5,7 +5,6 @@ Tests for pipeline reconstruction from tool execution records.
 import json
 from pathlib import Path
 
-import pytest
 
 from dsagt.provenance import (
     build_dependency_graph,

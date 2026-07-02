@@ -850,7 +850,6 @@ class TestKnowledgeBaseSearch:
         mock_st = MagicMock()
         mock_st.CrossEncoder.return_value = mock_reranker
 
-        import sys
 
         with patch.dict(sys.modules, {"sentence_transformers": mock_st}):
             # Ensure the lazy import triggers

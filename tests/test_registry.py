@@ -10,9 +10,6 @@ import yaml
 
 from dsagt.registry import (
     CodeRegistry,
-    SkillRegistry,
-    _wrap_executable,
-    _uv_run_prefix,
     _parse_frontmatter,
     _lenient_frontmatter,
     render_arguments,

@@ -21,10 +21,8 @@ import shutil
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 
 import pytest
-import yaml
 
 
 from dsagt.mcp.registry_tools import create_registry_server
