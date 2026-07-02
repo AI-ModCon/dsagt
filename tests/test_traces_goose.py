@@ -162,6 +162,6 @@ def test_end_to_end_through_the_sink(mlflow_sqlite):
     assert len(ids) == 2
     exp = mlflow.get_experiment_by_name("gooseproj")
     traces = mlflow.search_traces(
-        experiment_ids=[exp.experiment_id], return_type="list"
+        locations=[exp.experiment_id], return_type="list"
     )
     assert len(traces) == 2

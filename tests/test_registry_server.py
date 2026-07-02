@@ -2,7 +2,7 @@
 Tests for the registry MCP server.
 
 Tests tool handlers: save_code_spec, get_registry, search_registry,
-read_file, run_command, install_dependencies.
+read_file, run_command, http_request, install_dependencies.
 """
 
 import subprocess
@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import httpx
 import pytest
 import yaml
 
@@ -305,6 +306,72 @@ class TestRunCommand:
             },
         )
         assert "timed out" in text
+
+
+# ---------------------------------------------------------------------------
+# http_request
+# ---------------------------------------------------------------------------
+
+
+class TestHttpRequest:
+
+    @patch("dsagt.mcp.registry_tools.httpx.AsyncClient")
+    def test_success_with_defaults(self, mock_client_cls, server):
+        """A plain URL issues a GET and returns status + body."""
+        client = mock_client_cls.return_value.__aenter__.return_value
+        client.request.return_value = MagicMock(status_code=200, text="pong")
+
+        text = call_tool(
+            server,
+            "http_request",
+            {"url": "https://example.test/ping"},
+        )
+
+        assert text == "Status: 200\n\npong"
+        client.request.assert_awaited_once_with(
+            method="GET",
+            url="https://example.test/ping",
+            headers={},
+            timeout=30.0,
+        )
+
+    @patch("dsagt.mcp.registry_tools.httpx.AsyncClient")
+    def test_method_and_headers_forwarded(self, mock_client_cls, server):
+        """Explicit method and headers reach the client unchanged."""
+        client = mock_client_cls.return_value.__aenter__.return_value
+        client.request.return_value = MagicMock(status_code=201, text="created")
+
+        text = call_tool(
+            server,
+            "http_request",
+            {
+                "url": "https://example.test/items",
+                "method": "POST",
+                "headers": {"Authorization": "Bearer tok"},
+            },
+        )
+
+        assert text.startswith("Status: 201")
+        client.request.assert_awaited_once_with(
+            method="POST",
+            url="https://example.test/items",
+            headers={"Authorization": "Bearer tok"},
+            timeout=30.0,
+        )
+
+    @patch("dsagt.mcp.registry_tools.httpx.AsyncClient")
+    def test_transport_error_reported(self, mock_client_cls, server):
+        """httpx transport failures surface as a clean error string."""
+        client = mock_client_cls.return_value.__aenter__.return_value
+        client.request.side_effect = httpx.ConnectError("Connection refused")
+
+        text = call_tool(
+            server,
+            "http_request",
+            {"url": "https://example.test/down"},
+        )
+
+        assert text == "Error making request: Connection refused"
 
 
 # ---------------------------------------------------------------------------

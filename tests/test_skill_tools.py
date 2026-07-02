@@ -153,10 +153,21 @@ class TestSearchSkills:
 
 class TestInstallSkill:
 
-    def test_install_skill_routes_and_reports_missing(self, tmp_path):
+    def test_install_skill_routes_and_reports_missing(self, tmp_path, monkeypatch):
         """install_skill is registered and reports a clean error when the
-        named skill isn't in any synced catalog."""
-        server, skill_reg, kb = _make_skill_server(tmp_path)
+        named skill isn't in any synced catalog.
+
+        The handler builds its own SkillRouter over the machine-global clone
+        cache, so point that at an empty tmp dir — the test must not depend on
+        (or scan) whatever catalogs are synced on the developer's machine.  No
+        KB is involved on the install path, so a mock keeps the test fast.
+        """
+        monkeypatch.setattr(
+            "dsagt.skills.SKILL_SOURCES_DIR", tmp_path / "skill_sources"
+        )
+        server = create_skill_server(
+            kb=MagicMock(), runtime_dir=str(tmp_path / "runtime")
+        )
         text = call_tool_sync(
             server,
             "install_skill",

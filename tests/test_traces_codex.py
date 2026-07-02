@@ -204,7 +204,7 @@ def test_end_to_end_through_the_sink(mlflow_sqlite):
     assert len(ids) == 2  # one MLflow trace per turn
     exp = mlflow.get_experiment_by_name("codexproj")
     traces = mlflow.search_traces(
-        experiment_ids=[exp.experiment_id], return_type="list"
+        locations=[exp.experiment_id], return_type="list"
     )
     assert len(traces) == 2
     # the tool-bearing turn rendered llm + tool spans under its agent root

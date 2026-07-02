@@ -12,7 +12,7 @@ the job completed use an async helper that lets the event loop tick.
 
 import asyncio
 import json
-import time
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -424,27 +424,37 @@ class TestJobStatus:
         folder = tmp_path / "slow_docs"
         folder.mkdir()
 
-        # Make ingest block so the job stays in "running"
+        # Hold the job in "running" until the test has observed it.
+        # asyncio.run joins the worker thread at loop shutdown, so the
+        # event must be set before ``run()`` returns; the wait timeout
+        # only bounds a failing test.
+        release = threading.Event()
+
         def blocking_ingest(*args, **kwargs):
-            time.sleep(10)
+            release.wait(timeout=10)
             return {"collection": "slow_docs", "files": 1, "chunks": 5}
 
         mock_kb.ingest.side_effect = blocking_ingest
 
         async def run():
-            initial = await _call_tool_async(
-                server,
-                "kb_ingest",
-                {
-                    "folder_path": str(folder),
-                },
-            )
-            assert initial["status"] == "started"
-            job_id = initial["job_id"]
+            try:
+                initial = await _call_tool_async(
+                    server,
+                    "kb_ingest",
+                    {
+                        "folder_path": str(folder),
+                    },
+                )
+                assert initial["status"] == "started"
+                job_id = initial["job_id"]
 
-            # Immediately check — should still be running
-            status = await _call_tool_async(server, "kb_job_status", {"job_id": job_id})
-            assert status["status"] == "running"
+                # Immediately check — should still be running
+                status = await _call_tool_async(
+                    server, "kb_job_status", {"job_id": job_id}
+                )
+                assert status["status"] == "running"
+            finally:
+                release.set()
 
         asyncio.run(run())
 

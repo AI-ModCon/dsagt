@@ -406,7 +406,7 @@ def test_emitted_traces_land_in_the_store(scan_env):
     collector.collect(include_last=True)  # emit both turns
     exp = mlflow.get_experiment_by_name("proj")
     traces = mlflow.search_traces(
-        experiment_ids=[exp.experiment_id], return_type="list"
+        locations=[exp.experiment_id], return_type="list"
     )
     sessions = {t.info.trace_metadata.get("mlflow.trace.session") for t in traces}
     assert len(traces) == 2
