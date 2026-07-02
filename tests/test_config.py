@@ -515,10 +515,7 @@ class TestSessionState:
 # Per-agent record writers: static_agent_record + dynamic_agent_record
 #
 # Each test runs both writers against a project init'd with --agent,
-# mirroring what `dsagt start` does in production.  Cline's dynamic
-# writer would shell out to `cline auth` here, so cline gets exercised
-# by ``test_cline_mcp_config_shape`` (mocked subprocess) instead of
-# the full dynamic writer.
+# mirroring what `dsagt start` does in production.
 # ---------------------------------------------------------------------------
 
 
@@ -565,19 +562,58 @@ class TestAgentRecord:
         assert goose["extensions"]["dsagt"]["cmd"] == "uv run dsagt-server"
         assert (working_dir / ".goosehints").exists()
 
-    def test_cline_writes_static_only_in_split_test(self, tmp_path):
-        # Cline's dynamic writer shells out to `cline auth` and `cline mcp
-        # add`, which would fail without cline installed.  Test only the
-        # static half here; ``test_cline_mcp_config_shape`` covers the
-        # dynamic half with mocked subprocess.
+    def test_cline_writes_project_mcp_settings(self, tmp_path):
+        """Cline's dynamic writer hand-writes the per-project MCP settings
+        file (no cline binary needed); runtime_env points cline at it via
+        CLINE_MCP_SETTINGS_PATH, leaving global auth + settings untouched."""
+        import json as _json
+
+        from dsagt.agents import AGENTS
+
         config = self._init_and_load("cline")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
 
         static_agent_record(config, config["agent"], working_dir)
+        assert (working_dir / ".clinerules" / "dsagt_instructions.md").exists()
 
-        instructions = working_dir / ".clinerules" / "dsagt_instructions.md"
-        assert instructions.exists()
+        dynamic_agent_record(config, env={}, working_dir=working_dir)
+        settings_path = working_dir / ".cline-data" / "cline_mcp_settings.json"
+        settings = _json.loads(settings_path.read_text())
+        transport = settings["mcpServers"]["dsagt"]["transport"]
+        assert transport["type"] == "stdio"
+        assert [transport["command"], *transport["args"]] == [
+            "uv",
+            "run",
+            "dsagt-server",
+        ]
+        assert "DSAGT_PROJECT_DIR" in transport["env"]
+
+        env = AGENTS["cline"]().runtime_env(config)
+        assert env["CLINE_MCP_SETTINGS_PATH"].endswith(
+            ".cline-data/cline_mcp_settings.json"
+        )
+        assert "CLINE_DIR" not in env
+
+    def test_cline_dynamic_preserves_user_mcp_entries(self, tmp_path):
+        """Re-running the writer keeps non-dsagt servers the user added."""
+        import json as _json
+
+        config = self._init_and_load("cline")
+        working_dir = tmp_path / "workdir"
+        working_dir.mkdir()
+
+        dynamic_agent_record(config, env={}, working_dir=working_dir)
+        settings_path = working_dir / ".cline-data" / "cline_mcp_settings.json"
+        settings = _json.loads(settings_path.read_text())
+        settings["mcpServers"]["mytool"] = {
+            "transport": {"type": "stdio", "command": "mytool", "args": []}
+        }
+        settings_path.write_text(_json.dumps(settings))
+
+        dynamic_agent_record(config, env={}, working_dir=working_dir)
+        settings = _json.loads(settings_path.read_text())
+        assert set(settings["mcpServers"]) == {"dsagt", "mytool"}
         assert (working_dir / ".cline-data").is_dir()
 
     def test_codex_writes_static_and_dynamic(self, tmp_path):
