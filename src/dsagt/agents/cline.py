@@ -3,8 +3,11 @@ Cline agent setup.
 
 Install: ``npm i -g cline``.
 Generates: ``.clinerules/dsagt_instructions.md``;
-``cline auth`` + ``cline mcp add`` run per-init in
-:meth:`ClineSetup.write_dynamic` and write to ``$CLINE_DIR/data/``.
+``cline mcp add`` runs per-init in :meth:`ClineSetup.write_dynamic` and
+writes to ``$CLINE_DIR/data/``.  Provider auth is cline's own
+(subscription login / ``cline auth`` / the VS Code extension), configured
+by the user before dsagt — dsagt never writes cline auth state, since
+doing so can clobber an existing provider integration.
 
 **Batch / smoke-test status: NOT SUPPORTED.** Cline's bundled
 ``lib.mjs`` ships a hardcoded anthropic-provider model whitelist
@@ -72,36 +75,13 @@ class ClineSetup(AgentSetup):
     # is harmless if unused, and search_skills covers the disabled case.
     native_skills_dir = ".cline/skills"
     install_hint = "Install with `npm i -g cline`."
-    # Cline's CLI nominally supports openai-native + anthropic, but cline
-    # auth's ``-b/--baseurl`` flag is openai-only and the openai-native
-    # path needs a non-standard model env var.  Anthropic is the only
-    # path with consistent env conventions: ``ANTHROPIC_BASE_URL`` is read
-    # by cline's anthropic SDK at runtime, covering api.anthropic.com and
-    # gateway endpoints alike.
-    credential_env_vars = (
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_MODEL",
-    )
-    credential_hints = (
-        (
-            "ANTHROPIC_API_KEY",
-            "your provider API key (works for openai-shape "
-            "gateways too — cline's anthropic SDK reaches them via "
-            "ANTHROPIC_BASE_URL)",
-        ),
-        (
-            "ANTHROPIC_BASE_URL",
-            "gateway / proxy URL "
-            "(cline auth's -b flag is openai-only; the anthropic SDK reads "
-            "this env var at runtime)",
-        ),
-        (
-            "ANTHROPIC_MODEL",
-            "model name your gateway serves "
-            "(e.g. claude-haiku-4-5-20251001-v1-project)",
-        ),
-    )
+    # Cline owns its provider auth (subscription login, `cline auth`, or the
+    # VS Code extension's settings) — BYOA means the user configures cline
+    # BEFORE pointing dsagt at it, and dsagt never touches auth state:
+    # running `cline auth` from scavenged env vars can clobber an existing
+    # provider integration (e.g. an OpenAI subscription login).
+    credential_env_vars = ()
+    credential_hints = ()
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
         return [
@@ -133,64 +113,24 @@ class ClineSetup(AgentSetup):
         working_dir: Path,
         pdir: Path,
     ) -> list[str]:
-        """Three side-effects, all idempotent:
+        """Two side-effects, both idempotent:
 
-        1. ``cline auth`` — populate per-project auth state from
-           ``ANTHROPIC_API_KEY`` / ``ANTHROPIC_MODEL`` in the user's
-           shell.  Cline's per-project state dir is empty until ``cline
-           auth`` writes to it; the user's global cline auth doesn't
-           propagate into a fresh ``--config <project>/.cline-data``.
-        2. ``cline mcp add`` per server (skipped if entry already exists
+        1. ``cline mcp add`` per server (skipped if entry already exists
            — cline's mcp subcommand has no remove, only add).
-        3. Patch the JSON cline wrote with our env block (cline doesn't
+        2. Patch the JSON cline wrote with our env block (cline doesn't
            inherit parent env into MCP children, so MLFLOW_TRACKING_URI,
            DSAGT_PROJECT_DIR, EMBEDDING_* must live in the JSON).
 
+        Provider auth is cline's own (subscription login / ``cline auth`` /
+        the VS Code extension) and must be configured before using dsagt —
+        dsagt never writes cline auth state (see the class comment).
+
         Requires the ``cline`` binary to be installed at init time.
         """
-        del pdir
+        del env, pdir
         actions: list[str] = []
         cline_dir = str(working_dir / ".cline-data")
         Path(cline_dir).mkdir(parents=True, exist_ok=True)
-
-        # 1. Configure per-project cline auth from shell env.
-        api_key = env.get("ANTHROPIC_API_KEY")
-        model = env.get("ANTHROPIC_MODEL")
-        if not api_key or not model:
-            raise RuntimeError(
-                "cline batch mode requires ANTHROPIC_API_KEY and "
-                "ANTHROPIC_MODEL in the shell env (and ANTHROPIC_BASE_URL "
-                "if you're on a gateway).  Cline's anthropic SDK reads "
-                "ANTHROPIC_BASE_URL at runtime, so this single config "
-                "covers api.anthropic.com and lab gateways alike.  For "
-                "openai-shape gateways like PNNL, alias "
-                "ANTHROPIC_API_KEY=$OPENAI_API_KEY — most lab gateways "
-                "serve both wire protocols on the same key."
-            )
-        auth_cmd = [
-            "cline",
-            "auth",
-            "--config",
-            cline_dir,
-            "-p",
-            "anthropic",
-            "-k",
-            api_key,
-            "-m",
-            model,
-        ]
-        result = subprocess.run(
-            auth_cmd,
-            cwd=str(working_dir),
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip()
-            raise RuntimeError(
-                f"cline auth failed (exit {result.returncode}): {detail}"
-            )
-        actions.append(f"Configured cline auth at {cline_dir}")
 
         # Cline's mcp subcommand only has ``add`` (no ``remove``), and ``add``
         # errors if the server already exists.  Detect pre-existing entries
@@ -209,12 +149,16 @@ class ClineSetup(AgentSetup):
                 existing = set()
 
         if "dsagt" not in existing:
+            # ``--config`` is a *global* option on cline ≥3.x — it must
+            # precede the subcommand (``mcp add`` rejects it as unknown).
+            # ``--yes`` skips the interactive add wizard cline 3.x opens.
             add_cmd = [
                 "cline",
-                "mcp",
-                "add",
                 "--config",
                 cline_dir,
+                "mcp",
+                "add",
+                "--yes",
                 "dsagt",
                 "--",
                 "uv",

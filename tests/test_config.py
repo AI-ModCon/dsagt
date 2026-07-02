@@ -1131,11 +1131,6 @@ class TestByoaEnvHints:
         [
             ("claude", "ANTHROPIC_BASE_URL"),
             ("codex", "OPENAI_BASE_URL"),
-            # Cline: ``cline auth -b`` is openai-only and the openai-native
-            # path needs a non-standard model env var, so we standardize on
-            # the anthropic path — same env conventions as the rest of the
-            # BYOA story.  See cline.py credential_hints.
-            ("cline", "ANTHROPIC_BASE_URL"),
             # opencode emits both — its provider config supports both wire
             # protocols via {env:VAR} interpolation in opencode.json.
             ("opencode", "OPENAI_BASE_URL"),
@@ -1149,6 +1144,15 @@ class TestByoaEnvHints:
 
         names = [n for n, _ in AGENTS[agent_name]().byoa_env_hints()]
         assert gateway_var in names
+
+    def test_cline_emits_no_credential_hints(self, tmp_path):
+        """Cline owns its provider auth (subscription login / cline auth /
+        the VS Code extension) — dsagt surfaces no env-var hints and never
+        writes cline auth state, since doing so can clobber an existing
+        provider integration."""
+        from dsagt.agents import AGENTS
+
+        assert AGENTS["cline"]().byoa_env_hints() == []
 
 
 class TestNoLaunchShim:
