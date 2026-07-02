@@ -620,10 +620,17 @@ def init_project(
     pdir = (location or DEFAULT_PROJECTS_BASE) / project_name
 
     pdir.mkdir(parents=True, exist_ok=True)
-    # `codes/` is created by CodeRegistry on first server startup.
     # ``mlflow.db`` is created lazily by the MLflow client on first span.
     for subdir in ("trace_archive", "skills", CONFIG_DIRNAME):
         (pdir / subdir).mkdir(parents=True, exist_ok=True)
+
+    # Bundled codes are copied into <project>/codes/ so every available
+    # code lives in one place, in one format (skill-standard dirs), fully
+    # self-contained.  Re-init after a package upgrade refreshes copies
+    # the user hasn't touched; edited/overridden dirs are never clobbered.
+    from dsagt.registry import CodeRegistry
+
+    CodeRegistry(runtime_dir=pdir).ensure_bundled_copies()
 
     _provision_kb(pdir, include, exclude, embedding=embedding)
 

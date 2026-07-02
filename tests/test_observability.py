@@ -579,12 +579,7 @@ def _make_registry_server(tmp_path):
     from dsagt.mcp.registry_tools import create_registry_server
     from dsagt.registry import CodeRegistry
 
-    source_dir = tmp_path / "source_skills"
-    source_dir.mkdir()
-    reg = CodeRegistry(
-        source_tools_dir=str(source_dir),
-        runtime_dir=str(tmp_path / "runtime"),
-    )
+    reg = CodeRegistry(runtime_dir=str(tmp_path / "runtime"))
     return create_registry_server(reg)
 
 

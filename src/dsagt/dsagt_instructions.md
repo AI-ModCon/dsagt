@@ -15,7 +15,7 @@ All data operations must be performed by calling registered codes. The point is 
 **Whenever the user says "what do you remember", "recall", or asks you to retrieve a previously-stored fact, you MUST call `kb_get_memories()` first** and answer based on its result, not from in-context message history.
 
 ### 1b. Registered-Code Invocation: Use the `executable` String Verbatim
-**When invoking a registered code, copy the spec's `executable` field byte-for-byte, including any `dsagt-run --code <name> --` prefix.** The prefix is the wrapper that writes the execution record to `trace_archive/`; bypassing it (e.g. running the bare script directly when the spec says `dsagt-run --code scan-directory -- python -m dsagt.codes.scan_directory`) loses provenance and breaks pipeline reconstruction. If `dsagt-run` errors with "command not found", surface the error rather than working around it.
+**When invoking a registered code, copy the spec's `executable` field byte-for-byte, including any `dsagt-run --code <name> --` prefix.** The prefix is the wrapper that writes the execution record to `trace_archive/`; bypassing it (e.g. running the bare script directly when the spec says `dsagt-run --code scan-directory -- python codes/scan-directory/scripts/scan_directory.py`) loses provenance and breaks pipeline reconstruction. If `dsagt-run` errors with "command not found", surface the error rather than working around it.
 
 ### 2. Code and Skill Discovery
 

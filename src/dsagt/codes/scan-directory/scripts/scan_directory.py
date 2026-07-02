@@ -2,14 +2,6 @@
 """
 Scan Directory (macOS + Linux, core-tools implementation)
 
-Lives beside (not inside) its spec dir ``scan-directory/`` on purpose:
-the spec's ``executable`` is static text, and a bundled code's install
-path varies per machine, so it must run as ``python -m
-dsagt.codes.scan_directory`` — and module paths can't contain the
-hyphen the skill-standard dir name requires.  Project-registered codes
-don't have this tension (their scripts live at stable project paths in
-``codes/<name>/scripts/``).
-
 Sensible defaults:
 - ALWAYS include hidden files/dirs (dotfiles)
 - Use core shell tools to enumerate files/sizes (find + stat) and total size (du)

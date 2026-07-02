@@ -436,7 +436,6 @@ def main():
     # bundled embedding work happens here; save_code_spec incurs a single
     # embed at save time.
     registry = CodeRegistry(
-        source_tools_dir=None,
         runtime_dir=str(project_dir),
         kb=kb,
     )

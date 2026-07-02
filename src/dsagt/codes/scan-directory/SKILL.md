@@ -2,7 +2,7 @@
 name: scan-directory
 description: Scan a data directory and produce structured report with file counts,
   sizes, and directory tree
-executable: dsagt-run --code scan-directory -- python -m dsagt.codes.scan_directory
+executable: dsagt-run --code scan-directory -- python codes/scan-directory/scripts/scan_directory.py
 parameters:
   directory:
     type: string

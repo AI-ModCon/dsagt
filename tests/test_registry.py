@@ -101,14 +101,12 @@ def _write_tool(codes_dir, spec: dict) -> None:
 
 def make_registry(tmp_path, tools: list[dict]) -> CodeRegistry:
     """Create a CodeRegistry with the given tool definitions."""
-    codes_dir = tmp_path / "source_skills"
-    codes_dir.mkdir()
+    runtime_dir = tmp_path / "runtime"
+    codes_dir = runtime_dir / "codes"
+    codes_dir.mkdir(parents=True, exist_ok=True)
     for tool in tools:
         _write_tool(codes_dir, tool)
-    return CodeRegistry(
-        source_tools_dir=str(codes_dir),
-        runtime_dir=str(tmp_path / "runtime"),
-    )
+    return CodeRegistry(runtime_dir=str(runtime_dir))
 
 
 @pytest.fixture
@@ -312,30 +310,41 @@ class TestSaveTool:
 # ---------------------------------------------------------------------------
 
 
-class TestRuntimeIsolation:
+class TestBundledCopies:
 
-    def test_source_unchanged_after_init(self, tmp_path):
-        """Source skills directory is not modified; runtime copy is separate."""
-        source_dir = tmp_path / "source_skills"
-        source_dir.mkdir()
-        _write_tool(source_dir, TOOL_NO_PARAMS)
+    def test_copies_bundled_codes_into_project(self, tmp_path):
+        """ensure_bundled_copies lands each packaged code dir in codes/."""
+        reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
+        actions = reg.ensure_bundled_copies()
+        assert any("scan-directory" in a for a in actions)
+        copied = tmp_path / "rt" / "codes" / "scan-directory"
+        assert (copied / "SKILL.md").exists()
+        # Fully self-contained: the implementation script rides along.
+        assert (copied / "scripts" / "scan_directory.py").exists()
+        assert reg.get_code("scan-directory") is not None
 
-        runtime_dir = tmp_path / "runtime"
-        reg = CodeRegistry(
-            source_tools_dir=str(source_dir),
-            runtime_dir=str(runtime_dir),
+    def test_never_clobbers_existing_copy(self, tmp_path):
+        """A user-edited (or agent-overridden) code dir is left untouched."""
+        reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
+        reg.ensure_bundled_copies()
+        spec = tmp_path / "rt" / "codes" / "scan-directory" / "SKILL.md"
+        spec.write_text(spec.read_text() + "\nUser edit.\n")
+        actions = reg.ensure_bundled_copies()
+        assert actions == []
+        assert "User edit." in spec.read_text()
+
+    def test_package_source_unmodified(self, tmp_path):
+        """Copying never touches the packaged source dirs."""
+        before = sorted(
+            p.relative_to(CodeRegistry._PACKAGE_CODES_DIR)
+            for p in CodeRegistry._PACKAGE_CODES_DIR.rglob("*")
         )
-
-        # Add a tool to runtime
-        reg.save_tool(TOOL_WITH_MIXED_PARAMS)
-
-        # Source should be unchanged
-        source_files = list(source_dir.glob("*/SKILL.md"))
-        assert len(source_files) == 1
-        assert source_files[0].parent.name == "ping"
-
-        # Runtime should have both tools
-        assert len(reg.list_codes()) == 2
+        CodeRegistry(runtime_dir=str(tmp_path / "rt")).ensure_bundled_copies()
+        after = sorted(
+            p.relative_to(CodeRegistry._PACKAGE_CODES_DIR)
+            for p in CodeRegistry._PACKAGE_CODES_DIR.rglob("*")
+        )
+        assert before == after
 
 
 # ---------------------------------------------------------------------------
@@ -363,12 +372,12 @@ class TestDefaultTools:
             assert tool.get("executable"), f"{path.name}: missing 'executable'"
             assert "parameters" in tool, f"{path.name}: missing 'parameters'"
 
-    def test_default_init_fallback(self, tmp_path):
-        """CodeRegistry with no source_tools_dir falls back to package skills."""
-        reg = CodeRegistry(source_tools_dir=None, runtime_dir=str(tmp_path / "rt"))
-        tools = reg.list_codes()
-        assert len(tools) > 0
-        names = [t["name"] for t in tools]
+    def test_bundled_codes_appear_after_copy(self, tmp_path):
+        """A fresh registry is empty until ensure_bundled_copies runs."""
+        reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
+        assert reg.list_codes() == []
+        reg.ensure_bundled_copies()
+        names = [t["name"] for t in reg.list_codes()]
         assert "scan-directory" in names
 
 

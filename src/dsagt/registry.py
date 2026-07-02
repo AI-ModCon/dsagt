@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -309,21 +310,14 @@ class CodeRegistry:
     """
     Manages CLI code spec files and optional KB indexing.
 
-    Two layers:
-
-    * **Bundled codes** ship with the dsagt package at
-      ``_PACKAGE_CODES_DIR``.  They are read-only; their KB embeddings
-      live in the shared ``bundled_tools`` collection (built once per
-      machine per dsagt version by ``dsagt init``).  Never copied
-      into projects, so package upgrades automatically reach all
-      existing projects.
-    * **Project codes** are agent-saved or user-edited specs in
-      ``<project>/codes/``.  Embeddings go into the project-local
-      ``registered_tools`` collection on save.
-
-    Listing / lookup methods merge both layers (project wins on name
-    collision so agents can override a bundled code).  Search the
-    KB-side via ``search_registry`` which queries both collections.
+    One layer: every code — bundled or agent-registered — is a
+    skill-standard directory in ``<project>/codes/<name>/``.  Bundled
+    codes ship with the package at ``_PACKAGE_CODES_DIR`` and are COPIED
+    into the project at ``dsagt init`` (:meth:`ensure_bundled_copies`),
+    so all available codes live in one place, in one format, fully
+    self-contained (spec + scripts).  Re-running ``dsagt init`` after a
+    package upgrade refreshes unmodified copies; a user-edited copy is
+    never clobbered.  KB-side search via ``search_registry``.
     """
 
     _PACKAGE_CODES_DIR = Path(__file__).parent / "codes"
@@ -331,65 +325,53 @@ class CodeRegistry:
     def __init__(
         self,
         runtime_dir: str | Path,
-        source_tools_dir: str | None = None,
         kb: KnowledgeBase | None = None,
     ):
         self.runtime_dir = Path(runtime_dir)
         self.codes_dir = self.runtime_dir / "codes"
         self._kb = kb
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        # Optional override of the package-bundled directory (used by
-        # tests; production callers leave source_tools_dir=None and let
-        # the package dir stand).
-        self._bundled_dir = (
-            Path(source_tools_dir)
-            if source_tools_dir and Path(source_tools_dir).exists()
-            else self._PACKAGE_CODES_DIR
-        )
-
-        # Project code dir is always agent-writable.  We no longer
-        # pre-populate it with bundled codes — they're served directly
-        # from the package via the merge in list_codes / get_code.
         # Each code is a self-contained skill-standard directory
         # (``codes/<name>/SKILL.md`` + optional ``scripts/``), so there is
         # no shared scripts/ dir to pre-create.
         self.codes_dir.mkdir(parents=True, exist_ok=True)
 
-    def _bundled_code_paths(self) -> list[Path]:
-        """Return SKILL.md spec paths shipped with the package."""
-        if not self._bundled_dir.exists():
-            return []
-        return sorted(self._bundled_dir.glob("*/SKILL.md"))
+    def ensure_bundled_copies(self) -> list[str]:
+        """Copy package-bundled code dirs into ``<project>/codes/``.
+
+        Called at ``dsagt init``.  A dir whose name already exists in the
+        project is left untouched — user edits and agent overrides win;
+        delete the dir and re-init to restore the packaged version.
+        Returns one action line per copy made.
+        """
+        actions: list[str] = []
+        if not self._PACKAGE_CODES_DIR.exists():
+            return actions
+        for spec in sorted(self._PACKAGE_CODES_DIR.glob("*/SKILL.md")):
+            dest = self.codes_dir / spec.parent.name
+            if dest.exists():
+                continue
+            shutil.copytree(spec.parent, dest)
+            actions.append(f"Copied bundled code {spec.parent.name} into {dest}")
+        return actions
 
     def _project_code_paths(self) -> list[Path]:
-        """Return SKILL.md spec paths the agent has saved into this project."""
+        """Return SKILL.md spec paths in this project's codes dir."""
         return sorted(self.codes_dir.glob("*/SKILL.md"))
 
     def code_dirs(self) -> list[Path]:
-        """All code directories, bundled first so project wins downstream
-        name collisions (mirror order — see ``AgentSetup.setup_skills``)."""
-        return [p.parent for p in self._bundled_code_paths()] + [
-            p.parent for p in self._project_code_paths()
-        ]
+        """All code directories (for the native-skills mirror — see
+        ``AgentSetup.setup_skills``)."""
+        return [p.parent for p in self._project_code_paths()]
 
     def list_codes_raw(self) -> list[dict]:
-        """Return full frontmatter dicts for all codes.
-
-        Merges bundled (package) + project (``<project>/codes/``).
-        Project codes win on name collision so agents can override a
-        bundled code with their own implementation.
-        """
+        """Return full frontmatter dicts for all codes in the project."""
         seen: dict[str, dict] = {}
-        for p in self._bundled_code_paths():
-            spec = _parse_frontmatter(p)
-            name = spec.get("name")
-            if name:
-                seen[name] = spec
         for p in self._project_code_paths():
             spec = _parse_frontmatter(p)
             name = spec.get("name")
             if name:
-                seen[name] = spec  # project layer overrides bundled
+                seen[name] = spec
         return [seen[name] for name in sorted(seen)]
 
     def list_codes(self) -> list[dict]:
@@ -423,15 +405,10 @@ class CodeRegistry:
         return codes
 
     def get_code(self, name: str) -> dict | None:
-        """Look up a code spec by name.  Project layer overrides bundled."""
-        project_path = self.codes_dir / name / "SKILL.md"
-        if project_path.exists():
-            code = _parse_frontmatter(project_path)
-            if code.get("name") == name:
-                return code
-        bundled_path = self._bundled_dir / name / "SKILL.md"
-        if bundled_path.exists():
-            code = _parse_frontmatter(bundled_path)
+        """Look up a code spec by name."""
+        path = self.codes_dir / name / "SKILL.md"
+        if path.exists():
+            code = _parse_frontmatter(path)
             if code.get("name") == name:
                 return code
         return None
@@ -505,24 +482,6 @@ class CodeRegistry:
             collection=CODES_COLLECTION,
             metadatas=[metadata],
         )
-
-    def reindex_all(self) -> int:
-        """Reindex project-local code files into the ``codes`` collection.
-
-        Returns count indexed.  Bundled codes are NOT indexed here — they
-        live in the shared ``codes`` collection built and copied into the
-        project at ``dsagt init`` time.  Search via
-        ``search_registry`` queries the merged collection.
-        """
-        if not self._kb:
-            return 0
-        count = 0
-        for path in self._project_code_paths():
-            spec = _parse_frontmatter(path)
-            if spec.get("name"):
-                self._index_code(spec, path)
-                count += 1
-        return count
 
 
 # ---------------------------------------------------------------------------

@@ -28,7 +28,8 @@ def _make_merged_server(tmp_path: Path):
     kb.default_rerank = True
     kb.collections = []
     runtime = str(tmp_path / "runtime")
-    reg = CodeRegistry(source_tools_dir=None, runtime_dir=runtime, kb=None)
+    reg = CodeRegistry(runtime_dir=runtime, kb=None)
+    reg.ensure_bundled_copies()
     sreg = SkillRegistry(source_skills_dir=None, runtime_dir=runtime, kb=None)
     return create_dsagt_server(reg, kb, sreg, runtime_dir=runtime)
 

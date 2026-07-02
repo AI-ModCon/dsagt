@@ -53,23 +53,15 @@ def _write_tool(codes_dir: Path, spec: dict) -> None:
 def _make_server(tmp_path, tools=None):
     """Create (server, registry) with optional pre-populated tools.
 
-    Pre-populated tools are written into ``<runtime>/tools/`` (the
-    project layer) so they exercise the agent-saved code path —
-    ``reindex_all`` and most lookups happen here.  The ``source_dir``
-    is still passed as the bundled layer override but left empty;
-    tests that need bundled-layer behavior populate it explicitly.
+    Pre-populated tools are written into ``<runtime>/codes/`` — the
+    single project layer every lookup reads.
     """
-    source_dir = tmp_path / "source_skills"
-    source_dir.mkdir()
     runtime_dir = tmp_path / "runtime"
     project_tools_dir = runtime_dir / "codes"
     project_tools_dir.mkdir(parents=True, exist_ok=True)
     for spec in tools or []:
         _write_tool(project_tools_dir, spec)
-    reg = CodeRegistry(
-        source_tools_dir=str(source_dir),
-        runtime_dir=str(runtime_dir),
-    )
+    reg = CodeRegistry(runtime_dir=str(runtime_dir))
     return create_registry_server(reg), reg
 
 
@@ -535,12 +527,10 @@ def _make_server_with_kb(tmp_path, tools=None):
     """Create (server, registry, kb) with a real local-embedding KnowledgeBase.
 
     Pre-populated tools are written to ``<runtime>/tools/`` so they
-    exercise the agent-saved code path that ``reindex_all`` operates on.
+    exercise the agent-saved code path.
     """
     from dsagt.knowledge import KnowledgeBase
 
-    source_dir = tmp_path / "source_skills"
-    source_dir.mkdir()
     runtime_dir = tmp_path / "runtime"
     project_tools_dir = runtime_dir / "codes"
     project_tools_dir.mkdir(parents=True, exist_ok=True)
@@ -552,7 +542,6 @@ def _make_server_with_kb(tmp_path, tools=None):
         default_embedder="local",
     )
     reg = CodeRegistry(
-        source_tools_dir=str(source_dir),
         runtime_dir=str(runtime_dir),
         kb=kb,
     )
@@ -619,22 +608,3 @@ class TestToolIndexing:
             server, "search_registry", {"query": "tool", "tag": "genomics"}
         )
         assert "fastp" in text
-
-    def test_reindex_all(self, tmp_path):
-        """reindex_all populates KB from existing skill files."""
-        from dsagt.registry import TOOL_REGISTRY_COLLECTION
-
-        server, reg, kb = _make_server_with_kb(
-            tmp_path,
-            tools=[
-                make_spec(name="preexisting", description="Already registered tool")
-            ],
-        )
-
-        # Skills were copied to runtime on init but not indexed (KB was empty)
-        # reindex_all should pick them up
-        count = reg.reindex_all()
-        assert count >= 1
-
-        results = kb.search("registered", collection=TOOL_REGISTRY_COLLECTION)
-        assert len(results) > 0

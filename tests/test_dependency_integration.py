@@ -94,7 +94,6 @@ def test_register_and_run_tool_with_dependency(tmp_path):
 
     # 2. Create a registry server with a fresh CodeRegistry
     registry = CodeRegistry(
-        source_tools_dir=None,
         runtime_dir=str(tmp_path / "runtime"),
     )
     server = create_registry_server(registry)
