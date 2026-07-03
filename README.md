@@ -82,9 +82,9 @@ dsagt start quickstart   # …or: cd ~/dsagt-projects/quickstart && <your agent>
 Inside the agent, paste these prompts one at a time (substitute the absolute path you exported as `$SMOKE_DIR` — the chat doesn't expand env vars):
 
 1. > Ingest the docs in `$SMOKE_DIR/knowledge/` into a collection named `knowledge`.
-2. > Register the csvkit CLI codes `csvcut`, `csvgrep`, `csvstat`, and `csvlook`.
+2. > Register the CLI utility at `$SMOKE_DIR/csv_summary.py` as a code named `csv-summary` so we can reuse it.
 3. > Use the `scan-directory` code from the registry to scan `$SMOKE_DIR/data/`.
-4. > Summarize `samples.csv` — columns, row count, quality issues using csvkit codes from the registry.
+4. > Run the `csv-summary` code on `$SMOKE_DIR/data/samples.csv` and tell me the columns, row count, and any columns with null values.
 5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
 6. > Tell me what you remember about the samples dataset.
 
@@ -93,9 +93,11 @@ This exercised:
 | Prompt | Capability |
 |---|---|
 | 1 | `dsagt-server` (`kb_ingest`) — chunks and indexes docs into ChromaDB |
-| 2 | `dsagt-server` (`save_code_spec`) — writes `codes/csvcut/SKILL.md`, `codes/csvgrep/SKILL.md`, etc. (one skill-standard dir per registered code) |
-| 3 | `dsagt-run` provenance wrapper — records the execution to `trace_archive/` |
+| 2 | `dsagt-server` (`save_code_spec`) — writes `codes/csv-summary/SKILL.md` (a skill-standard dir), wrapping the executable with `dsagt-run` |
+| 3–4 | `dsagt-run` provenance wrapper — records each execution to `trace_archive/` |
 | 5–6 | Explicit memory (`kb_remember` → `.dsagt/explicit_memories.yaml`) + KB recall (`kb_get_memories`) |
+
+(`csv_summary.py` is stdlib-only — no dependency to install — so registration and execution work out of the box. Step 4's null-column finding is the fact you store and recall in 5–6.)
 
 Exit the agent (`Ctrl+C` or `/exit`), then verify the artifacts and view traces:
 

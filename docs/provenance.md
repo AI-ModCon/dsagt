@@ -8,22 +8,27 @@ Codes are CLI executables defined as markdown files with YAML frontmatter under 
 
 A code spec includes:
 
-- A YAML frontmatter block describing the command, arguments, dependencies, and tags.
-- A markdown body with usage examples and notes for the agent.
+- A YAML frontmatter block describing the executable, parameters, dependencies, and tags.
+- A markdown body with the exact runnable command, usage, and notes for the agent.
 
-Example code spec:
+Example code spec (`codes/csv-summary/SKILL.md`):
 
 ```markdown
 ---
-name: csvstat
-command: csvstat
+name: csv-summary
+description: Summarize a CSV — columns, row count, null counts, numeric stats. Use when profiling a tabular dataset.
+executable: dsagt-run --code csv-summary -- python codes/csv-summary/scripts/csv_summary.py
+parameters:
+  file:
+    type: string
+    required: true
+    cli: positional
+    description: Path to the CSV file
 dependencies: []
-tags: [csv, statistics]
+tags: [csv, profiling]
 ---
 
-Prints descriptive statistics for all columns in a CSV file.
-
-Usage: csvstat [options] [FILE]
+Run this registered code with the exact shell command below…
 ```
 
 DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. It ships one bundled code, `scan-directory`, indexed for search by `dsagt init`.
@@ -41,14 +46,15 @@ The on-disk execution records are the canonical provenance chain. The agent call
 ## Try it
 
 ```bash
+export SMOKE_DIR="$(pwd)/tests/smoke_test"   # a small bundled sample script + CSV
 dsagt init            # follow the prompts: name it `demo`, then pick your agent
 dsagt start demo      # launch the agent in the project
 ```
 
-Then, in the agent:
+Then, in the agent (replace `$SMOKE_DIR` with the absolute path you exported):
 
-1. > Register the csvkit codes `csvstat` and `csvcut`.
-2. > Use `csvstat` from the registry on `data/samples.csv` and summarize the columns.
+1. > Register the CLI utility at `$SMOKE_DIR/csv_summary.py` as a code named `csv-summary`.
+2. > Run the `csv-summary` code from the registry on `$SMOKE_DIR/data/samples.csv` and summarize the columns.
 3. > Reconstruct the pipeline as a bash script.
 
 Afterwards, inspect the trail:
