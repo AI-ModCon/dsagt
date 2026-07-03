@@ -35,7 +35,7 @@ uv run ruff check .                                                    # lint
 The codebase separates **commands** (entry points with argparse, launched as CLI tools or subprocesses) from **modules** (importable logic). Commands live in `src/dsagt/commands/`, modules in `src/dsagt/`.
 
 **Commands** (`src/dsagt/commands/`):
-- `cli.py` — `dsagt init / start / info / list / mv / rm / smoke-test`. `dsagt start` launches the agent in the foreground and runs post-session extraction on exit.
+- `cli.py` — `dsagt init / start / info / traces / list / mv / rm / smoke-test`. `dsagt start` launches the agent in the foreground and runs post-session extraction on exit. `dsagt traces <project>` opens the MLflow viewer over the project's store (runs catch-up first, deep-links to the Traces tab, quiets the mlflow noise; foreground, no managed daemon).
 - `run_code.py` — `dsagt-run` (code execution wrapper).
 - `setup_core_kb.py` — KB-asset build engine (`resolve_assets` / `ensure_assets`), called by `dsagt init` to provision the shared KB; not a CLI command of its own.
 - `info.py` — `dsagt info` (project/config introspection + trace triage).

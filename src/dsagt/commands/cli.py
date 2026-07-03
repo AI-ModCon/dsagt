@@ -20,6 +20,7 @@ Usage:
                          [--include <asset>... | --exclude <asset>...]   # non-interactive
     dsagt start <project>
     dsagt info <project> [--json]
+    dsagt traces <project> [--port <n>]
     dsagt smoke-test
     dsagt list
     dsagt mv <project> <location>
@@ -552,6 +553,13 @@ def _cmd_info(args):
     return run(args.project, as_json=args.json)
 
 
+def _cmd_traces(args):
+    """Open the MLflow trace viewer over the project's store (catch-up first)."""
+    from dsagt.commands.traces import run
+
+    return run(args.project, port=args.port)
+
+
 def _cmd_smoke_test(args):
     """Run the end-to-end smoke test (non-interactive, with assertions).
 
@@ -722,6 +730,19 @@ def main(argv=None):
         help="Emit the structured report as JSON instead of formatted text",
     )
 
+    p_traces = sub.add_parser(
+        "traces",
+        help="Open the MLflow trace viewer over a project's store (runs catch-up "
+        "first, deep-links to the Traces tab, quiets the mlflow noise)",
+    )
+    p_traces.add_argument("project", help="Project name")
+    p_traces.add_argument(
+        "--port",
+        type=int,
+        default=5000,
+        help="Port for the local MLflow UI (default: 5000)",
+    )
+
     p_smoke = sub.add_parser(
         "smoke-test",
         help="Run the end-to-end smoke test (sources DSAGT/.env, drives the agent non-interactively, asserts artifacts)",
@@ -784,6 +805,7 @@ def main(argv=None):
         "init": _cmd_init,
         "start": _cmd_start,
         "info": _cmd_info,
+        "traces": _cmd_traces,
         "smoke-test": _cmd_smoke_test,
         "list": _cmd_list,
         "mv": _cmd_mv,

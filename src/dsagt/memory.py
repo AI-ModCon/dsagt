@@ -373,12 +373,15 @@ class MemoryExtractor:
         if not exchanges:
             return
         # Categorization root: this runs on the heartbeat, outside any MCP
-        # dispatch, so tag the whole extraction ``dsagt.source=memory`` — the
+        # dispatch, so tag the whole extraction ``dsagt.source=episodic`` — the
         # nested kb.* writes inherit it (otherwise they'd land uncategorized).
+        # ``episodic``, NOT ``memory``: this is per-turn internal embedding, and
+        # must filter apart from the user-facing memory tools (kb_remember /
+        # kb_get_memories) that carry ``dsagt.source=memory``.
         # (This tags the *observability* span, not the memory chunks.)
         from dsagt.observability import open_span
 
-        with open_span("memory.extract", source="memory"):
+        with open_span("memory.extract", source="episodic"):
             self._index_turns(exchanges)
 
     def _index_turns(self, exchanges: list[dict]) -> None:

@@ -382,7 +382,14 @@ class CodeUseIndexer:
                 fcntl.flock(lf, fcntl.LOCK_UN)
 
     def tick(self) -> int:
-        """Index newly-arrived records; return how many were indexed this tick."""
+        """Index newly-arrived records; return how many were indexed this tick.
+
+        Emits no categorization root of its own: at the ``reconstruct_pipeline``
+        call site this runs *inside* the registry tool's trace, so its ``kb.*``
+        writes correctly inherit ``dsagt.source=registry``.  The background
+        callers (heartbeat / startup catch-up) run outside any trace and use
+        :meth:`tick_traced` so their writes don't orphan as untagged roots.
+        """
         with self._lock():
             acks = self._load_acks()
             before = len(acks)
@@ -392,6 +399,22 @@ class CodeUseIndexer:
             if len(acks) != before:
                 self._save_acks(acks)
             return result.get("indexed", 0)
+
+    def tick_traced(self) -> int:
+        """:meth:`tick` under a ``dsagt.source=code_use`` categorization root.
+
+        For the background triggers (heartbeat, startup catch-up) that run off
+        any tool-call trace — otherwise the indexer's ``kb.add_entries`` /
+        ``kb.embed`` spans start their own untagged top-level traces, landing in
+        the ``unknown`` bucket and detached from the executions they index.
+        Must run on the same thread as the embedding (open the span inside the
+        worker), so callers dispatch *this* to the thread, not a wrapped
+        :meth:`tick`.
+        """
+        from dsagt.observability import open_span
+
+        with open_span("code_use.index", source="code_use"):
+            return self.tick()
 
 
 # ---------------------------------------------------------------------------

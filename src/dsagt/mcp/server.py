@@ -148,7 +148,10 @@ async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> N
                     logger.debug("Could not record trace source: %s", e)
         if tool_indexer is not None:
             try:
-                n = await asyncio.to_thread(tool_indexer.tick)
+                # tick_traced (not tick): opens a code_use categorization root on
+                # the worker thread so the indexer's kb.* writes nest under it
+                # instead of orphaning as untagged top-level traces.
+                n = await asyncio.to_thread(tool_indexer.tick_traced)
                 if n:
                     logger.info("Tool-use heartbeat: indexed %d record(s)", n)
             except Exception as e:  # noqa: BLE001

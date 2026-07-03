@@ -746,7 +746,10 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
     try:
         tool_use_indexed = 0
         try:
-            tool_use_indexed = CodeUseIndexer(kb, pdir).tick()
+            # tick_traced: this catch-up runs off any tool-call trace, so tag
+            # the indexer's kb.* writes dsagt.source=code_use rather than let
+            # them orphan as untagged top-level traces.
+            tool_use_indexed = CodeUseIndexer(kb, pdir).tick_traced()
         except Exception as e:  # noqa: BLE001 — never let a background task crash
             logger.warning("Tool execution indexing failed: %s", e)
 

@@ -19,8 +19,14 @@ span inspection:
     traces, from the ``dsagt.source`` tag (the MCP tool category the agent
     invoked, set on the trace root by the dispatch shell).
   - ``execution`` — dsagt-run tool-execute traces (``dsagt.source``).
+  - ``episodic`` / ``code_use`` — background emitters (per-turn memory
+    extraction; trace-archive indexing), tagged at their off-thread call site
+    so their embedding writes don't orphan as untagged ``unknown`` roots.
   - ``claude`` / ``goose`` / ``cline`` / ``codex`` — agent traces, from the
     ``dsagt.agent`` metadata stamped by ``MLflowSink`` (the bulk of traffic).
+
+The ``Agent turns`` / ``Internal/debug`` headline splits the recovered agent
+conversation from all of DSAGT's own bookkeeping traces (:data:`_INTERNAL_SOURCES`).
 """
 
 from __future__ import annotations
@@ -225,15 +231,26 @@ def _fmt_count(n: int) -> str:
     return f"{n / 1_000_000:.1f}M"
 
 
+#: The ``dsagt.source`` categories — internal (debug) traces DSAGT emits, as
+#: opposed to the recovered agent-conversation traces.  MCP tool categories
+#: (``memory`` / ``skill`` / ``knowledge`` / ``registry``), ``execution`` for
+#: dsagt-run, plus the two background emitters: ``episodic`` (per-turn memory
+#: extraction) and ``code_use`` (the trace-archive indexer).
+_INTERNAL_SOURCES = frozenset(
+    {"memory", "skill", "knowledge", "registry", "execution", "episodic", "code_use"}
+)
+
+
 def _row_source_for(tags: dict, metadata: dict) -> str:
     """Bucket a trace by who emitted it, from the metadata DSAGT itself stamps.
 
     No span inspection: internal debug traces carry an explicit ``dsagt.source``
-    tag (the MCP tool category — ``memory`` / ``skill`` / ``knowledge`` /
-    ``registry`` — or ``execution`` for dsagt-run), set on the trace root by the
-    MCP dispatch shell / ``code_execute_span``.  Agent traces carry ``dsagt.agent``
-    metadata, stamped by ``MLflowSink``.  Neither overlaps, so the bucket is a
-    direct lookup; anything else (a stray trace with neither) is ``"unknown"``.
+    tag (see :data:`_INTERNAL_SOURCES`), set on the trace root by the MCP
+    dispatch shell / ``code_execute_span`` / the background emitters.  Agent
+    traces carry ``dsagt.agent`` metadata, stamped by ``MLflowSink``.  Neither
+    overlaps, so the bucket is a direct lookup; anything else (a stray trace
+    with neither — which should no longer happen now background work is tagged)
+    is ``"unknown"``.
     """
     src = (tags or {}).get("dsagt.source")
     if src:
@@ -557,6 +574,18 @@ def _print_text(r: dict) -> None:
         f"{_fmt_count(r['output_tokens'])} out"
     )
     print(f"  Errors: {r['total_errors']}")
+    # Split agent turns (the substance) from DSAGT's own internal/debug traces
+    # (embedding, indexing, tool spans) so the headline isn't dominated by
+    # bookkeeping.  ``unknown`` counts as internal/debug — it's an orphaned
+    # DSAGT span, not an agent turn (and should be empty now background work is
+    # tagged); only genuine agent-conversation traces count as agent turns.
+    agent_traces = sum(
+        row["traces"]
+        for row in r["by_source"]
+        if row["source"] not in _INTERNAL_SOURCES and row["source"] != "unknown"
+    )
+    internal_traces = r["total_traces"] - agent_traces
+    print(f"  Agent turns: {agent_traces}   Internal/debug: {internal_traces}")
     print()
 
     print("By source:")

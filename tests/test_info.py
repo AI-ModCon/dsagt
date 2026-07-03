@@ -219,6 +219,88 @@ def test_report_aggregates_by_source_and_session(config):
     assert err["trace_id"] == "t4"
 
 
+def test_episodic_and_code_use_bucket_as_internal_sources(config):
+    """The background emitters carry their own dsagt.source and are counted as
+    internal/debug, not agent turns."""
+    from dsagt.commands.info import _INTERNAL_SOURCES
+
+    assert {"episodic", "code_use"} <= _INTERNAL_SOURCES
+
+    df = _traces_df(
+        [
+            {
+                "trace_id": "a1",
+                "state": "OK",
+                "request_time": 100,
+                "trace_metadata": _metadata(
+                    session="s", agent="claude", in_t=900, out_t=90
+                ),
+                "tags": _tags_for(None),
+            },
+            {
+                "trace_id": "e1",
+                "state": "OK",
+                "request_time": 110,
+                "trace_metadata": _metadata(session="s", agent=None, in_t=0, out_t=0),
+                "tags": _tags_for("episodic"),
+            },
+            {
+                "trace_id": "c1",
+                "state": "OK",
+                "request_time": 120,
+                "trace_metadata": _metadata(session="s", agent=None, in_t=0, out_t=0),
+                "tags": _tags_for("code_use"),
+            },
+        ]
+    )
+    r = _report("proj", config, df)
+    sources = {row["source"]: row for row in r["by_source"]}
+    assert sources["episodic"]["traces"] == 1
+    assert sources["code_use"]["traces"] == 1
+    # Agent-vs-internal split (the headline): 1 agent turn, 2 internal.
+    agent_traces = sum(
+        row["traces"]
+        for row in r["by_source"]
+        if row["source"] not in _INTERNAL_SOURCES and row["source"] != "unknown"
+    )
+    assert agent_traces == 1
+    assert r["total_traces"] - agent_traces == 2
+
+
+def test_agent_vs_internal_split_counts_unknown_as_internal(config):
+    """An orphaned/uncategorized trace (no source, no agent) is bookkeeping —
+    it counts as internal/debug, never as an agent turn."""
+    from dsagt.commands.info import _INTERNAL_SOURCES
+
+    df = _traces_df(
+        [
+            {
+                "trace_id": "a1",
+                "state": "OK",
+                "request_time": 100,
+                "trace_metadata": _metadata(
+                    session="s", agent="claude", in_t=10, out_t=1
+                ),
+                "tags": _tags_for(None),
+            },
+            {  # neither dsagt.source nor dsagt.agent → "unknown"
+                "trace_id": "u1",
+                "state": "OK",
+                "request_time": 110,
+                "trace_metadata": _metadata(session="s", agent=None, in_t=0, out_t=0),
+                "tags": _tags_for(None),
+            },
+        ]
+    )
+    r = _report("proj", config, df)
+    agent_traces = sum(
+        row["traces"]
+        for row in r["by_source"]
+        if row["source"] not in _INTERNAL_SOURCES and row["source"] != "unknown"
+    )
+    assert agent_traces == 1  # not 2 — the unknown is internal/debug
+
+
 def test_report_missing_source_falls_back_to_unknown(config):
     """No dsagt.source tag and no dsagt.agent → bucket is "unknown"."""
     df = _traces_df(

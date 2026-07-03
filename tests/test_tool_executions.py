@@ -201,6 +201,36 @@ class TestCodeUseIndexer:
             assert set(acks) == {"r1", "r2"}
             kb.close()
 
+    def test_tick_traced_wraps_in_code_use_source_span(self, tmp_path):
+        """The background triggers use tick_traced so the indexer's kb.* writes
+        nest under a dsagt.source=code_use root instead of orphaning."""
+        pdir = tmp_path / "proj"
+        (pdir / ".dsagt").mkdir(parents=True)
+        kb = MagicMock()
+        indexer = CodeUseIndexer(kb, pdir)
+
+        opened = {}
+
+        class _Span:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def _fake_open_span(name, span_type=None, source=None):
+            opened["name"] = name
+            opened["source"] = source
+            return _Span()
+
+        with patch("dsagt.observability.open_span", _fake_open_span):
+            # No records → tick returns 0, but the span must still be opened
+            # with the right source.
+            assert indexer.tick_traced() == 0
+
+        assert opened["source"] == "code_use"
+        assert opened["name"] == "code_use.index"
+
 
 # ---------------------------------------------------------------------------
 # index_trace_archive

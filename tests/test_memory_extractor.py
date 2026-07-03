@@ -107,3 +107,30 @@ def test_empty_trace_writes_nothing(tmp_path):
     ext = MemoryExtractor(kb, runtime_dir=tmp_path, session_id="proj:s")
     ext.write(Trace("t", "proj:s", "claude", "proj"))
     assert kb.calls == []
+
+
+def test_extraction_span_tagged_episodic_not_memory(tmp_path):
+    """The per-turn embedding runs off the heartbeat, so it must carry
+    dsagt.source=episodic — filtering apart from the user-facing memory tools
+    (kb_remember / kb_get_memories) that carry dsagt.source=memory."""
+    from unittest.mock import patch
+
+    opened = {}
+
+    class _Span:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake_open_span(name, span_type=None, source=None):
+        opened["source"] = source
+        return _Span()
+
+    kb = FakeKB()
+    ext = MemoryExtractor(kb, runtime_dir=tmp_path, session_id="proj:s")
+    with patch("dsagt.observability.open_span", _fake_open_span):
+        ext.write(_one_turn_trace())
+
+    assert opened["source"] == "episodic"
