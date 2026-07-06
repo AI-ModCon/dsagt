@@ -36,9 +36,10 @@ dsagt init            # name it `demo`, and enable the AIDRIN collection in the 
 dsagt start demo
 ```
 
-Then, in the agent:
+Then, in the agent — substituting `<your-docs-folder>` with any folder of your
+own documents (papers, protocols, schemas):
 
-1. > Ingest the docs in `knowledge/` into a collection named `domain`.
+1. > Ingest the docs in `<your-docs-folder>` into a collection named `domain`.
 2. > Search the `domain` and `aidrin` collections for how to assess data completeness.
 
 ## In practice
