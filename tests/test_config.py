@@ -258,6 +258,48 @@ class TestDefaultConfigContent:
 
 
 # ---------------------------------------------------------------------------
+# CLI: unlisted `mlflow` alias for `traces`
+# ---------------------------------------------------------------------------
+
+
+class TestMlflowAlias:
+    """``dsagt mlflow`` routes to ``traces`` without ever reaching argparse,
+    so it stays out of --help; only the command slot is rewritten (a project
+    may itself be named "mlflow")."""
+
+    def _capture_traces(self, monkeypatch):
+        from dsagt.commands import cli
+
+        seen = {}
+
+        def fake(args):
+            seen.update(project=args.project, port=args.port)
+            return 0
+
+        monkeypatch.setattr(cli, "_cmd_traces", fake)
+        return cli, seen
+
+    def test_mlflow_routes_to_traces(self, monkeypatch):
+        cli, seen = self._capture_traces(monkeypatch)
+        assert cli.main(["mlflow", "myproj", "--port", "5001"]) == 0
+        assert seen == {"project": "myproj", "port": 5001}
+
+    def test_project_named_mlflow_is_not_rewritten(self, monkeypatch):
+        cli, seen = self._capture_traces(monkeypatch)
+        assert cli.main(["traces", "mlflow"]) == 0
+        assert seen == {"project": "mlflow", "port": 5000}
+
+    def test_alias_absent_from_help_command_list(self, capsys):
+        from dsagt.commands import cli
+
+        with pytest.raises(SystemExit):
+            cli.main(["--help"])
+        out = capsys.readouterr().out
+        choices = out[out.index("{") + 1 : out.index("}")]
+        assert "mlflow" not in choices
+
+
+# ---------------------------------------------------------------------------
 # CLI: init choice resolution (_collect_settings)
 # ---------------------------------------------------------------------------
 

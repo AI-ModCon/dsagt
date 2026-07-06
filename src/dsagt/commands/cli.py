@@ -645,6 +645,18 @@ _USER_ERRORS = (FileNotFoundError, FileExistsError, ValueError, RuntimeError)
 def main(argv=None):
     from dsagt import __version__
 
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # `dsagt mlflow <project>` is an unlisted alias for `traces` — the word
+    # people reach for when they want the MLflow viewer.  Rewritten before
+    # parsing (only the command slot: the first non-flag token) so argparse —
+    # and therefore --help — only ever knows `traces`.
+    for i, tok in enumerate(argv):
+        if tok.startswith("-"):
+            continue
+        if tok == "mlflow":
+            argv[i] = "traces"
+        break
+
     parser = argparse.ArgumentParser(
         prog="dsagt", description="DSAgt project and session management."
     )
