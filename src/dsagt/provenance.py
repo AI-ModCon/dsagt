@@ -287,6 +287,8 @@ def index_trace_archive(
     trace_dir: Path,
     kb: KnowledgeBase,
     indexed_ids: set[str] | None = None,
+    *,
+    source: str | None = None,
 ) -> dict:
     """Batch-index all code execution records in a trace archive directory."""
     if indexed_ids is None:
@@ -333,11 +335,25 @@ def index_trace_archive(
 
     # No ``route=`` — see ``index_execution_record`` above.
     if texts:
-        kb.add_entries(
-            texts=texts,
-            collection=CODE_USE_COLLECTION,
-            metadatas=metadatas,
-        )
+        from contextlib import nullcontext
+
+        from dsagt.observability import open_span
+
+        # Open a categorization root only when there is work to index — a quiet
+        # heartbeat produces no child spans, so wrapping it would just emit an
+        # empty, null-request trace.  Only the tagged background triggers pass a
+        # ``source``; the reconstruct-pipeline caller passes none and lets its
+        # kb.* writes inherit the tool's own trace.
+        cm = open_span("code_use.index", source=source) if source else nullcontext(None)
+        with cm as span:
+            kb.add_entries(
+                texts=texts,
+                collection=CODE_USE_COLLECTION,
+                metadatas=metadatas,
+            )
+            if span is not None:
+                span.set_inputs({"trace_dir": str(trace_dir), "n_records": len(texts)})
+                span.set_outputs({"indexed": len(texts)})
 
     return {
         "indexed": len(texts),
@@ -396,21 +412,25 @@ class CodeUseIndexer:
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
 
-    def tick(self) -> int:
+    def tick(self, *, source: str | None = None) -> int:
         """Index newly-arrived records; return how many were indexed this tick.
 
-        Emits no categorization root of its own: at the ``reconstruct_pipeline``
-        call site this runs *inside* the registry tool's trace, so its ``kb.*``
+        Passing ``source`` opens a ``dsagt.source=<source>`` categorization root
+        around the actual indexing (see :func:`index_trace_archive`) — but only
+        when records are indexed.  At the ``reconstruct_pipeline`` call site this
+        runs *inside* the registry tool's trace with no source, so its ``kb.*``
         writes correctly inherit ``dsagt.source=registry``.  The background
-        callers (heartbeat / startup catch-up) run outside any trace and use
-        :meth:`tick_traced` so their writes don't orphan as untagged roots.
+        callers use :meth:`tick_traced` so their writes don't orphan as untagged
+        roots.
         """
         with self._lock():
             acks = self._load_acks()
             before = len(acks)
             # index_trace_archive skips record_ids already in ``acks`` and adds
             # the newly-indexed ones to it (mutates the set we pass).
-            result = index_trace_archive(self._trace_dir, self._kb, indexed_ids=acks)
+            result = index_trace_archive(
+                self._trace_dir, self._kb, indexed_ids=acks, source=source
+            )
             if len(acks) != before:
                 self._save_acks(acks)
             return result.get("indexed", 0)
@@ -421,15 +441,12 @@ class CodeUseIndexer:
         For the background triggers (heartbeat, startup catch-up) that run off
         any tool-call trace — otherwise the indexer's ``kb.add_entries`` /
         ``kb.embed`` spans start their own untagged top-level traces, landing in
-        the ``unknown`` bucket and detached from the executions they index.
-        Must run on the same thread as the embedding (open the span inside the
-        worker), so callers dispatch *this* to the thread, not a wrapped
-        :meth:`tick`.
+        the ``unknown`` bucket and detached from the executions they index.  The
+        root is opened only when a tick actually indexes records, so a quiet
+        heartbeat emits no empty trace.  Runs on the caller's thread (callers
+        dispatch *this* to the embedding worker), so the span opens there.
         """
-        from dsagt.observability import open_span
-
-        with open_span("code_use.index", source="code_use"):
-            return self.tick()
+        return self.tick(source="code_use")
 
 
 # ---------------------------------------------------------------------------

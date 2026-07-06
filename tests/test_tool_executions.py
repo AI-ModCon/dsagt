@@ -10,6 +10,7 @@ intent/report records, was removed — see scratch/excised_proxy_provenance.py.)
 """
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -211,35 +212,82 @@ class TestCodeUseIndexer:
             assert set(acks) == {"r1", "r2"}
             kb.close()
 
-    def test_tick_traced_wraps_in_code_use_source_span(self, tmp_path):
-        """The background triggers use tick_traced so the indexer's kb.* writes
-        nest under a dsagt.source=code_use root instead of orphaning."""
+    def test_tick_traced_opens_no_span_when_nothing_to_index(self, tmp_path):
+        """A quiet heartbeat (no new records) must open NO categorization root —
+        otherwise the MLflow trace list fills with empty, null-request traces."""
         pdir = tmp_path / "proj"
         (pdir / ".dsagt").mkdir(parents=True)
         kb = MagicMock()
         indexer = CodeUseIndexer(kb, pdir)
 
-        opened = {}
-
-        class _Span:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
+        opened = []
 
         def _fake_open_span(name, span_type=None, source=None):
-            opened["name"] = name
-            opened["source"] = source
-            return _Span()
+            opened.append((name, source))
+            return nullcontext(None)
 
         with patch("dsagt.observability.open_span", _fake_open_span):
-            # No records → tick returns 0, but the span must still be opened
-            # with the right source.
             assert indexer.tick_traced() == 0
 
-        assert opened["source"] == "code_use"
-        assert opened["name"] == "code_use.index"
+        assert opened == []  # nothing indexed → no span, no trace
+
+    def test_tick_traced_wraps_real_work_in_code_use_span(self, tmp_path):
+        """When a tick indexes records, it opens one code_use.index root tagged
+        dsagt.source=code_use with populated inputs/outputs (not a null trace)."""
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
+            mock_embedder = MagicMock()
+            mock_embedder.embed = fake_embed
+            mock_make.return_value = mock_embedder
+
+            pdir = tmp_path / "proj"
+            (pdir / ".dsagt").mkdir(parents=True)
+            kb = KnowledgeBase(index_dir=pdir / "kb")
+            indexer = CodeUseIndexer(kb, pdir)
+            r1 = make_wrapper_record()
+            r1["record_id"] = "r1"
+            self._write(pdir / "trace_archive", r1)
+
+            spans = []
+
+            class _RecSpan:
+                def __init__(self, name, source):
+                    self.name, self.source = name, source
+                    self.inputs = self.outputs = None
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def set_inputs(self, v):
+                    self.inputs = v
+
+                def set_outputs(self, v):
+                    self.outputs = v
+
+            def _fake_open_span(name, span_type=None, source=None):
+                # Only intercept the categorization root; nested kb.* @traced
+                # spans no-op as they would with tracing off.
+                if name != "code_use.index":
+                    return nullcontext(None)
+                s = _RecSpan(name, source)
+                spans.append(s)
+                return s
+
+            with patch("dsagt.observability.open_span", _fake_open_span):
+                assert indexer.tick_traced() == 1
+
+            assert len(spans) == 1
+            span = spans[0]
+            assert span.name == "code_use.index"
+            assert span.source == "code_use"
+            assert span.inputs == {
+                "trace_dir": str(pdir / "trace_archive"),
+                "n_records": 1,
+            }
+            assert span.outputs == {"indexed": 1}
+            kb.close()
 
 
 # ---------------------------------------------------------------------------

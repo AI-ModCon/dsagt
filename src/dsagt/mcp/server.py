@@ -92,7 +92,7 @@ def build_dispatch_server(
     @server.call_tool()
     async def call_tool(tool_name: str, arguments: dict) -> list[types.TextContent]:
         handler = handlers[tool_name]  # KeyError = bug in list_tools schema
-        with open_span(tool_name, source=tool_category.get(tool_name)):
+        with open_span(tool_name, source=tool_category.get(tool_name)) as span:
             try:
                 result = await handler(arguments)
             except ValueError as e:
@@ -100,6 +100,12 @@ def build_dispatch_server(
             except Exception as e:
                 logger.exception("Unexpected error in tool '%s'", tool_name)
                 result = {"status": "error", "error": f"Unexpected error: {e}"}
+            if span is not None:
+                # The trace-level Request/Inputs/Outputs are read from this
+                # categorization root; record the call's arguments and result so
+                # the MLflow UI shows them instead of a null request.
+                span.set_inputs(arguments)
+                span.set_outputs(result)
         text = (
             result
             if isinstance(result, str)

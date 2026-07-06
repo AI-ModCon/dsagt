@@ -389,10 +389,16 @@ class MemoryExtractor:
         # (This tags the *observability* span, not the memory chunks.)
         from dsagt.observability import open_span
 
-        with open_span("memory.extract", source="episodic"):
-            self._index_turns(exchanges)
+        with open_span("memory.extract", source="episodic") as span:
+            n = self._index_turns(exchanges)
+            if span is not None:
+                # Trace-level Request/Inputs/Outputs are read from this root, so
+                # record the turn count in and chunk count out to keep the trace
+                # from showing a null request in the MLflow UI.
+                span.set_inputs({"n_turns": len(exchanges)})
+                span.set_outputs({"chunks_indexed": n})
 
-    def _index_turns(self, exchanges: list[dict]) -> None:
+    def _index_turns(self, exchanges: list[dict]) -> int:
         """Chunk each turn per-block and embed into session_memory."""
         tool_names = _resolve_tool_names(exchanges)
         texts, metas = [], []
@@ -415,3 +421,4 @@ class MemoryExtractor:
             self._kb.add_entries(
                 texts=texts, collection=SESSION_MEMORY_COLLECTION, metadatas=metas
             )
+        return len(texts)
