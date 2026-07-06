@@ -6,55 +6,62 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-This cycle restores **observability and episodic memory without a proxy** — both
-recovered by reading each agent's own on-disk session transcript instead of
-intercepting its LLM traffic — and ships episodic memory end to end.
+This cycle restores **observability and episodic memory without a proxy** —
+both recovered from each agent's own on-disk transcript rather than intercepted
+LLM traffic — renames registered executables to **codes**, and makes codes and
+skills natively discoverable the moment they land in a project.
 
 ### Added
-- **Trace pipeline + observability (proxy-free).** An in-session heartbeat in
-  `dsagt-server` reads the agent's transcript, translates it to a canonical
-  trace shape, and logs it to the serverless MLflow store — so prompts,
-  responses, tool calls, and token usage land in the trace view for **every**
-  supported agent (claude, codex, goose, opencode, cline), with no proxy, no
-  OTel routing, and no credentials. DSAgt's own `kb.*` / `tool.execute` /
-  registry spans flow to the same store.
-- **Episodic memory (opt-in).** `dsagt init --episodic` turns on automatic
-  session memory: the heartbeat mechanically chunks, keyword-tags (against a
-  closed "AI-data-ready" taxonomy), and embeds each completed turn into the
-  per-project `session_memory` collection — no LLM, no credentials —
-  retrievable via `kb_search` / `kb_get_memories`.
-- **Recency-weighted episodic retrieval** (`episodic.recency_half_life_days`,
-  default 14): a newer turn edges out a stale one as a bounded boost, so a more
-  recent turn wins without contradiction detection while durable old turns keep
-  their relevance.
+- **Proxy-free trace pipeline.** An in-session heartbeat in `dsagt-server`
+  reads the agent's transcript and logs prompts, responses, tool calls, and
+  token usage to the serverless MLflow store — every supported agent (claude,
+  codex, goose, opencode, cline); no proxy, no OTel routing, no credentials.
+  DSAgt's own spans flow to the same store, tagged `dsagt.source` so the debug
+  view filters apart from agent traces.
+- **`dsagt traces <project>`** opens the MLflow viewer with nothing to
+  remember: runs trace catch-up first, deep-links straight to the project's
+  Traces tab, quiets the server noise.
+- **Episodic memory (opt-in).** `dsagt init --episodic`: the heartbeat
+  mechanically chunks, keyword-tags, and embeds each completed turn into
+  `session_memory` (no LLM); retrieval is recency-weighted
+  (`episodic.recency_half_life_days`, default 14).
+- New domain use cases: tokamak stability, AIDRIN data-readiness.
 
 ### Changed
-- **Tool-use indexing is now incremental.** `dsagt-run` execution records are
-  embedded into the `tool_use` collection by the heartbeat as a session runs
-  (idempotent), and on demand right before `reconstruct_pipeline` — so the
-  pipeline review and tool-use search reflect the calls just made, instead of
-  waiting for the next session's startup catch-up.
+- **"Tools" are now "codes."** Registered CLI executables are *codes*
+  throughout — `<project>/codes/`, `save_code_spec`, `dsagt-run --code`, the
+  `code_use` collection, `code.execute` spans — reserving "tool" for the
+  MCP/agent sense.
+- **Codes share the skill envelope.** A code is a skill-standard dir
+  (`codes/<name>/SKILL.md`); bundled codes are copied into `<project>/codes/`
+  at init — one place, one format.
+- **Native discovery is immediate.** Installing/creating a skill or registering
+  a code mirrors it into the agent's native skills dir on the spot (previously
+  at the next `dsagt start`), so the next session auto-discovers it however the
+  agent is launched — and the agent no longer tells users a restart is needed.
+- **Agents are pre-authenticated.** DSAgt never touches provider credentials;
+  all credential-hint machinery is gone.
+- **Code-use indexing is incremental.** `dsagt-run` records embed into
+  `code_use` on the heartbeat and on demand before `reconstruct_pipeline`,
+  instead of waiting for the next session's startup catch-up.
+- Docs split into per-capability pages; use-case walkthroughs restructured
+  (setup → prompt dialogue → post-conditions) and swept for staleness.
 
 ### Fixed
-- **Duplicate `tool_use` entries.** Startup catch-up re-indexed the entire
-  `trace_archive` every launch (the idempotency cursor was written but never
-  read), accumulating duplicates each session. Indexing is now idempotent
-  against a persisted ack set shared by the heartbeat and catch-up.
+- **Duplicate `code_use` entries** — indexing is now idempotent against a
+  persisted ack set shared by the heartbeat and startup catch-up.
+- **cline:** per-project MCP config via `CLINE_MCP_SETTINGS_PATH`; `cline mcp
+  add` works on cline 3.x; global auth and settings are never touched.
+- **codex:** the trace reader follows the per-project `CODEX_HOME`.
 
 ### Removed
-- Dead `provenance.index_execution_record` (the orphaned single-record path,
-  superseded by the heartbeat's batched, idempotent indexer).
-- **Episodic LLM-judge distillation layer** (`judge.py`: `Judge` / `LocalJudge`
-  / `APIJudge` + `llama-cpp-python`) and the **outlier-suggestion** feature
-  (`CategoryCentroids` / `SuggestionQueue` + the `kb_get_suggestions` /
-  `kb_dismiss_suggestion` MCP tools, 23 → 21 tools). Episodic memory keeps only
-  the mechanical capture path so a Tier-0 baseline can be measured before the
-  judge's runtime/dependency cost is justified; the design notes and parked code
-  live in `design-notes/judge.md` and `scratch/`.
-- `dsagt init` no longer prompts for an LLM judge or solicits a per-project
-  memory taxonomy; the `--domain-tags` flag and the `episodic.judge` /
-  `episodic.domain_tags` / `episodic.outlier_sensitivity` config keys are gone.
-  The stock taxonomy is the fixed tag set.
+- The episodic **LLM-judge** distillation layer and **outlier-suggestion**
+  feature (incl. the `kb_get_suggestions` / `kb_dismiss_suggestion` MCP tools
+  and the `llama-cpp-python` dependency), plus their `dsagt init` prompts and
+  config keys. Episodic memory keeps the mechanical capture path so a Tier-0
+  baseline can be measured first; design notes parked in
+  `design-notes/judge.md`.
+- Dead `provenance.index_execution_record`.
 
 ## [0.2.0] - 2026-06-24
 
