@@ -25,6 +25,7 @@ Public API exported here:
 - :func:`static_agent_record` — write instructions + state dirs.
 - :func:`static_agent_files_present` — has the static record been written?
 - :func:`dynamic_agent_record` — write runtime-dependent files.
+- :func:`refresh_native_skills` — re-run the native-skills mirror on demand.
 - :func:`launch_agent` — fork the agent and block until exit.
 """
 
@@ -172,6 +173,33 @@ def dynamic_agent_record(
     # Central here so each agent only declares native_skills_dir.
     actions += setup.setup_skills(Path(working_dir), config)
     return actions
+
+
+def refresh_native_skills(working_dir: str | Path) -> list[str]:
+    """Re-run the native-skills mirror for the project's configured agent.
+
+    Called by the MCP tools right after a skill is installed/created or a
+    code is registered, so the native skills dir is current the moment the
+    files land — the next session auto-discovers them no matter how the agent
+    is launched (bare or ``dsagt start``).  An already-running session
+    enumerates its skills at startup (agent-side behavior), but can use a
+    fresh skill right away by reading its SKILL.md — which is all native
+    invocation does.  Idempotent (manifest-tracked, the same mirror
+    :func:`dynamic_agent_record` runs at init/start).
+
+    No-op when ``working_dir`` has no ``.dsagt/config.yaml`` agent — the dir
+    hasn't been ``dsagt init``-ed, so there is no native skills dir to mirror
+    into (the test-facing ``create_*_server`` wrappers over bare tmp dirs).
+    """
+    # Lazy: session drags in knowledge/provenance at module level, which this
+    # package (imported by the CLI at cold start) must not pay for.
+    from dsagt.session import read_config_file
+
+    working_dir = Path(working_dir)
+    config = read_config_file(working_dir)
+    if not config.get("agent"):
+        return []
+    return _setup_for(config["agent"]).setup_skills(working_dir, config)
 
 
 def launch_agent(

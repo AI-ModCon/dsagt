@@ -146,6 +146,45 @@ class TestSearchSkills:
         assert "add_skill_source" in text
 
 
+class TestNativeMirror:
+
+    def test_save_skill_mirrors_into_native_skills_dir(self, tmp_path):
+        """A skill created mid-session mirrors into the agent's native skills
+        dir immediately (not at the next ``dsagt start``), so the next session
+        auto-discovers it however the agent is launched.  install_skill and
+        save_code_spec run the same ``refresh_native_skills`` call."""
+        server, skill_reg, kb = _make_skill_server(tmp_path)
+        runtime = tmp_path / "runtime"
+        (runtime / ".dsagt").mkdir()
+        (runtime / ".dsagt" / "config.yaml").write_text("project: p\nagent: claude\n")
+
+        call_tool_sync(
+            server,
+            "save_skill",
+            {
+                "spec": {"name": "mirror-me", "description": "mirrors right away"},
+                "body": "# mirror-me\n\nDo the thing.\n",
+            },
+        )
+
+        native = runtime / ".claude" / "skills"
+        assert (native / "mirror-me" / "SKILL.md").exists()
+        manifest = json.loads((native / ".dsagt-managed.json").read_text())
+        assert "mirror-me" in manifest
+
+    def test_save_skill_without_project_config_skips_mirror(self, tmp_path):
+        """No ``.dsagt/config.yaml`` (not dsagt init-ed) → the skill still
+        saves; no native dir appears."""
+        server, skill_reg, kb = _make_skill_server(tmp_path)
+        text = call_tool_sync(
+            server,
+            "save_skill",
+            {"spec": {"name": "bare", "description": "no config"}, "body": "# b\n"},
+        )
+        assert "added" in text
+        assert not (tmp_path / "runtime" / ".claude").exists()
+
+
 # ---------------------------------------------------------------------------
 # install_skill
 # ---------------------------------------------------------------------------

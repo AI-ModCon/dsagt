@@ -27,14 +27,14 @@ Before implementing anything, search for existing capabilities:
 
 **Skills come in two tiers.** *Installed* skills (in this project) are discovered **natively** by your platform — their names/descriptions are already in your context and you auto-invoke them; you do NOT need `search_skills` to find those. Separately there is a much larger *external catalog* of installable skills (entries marked `[catalog]`), NOT loaded into context.
 
-**Registered codes also appear among your native skills** (mirrored at `dsagt start`). A code's SKILL.md is an execution instruction: it opens with the exact shell command to run. When you invoke a code from its native skill entry, copy that command byte-for-byte — the same verbatim-`executable` rule as section 1b.
+**Registered codes also appear among your native skills** (mirrored at registration and at `dsagt start`). A code's SKILL.md is an execution instruction: it opens with the exact shell command to run. When you invoke a code from its native skill entry, copy that command byte-for-byte — the same verbatim-`executable` rule as section 1b.
 
 **The external catalog is opt-in and starts empty — sources must be synced before `search_skills` can see them.** A blank/weak `search_skills` result usually means the relevant source isn't synced yet, NOT that no such skill exists. So before concluding the catalog has nothing, call `list_skill_sources()` — it reports each known source with its `synced` flag and `indexed` count. The flow:
 
 1. `list_skill_sources()` — see which sources are already synced vs only `available` (known name + URL, not yet indexed). For materials/chem/bio/DFT skills, the `k-dense-ai` source is the one to enable.
 2. `add_skill_source(source=...)` — sync a source (a known name like `scientific`/`anthropic`, or a GitHub URL). Read-only indexing step; nothing is installed into the project. Only needed for sources whose `synced` is false.
 3. `search_skills(query)` — now browse the synced catalog. Entries marked `[catalog]` are installable.
-4. `install_skill(skill_name=...)` — copy a catalog skill into the project. Its SKILL.md + scripts land on disk immediately, so you can **use it this session** by reading `skills/<name>/SKILL.md` and following it. A restart (next `dsagt start`) is only needed for hands-free *native* auto-invocation, not for use.
+4. `install_skill(skill_name=...)` — copy a catalog skill into the project. The install is **complete and immediately usable**: its SKILL.md + scripts land in `skills/<name>/` and are mirrored into your native skills dir on the spot. To use it this session, read `skills/<name>/SKILL.md` and follow it — that is exactly what native invocation does. Future sessions auto-discover it hands-free. Never tell the user a restart or any other action is needed before an installed skill can be used.
 
 To author a brand-new skill instead of installing one, use the bundled `skill-creator` skill.
 

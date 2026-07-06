@@ -38,10 +38,11 @@ async def _handle_save_skill(
 ) -> str:
     """Register a skill (workflow / agent instructions) for later reuse.
 
-    Writes SKILL.md to ``<project>/skills/<name>/``, where every supported
-    agent natively auto-discovers it (after the next ``dsagt start`` mirror).
-    No KB indexing — ``search_skills`` covers only the not-yet-installed
-    *catalog* tier, since installed skills are already natively discoverable.
+    Writes SKILL.md to ``<project>/skills/<name>/`` and mirrors it into the
+    agent's native skills dir immediately, where every supported agent
+    auto-discovers it from its next session.  No KB indexing —
+    ``search_skills`` covers only the not-yet-installed *catalog* tier, since
+    installed skills are already natively discoverable.
     """
     spec = arguments["spec"]
     if isinstance(spec, str):
@@ -62,6 +63,9 @@ async def _handle_save_skill(
         )
     except (KeyError, ValueError, OSError) as e:
         return f"Error saving skill: {e}"
+    from dsagt.agents import refresh_native_skills
+
+    refresh_native_skills(skill_registry.runtime_dir)
     skill_count = len(skill_registry.list_skills())
     return (
         f"Skill '{spec['name']}' {action} successfully. "
@@ -96,10 +100,10 @@ async def _handle_install_skill(
 ) -> str:
     """Install a catalog skill into ``<project>/skills/<name>/``.
 
-    The skill's files land on disk immediately, so the agent can use it in the
-    current session by reading its SKILL.md.  *Native* auto-invocation requires
-    the next ``dsagt start`` (which mirrors installed skills into
-    ``.claude/skills/`` before launch) plus an agent restart.
+    The skill's files land on disk and are mirrored into the agent's native
+    skills dir immediately — usable right away (the agent reads/follows its
+    SKILL.md, which is all native invocation does); hands-free auto-discovery
+    kicks in at the agent's next session, with no user action.
     """
     from dsagt.skills import SkillRouter
 
@@ -110,8 +114,11 @@ async def _handle_install_skill(
         info = SkillRouter().install(name, runtime_dir)
     except LookupError as e:
         return f"Error: {e}"
+    from dsagt.agents import refresh_native_skills
 
-    # Bare confirmation by design: the install→use→restart model and the
+    refresh_native_skills(runtime_dir)
+
+    # Bare confirmation by design: the install→use model and the
     # license/PROVENANCE capture are already in the agent's instructions and on
     # disk (PROVENANCE.txt), so repeating them on every install is just noise.
     verb = "Updated" if info["action"] == "updated" else "Installed"
@@ -241,11 +248,12 @@ def _skill_tools_and_handlers(
             name="save_skill",
             description=(
                 "Register a skill (agent workflow / instructions) into "
-                "<project>/skills/<name>/SKILL.md, where the agent natively "
-                "auto-discovers it after the next `dsagt start`.  Symmetric "
-                "with save_code_spec — use this when you've designed a "
-                "reusable instruction set you want future sessions to load "
-                "automatically."
+                "<project>/skills/<name>/SKILL.md, mirrored into the agent's "
+                "native skills dir immediately so future sessions "
+                "auto-discover it — no restart or user action needed.  "
+                "Symmetric with save_code_spec — use this when you've "
+                "designed a reusable instruction set you want future "
+                "sessions to load automatically."
             ),
             inputSchema={
                 "type": "object",
@@ -353,8 +361,10 @@ def _skill_tools_and_handlers(
             name="install_skill",
             description=(
                 "Install a skill from the external catalog (found via search_skills) "
-                "into this project so the agent can use it natively. Copies SKILL.md "
-                "+ scripts/references; available natively after the next restart."
+                "into this project. Copies SKILL.md + scripts/references and mirrors "
+                "it into the agent's native skills dir — usable immediately (read and "
+                "follow its SKILL.md); future sessions auto-discover it natively with "
+                "no user action."
             ),
             inputSchema={
                 "type": "object",

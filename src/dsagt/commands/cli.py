@@ -408,10 +408,11 @@ def _cmd_start(args):
     """Refresh the dynamic agent record, then ``cd <project> && <agent>``.
 
     The refresh (``dynamic_agent_record``: per-agent MCP config +
-    native-skills mirror, all idempotent) is what makes ``install_skill`` /
-    ``save_code_spec`` results appear natively "after the next dsagt start",
-    and lets a credential-dependent step skipped at init (cline auth) pick
-    up once the vars are in the shell.  Session lifecycle (session-id
+    native-skills mirror, all idempotent) backstops the install-time mirror
+    the MCP tools run (``agents.refresh_native_skills``) — e.g. a skill dir
+    dropped in by hand still mirrors here — and lets a credential-dependent
+    step skipped at init (cline auth) pick up once the vars are in the
+    shell.  Session lifecycle (session-id
     minting, post-session extraction catch-up) is owned by the MCP server
     at startup.
 

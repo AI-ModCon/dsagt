@@ -148,6 +148,11 @@ async def _handle_save_code_spec(
             obs.event("save_tool_failed", error=str(e)[:256])
             return f"Error saving tool spec: {e}"
 
+        # Codes share the skill envelope, so a fresh registration mirrors into
+        # the agent's native skills dir right away (next session discovers it).
+        from dsagt.agents import refresh_native_skills
+
+        refresh_native_skills(registry.runtime_dir)
         tool_count = len(registry.list_codes_raw())
         obs.set("action", action)
         obs.set("registry_size", tool_count)
@@ -391,8 +396,8 @@ def _registry_tools_and_handlers(
             name="save_code_spec",
             description=(
                 "Register a CLI code: writes a skill-standard spec dir "
-                "(codes/<name>/SKILL.md) the agent also auto-discovers "
-                "natively after the next dsagt start"
+                "(codes/<name>/SKILL.md), mirrored into the agent's native "
+                "skills dir immediately so future sessions auto-discover it"
             ),
             inputSchema={
                 "type": "object",

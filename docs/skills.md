@@ -11,7 +11,7 @@ Skills live in `<project>/skills/`. Each is a directory containing a `SKILL.md` 
 Skills live in **two tiers**, and a single MCP service — the **SkillRouter** — is the one entry point that routes every skill operation between them:
 
 - **Catalog tier** — skills that exist in external repositories but are *not yet installed*. DSAgt federates many sources (`k-dense-ai`, `anthropic`, `antigravity`, `composio`, `genesis`, or any git URL); each is cloned and indexed into its own collection. The agent browses this tier with `search_skills` and manages sources with `add_skill_source` / `list_skill_sources`.
-- **Installed + created tier** — skills drawn into the project's Skill Directory (`<project>/skills/`), either installed from the catalog (`install_skill`) or authored in place (e.g. with the bundled `skill-creator`). At `dsagt start` these are mirrored into each agent's *native* skill directory (`.claude/`, `.agents/`, `.cline/`), where the agent auto-discovers and auto-invokes them.
+- **Installed + created tier** — skills drawn into the project's Skill Directory (`<project>/skills/`), either installed from the catalog (`install_skill`) or authored in place (e.g. with the bundled `skill-creator`). These are mirrored into each agent's *native* skill directory (`.claude/`, `.agents/`, `.cline/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them.
 
 The lifecycle runs **Discovery** (the router) → **Registration** (the searchable catalog) → **Progressive Exposure** (the native Skill Directory the agent loads on its own).
 

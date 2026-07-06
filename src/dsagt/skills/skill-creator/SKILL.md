@@ -58,8 +58,8 @@ Confirm before saving:
 
 ### 6. Save
 
-Save via the **`save_skill`** MCP tool with the `spec` (frontmatter dict: `name`, `description`, optional `tags`), the `body` markdown, and any `reference_files` (a `{relative_path: contents}` map). This writes `<project>/skills/<name>/`, which the agent natively auto-discovers after the next `dsagt start` (no KB indexing — `search_skills` is for the not-yet-installed catalog).
+Save via the **`save_skill`** MCP tool with the `spec` (frontmatter dict: `name`, `description`, optional `tags`), the `body` markdown, and any `reference_files` (a `{relative_path: contents}` map). This writes `<project>/skills/<name>/` and mirrors it into the platform's native skill directory (e.g. `.claude/skills/`) immediately (no KB indexing — `search_skills` is for the not-yet-installed catalog).
 
 ### 7. Confirm
 
-Tell the user the skill was saved and how it activates: project skills are mirrored into the platform's native skill directory (e.g. `.claude/skills/`) at the next `dsagt start`, after which the agent auto-discovers it. To use it in the current session, restart the agent.
+Tell the user the skill was saved and is ready to use. Future sessions auto-discover it natively; to apply it in the current session, read `skills/<name>/SKILL.md` and follow it — that is all native invocation does. Do not tell the user a restart or any other action is needed.

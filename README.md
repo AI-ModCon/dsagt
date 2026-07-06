@@ -120,7 +120,7 @@ The same flow runs non-interactively via `dsagt smoke-test --agent claude` (or `
 - **Skill Catalogs** — the skill-catalog sources you pick at init (default `genesis`) are cloned and indexed so `search_skills` returns installable skills. The bundled `skill-creator` is discovered natively by the agent.
 - **Knowledge Collections** — optional reference document sets you pick at init (`nemo_curator`, `aidrin`), downloaded and indexed for data-curation domain knowledge.
 
-The default embedder is a local sentence-transformers model (~130 MB of weights downloaded on first run, CPU-side, no API key).
+The default embedder is a local sentence-transformers model (~130 MB of weights downloaded on first run).
 
 ## Use Case Examples
 
@@ -173,7 +173,7 @@ DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to
 
 **Skills** are instruction-based agent workflows — a directory with a `SKILL.md` and optional reference docs. They come in two tiers:
 
-- **Installed** skills live in `<project>/skills/` (DSAgt ships a bundled `skill-creator`; domain skills like the MODCON datacard generator are installed from the `genesis` catalog). These are mirrored into the agent's native skill directory (e.g. `.claude/skills/`, `.agents/skills/`) at `dsagt init`/`start`, where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the catalog tier below).
+- **Installed** skills live in `<project>/skills/` (DSAgt ships a bundled `skill-creator`; domain skills like the MODCON datacard generator are installed from the `genesis` catalog). These are mirrored into the agent's native skill directory (e.g. `.claude/skills/`, `.agents/skills/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the catalog tier below).
 - **Catalog** skills come from external Git repositories — GitHub *or* GitLab — indexed into a searchable catalog the agent browses with `search_skills` but that is **not** loaded into its context (so a catalog can hold thousands of skills). The agent enables a source with `add_skill_source(...)`, finds skills with `search_skills(...)`, then copies one into the project with `install_skill(...)`.
 
 The catalog is **opt-in**: a source must be synced before its skills are searchable. Curated named sources ship out of the box — `k-dense-ai`, `anthropic`, `antigravity`, `composio`, and `genesis` (the OSTI GENESIS catalog: HPC, HuggingFace, LangChain, OpenAI, plasma-sim, and more) — and any Git URL or `owner/repo` works too. Manage catalogs from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
