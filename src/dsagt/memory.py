@@ -71,9 +71,9 @@ class ExplicitMemory:
             return []
         data = yaml.safe_load(text)
         if not isinstance(data, list):
-            # Out-of-contract: a non-list payload means the file is corrupt or
-            # hand-edited wrong.  Surfacing beats silently coercing to [] and
-            # then overwriting the original on the next _save (silent data loss).
+            # A non-list payload means the file is corrupt or hand-edited.
+            # Raising keeps the next _save from silently overwriting (and
+            # losing) its real contents.
             raise ValueError(
                 f"{self._path} is not a list of memories "
                 f"(got {type(data).__name__}); inspect and fix the file."

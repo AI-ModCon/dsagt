@@ -78,6 +78,8 @@ Distilled from working on this codebase; `knowledge.py` is the reference example
 
 **Comments state the real reason, at the point they explain it.** A lazy import is justified *at the import site* with its actual cause, not as an "this is absent" note in the import block citing a stale rationale. If the reason changes, fix the comment.
 
+**No change-narration in comments.** A comment describes what the code does and why it exists *now* — never how it used to work, what changed, or paradigms no longer in the tree. Ban breadcrumbs like "previously…", "was formerly…", "no longer uses…", "moved from…", "(not a `.get` default)", "instead of the old…". Git carries the history; the comment describes the present. State the hazard/intent directly ("session_id is null outside a minted session, and ChromaDB rejects null metadata") rather than contrasting with a prior version ("… beats coercing to `[]` like before").
+
 **Import hygiene on hot paths.** Modules on frequently-invoked paths (`dsagt-run` runs per tool call) must not transitively drag heavy modules in for *annotation-only* type hints. Use `from __future__ import annotations` + a `TYPE_CHECKING`-guarded import (verify the module doesn't introspect annotations at runtime first). Keep cold start lean; lazy-import the heavy leaf (llama_index) at its single use site.
 
 **Naming.** Prefer concise domain names (`APIEmbedder`/`LocalEmbedder`, not `…EmbeddingClient`).

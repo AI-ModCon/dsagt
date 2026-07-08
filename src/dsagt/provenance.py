@@ -265,9 +265,9 @@ def execution_metadata(record: dict) -> dict:
 
     meta: dict = {}
     meta["code_name"] = record.get("code_name") or "unknown"
-    # ``or`` (not a .get default): a record written outside a minted session
-    # stores session_id: null, and ChromaDB rejects a None metadata value —
-    # which would poison the whole batch and re-fail every heartbeat.
+    # A code run outside a minted session stores session_id: null, and ChromaDB
+    # rejects a null metadata value — which would fail the whole batch add and
+    # re-fail every heartbeat.  Coerce null to "unknown".
     meta["session_id"] = record.get("session_id") or "unknown"
 
     if execution and execution.get("return_code") is not None:
