@@ -108,7 +108,7 @@ We can process them one at a time.
 Search for a skill that can generate a datacard for our processed data, then use it.
 ```
 
-The agent should find the bundled `datacard-generator` skill via `search_skills`.
+The agent should find the `datacard-generator` skill in the `genesis` catalog via `search_skills` and install it with `install_skill` (only `skill-creator` ships bundled; domain skills come from catalogs).
 
 ### 6. Reconstruct pipeline
 

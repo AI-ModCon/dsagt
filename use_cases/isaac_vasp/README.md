@@ -1,3 +1,17 @@
+---
+title: VASP / ISAAC
+domain: Materials science — DFT input/output handling with VASP
+summary: >-
+  Convert VASP DFT input/output into an AI-ready ISAAC record — register the
+  conversion tooling and build the pipeline against bundled NEB fixture data
+  (no DFT run, no HPC).
+status: published
+order: 30
+guides:
+  - text: VASP → ISAAC Walkthrough
+    path: README.md
+---
+
 # DSAgt Demo: VASP → ISAAC AI-Ready Record
 
 > **Estimated time:** ~15 minutes — the NEB fixture data is bundled in this

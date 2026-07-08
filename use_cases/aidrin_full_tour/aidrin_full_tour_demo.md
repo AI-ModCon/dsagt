@@ -8,7 +8,7 @@
 This guide drives **every** [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector)
 metric through DSAgt on a single tabular dataset — exercising all 15 metrics across all four
 categories, with full execution provenance. It is the companion to the
-[cryo-EM readiness gate demo](cryoem_readiness_demo.md), which applies the quality subset to
+[cryo-EM readiness gate demo](../aidrin_readiness_gate/cryoem_readiness_demo.md), which applies the quality subset to
 scientific data; here we use a dataset rich enough to exercise the fairness and privacy metrics too.
 
 The dataset is the **UCI Adult** census extract bundled with AIDRIN

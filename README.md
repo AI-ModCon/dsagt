@@ -4,7 +4,7 @@
 
 ![DSAgt architecture](latex/architecture.png)
 
-DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. DSAgt provides data-pipeline scaffolding around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …);
+DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It wraps these capabilities around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …).
 
 **Prerequisites:** Python 3.12 or 3.13, and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
 
@@ -31,17 +31,19 @@ pip install "git+https://github.com/AI-ModCon/dsagt.git"
 dsagt --version                            # 0.2.0
 ```
 
-This puts the `dsagt` CLI (and the `dsagt-run` / `dsagt-server` helpers) on your PATH. Create your first project — `dsagt init` is interactive (it walks you through the agent platform, project location, packaged knowledge collections, and skill-catalog sources) and sets up the knowledge base on first run:
+This puts the `dsagt` CLI on your PATH. Create your first project — `dsagt init` is interactive (it walks you through the agent platform, project location, packaged knowledge collections, and skill-catalog sources) and sets up the knowledge base on first run:
 
 ```bash
 dsagt init                      # interactive; pick agent, collections, sources
 ```
 
-Then start your agent from the project directory, use dsagt cli, or open a VS code :
+Then start dsagt (shorthand for starting your agent with the dsagt MCP server enabled), or open the project in VS Code:
 
 ```bash
-cd ~/dsagt-projects/my-project && claude   # …or: dsagt start my-project
+dsagt start <my-project>   # ≈ cd ~/dsagt-projects/my-project && claude   (or your preferred agent)
 ```
+
+Or, if you use a VS Code agent extension, just open the folder as a project in VS Code and start the agent — `dsagt init` already made the dsagt MCP server available via the native interface (e.g. for Claude, exposed in the project's `.mcp.json`).
 
 To upgrade later, reinstall — re-running `dsagt init` reconfigures an existing project in place:
 
@@ -49,7 +51,7 @@ To upgrade later, reinstall — re-running `dsagt init` reconfigures an existing
 pip install --upgrade "git+https://github.com/AI-ModCon/dsagt.git"
 ```
 
-> Pin to a specific release once tags are published, e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@v0.2.0"`.
+> Pin to a specific release: e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@v0.2.0"`.
 <!-- md-shared:install:end -->
 
 ### For development
@@ -97,7 +99,7 @@ This exercised:
 | 3–4 | `dsagt-run` provenance wrapper — records each execution to `trace_archive/` |
 | 5–6 | Explicit memory (`kb_remember` → `.dsagt/explicit_memories.yaml`) + KB recall (`kb_get_memories`) |
 
-(`csv_summary.py` is stdlib-only — no dependency to install — so registration and execution work out of the box. Step 4's null-column finding is the fact you store and recall in 5–6.)
+Step 4's null-column finding is the fact you store and recall in 5–6.
 
 Exit the agent (`Ctrl+C` or `/exit`), then verify the artifacts and view traces:
 
@@ -107,10 +109,11 @@ ls ~/dsagt-projects/quickstart/{codes,trace_archive}
 cat ~/dsagt-projects/quickstart/.dsagt/explicit_memories.yaml
 
 # Traces land in a serverless SQLite store.  Browse them with:
-mlflow ui --backend-store-uri sqlite:///$HOME/dsagt-projects/quickstart/mlflow.db
+dsagt traces quickstart
+# Runs mlflow ui --backend-store-uri sqlite:///$HOME/dsagt-projects/quickstart/mlflow.db
 ```
 
-The same flow runs non-interactively via `dsagt smoke-test --agent claude` (or `goose` / `codex` / `opencode` / `cline`), which asserts each artifact is present.
+The same sequence of project initialization/prompts runs automatically for installation integration testing via `dsagt smoke-test --agent claude` (or `goose` / `codex` / `opencode` / `cline`), which asserts each artifact is present, and concludes cleaning up the smoke-test project artifacts.
 
 ### Knowledge base setup
 
@@ -124,15 +127,9 @@ The default embedder is a local sentence-transformers model (~130 MB of weights 
 
 ## Use Case Examples
 
-End-to-end walkthroughs for representative scientific and data-readiness scenarios live in [`use_cases/`](use_cases/). Each one covers data acquisition, code registration, pipeline construction, and agent-driven execution against a real dataset.
+[`use_cases/`](use_cases/) holds end-to-end domain walkthroughs — each covering data acquisition, code registration, pipeline construction, and agent-driven execution against a real dataset (genomics, cryo-EM, materials science, AI data-readiness). Browse one to see how the pieces fit on a concrete pipeline before building your own.
 
-| Use case | Domain | Guide |
-|----------|--------|-------|
-| Microbial isolate processing | Genomics — short-read QC and assembly with `fastp` + `megahit` | [isolate_demo.md](use_cases/microbial_isolates/isolate_demo.md) |
-| Cryo-EM data curation | Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP | [cryoem_demo.md](use_cases/cryoem/cryoem_demo.md) |
-| ISAAC / VASP workflows | Materials science — DFT input/output handling with VASP | [use_cases/isaac_vasp/](use_cases/isaac_vasp/) |
-| AIDRIN readiness gate (cryo-EM) | AI data readiness — `aidrin` quality metrics before/after cryo-EM curation | [cryoem_readiness_demo.md](use_cases/aidrin_readiness/cryoem_readiness_demo.md) |
-| AIDRIN full feature tour | AI data readiness — all 15 `aidrin` metrics (quality, fairness, privacy) on UCI Adult | [aidrin_full_tour_demo.md](use_cases/aidrin_readiness/aidrin_full_tour_demo.md) |
+See the **[Use Cases documentation](https://ai-modcon.github.io/dsagt/use-cases/)** for the full catalog, or drop a `README.md` with frontmatter into a `use_cases/<name>/` folder to add your own (it's auto-published to the docs site — see [`hooks/gen_use_cases.py`](hooks/gen_use_cases.py)).
 
 ## Project Directory
 
@@ -226,13 +223,10 @@ Each launch gets a session id that every span carries, so you can filter the tra
 | `dsagt init` | Create or reconfigure a project — interactive menu for name, location, agent, knowledge collections, skill sources, and the episodic-memory opt-in; sets up the KB and writes the per-agent MCP config |
 | `dsagt start <name>` | Launch the agent in the project directory (equivalent to `cd <project> && <agent>`) |
 | `dsagt info <name> [--json]` | Resolved config (with source per value) and a session/trace summary |
+| `dsagt traces <name> [--port <n>]` | Open the MLflow trace viewer over the project's store (runs catch-up first, deep-links to the Traces tab, quiets the mlflow noise) |
 | `dsagt list` | List all projects with agent and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project (and optionally delete its directory) |
 | `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline]` | End-to-end install verification |
-
-> **Deprecated `dsagt init` flags (backcompat).** The pre-menu flags still work for scripts/CI but are deprecated in favor of the interactive menu: `<name>` (positional), `--agent <platform>`, `--location <path>`, `--include … | --exclude …`, and `--episodic`. Passing any of them skips the corresponding prompt; new usage should prefer bare `dsagt init`.
-
-Skill catalogs are managed from the agent via the MCP tools (`add_skill_source` / `search_skills` / `install_skill`), and traces are viewed with `mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db`.
 
 For tests, troubleshooting, and other developer-facing material, see [developer.md](developer.md).

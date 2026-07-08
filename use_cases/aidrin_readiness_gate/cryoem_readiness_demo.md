@@ -31,7 +31,7 @@ AIDRIN's **fairness rate** metrics (`statistical-rates`, `representation-rate`) 
 data-governance / privacy** metrics (`k-anonymity`, `l-diversity`, `t-closeness`, `entropy-risk`,
 `single`/`multiple-attribute-risk`, `differential-privacy`) are **deliberately excluded** — they
 assume sensitive attributes or personally-identifying quasi-identifiers, which cryo-EM particle
-data does not contain. The [full AIDRIN tour](aidrin_full_tour_demo.md) exercises those on a
+data does not contain. The [full AIDRIN tour](../aidrin_full_tour/aidrin_full_tour_demo.md) exercises those on a
 tabular dataset where they do apply.
 
 ## Prerequisites

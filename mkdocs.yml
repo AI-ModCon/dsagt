@@ -35,6 +35,9 @@ plugins:
   - search
   - include-markdown
 
+hooks:
+  - hooks/gen_use_cases.py
+
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -62,9 +65,6 @@ nav:
   - CLI Reference: cli.md
   - Use Cases:
     - Overview: use-cases/index.md
-    - Microbial Isolates: use-cases/microbial-isolates.md
-    - Cryo-EM: use-cases/cryoem.md
-    - VASP / ISAAC: use-cases/vasp.md
-    - AIDRIN Readiness Gate (Cryo-EM): use-cases/aidrin-cryoem.md
-    - AIDRIN Full Feature Tour: use-cases/aidrin-tour.md
+    # Individual use-case pages are generated from use_cases/<name>/README.md
+    # frontmatter and appended here by hooks/gen_use_cases.py.
   - Developer Guide: developer.md
