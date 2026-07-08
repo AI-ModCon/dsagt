@@ -53,10 +53,11 @@ uv run mkdocs build --strict    # what CI runs
 
 ## Codebase orientation
 
-`CLAUDE.md` at the repo root is the fullest map of the code — the
-commands-vs-modules split, the single `dsagt-server` MCP layout, and the
-observability/memory design. The [Architecture](architecture.md) page is the
-user-facing summary.
+The [Architecture](architecture.md) page is the map of the system — the
+capabilities, the single `dsagt-server` MCP layout, and the observability and
+memory design. `CLAUDE.md` at the repo root records the house coding and prose
+conventions (it doubles as instructions for AI coding agents working in the
+repo); read it before a substantial change.
 
 ## Troubleshooting
 
