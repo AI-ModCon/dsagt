@@ -106,8 +106,6 @@ def agent_env(config: dict) -> dict:
     env["DSAGT_PROJECT"] = config["project"]
     env["DSAGT_PROJECT_DIR"] = pdir
     env["DSAGT_AGENT"] = agent_name
-    if config.get("session_id"):
-        env["DSAGT_SESSION_ID"] = config["session_id"]
 
     from dsagt.observability import resolve_tracking_uri
 

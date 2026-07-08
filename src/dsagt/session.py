@@ -650,7 +650,7 @@ def remove_collection(pdir: Path, collection: str) -> bool:
 
     Used by re-run ``dsagt init`` when the user opts to remove a collection
     that was dropped from the asset set.  Returns True if a directory was
-    removed.  Caller must guard agent-populated collections (``tool_use``,
+    removed.  Caller must guard agent-populated collections (``code_use``,
     ``session_memory``) — this helper deletes whatever name it's given.
     """
     target = Path(pdir) / "kb_index" / collection
@@ -693,24 +693,6 @@ def remove_project(project_name: str, keep_files: bool = False) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Service start / stop
-# ---------------------------------------------------------------------------
-
-
-def _embedding_provider(config: dict) -> str:
-    """Resolve embedding provider with a fallback for two cases:
-
-    - YAML key absent (older configs predating ``embedding.provider``)
-    - YAML key present but holds an unresolved ``${EMBEDDING_PROVIDER}``
-      literal (newer template, but ``.env`` doesn't set the var)
-    """
-    provider = (config.get("embedding", {}).get("provider") or "").strip()
-    if not provider or provider.startswith("${"):
-        return "openai_like"
-    return provider
-
-
-# ---------------------------------------------------------------------------
 # Memory extraction orchestration
 # ---------------------------------------------------------------------------
 
@@ -726,8 +708,8 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
 
     Two phases, both best-effort:
 
-    1. **Tool-execution indexing** (always): embed the previous session's
-       ``<pdir>/trace_archive/`` records into the ``tool_use`` collection via
+    1. **Code-execution indexing** (always): embed the previous session's
+       ``<pdir>/trace_archive/`` records into the ``code_use`` collection via
        the shared :class:`~dsagt.provenance.CodeUseIndexer` — idempotent against
        the same ``.dsagt/code_use_acks.json`` the live heartbeat uses, so the
        startup catch-up and the heartbeat never double-index.  No LLM, no
@@ -744,14 +726,14 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
     kb = kb_from_config(config)
 
     try:
-        tool_use_indexed = 0
+        code_use_indexed = 0
         try:
             # tick_traced: this catch-up runs off any tool-call trace, so tag
             # the indexer's kb.* writes dsagt.source=code_use rather than let
             # them orphan as untagged top-level traces.
-            tool_use_indexed = CodeUseIndexer(kb, pdir).tick_traced()
+            code_use_indexed = CodeUseIndexer(kb, pdir).tick_traced()
         except Exception as e:  # noqa: BLE001 — never let a background task crash
-            logger.warning("Tool execution indexing failed: %s", e)
+            logger.warning("Code execution indexing failed: %s", e)
 
         traces_caught_up = 0
         try:
@@ -761,7 +743,7 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
 
         return {
             "status": "ok",
-            "tool_use_indexed": tool_use_indexed,
+            "code_use_indexed": code_use_indexed,
             "traces_caught_up": traces_caught_up,
         }
     finally:

@@ -2,7 +2,7 @@
 # DSAGT smoke test — non-interactive end-to-end exercise.
 #
 # Drives the SAME `dsagt start` lifecycle as an interactive run (config
-# generation → agent in the foreground → post-session run_extraction).
+# generation → agent in the foreground → post-session catch-up extraction).
 # Serverless: there are no services to start or stop — all self-logging
 # lands in the project's sqlite MLflow store.  Only the agent-launch
 # step swaps from interactive to batch (`--script`).
