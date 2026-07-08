@@ -31,13 +31,13 @@ tags: [csv, profiling]
 Run this registered code with the exact shell command below…
 ```
 
-DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. It ships one bundled code, `scan-directory`, indexed for search by `dsagt init`.
+DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. It provides one built-in code, `scan-directory`, indexed for search by `dsagt init`.
 
 ## Execution capture
 
-Every registered code runs through the `dsagt-run` wrapper. For each call it records the command, arguments, exit code, duration, input/output file counts, and truncated stderr to `<project>/trace_archive/<record_id>.json`, and emits a `code.execute` span to the trace store. The MCP server incrementally indexes those records into the `code_use` collection, so past executions are searchable.
+Every registered code runs through the `dsagt-run` wrapper. For each call it records the command, arguments, exit code, duration, input/output file counts, and truncated stderr to `<project>/trace_archive/<record_id>.json`, and emits a `code.execute` span to the [trace store](observability.md). The MCP server incrementally indexes those records into the `code_use` collection, so past executions are searchable.
 
-The wrapper is the whole point of code-mediated data access: a direct shell or editor call leaves no record and breaks reconstruction.
+The wrapper is the point of code-mediated data access. A direct shell or editor call isn't recordless — the agent's transcript still captures whatever it chose to report about the command and its stdout/stderr — but that's a partial, agent-curated account, not the structured `dsagt-run` record of exit code, timing, and input/output files. Only the wrapped record carries what `reconstruct_pipeline` needs, so a direct call still breaks reconstruction.
 
 ## Pipeline reconstruction
 
@@ -46,7 +46,7 @@ The on-disk execution records are the canonical provenance chain. The agent call
 ## Try it
 
 ```bash
-export SMOKE_DIR="$(pwd)/tests/smoke_test"   # a small bundled sample script + CSV
+export SMOKE_DIR="$(pwd)/tests/smoke_test"   # a small built-in sample script + CSV
 dsagt init            # follow the prompts: name it `demo`, then pick your agent
 dsagt start demo      # launch the agent in the project
 ```
@@ -63,7 +63,3 @@ Afterwards, inspect the trail:
 ls ~/dsagt-projects/demo/{codes,trace_archive}          # the specs + execution records
 mlflow ui --backend-store-uri sqlite:///$HOME/dsagt-projects/demo/mlflow.db   # code.execute spans
 ```
-
-## In practice
-
-See the [Use Cases](use-cases/index.md) for provenance-captured pipelines on real datasets — for example registering `fastp` and `megahit` as codes and reconstructing a genomics QC-and-assembly pipeline end to end.

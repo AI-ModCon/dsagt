@@ -46,7 +46,7 @@ source .venv/bin/activate
 |-------|-------------|
 | **Code Registry** | Register CLI codes as markdown specs; the agent discovers and runs them via `search_registry` |
 | **Knowledge Base** | Hybrid semantic + keyword (BM25) search over indexed ChromaDB collections |
-| **Skills Discovery** | Search external GitHub skill catalogs and install workflow skills on demand via `search_skills` / `install_skill`, without flooding the agent's context |
+| **Skills Discovery** | Search the external skill corpus and install workflow skills on demand via `search_skills` / `install_skill`, without flooding the agent's context |
 | **Provenance** | `dsagt-run` wrapper records every code execution to `trace_archive/`; `reconstruct_pipeline` renders it as a runnable script |
 | **Explicit Memory** | User-confirmed facts persisted to YAML and the knowledge base |
 | **Episodic Memory** | Opt-in: the MCP server mechanically chunks and embeds each session turn into a searchable `session_memory` collection (recency-weighted retrieval) |

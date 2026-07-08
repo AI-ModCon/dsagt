@@ -1,6 +1,6 @@
 # Developer Guide
 
-Material for contributors and users working beyond the default `dsagt init` → agent flow.
+Material for contributors and developers.
 
 ## Tests
 

@@ -1,18 +1,18 @@
 # Observability
 
-DSAgt logs traces to a **serverless MLflow store** — a SQLite file at `<project>/mlflow.db`, created lazily on the first span. View it with MLflow's UI pointed at the file:
+DSAgt logs traces to a **MLflow** via an SQLite file at `~/dsagt-projects/<project>/mlflow.db`. To view in the MLflow UI:
 
 ```bash
-mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
+dsagt traces <project> # rund dsagt mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
 ```
 
 `dsagt info <name>` prints the resolved tracking URI and a session/trace summary. The tracking URI resolves as `MLFLOW_TRACKING_URI` env → project config → the `sqlite:///<project>/mlflow.db` default.
 
 ## Two feeds
 
-DSAgt is **BYOA**: the agent talks to its own LLM provider directly, and DSAgt reconstructs traces from what the agent writes to disk. Traces come from two places:
+DSAgt reconstructs traces from what the agent writes to disk. Traces come from two places:
 
-1. **First-party spans (live).** DSAgt instruments its own code and emits spans directly to the store as it runs.
+1. **DSAgt spans (live).** DSAgt instruments its own code and emits spans directly to the store as it runs.
 2. **Agent traces (post-hoc).** The MCP server's in-session heartbeat reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — recovering prompts, responses, and tool calls.
 
 ## Trace Coverage
@@ -30,22 +30,14 @@ Agent traces are reconstructed from each agent's on-disk session record. A per-a
 
 Every span carries the project's session id (minted per launch into `<project>/.dsagt/state.yaml`) for filtering in the MLflow trace view.
 
-## The heartbeat
-
-The trace scan runs as a periodic heartbeat inside the long-lived MCP server — the one DSAgt process alive in every launch flow. Each tick reads new transcript records, translates completed turns, and fans out to subscribers (the MLflow sink always; the episodic-memory extractor when enabled). Correctness rests on idempotency: each subscriber keeps its own ack set, so a re-tick or a next-session catch-up can never double-log or lose a turn. The same heartbeat incrementally indexes `dsagt-run` code-execution records into the `code_use` collection.
-
-The same heartbeat also indexes `dsagt-run` execution records for search — the on-disk records and pipeline reconstruction are covered under [Provenance](provenance.md).
+The trace scan runs at periodic intervals (2m) inside the MCP server — At each interval DSAgt reads new transcript records, translates completed turns, and translates the canonical trace format to episodic memory in the knowledge base, and MLflow records in the MLFlow store. 
 
 ## Try it
 
 ```bash
 dsagt init            # follow the prompts: name it `demo`, then pick your agent
 dsagt start demo      # …run a prompt or two, then exit the agent
-mlflow ui --backend-store-uri sqlite:///$HOME/dsagt-projects/demo/mlflow.db
+dsagt traces <project>
 ```
 
-Open the MLflow UI to see both feeds in one store: DSAgt's own `kb.*` / `code.execute` spans and the per-turn agent traces recovered from the transcript. `dsagt info demo` prints the same session/trace summary from the command line.
-
-## In practice
-
-See the [Use Cases](use-cases/index.md) to watch a full curation session — every retrieval, code run, and agent turn — land in the trace store as it happens.
+Open MLflow UI to see both feeds in one store: DSAgt's own `kb.*` / `code.execute` spans and the per-turn agent traces recovered from the transcript. `dsagt info demo` prints the same session/trace summary from the command line.

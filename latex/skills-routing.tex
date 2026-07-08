@@ -5,13 +5,13 @@
 %
 % Colour semantics (see legend): blue = external (skill repos, agent),
 % green = DSAgt service (SkillRouter), orange = DSAgt store / skill (Skills
-% Catalog, Skill Directory, the bundled skill-creator).  Concern bands are
-% uniform faint outlines.  SkillRouter is the single skill-MCP entry point:
-% every skill tool is labelled on the router operation it drives.
+% Corpus, Installed Skills, the built-in skill-creator).  SkillRouter is the
+% single skill-MCP entry point: every skill tool is labelled on the router
+% operation it drives.
 \documentclass[border=2mm]{standalone}
 \usepackage{tikz}
 \usepackage{lmodern}
-\usetikzlibrary{positioning, arrows.meta, fit, backgrounds, calc}
+\usetikzlibrary{positioning, arrows.meta, calc}
 
 \begin{document}
 \begin{tikzpicture}[
@@ -28,8 +28,6 @@
     link/.style={->, thick, blue!60!black},
     bilink/.style={<->, thick, blue!60!black},
     lbl/.style={font=\scriptsize\itshape, text=gray!55!black, align=center},
-    concern/.style={font=\footnotesize\bfseries, text=gray!62!black},
-    band/.style={draw=gray!55, dashed, rounded corners, fill=black!3},
 ]
 
 % ============================ legend ====================================
@@ -47,13 +45,13 @@
 \node[ext, minimum width=22mm] (agent) at (16.8,3.8) {Agent};
 
 % ============================ DSAgt stores ==============================
-\node[store, minimum width=34mm] (catalog) at (5.6,0.6)
-  {\textbf{Skills Catalog}\\{\scriptsize federated across sources}\\{\scriptsize searchable $\cdot$ not yet installed}};
+\node[store, minimum width=34mm] (corpus) at (5.6,0.6)
+  {\textbf{Skills Corpus}\\{\scriptsize federated across sources}\\{\scriptsize searchable $\cdot$ not yet installed}};
 
 \node[store, minimum width=46mm, minimum height=26mm] (native) at (11.6,0.9) {};
 \node[anchor=north, align=center, font=\footnotesize]
   at ([yshift=-1.6mm]native.north)
-  {Skill Directory\\{\scriptsize installed + created}\\{\scriptsize .claude $\cdot$ .agents $\cdot$ .cline $\cdot$ .roo /skills}};
+  {\textbf{Installed Skills}\\{\scriptsize installed + created}\\{\scriptsize .claude $\cdot$ .agents $\cdot$ .cline $\cdot$ .roo /skills}};
 \node[skill, minimum width=26mm, anchor=south] at ([yshift=2mm]native.south)
   {\texttt{skill-creator}};
 
@@ -64,7 +62,7 @@
 % ============================ router operations (skill MCP tools) =======
 \draw[link] (router.west) -| (extrepos.north)
   node[lbl, pos=0.25, above] {add\_skill\_source\\list\_skill\_sources};
-\draw[bilink] (router.south) -- (catalog.north)
+\draw[bilink] (router.south) -- (corpus.north)
   node[lbl, pos=0.5, right] {search\_skills};
 \draw[link] (router.east) -| (native.north)
   node[lbl, pos=0.25, above] {install\_skill};
@@ -74,16 +72,6 @@
 % ============================ agent <-> skill directory (two-way) =======
 \draw[bilink] (native.east) -| (agent.south)
   node[lbl, pos=0.22, below, align=center] {auto-invoke\\author};
-
-% ============================ concern bands =============================
-\begin{scope}[on background layer]
-  \node[band, fit=(catalog), inner sep=3mm] (regband) {};
-  \node[band, fit=(native), inner sep=3mm] (expband) {};
-  \node[band, fit=(router), inner sep=3mm] (disband) {};
-\end{scope}
-\node[concern] at (disband.north) [above=0.6mm] {DISCOVERY};
-\node[concern] at (regband.south) [below=0.6mm] {REGISTRATION};
-\node[concern] at (expband.south) [below=0.6mm] {PROGRESSIVE EXPOSURE};
 
 \end{tikzpicture}
 \end{document}

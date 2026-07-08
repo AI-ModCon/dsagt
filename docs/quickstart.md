@@ -26,23 +26,23 @@ dsagt start quickstart     # …or: cd ~/dsagt-projects/quickstart && <your agen
 
 Inside the agent, paste these prompts one at a time. Replace `$SMOKE_DIR` with the absolute path you exported — the chat does not expand shell variables.
 
-1. > Ingest the docs in `$SMOKE_DIR/knowledge/` into a collection named `knowledge`.
-2. > Register the CLI utility at `$SMOKE_DIR/csv_summary.py` as a code named `csv-summary` so we can reuse it.
-3. > Use the `scan-directory` code from the registry to scan `$SMOKE_DIR/data/`.
-4. > Run the `csv-summary` code on `$SMOKE_DIR/data/samples.csv` and tell me the columns, row count, and any columns with null values.
-5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
-6. > Tell me what you remember about the samples dataset.
+<!-- Shared with README.md — edit there, not here. -->
+{%
+   include-markdown "../README.md"
+   start="<!-- md-shared:quickstart-prompts:start -->"
+   end="<!-- md-shared:quickstart-prompts:end -->"
+%}
 
 `csv_summary.py` is stdlib-only, so there's no dependency to install — registration and execution work out of the box. Step 4's null-column finding is the fact you store and recall in 5–6.
 
 ## Capabilities Covered
 
-| Prompt | DSAgt capability |
-|--------|-------------|
-| 1 | `dsagt-server` (`kb_ingest`) — chunks and indexes docs into ChromaDB |
-| 2 | `dsagt-server` (`save_code_spec`) — writes `codes/csv-summary/SKILL.md` (a skill-standard dir), wrapping the executable with `dsagt-run` |
-| 3–4 | `dsagt-run` provenance wrapper — records each registered-code execution to `trace_archive/` |
-| 5–6 | Explicit memory (`kb_remember` → `.dsagt/explicit_memories.yaml`) + `kb_get_memories` |
+<!-- Shared with README.md — edit there, not here. -->
+{%
+   include-markdown "../README.md"
+   start="<!-- md-shared:quickstart-capabilities:start -->"
+   end="<!-- md-shared:quickstart-capabilities:end -->"
+%}
 
 ## Verify the Artifacts
 
@@ -69,8 +69,8 @@ dsagt smoke-test --agent claude
 
 `dsagt init` sets up the project's knowledge base with three kinds of collection:
 
-- **Code Specs** — DSAgt's bundled code specs, always set up so the agent finds them via `search_registry` from the first session.
-- **Skill Catalogs** — the skill-catalog sources you chose at init (default `genesis`), cloned and indexed so `search_skills` returns installable skills.
+- **Code Specs** — DSAgt's built-in code specs, always set up so the agent finds them via `search_registry` from the first session.
+- **Skill Corpus** — the skill sources you chose at init (default `genesis`), cloned and indexed so `search_skills` returns installable skills.
 - **Knowledge Collections** — optional reference document sets you chose at init (`nemo_curator`, `aidrin`).
 
 `--include` / `--exclude` (asset names, or `all`) select the set non-interactively. The default embedder is a local sentence-transformers model (~130 MB, CPU-side, no API key).
