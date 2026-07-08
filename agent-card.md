@@ -34,9 +34,9 @@ agent_card:
     push_notifications: false
     state_transition_history: true  # trace_archive + the serverless MLflow store record full execution history
 
-authentication:
-  schemes: []  # BYOA — the agent platform owns its own LLM-provider auth; DSAgt never proxies or stores credentials
-  credentials: "N/A (optional: EMBEDDING_API_KEY in the shell for a hosted embedding backend — never written to disk)"
+  authentication:
+    schemes: []  # BYOA — the agent platform owns its own LLM-provider auth; DSAgt never proxies or stores credentials
+    credentials: "N/A (optional: EMBEDDING_API_KEY in the shell for a hosted embedding backend — never written to disk)"
 
   default_input_modes:
     - "text/plain"
@@ -278,7 +278,7 @@ See https://github.com/AI-ModCon/dsagt/graphs/contributors
 
 ## Intended Use
 
-DSAgt is intended to assist researchers and data engineers in building, documenting, and reproducing scientific data pipelines using AI agent platforms. Developed under the DOE Genesis Mission, DSAgt assists in AI-LLM assisted preparation and evaluation of AI-Ready data using an agentic harness.
+DSAgt is intended to assist researchers and data engineers in building, documenting, and reproducing scientific data pipelines using AI agent platforms. Developed under the DOE Genesis Mission, it helps researchers prepare and evaluate AI-ready scientific data through an agent.
 
 ### Primary Intended Users
 
@@ -344,7 +344,7 @@ The agent discovers DSAgt tools via MCP and can invoke `search_registry`, `kb_se
 
 ```bash
 # Full quickstart (see README for step-by-step prompts):
-dsagt init quickstart --agent claude
+dsagt init                                  # interactive; name it "quickstart", pick agent + collections
 dsagt start quickstart
 
 # After the session:
@@ -386,7 +386,7 @@ DSAgt executes arbitrary CLI codes registered by the agent. The registry wraps c
 # Agent evaluation details
 
 - **Smoke test**: `dsagt smoke-test --agent <platform>` runs two full agent sessions non-interactively and asserts 18 artifacts: code registration + execution provenance, knowledge ingest + retrieval, skill catalog install, native skill mirroring, explicit + episodic memory, cross-session recall, agent-trace recovery, and session state
-- **Unit tests**: `uv run python -m pytest tests/` (~620 tests; integration tests requiring credentials live in `test_*_integration.py`)
+- **Unit tests**: `uv run python -m pytest tests/` (~640 tests; integration tests requiring credentials live in `test_*_integration.py`)
 - **Code-call correctness**: verified by checking `trace_archive/` records for expected exit codes and captured output
 - **Knowledge base precision**: evaluated via retrieval assertions in the smoke test (the agent must answer from ingested docs)
 
