@@ -8,7 +8,7 @@ retired); ``session._provision_kb`` calls :func:`resolve_assets` +
 Asset namespace (the ``--include`` / ``--exclude`` selectors on ``dsagt init``):
 - ``tools``                bundled tool specs (cheap, local)
 - skill catalogs           ``genesis`` (default), ``scientific``, ``composio``, …
-- scientific collections   ``nemo_curator``, ``aidrin`` (heavy; clone external repos)
+- scientific collections   ``nemo_curator``, ``aidrin`` (clone external repos; docs + papers only, not source)
 
 :data:`DEFAULT_ASSETS` (bundled tools + the genesis skill catalog) is the
 cheap set installed automatically on a machine's first project.  Embedding
@@ -84,18 +84,21 @@ NVIDIA's scalable data curation library for LLM training data.
 - PII detection and removal
 
 ## Use For
-Building data curation pipelines, understanding filter implementations,
+Building data curation pipelines, understanding the available filters,
 quality assessment strategies.
 """,
         "sources": [
             {
                 "type": "github",
-                "url": "https://github.com/NVIDIA/NeMo-Curator",
+                "url": "https://github.com/NVIDIA-NeMo/Curator",
                 "branch": "main",
-                # Top-level subdirs to clone.  examples + tutorials are
-                # kept on purpose: agents writing pipelines benefit from
-                # concrete usage patterns more than from prose docs alone.
-                "include": ["docs", "nemo_curator", "tutorials", "examples"],
+                # Docs only — the library source (and the notebook/script
+                # tutorials) are deliberately omitted.  A vector index is a
+                # poor way to retrieve code (the agent's native file search
+                # beats it), and skipping the source tree keeps ingestion
+                # fast for onboarding.  clone_github still pulls the top-level
+                # files (README, pyproject.toml, …) for install metadata.
+                "include": ["docs"],
             },
         ],
     },
@@ -118,10 +121,15 @@ readiness evaluation for ML pipelines.
         "sources": [
             {
                 "type": "github",
-                # FIX 1: Correct URL (AIDRIN is uppercase)
                 "url": "https://github.com/kaveenh/AIDRIN",
-                # FIX 2: Correct branch (develop, not main)
                 "branch": "develop",
+                # Docs only — omit the `aidrin` source package.  The docs
+                # and the two arxiv papers below cover how to use the tool;
+                # code retrieval is better served by the agent's native
+                # file search, and skipping the source speeds ingestion.
+                # clone_github still keeps the top-level files (README,
+                # pyproject.toml, requirements.txt, …) for install metadata.
+                "include": ["docs"],
             },
             {"type": "arxiv", "id": "2406.19256"},  # AIDRIN paper
             {"type": "arxiv", "id": "2404.05779"},  # Data Readiness Survey
