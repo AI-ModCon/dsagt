@@ -237,4 +237,4 @@ Each launch gets a session id that every span carries, so you can filter the tra
 | `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline]` | End-to-end install verification |
 <!-- md-shared:cli:end -->
 
-For tests, troubleshooting, and other developer-facing material, see [developer.md](developer.md).
+For tests, troubleshooting, and other developer-facing material, see [docs/developer.md](docs/developer.md).
