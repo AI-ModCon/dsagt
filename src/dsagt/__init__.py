@@ -35,6 +35,7 @@ _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 # inject_into_ssl() must run before any ssl.SSLContext is constructed.
 try:
     import truststore as _truststore
+
     _truststore.inject_into_ssl()
     del _truststore
 except ImportError:

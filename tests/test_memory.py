@@ -108,7 +108,7 @@ class TestSupersede:
 
     def test_supersede_preserves_other_entries(self, mem):
         r1 = mem.remember("fact one")
-        r2 = mem.remember("fact two")
+        mem.remember("fact two")
         mem.remember("fact one updated", supersedes=r1["entry_id"])
 
         entries = mem.get_all()

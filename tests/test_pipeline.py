@@ -357,7 +357,7 @@ class TestReconstructPipeline:
 
         # Steps in correct order
         lines = script.splitlines()
-        step_lines = [l for l in lines if l.startswith("# Step")]
+        step_lines = [line for line in lines if line.startswith("# Step")]
         assert "fastp" in step_lines[0]
         assert "megahit" in step_lines[1]
         assert "quast" in step_lines[2]

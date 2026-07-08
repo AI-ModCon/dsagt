@@ -203,9 +203,7 @@ def test_end_to_end_through_the_sink(mlflow_sqlite):
     ids = MLflowSink(mlflow_sqlite, "codexproj").write(trace)
     assert len(ids) == 2  # one MLflow trace per turn
     exp = mlflow.get_experiment_by_name("codexproj")
-    traces = mlflow.search_traces(
-        locations=[exp.experiment_id], return_type="list"
-    )
+    traces = mlflow.search_traces(locations=[exp.experiment_id], return_type="list")
     assert len(traces) == 2
     # the tool-bearing turn rendered llm + tool spans under its agent root
     shapes = {len(t.data.spans) for t in traces}
