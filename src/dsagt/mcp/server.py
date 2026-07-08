@@ -164,9 +164,7 @@ async def _run_stdio(
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         hb = (
             asyncio.create_task(
-                _heartbeat(
-                    collector, tool_indexer, HEARTBEAT_INTERVAL_S, project_dir
-                )
+                _heartbeat(collector, tool_indexer, HEARTBEAT_INTERVAL_S, project_dir)
             )
             if (collector is not None or tool_indexer is not None)
             else None
@@ -431,7 +429,18 @@ def main():
     # best-effort, never blocks or fails server startup.
     _spawn_catch_up(project_dir, config)
 
-    kb = _build_kb_from_config(config, project_dir)
+    # A KB misconfig (e.g. embedding.backend='api' with no base_url/API key)
+    # must not take down the whole server: the tool surface accepts kb=None and
+    # only KB-backed tools degrade, so fall back rather than crash all 20 tools.
+    try:
+        kb = _build_kb_from_config(config, project_dir)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "Knowledge base unavailable (%s); KB tools will degrade, "
+            "non-KB tools are unaffected.",
+            e,
+        )
+        kb = None
 
     # Bundled tools are pre-embedded in the shared ~/dsagt-projects/kb_index/
     # by ``dsagt init`` (shared cache, one-time per machine) and
@@ -486,9 +495,7 @@ def main():
         logger.warning("Could not start tool-use indexer: %s", e)
 
     try:
-        asyncio.run(
-            _run_stdio(server, "dsagt", collector, tool_indexer, project_dir)
-        )
+        asyncio.run(_run_stdio(server, "dsagt", collector, tool_indexer, project_dir))
     finally:
         kb.close()
 

@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     # the hint is a string).  Importing KnowledgeBase at runtime would drag the
     # whole retrieval module into ``dsagt-run``, which only writes provenance
     # records to disk and never touches a KB — the embedding of those records
-    # happens later, in ``session.run_extraction``.
+    # happens later, on the MCP-server heartbeat via ``CodeUseIndexer``.
     from dsagt.knowledge import KnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -264,8 +264,11 @@ def execution_metadata(record: dict) -> dict:
     execution = record.get("execution")
 
     meta: dict = {}
-    meta["code_name"] = record.get("code_name", "unknown")
-    meta["session_id"] = record.get("session_id", "unknown")
+    meta["code_name"] = record.get("code_name") or "unknown"
+    # ``or`` (not a .get default): a record written outside a minted session
+    # stores session_id: null, and ChromaDB rejects a None metadata value —
+    # which would poison the whole batch and re-fail every heartbeat.
+    meta["session_id"] = record.get("session_id") or "unknown"
 
     if execution and execution.get("return_code") is not None:
         meta["return_code"] = execution["return_code"]
@@ -302,8 +305,15 @@ def index_trace_archive(
     errors = 0
 
     for path in json_files:
-        raw = path.read_text()
-        record = json.loads(raw)
+        try:
+            record = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            # A truncated/corrupt record must not abort the whole batch — it
+            # persists on disk and would re-fail every heartbeat.  Skip it,
+            # consistent with the missing-execution-layer skip below.
+            logger.warning("Skipping %s: unreadable record", path.name)
+            errors += 1
+            continue
 
         record_id = record.get("record_id", "")
         if record_id and record_id in indexed_ids:
@@ -364,6 +374,11 @@ class CodeUseIndexer:
         try:
             return set(json.loads(self._acks_path.read_text()))
         except FileNotFoundError:
+            return set()
+        except (json.JSONDecodeError, ValueError):
+            # A truncated/corrupt ack file must not stall indexing every tick;
+            # treat it as empty and let the next _save_acks rewrite it.
+            logger.warning("Corrupt %s; treating as empty", self._acks_path.name)
             return set()
 
     def _save_acks(self, acks: set[str]) -> None:

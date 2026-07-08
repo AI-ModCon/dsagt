@@ -332,9 +332,16 @@ def sync_source(
         dest.mkdir(parents=True, exist_ok=True)
         subdir = spec.get("subdir")
         include = [subdir] if subdir else None
-        clone_github(
-            spec["url"], dest, branch=spec.get("branch", "main"), include=include
-        )
+        try:
+            clone_github(
+                spec["url"], dest, branch=spec.get("branch", "main"), include=include
+            )
+        except Exception:
+            # A failed clone must not leave the empty dir behind: it would
+            # permanently satisfy the dest.exists() skip above, wedging the
+            # source at zero skills until a manual force-resync.
+            shutil.rmtree(dest, ignore_errors=True)
+            raise
 
     walk_root = dest / spec["subdir"] if spec.get("subdir") else dest
     skill_dirs = _discover_skill_dirs(walk_root)
@@ -512,6 +519,16 @@ def install_into_project(
     spec = _parse_frontmatter(src / "SKILL.md")
     skill_name = spec.get("name") or src.name
 
+    # ``skill_name`` comes from an untrusted catalog's SKILL.md frontmatter.
+    # A ``..``/absolute/nested value would escape the skills dir (pathlib drops
+    # the base when joined with an absolute path) and let the rmtree+copytree
+    # below delete/overwrite arbitrary paths.  Require a single safe component.
+    if skill_name in ("", ".", "..") or skill_name != Path(skill_name).name:
+        raise ValueError(
+            f"unsafe skill name {skill_name!r} from {src / 'SKILL.md'}: "
+            "must be a single path component (no '/', '\\', '..', or absolute path)"
+        )
+
     dest = Path(project_dir) / "skills" / skill_name
     action = "updated" if dest.exists() else "added"
     if dest.exists():
@@ -531,6 +548,15 @@ def install_into_project(
 # ---------------------------------------------------------------------------
 # SkillsCatalog — the catalog data plane (composition over KnowledgeBase)
 # ---------------------------------------------------------------------------
+
+
+def _has_tag(tags: str | None, tag: str) -> bool:
+    """True if *tag* is one of the comma-separated tokens in *tags*.
+
+    Token equality, not substring: filtering by ``ml`` must not match
+    ``html``, nor ``bio`` match ``microbiome``.
+    """
+    return tag in {t.strip() for t in (tags or "").split(",") if t.strip()}
 
 
 class SkillsCatalog:
@@ -640,7 +666,7 @@ class SkillsCatalog:
                 }
             )
         if tag:
-            out = [h for h in out if tag in (h["tags"] or "")]
+            out = [h for h in out if _has_tag(h["tags"], tag)]
         out.sort(key=lambda h: h["score"], reverse=True)
         return out[:top_k]
 
@@ -673,7 +699,7 @@ class SkillsCatalog:
         """
         cands = self._candidate_skills()
         if tag:
-            cands = [c for c in cands if tag in (c["tags"] or "")]
+            cands = [c for c in cands if _has_tag(c["tags"], tag)]
         if not query:
             picks = cands[:top_k]
             return [

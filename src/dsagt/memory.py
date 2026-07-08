@@ -70,7 +70,15 @@ class ExplicitMemory:
         if not text.strip():
             return []
         data = yaml.safe_load(text)
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            # Out-of-contract: a non-list payload means the file is corrupt or
+            # hand-edited wrong.  Surfacing beats silently coercing to [] and
+            # then overwriting the original on the next _save (silent data loss).
+            raise ValueError(
+                f"{self._path} is not a list of memories "
+                f"(got {type(data).__name__}); inspect and fix the file."
+            )
+        return data
 
     def _save(self, entries: list[dict]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)

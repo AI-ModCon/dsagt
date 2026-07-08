@@ -158,7 +158,7 @@ def _parse_frontmatter(path: Path) -> dict:
     if len(parts) < 3:
         return {}
     try:
-        return yaml.safe_load(parts[1]) or {}
+        data = yaml.safe_load(parts[1])
     except yaml.YAMLError as e:
         # Benign: the frontmatter is flat ``key: value`` but not strict YAML;
         # we recover the fields below.  DEBUG, not WARNING — nothing is lost
@@ -169,6 +169,9 @@ def _parse_frontmatter(path: Path) -> dict:
             str(e).splitlines()[0],
         )
         return _lenient_frontmatter(parts[1])
+    # safe_load yields a scalar/list for a non-mapping body (e.g. a bare prose
+    # frontmatter); callers do ``spec.get(...)``, so always hand back a dict.
+    return data if isinstance(data, dict) else _lenient_frontmatter(parts[1])
 
 
 def _lenient_frontmatter(block: str) -> dict:
@@ -394,7 +397,7 @@ class CodeRegistry:
             codes.append(
                 {
                     "name": code["name"],
-                    "description": code["description"],
+                    "description": code.get("description", ""),
                     "inputSchema": {
                         "type": "object",
                         "properties": properties,

@@ -298,19 +298,6 @@ def _handle_destructive(
                 "(kept on disk)."
             )
 
-    # Embedding backend/model change invalidates existing embeddings.
-    old_emb = existing.get("embedding") or {}
-    new_emb = settings["embedding"]
-    changed = old_emb.get("backend") != new_emb.get("backend") or old_emb.get(
-        "model"
-    ) != new_emb.get("model")
-    if changed and any((pdir / "kb_index").glob("*/")):
-        print(
-            "\n  WARNING: embedding backend/model changed.  Existing collections "
-            "were embedded with the old settings and KB search will degrade until "
-            "they are re-provisioned (delete + re-add the affected assets)."
-        )
-
 
 def _cmd_init(args):
     """Create or reconfigure a BYOA project — interactive and re-runnable.

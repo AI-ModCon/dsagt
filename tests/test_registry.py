@@ -52,6 +52,16 @@ class TestLenientFrontmatter:
         spec = _parse_frontmatter(path)
         assert spec == {"name": "ok", "description": "clean", "tags": ["a"]}
 
+    def test_scalar_frontmatter_yields_dict_not_str(self, tmp_path):
+        """Regression: a bare-prose frontmatter parses to a str; callers do
+        ``spec.get(...)``, so a non-dict would raise AttributeError and drop
+        every skill from the source.  Always hand back a dict."""
+        path = tmp_path / "SKILL.md"
+        path.write_text("---\njust some prose, no keys\n---\n# Body\n")
+        spec = _parse_frontmatter(path)
+        assert isinstance(spec, dict)
+        assert spec.get("name") is None  # .get must not raise
+
 
 # ---------------------------------------------------------------------------
 # Fixtures

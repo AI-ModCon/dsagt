@@ -473,6 +473,29 @@ class TestInitProject:
         config = load_config("myproj")
         assert config["agent"] == "claude"
 
+    def test_reinit_handle_destructive_survives_missing_embedding_key(self):
+        """Regression: re-init runs ``_handle_destructive``, which must not
+        KeyError on settings that carry no ``embedding`` key (it was dropped as
+        an init choice).  ``init_project()`` bypasses this path — which is how
+        the crash shipped — so drive ``_handle_destructive`` directly."""
+        import types
+        from dsagt.commands import cli
+
+        init_project("myproj", "goose")
+        existing = load_config("myproj")
+        pdir = project_dir("myproj")
+
+        args = types.SimpleNamespace(
+            agent="goose", include=["codes"], exclude=None, episodic=False
+        )
+        settings = cli._collect_settings(
+            args, interactive=False, existing=existing, pdir=pdir
+        )
+        assert "embedding" not in settings  # the invariant the old code broke
+
+        # Must not raise (previously KeyError('embedding')).
+        cli._handle_destructive(existing, settings, pdir, interactive=False)
+
     def test_invalid_agent_raises(self):
         with pytest.raises(ValueError):
             init_project("myproj", "invalid-agent")

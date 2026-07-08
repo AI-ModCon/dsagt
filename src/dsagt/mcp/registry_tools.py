@@ -17,6 +17,7 @@ test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
 ``install_skill``) live in :mod:`dsagt.mcp.skill_tools`.
 """
 
+import asyncio
 import json
 import logging
 import subprocess
@@ -105,11 +106,16 @@ async def _handle_run_command(arguments: dict) -> str:
     args = arguments.get("args", [])
     timeout = arguments.get("timeout", 10)
     try:
-        result = subprocess.run(
-            [command] + args,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+        # Off the shared event loop: a blocking subprocess.run here would stall
+        # the trace heartbeat and every concurrent tool call for its duration.
+        result = await asyncio.to_thread(
+            partial(
+                subprocess.run,
+                [command] + args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
         )
     except subprocess.TimeoutExpired:
         return f"Command timed out after {timeout} seconds"
@@ -163,7 +169,7 @@ async def _handle_save_code_spec(
         deps = spec.get("dependencies", [])
         if deps:
             with registry_install_deps_span(deps):
-                dep_result = _install_dependencies(deps)
+                dep_result = await asyncio.to_thread(_install_dependencies, deps)
                 if dep_result.startswith("Successfully installed:"):
                     obs.set("status", "ok")
                 else:
@@ -213,7 +219,8 @@ async def _handle_search_registry(
 
     # Single ``tools`` collection — bundled and registered entries
     # coexist, distinguished by ``metadata.source`` if needed.
-    results = kb.search(
+    results = await asyncio.to_thread(
+        kb.search,
         query=query or "tool",
         collection=CODES_COLLECTION,
         top_k=top_k * 3 if tag else top_k,
@@ -253,12 +260,12 @@ async def _handle_reconstruct_pipeline(
     # is safe to fire alongside the heartbeat's own CodeUseIndexer.
     if kb is not None:
         try:
-            CodeUseIndexer(kb, runtime_dir).tick()
+            await asyncio.to_thread(CodeUseIndexer(kb, runtime_dir).tick)
         except Exception as e:  # noqa: BLE001 — indexing is best-effort here
-            logger.warning("tool_use indexing before reconstruct failed: %s", e)
+            logger.warning("code_use indexing before reconstruct failed: %s", e)
     with registry_reconstruct_pipeline_span(fmt):
         try:
-            script = reconstruct_pipeline(trace_dir, fmt=fmt)
+            script = await asyncio.to_thread(reconstruct_pipeline, trace_dir, fmt=fmt)
         except (FileNotFoundError, ValueError, OSError) as e:
             obs.event("reconstruct_failed", error=str(e)[:256])
             return f"Error reconstructing pipeline: {e}"
@@ -296,7 +303,7 @@ async def _handle_install_dependencies(
     with registry_install_deps_span(unique_deps):
         obs.set("scope_code", code_name)
         obs.set("n_tools_with_deps", len(codes_with_deps))
-        result = _install_dependencies(unique_deps)
+        result = await asyncio.to_thread(_install_dependencies, unique_deps)
         if result.startswith("Successfully installed:"):
             obs.set("status", "ok")
         else:

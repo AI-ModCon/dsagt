@@ -156,6 +156,16 @@ class TestExecutionMetadata:
         meta = execution_metadata(record)
         assert meta["session_id"] == "unknown"
 
+    def test_null_session_coerced_to_unknown(self):
+        """Regression: a record written outside a minted session stores
+        session_id: null.  ``.get(default)`` returns None for a present-but-null
+        key, and a None metadata value makes ChromaDB reject the whole batch —
+        so it must coerce to 'unknown'."""
+        record = {"code_name": "ls", "session_id": None}
+        meta = execution_metadata(record)
+        assert meta["session_id"] == "unknown"
+        assert None not in meta.values()
+
 
 # ---------------------------------------------------------------------------
 # CodeUseIndexer — idempotent, incremental heartbeat indexing

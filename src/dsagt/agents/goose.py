@@ -91,6 +91,15 @@ class GooseSetup(AgentSetup):
         actions.append(f"Wrote {goose_path}")
         return actions
 
+    def owned_artifacts(self, working_dir: Path) -> list[Path]:
+        # Base default is just the static marker (.goosehints), but
+        # write_dynamic also writes goose.yaml — list both so switching off
+        # goose doesn't strand the stale MCP-extension config.
+        return [
+            working_dir / ".goosehints",
+            working_dir / "goose.yaml",
+        ]
+
     def interactive_command(self, config: dict) -> list[str]:
         """Goose reads ``~/.config/goose/config.yaml`` for extensions, not a
         project-local file — so the dsagt MCP server is passed via

@@ -403,11 +403,18 @@ class JsonlReader(Reader):
         last_nl = chunk.rfind(b"\n")
         if last_nl == -1:
             return []
-        return [
-            json.loads(line)
-            for line in chunk[: last_nl + 1].splitlines()
-            if line.strip()
-        ]
+        out: list[dict] = []
+        for line in chunk[: last_nl + 1].splitlines():
+            if not line.strip():
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                # One corrupt complete line must not drop the whole session's
+                # transcript — it persists on disk and would re-fail every
+                # heartbeat.  Skip it, as we already skip the trailing partial.
+                logger.warning("skipping unparseable transcript line in %s", f)
+        return out
 
 
 def _transcript_dir(project_dir: str | Path, projects_root: Path | None = None) -> Path:
@@ -462,7 +469,13 @@ class CodexReader(JsonlReader):
             first = fh.readline()
         if not first.strip():
             return None
-        rec = json.loads(first)
+        try:
+            rec = json.loads(first)
+        except json.JSONDecodeError:
+            # A corrupt newest rollout must not abort discovery of the valid
+            # project rollout behind it — treat it as non-matching and move on.
+            logger.warning("skipping unparseable rollout header %s", path)
+            return None
         if rec.get("type") != "session_meta":
             return None
         return (rec.get("payload") or {}).get("cwd")
@@ -598,7 +611,13 @@ class OpenCodeReader(Reader):
                     {
                         "role": m.get("role"),
                         "model": (m.get("model") or {}).get("modelID"),
-                        "ts": t_created / 1000.0,
+                        # time_created is NULL for an unfinalized streaming part;
+                        # guard the ms->s divide (mirrors ClineTranslator._ts).
+                        "ts": (
+                            t_created / 1000.0
+                            if isinstance(t_created, (int, float))
+                            else None
+                        ),
                         "data": _loads_dict(data),
                     }
                 )
@@ -1385,11 +1404,14 @@ class TraceCollector:
                     continue
                 try:
                     consumer.write(trace.subset(emit_ids))
+                    # Persist acks inside the same try: if it raised outside,
+                    # a post-write failure would propagate out of collect() and
+                    # the next pass would re-emit these turns as duplicates.
+                    self._save_acks(
+                        consumer.name, acks | {key_by_span[s] for s in emit_ids}
+                    )
                 except Exception as e:  # noqa: BLE001 — per-consumer isolation
                     logger.warning("Trace consumer %r failed: %s", consumer.name, e)
                     continue
-                self._save_acks(
-                    consumer.name, acks | {key_by_span[s] for s in emit_ids}
-                )
                 emitted |= emit_ids
             return len(emitted)

@@ -28,6 +28,17 @@ def _mkskill(d, name, desc="a short description"):
 # ---------------------------------------------------------------------------
 
 
+def test_has_tag_matches_tokens_not_substrings():
+    """Regression: tag filtering must compare comma-separated tokens, not do
+    substring matching (``ml`` in ``html``)."""
+    assert sc._has_tag("html,xml", "html")
+    assert not sc._has_tag("html,xml", "ml")
+    assert not sc._has_tag("microbiome", "bio")
+    assert sc._has_tag("a, b , c", "b")  # whitespace-trimmed tokens
+    assert not sc._has_tag(None, "x")
+    assert not sc._has_tag("", "x")
+
+
 def test_repo_slug_is_collection_safe():
     slug = sc._repo_slug("https://github.com/K-Dense-AI/scientific-agent-skills")
     assert slug == "k-dense-ai-scientific-agent-skills"
@@ -151,6 +162,23 @@ def test_install_into_project_source_qualified(tmp_path):
     info = sc.install_into_project("srcB/dup", proj, cache_dir=cache)
     assert info["name"] == "dup"
     assert (proj / "skills" / "dup" / "SKILL.md").read_text().count("from B") == 1
+
+
+def test_install_rejects_path_traversal_name(tmp_path):
+    """A hostile catalog SKILL.md whose frontmatter ``name`` escapes the skills
+    dir (here ``..``, which would make dest the project root and rmtree it) is
+    rejected before any filesystem mutation."""
+    cache = tmp_path / "cache"
+    # dir name is benign so find_catalog_skill locates it; the danger is the
+    # frontmatter name, which is what install uses to build the dest path.
+    _mkskill(cache / "src" / "skills" / "evil", "..")
+    proj = tmp_path / "proj"
+    (proj / "skills").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="unsafe skill name"):
+        sc.install_into_project("..", proj, cache_dir=cache)
+    # The project skills dir was not deleted/overwritten.
+    assert (proj / "skills").is_dir()
 
 
 def test_install_into_project_copies_subdirs(tmp_path):
