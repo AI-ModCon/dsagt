@@ -232,17 +232,13 @@ class TestFileEdgeCases:
         assert mem.count() == 0
 
     def test_handles_corrupt_file(self, tmp_path):
-        """Corrupt YAML either returns empty list or raises YAMLError."""
+        """Corrupt YAML fails fast — get_all surfaces the YAMLError, never
+        silently recovers to an empty list (which would hide data loss)."""
         mem = ExplicitMemory(runtime_dir=tmp_path)
         (tmp_path / ExplicitMemory.FILENAME).write_text("not: valid: yaml: [")
 
-        try:
-            result = mem.get_all()
-            # If it didn't raise, it should return an empty list (graceful recovery)
-            assert isinstance(result, list)
-        except yaml.YAMLError:
-            # Failing fast on corruption is also acceptable
-            pass
+        with pytest.raises(yaml.YAMLError):
+            mem.get_all()
 
     def test_file_is_human_readable(self, mem, tmp_path):
         mem.remember("readable fact", category="test")

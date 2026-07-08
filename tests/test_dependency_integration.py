@@ -2,7 +2,7 @@
 Integration test for dependency installation during tool registration.
 
 Registers a tool with a real dependency (cowsay), installs it via the
-registry server, then executes the tool through the pipeline's ToolRegistry
+registry server, then executes the tool through the pipeline's CodeRegistry
 to verify the package is usable.
 
 This test actually modifies the venv (installs and uninstalls cowsay).
@@ -21,23 +21,17 @@ import shutil
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
 
-import pytest
-import yaml
-
-
-from dsagt.commands.registry_server import create_registry_server
-from dsagt.registry import ToolRegistry
-
+from dsagt.mcp.registry_tools import create_registry_server
+from dsagt.registry import CodeRegistry
 
 # ---------------------------------------------------------------------------
 # Skip conditions
 # ---------------------------------------------------------------------------
+
 
 def _uv_available() -> bool:
     return shutil.which("uv") is not None
@@ -52,6 +46,7 @@ def _cowsay_installed() -> bool:
 
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.skipif(not _uv_available(), reason="uv not available on PATH"),
     pytest.mark.skipif(_cowsay_installed(), reason="cowsay already installed"),
 ]
@@ -60,6 +55,7 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module", autouse=True)
 def uninstall_cowsay_after():
@@ -74,10 +70,10 @@ def uninstall_cowsay_after():
 
 from mcp_helpers import call_tool_sync as call_tool
 
-
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
+
 
 def test_register_and_run_tool_with_dependency(tmp_path):
     """End-to-end: register a tool with a dependency, install it, run the tool."""
@@ -96,9 +92,8 @@ def test_register_and_run_tool_with_dependency(tmp_path):
         print(json.dumps({"cow_says": output, "status": "ok"}))
     """))
 
-    # 2. Create a registry server with a fresh ToolRegistry
-    registry = ToolRegistry(
-        source_tools_dir=None,
+    # 2. Create a registry server with a fresh CodeRegistry
+    registry = CodeRegistry(
         runtime_dir=str(tmp_path / "runtime"),
     )
     server = create_registry_server(registry)
@@ -117,14 +112,14 @@ def test_register_and_run_tool_with_dependency(tmp_path):
             },
         },
     }
-    text = call_tool(server, "save_tool_spec", {"spec": spec})
+    text = call_tool(server, "save_code_spec", {"spec": spec})
 
     # Verify the tool was saved and deps were installed
     assert "added" in text
     assert "Successfully installed" in text
 
     # 4. Verify the spec is in the skill file with dsagt-run wrapping
-    tool = registry.get_tool("cowsay_tool")
+    tool = registry.get_code("cowsay_tool")
     assert tool is not None
     assert tool["dependencies"] == ["cowsay"]
     assert "dsagt-run" in tool["executable"]

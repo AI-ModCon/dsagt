@@ -2,11 +2,18 @@
 # DSAGT smoke test — non-interactive end-to-end exercise.
 #
 # Drives the SAME `dsagt start` lifecycle as an interactive run (config
-# generation → start_services → agent → run_extraction → stop_services).
-# Only the agent-launch step swaps from `goose session` to `goose run -i`.
+# generation → agent in the foreground → post-session catch-up extraction).
+# Serverless: there are no services to start or stop — all self-logging
+# lands in the project's sqlite MLflow store.  Only the agent-launch
+# step swaps from interactive to batch (`--script`).
+#
+# TWO sessions run back-to-back: session 1 exercises ingest, code
+# registration + execution, provenance, KB retrieval, skill install,
+# and explicit memory; session 2 exercises cross-session recall,
+# registry persistence, and the startup catch-up path.
+#
 # BYOA: the user's shell must already have the agent's provider creds
-# (per `dsagt init` hints).  No .env handling — that returns with the
-# Phase 2 `--proxy_traces` flag.
+# (per `dsagt init` hints).  No .env handling.
 #
 # Run from anywhere:
 #   bash tests/smoke_test/run.sh
@@ -19,67 +26,40 @@ set -uo pipefail
 AGENT="${DSAGT_SMOKE_AGENT:-${1:-goose}}"   # arg or env var, default goose
 # Per-agent project name so each agent's mlflow.db, trace_archive, and
 # kb_index/ survive across runs — crucial for cross-agent comparison
-# (e.g., why does claude use 10x the tokens roo does?).  Without this,
+# (e.g., why does claude use 10x the tokens codex does?).  Without this,
 # `dsagt rm` at the start of each run wipes the previous agent's state.
 PROJECT="smoke-test-${AGENT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DSAGT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-SCRIPT_FILE="${SCRIPT_DIR}/script.txt"
 # Project lives at the default ``dsagt init`` location so smoke-test
 # artifacts stay out of the dsagt source tree.  PDIR mirrors
 # DEFAULT_PROJECTS_BASE in src/dsagt/session.py.
 PDIR="${HOME}/dsagt-projects/${PROJECT}"
 
 case "${AGENT}" in
-    goose|claude|cline|roo|codex|opencode) ;;
+    goose|claude|codex|opencode) ;;
+    cline)
+        # dsagt start --script hard-errors for cline: its headless CLI
+        # (verified 3.0.34) never loads MCP servers, so a scripted session
+        # has no dsagt tools to exercise — see agents/cline.py.  Skip rather
+        # than report red checks; drop this arm when cline ships MCP in
+        # headless mode.
+        echo "[smoke] SKIP: cline headless CLI loads no MCP servers (see agents/cline.py) — hand-test via tests/manual_walkthroughs/ instead"
+        exit 0
+        ;;
     *)
-        echo "ERROR: agent must be one of: goose, claude, cline, roo, codex, opencode (got '${AGENT}')" >&2
+        echo "ERROR: agent must be one of: goose, claude, cline, codex, opencode (got '${AGENT}')" >&2
         exit 2
         ;;
 esac
 
-# Proxy-mode opt-in.  ``DSAGT_SMOKE_PROXY=1`` (or arg #2 == "proxy")
-# routes the run through ``dsagt start --enable-proxy``, which spawns
-# dsagt-proxy and forwards the agent's LLM calls through it — required
-# for cline / roo (their CLIs hardcode model-ID whitelists incompatible
-# with lab-gateway aliases; the proxy translates names back to the
-# upstream's served IDs via _AGENT_PRIMARY_ALIASES).  Default off.
-PROXY_FLAG=""
-if [[ "${DSAGT_SMOKE_PROXY:-${2:-}}" == "1" || "${DSAGT_SMOKE_PROXY:-${2:-}}" == "proxy" ]]; then
-    PROXY_FLAG="--enable-proxy"
-    echo "[smoke] Agent: ${AGENT} (proxy mode)"
-else
-    echo "[smoke] Agent: ${AGENT}"
-fi
-
-# Cline / roo only work in proxy mode (see agents/cline.py + roo.py
-# module docstrings for the model-whitelist + endpoint-lockout reasons).
-if [[ -z "${PROXY_FLAG}" && ( "${AGENT}" == "cline" || "${AGENT}" == "roo" ) ]]; then
-    echo
-    echo "[smoke] ${AGENT} requires proxy mode in BYOA — skipping."
-    echo "[smoke] Re-run with: DSAGT_SMOKE_PROXY=1 dsagt smoke-test --agent ${AGENT}"
-    echo "[smoke] (or pass 'proxy' as the second arg to this script)"
-    exit 0
-fi
+echo "[smoke] Agent: ${AGENT}"
 
 cd "${DSAGT_ROOT}"
 
-# Proxy mode needs LLM_*/EMBEDDING_* in env so the proxy can forward
-# upstream.  Source .env if present (BYOA runs without it; only proxy
-# runs need these vars).  Validation happens at proxy spawn time —
-# session.py:_start_proxy raises if config["llm"] keys are missing.
-if [[ -n "${PROXY_FLAG}" && -f .env ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-    echo "[smoke] Sourced .env for proxy mode"
-fi
-
 # ---------------------------------------------------------------------------
-# 2. Clean slate (idempotent — silent if nothing exists)
+# 1. Clean slate (idempotent — silent if nothing exists)
 # ---------------------------------------------------------------------------
-dsagt stop "${PROJECT}" >/dev/null 2>&1 || true
 dsagt rm "${PROJECT}" -y >/dev/null 2>&1 || true
 rm -rf "${PDIR}"
 
@@ -95,64 +75,87 @@ if [[ "${AGENT}" == "claude" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Init at the default ``~/dsagt-projects/`` location so smoke artifacts
-#    don't pollute the dsagt source tree.  The agent's cwd will be
-#    ``${PDIR}``; the script template uses ``{{SMOKE_DIR}}`` placeholders
-#    that we substitute below so prompt paths resolve regardless of where
-#    PDIR lives.
+# 2. Init at the default ``~/dsagt-projects/`` location so smoke artifacts
+#    don't pollute the dsagt source tree.  --episodic so session turns land
+#    in the ``session_memory`` collection (asserted below).  The default KB
+#    set includes the genesis skill catalog, which the skill-install prompt
+#    relies on.
 # ---------------------------------------------------------------------------
-dsagt init "${PROJECT}" --agent "${AGENT}"
+# Force the non-interactive (flag-driven) init path regardless of TTY by
+# closing stdin — `dsagt init` prompts only when stdin is a TTY.
+dsagt init "${PROJECT}" --agent "${AGENT}" --episodic < /dev/null
 
 # Substitute {{SMOKE_DIR}} → absolute smoke_test/ path before the agent
-# sees the script.  Prompts can then reference data/knowledge files via
+# sees the scripts.  Prompts can then reference data/knowledge files via
 # absolute paths regardless of the agent's cwd.
-RENDERED_SCRIPT=$(mktemp -t dsagt-smoke-script.XXXXXX)
-trap 'rm -f "${RENDERED_SCRIPT}"' EXIT
-sed "s|{{SMOKE_DIR}}|${SCRIPT_DIR}|g" "${SCRIPT_FILE}" > "${RENDERED_SCRIPT}"
+RENDERED_SCRIPT_1=$(mktemp -t dsagt-smoke-script1.XXXXXX)
+RENDERED_SCRIPT_2=$(mktemp -t dsagt-smoke-script2.XXXXXX)
+SESSION_LOG_1=$(mktemp -t dsagt-smoke-log1.XXXXXX)
+SESSION_LOG_2=$(mktemp -t dsagt-smoke-log2.XXXXXX)
+trap 'rm -f "${RENDERED_SCRIPT_1}" "${RENDERED_SCRIPT_2}" "${SESSION_LOG_1}" "${SESSION_LOG_2}"' EXIT
+sed "s|{{SMOKE_DIR}}|${SCRIPT_DIR}|g" "${SCRIPT_DIR}/script.txt" > "${RENDERED_SCRIPT_1}"
+sed "s|{{SMOKE_DIR}}|${SCRIPT_DIR}|g" "${SCRIPT_DIR}/script2.txt" > "${RENDERED_SCRIPT_2}"
 
 # ---------------------------------------------------------------------------
-# 4. Run the FULL `dsagt start` lifecycle, with the agent in batch mode.
-#    Wall-clock cap belt-and-suspenders the --max-turns inside.
+# 3. Session runner: the FULL `dsagt start` lifecycle with the agent in
+#    batch mode, under a wall-clock watchdog.
 #
 #    Pure-bash watcher pattern instead of GNU `timeout` so the smoke test
 #    works on stock macOS without `brew install coreutils`.  SIGTERM gives
-#    dsagt's finally-block a chance to stop services cleanly; the
+#    dsagt's finally-block a chance to run post-session extraction; the
 #    follow-up SIGKILL after WALL_CLOCK_GRACE catches the agent if it
 #    swallows the term signal.
+#
+#    Output tees to a per-session log — the retrieval and recall
+#    assertions grep it for facts the agent can only have gotten from
+#    the KB / memory (process substitution keeps $! on dsagt itself).
 # ---------------------------------------------------------------------------
-WALL_CLOCK_CAP=300   # seconds (5 minutes)
 WALL_CLOCK_GRACE=10  # extra seconds before SIGKILL
 
-echo
-echo "[smoke] Running dsagt start --script ${PROXY_FLAG} (${WALL_CLOCK_CAP}s wall-clock cap)…"
-dsagt start "${PROJECT}" --script "${RENDERED_SCRIPT}" --max-turns 30 ${PROXY_FLAG} &
-DSAGT_PID=$!
-(
-    sleep "${WALL_CLOCK_CAP}"
-    kill -TERM "${DSAGT_PID}" 2>/dev/null && \
-        echo "[smoke] WARN: ${WALL_CLOCK_CAP}s cap exceeded — sent SIGTERM to dsagt start (pid ${DSAGT_PID})"
-    sleep "${WALL_CLOCK_GRACE}"
-    kill -KILL "${DSAGT_PID}" 2>/dev/null && \
-        echo "[smoke] WARN: dsagt start did not exit on SIGTERM — sent SIGKILL"
-) &
-WATCHER_PID=$!
-wait "${DSAGT_PID}"
-START_EXIT=$?
-# Tear down the watcher if dsagt exited on its own.
-kill -TERM "${WATCHER_PID}" 2>/dev/null
-wait "${WATCHER_PID}" 2>/dev/null
+run_session() {
+    local script_file="$1" max_turns="$2" cap="$3" log_file="$4"
+    dsagt start "${PROJECT}" --script "${script_file}" --max-turns "${max_turns}" \
+        > >(tee "${log_file}") 2>&1 &
+    local pid=$!
+    (
+        sleep "${cap}"
+        kill -TERM "${pid}" 2>/dev/null && \
+            echo "[smoke] WARN: ${cap}s cap exceeded — sent SIGTERM to dsagt start (pid ${pid})"
+        sleep "${WALL_CLOCK_GRACE}"
+        kill -KILL "${pid}" 2>/dev/null && \
+            echo "[smoke] WARN: dsagt start did not exit on SIGTERM — sent SIGKILL"
+    ) &
+    local watcher=$!
+    wait "${pid}"
+    local rc=$?
+    # Tear down the watcher if dsagt exited on its own.
+    kill -TERM "${watcher}" 2>/dev/null
+    wait "${watcher}" 2>/dev/null
+    # Let the tee process-substitution drain before the log is grepped.
+    sleep 1
+    return "${rc}"
+}
 
+echo
+echo "[smoke] Session 1: ingest / register / execute / provenance / skills / memory…"
+run_session "${RENDERED_SCRIPT_1}" 40 420 "${SESSION_LOG_1}"
+START_EXIT=$?
 if [[ ${START_EXIT} -ne 0 ]]; then
     echo "WARN: dsagt start exited non-zero (${START_EXIT}) — continuing to artifact checks anyway"
 fi
 
-# Defensive: ensure no stray services if the lifecycle's finally didn't run
-# (timeout SIGKILL skips Python's finally blocks).  Output kept visible —
-# if any port is still in use after this, we want to see the warning so
-# the next run doesn't race a half-shutdown orphan.
+# ---------------------------------------------------------------------------
+# 4. Session 2: cross-session recall + registry persistence.  Its startup
+#    also runs the catch-up path over session 1 (code-use indexing + the
+#    pinned trace re-collect), so the post-session-2 assertions cover it.
+# ---------------------------------------------------------------------------
 echo
-echo "[smoke] Final cleanup…"
-dsagt stop "${PROJECT}" || true
+echo "[smoke] Session 2: cross-session recall + catch-up…"
+run_session "${RENDERED_SCRIPT_2}" 15 240 "${SESSION_LOG_2}"
+START_EXIT_2=$?
+if [[ ${START_EXIT_2} -ne 0 ]]; then
+    echo "WARN: session 2 dsagt start exited non-zero (${START_EXIT_2}) — continuing to artifact checks anyway"
+fi
 
 # ---------------------------------------------------------------------------
 # 5. Artifact checks
@@ -170,42 +173,78 @@ check() {
     fi
 }
 
-check "csvtool_filter spec written"  "test -f '${PDIR}/tools/csvtool_filter.md'"
-check "trace_archive has records"    "ls '${PDIR}/trace_archive/'*.json | grep -q ."
-check "scan_directory record"        "ls '${PDIR}/trace_archive/'*scan_directory*.json | grep -q ."
-# Both files are written by dsagt-knowledge-server's kb_ingest_directory MCP
-# tool — chroma.sqlite3 is the actual vector DB, route.json is the collection
-# manifest.  Checking only `test -d kb_index/knowledge` is too weak: an agent
+# -- registry + execution + provenance --------------------------------------
+check "greet spec written"           "test -f '${PDIR}/codes/greet/SKILL.md'"
+# Codes share the skill-standard envelope and mirror into the agent's
+# native skills dir at dsagt start: the bundled scan-directory at
+# session 1's start, greet (registered mid-session-1) at session 2's.
+check "bundled code mirrored natively" "find '${PDIR}' -path '*skills/scan-directory/SKILL.md' | grep -q ."
+check "greet mirrored natively"       "find '${PDIR}' -path '*skills/greet/SKILL.md' | grep -q ."
+# The execution went through dsagt-run iff the record captured greet's
+# actual stdout — an agent that ran the script by hand can't fake the
+# trace_archive record.  Match only the greeting prefix: it proves our
+# custom --greeting arg flowed through the registered code, while
+# tolerating an agent flubbing which word goes in the name slot (goose
+# produced "Ahoy, Ahoy!").
+check "greet executed via dsagt-run" "grep -l 'Ahoy,' '${PDIR}/trace_archive/'*greet*.json"
+check "greet re-run in session 2"    "test \$(ls '${PDIR}/trace_archive/'*greet*.json | wc -l) -ge 2"
+check "scan-directory record"        "ls '${PDIR}/trace_archive/'*scan-directory*.json"
+
+# -- knowledge base ----------------------------------------------------------
+# Both files are written by dsagt-server's kb_ingest MCP tool — chroma.sqlite3
+# is the actual vector DB, chroma_ids.json the internal-collection manifest
+# (route.json marks routed *external* collections, which ingest never
+# creates).  Checking only `test -d kb_index/knowledge` is too weak: an agent
 # can satisfy it by hand-crafting an empty directory tree, masking a broken
-# MCP wiring (which is exactly what we hit when cline's dsagt-knowledge
-# server crashed silently and the LLM compensated by mkdir-ing the path).
-check "knowledge ingested (route)"   "test -f '${PDIR}/kb_index/knowledge/route.json'"
+# MCP wiring (which is exactly what we hit when cline's dsagt server crashed
+# silently and the LLM compensated by mkdir-ing the path).
+check "knowledge ingested (ids)"     "test -f '${PDIR}/kb_index/knowledge/chroma_ids.json'"
 check "knowledge ingested (vectors)" "test -f '${PDIR}/kb_index/knowledge/chroma.sqlite3'"
-# Explicit memory writes to <project>/explicit_memories.yaml (YAML at the
-# project root), NOT to kb_index/.  Only kb_remember (called deliberately
-# by the agent in response to "Put this in explicit memory" / "remember
-# this") populates the file.  End-of-session episodic extraction writes
-# elsewhere (kb_index/episodic_memory/...) and is independent.  Checking
-# the YAML's existence + non-empty catches the hallucination case where
-# the agent claims it stored a fact but didn't actually call the tool.
-check "explicit memory recorded"     "test -s '${PDIR}/explicit_memories.yaml'"
-check "mlflow has traces"            "test -s '${PDIR}/mlflow/mlflow.db'"
+# GRT-42 lives only in knowledge/troubleshooting.md — the agent answering
+# with it proves retrieval reached the ingested docs.
+check "kb retrieval answered (GRT-42)" "grep -q 'GRT-42' '${SESSION_LOG_1}'"
+
+# -- skills ------------------------------------------------------------------
+check "catalog skill installed"      "ls '${PDIR}/skills/'*/SKILL.md"
+
+# -- memory ------------------------------------------------------------------
+# Explicit memory lives with the server-owned internals in .dsagt/.  Only
+# kb_remember (called deliberately by the agent in response to "Put this in
+# explicit memory") populates the file; checking non-empty catches the
+# hallucination case where the agent claims it stored a fact but didn't
+# actually call the tool.
+check "explicit memory recorded"     "test -s '${PDIR}/.dsagt/explicit_memories.yaml'"
+# Cross-session recall: session 2's answer must carry the stored fact's
+# tokens, which only kb_get_memories (or episodic retrieval) can supply —
+# session 2 never saw samples.csv.
+check "cross-session recall"         "grep -qi 'null' '${SESSION_LOG_2}' && grep -qi 'status' '${SESSION_LOG_2}'"
+# Episodic memory (enabled via --episodic) chunks+embeds every turn into
+# the session_memory collection on the heartbeat.
+check "episodic memory indexed"      "test -f '${PDIR}/kb_index/session_memory/chroma.sqlite3'"
+
+# -- observability + session state -------------------------------------------
+check "mlflow store has traces"      "test -s '${PDIR}/mlflow.db'"
+# The heartbeat indexes trace_archive/ execution records into the code_use
+# collection (plus a startup catch-up in session 2).
+check "code_use collection indexed"  "test -f '${PDIR}/kb_index/code_use/chroma.sqlite3'"
+# state.yaml is the anchor for crash catch-up: both sessions logged, and
+# session 1 carries the trace_source token the session-2 catch-up pinned.
+check "state.yaml logged 2 sessions" "uv run --quiet python -c \"
+import yaml, sys
+s = yaml.safe_load(open('${PDIR}/.dsagt/state.yaml'))
+sessions = s.get('sessions') or []
+sys.exit(0 if len(sessions) >= 2 and sessions[0].get('trace_source') else 1)\""
+check "dsagt info runs"              "dsagt info '${PROJECT}'"
 
 # ---------------------------------------------------------------------------
-# 6. Agent LLM-call observability: every agent turn must produce at least
-#    one trace in MLflow with this session's id, tagged with the agent's
-#    service.name.  Replaces the proxy-log parity check from before
-#    proxy removal — the agent now emits OTel directly to MLflow's OTLP
-#    receiver, so MLflow IS the source of truth.  A zero count means
-#    either the agent didn't emit telemetry (e.g. CLAUDE_CODE_ENABLE_TELEMETRY=1
-#    not honored) or the OTel endpoint was misconfigured.
+# 6. Agent LLM-call transparency: the trace pipeline recovers every agent's
+#    turns from its on-disk transcript (heartbeat + graceful-shutdown flush,
+#    backstopped by session 2's startup catch-up), so agent traces in the
+#    store are a hard requirement for all five agents.
 # ---------------------------------------------------------------------------
-AGENT_OTEL_SUPPORT=$(uv run --quiet python -c "from dsagt.agents import agent_otel_support; print(agent_otel_support('${AGENT}'))" 2>/dev/null)
-AGENT_OTEL_SUPPORT="${AGENT_OTEL_SUPPORT:-unknown}"
-
 AGENT_TRACES=$(uv run --quiet python <<PY 2>/dev/null
 import mlflow
-mlflow.set_tracking_uri("sqlite:///${PDIR}/mlflow/mlflow.db")
+mlflow.set_tracking_uri("sqlite:///${PDIR}/mlflow.db")
 exp = mlflow.get_experiment_by_name("${PROJECT}")
 if exp is None:
     print(0); raise SystemExit
@@ -213,49 +252,22 @@ df = mlflow.search_traces(
     locations=[exp.experiment_id],
     max_results=500,
 )
-n = 0
-for _, row in df.iterrows():
-    spans = row.get("spans") or []
-    # Match by service.name on root span — agent-emitted traces only.
-    # MCP-server traces (kb.*, registry.*, tool.execute) carry
-    # service.name = "dsagt-knowledge-server" / "dsagt-registry-server" /
-    # "dsagt-run" and shouldn't count toward agent turn parity.
-    for s in spans:
-        attrs = getattr(s, "attributes", None) or (
-            s.get("attributes") if isinstance(s, dict) else None
-        )
-        if attrs and not str(attrs.get("service.name", "")).startswith("dsagt-"):
-            n += 1
-            break
+# MLflowSink stamps every replayed agent trace with "dsagt.trace_id" in
+# its trace metadata; DSAGT's internal MCP/dsagt-run debug traces carry a
+# "dsagt.source" tag instead — the positive marker is the reliable
+# filter.  A service.name span heuristic previously counted internal
+# spans lacking that attribute as agent traces, masking a codex reader
+# that collected nothing.
+n = sum(
+    1
+    for _, row in df.iterrows()
+    if "dsagt.trace_id" in (row.get("trace_metadata") or {})
+)
 print(n)
 PY
 )
 AGENT_TRACES="${AGENT_TRACES:-0}"
-
-# Grade by the agent's verified support tier rather than fail-or-pass:
-# agents we know don't emit OTel payloads (cline, roo) get SKIP, agents
-# we know partial-emit (codex) get WARN, agents we know full-emit
-# (claude, goose) get PASS-or-FAIL.  See agents/__init__.py module
-# docstring for the matrix.
-case "${AGENT_OTEL_SUPPORT}" in
-    full)
-        if [[ "${AGENT_TRACES}" -eq 0 ]]; then
-            echo "  FAIL  agent transparency: 0 agent LLM-call traces in MLflow (agent supports full payload but emitted none — env vars not honored?)"
-            FAIL=1
-        else
-            echo "  PASS  agent transparency: ${AGENT_TRACES} agent LLM-call trace(s) visible in MLflow"
-        fi
-        ;;
-    partial)
-        echo "  WARN  agent transparency: ${AGENT} emits only token counts + tool names natively (${AGENT_TRACES} agent trace(s)); use 'dsagt start --enable-proxy' to capture full LLM-call payloads"
-        ;;
-    none)
-        echo "  SKIP  agent transparency: ${AGENT} emits no payload-bearing OTel traces (${AGENT_TRACES} agent trace(s)); use 'dsagt start --enable-proxy' to make agent LLM calls visible in MLflow"
-        ;;
-    *)
-        echo "  WARN  agent transparency: support tier unknown for ${AGENT}; ${AGENT_TRACES} agent trace(s)"
-        ;;
-esac
+check "agent traces recovered (${AGENT_TRACES})" "test '${AGENT_TRACES}' -gt 0"
 
 echo
 if [[ ${FAIL} -eq 0 ]]; then
@@ -263,5 +275,8 @@ if [[ ${FAIL} -eq 0 ]]; then
     exit 0
 else
     echo "[smoke] FAIL"
+    echo "[smoke] session logs kept: ${SESSION_LOG_1} ${SESSION_LOG_2}"
+    trap - EXIT
+    rm -f "${RENDERED_SCRIPT_1}" "${RENDERED_SCRIPT_2}"
     exit 1
 fi

@@ -2,42 +2,20 @@
 Claude Code agent setup.
 
 Install: ``npm i -g @anthropic-ai/claude-code``.
-Generates: ``.mcp.json``, ``CLAUDE.md``, ``.dsagt_env``.
+Generates: ``CLAUDE.md`` (instructions) and ``.mcp.json`` (MCP config).
 
-Post-proxy: the user brings ``ANTHROPIC_API_KEY`` (and optionally
-``ANTHROPIC_MODEL``, ``ANTHROPIC_BASE_URL``) themselves and Claude Code
-talks directly to its provider.  We only inject OTel telemetry env vars
-so the agent's LLM-call traces land in the project's MLflow.
-
-OTel support: **full** for native MLflow visibility (verified).  Tool
-args land on the ``claude_code.tool_result`` event when
-``OTEL_LOG_TOOL_DETAILS=1`` and the assistant's response (with
-tool_use blocks) lands on the ``api_response_body`` event when
-``OTEL_LOG_RAW_API_BODIES=1``; both are gated.
-``CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`` enables the trace hierarchy.
-All four flags are set in ``_CLAUDE_TELEMETRY_ENV`` below.  Cited from
-https://code.claude.com/docs/en/monitoring-usage.md and verified
-end-to-end by the smoke-test harness once ``session.id`` was added to
-``OTEL_RESOURCE_ATTRIBUTES``.
-
-Memory extraction: **does NOT work without --enable-proxy**, even
-though traces are visible in the MLflow UI.  Claude Code emits its
-conversation via OTel *log events* (``api_response_body``,
-``tool_result``), which is a different shape from the LiteLLM-autolog
-``mlflow.spanInputs`` / ``mlflow.spanOutputs`` shape that
-``memory.drain_session_traces`` reads.  Users who want both visibility
-*and* extraction should run ``dsagt start --enable-proxy``.  See
-``agents/__init__.py`` module docstring for the design rationale.
-
-Truncation caveats: ``tool_input`` truncates per-value at 512 chars and
-total at ~4 KB; ``api_response_body`` is capped at 60 KB.  Large diffs
-or huge tool outputs may be clipped.
+The user brings ``ANTHROPIC_API_KEY`` (and optionally ``ANTHROPIC_MODEL``,
+``ANTHROPIC_BASE_URL``) themselves and Claude Code talks directly to its
+provider.  DSAGT sets **no** telemetry env on the agent — agent-side traces
+are recovered post-hoc from Claude's on-disk transcript by DSAGT's own
+serverless pipeline (MCP-server heartbeat → ``ClaudeReader`` →
+``ClaudeTranslator`` → ``MLflowSink``), uniformly with every other agent; not
+by forcing native OTel emission or wiring MLflow's autolog hook.
 
 Cache-marker injection: Claude Code handles Anthropic prompt caching
-natively against the Anthropic API, so the (deleted) proxy's
-``_inject_cache_breakpoints`` is unnecessary here.  Users on a custom
+natively against the Anthropic API.  Users on a custom
 ``ANTHROPIC_BASE_URL`` that proxies to a non-Anthropic provider lose
-caching either way.
+caching.
 """
 
 from __future__ import annotations
@@ -55,64 +33,20 @@ from .base import (
     _run_simple_script,
 )
 
-# Env vars Claude Code reads to gate full LLM-call telemetry.  Without
-# these, the OTel spans only carry counts/cost/duration.  See
-# https://code.claude.com/docs/en/monitoring-usage.md.
-#
-# OTEL_LOG_RAW_API_BODIES is intentionally omitted here — its value is
-# per-project (a path like ``file:<pdir>/api_bodies``) and gets rendered
-# dynamically by ``_cmd_mlflow``.  The ``=1`` (inline) mode would drop
-# bodies to ``/v1/logs`` which MLflow's OTLP receiver returns 404 for;
-# ``file:<dir>`` writes bodies to disk and stamps a ``body_ref`` on the
-# span event, which travels via ``/v1/traces`` (the path MLflow accepts).
-#
-# OTEL_LOGS_EXPORTER is also dropped — MLflow has no logs endpoint, so
-# pointing the SDK at /v1/logs only generates 404s in mlflow.log.
-_CLAUDE_TELEMETRY_ENV: dict[str, str] = {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
-    "OTEL_LOG_TOOL_DETAILS": "1",
-    # Without this, user prompts show as "[REDACTED]" in span attributes.
-    "OTEL_LOG_USER_PROMPTS": "1",
-    "OTEL_TRACES_EXPORTER": "otlp",
-}
-
 
 class ClaudeSetup(AgentSetup):
     name = "claude"
     base_command = ["claude"]
     static_marker = "CLAUDE.md"
+    native_skills_dir = ".claude/skills"
     install_hint = "Install with `npm i -g @anthropic-ai/claude-code`."
-    # Anthropic-protocol native; cross-protocol routing requires the proxy.
-    credential_env_vars = (
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_MODEL",
-    )
-    otel_payload_support = "full"
-    telemetry_env = _CLAUDE_TELEMETRY_ENV
-    credential_hints = (
-        ("ANTHROPIC_API_KEY", "your Anthropic API key (skip if subscription-authed)"),
-        ("ANTHROPIC_BASE_URL", "optional gateway / proxy URL"),
-        ("ANTHROPIC_MODEL", "optional model override"),
-    )
 
-    def env_overrides(self, config: dict) -> dict[str, str]:
-        """Phase-2 proxy-mode hook: pin ``ANTHROPIC_MODEL`` to the
-        upstream-served name so claude doesn't fall back to its
-        built-in default.  Only fires when ``config["proxy"]["port"]``
-        is set (gated by ``agents/__init__.py:agent_env``).
-
-        ``ANTHROPIC_BASE_URL`` and ``ANTHROPIC_API_KEY`` are set by
-        :meth:`proxy_env_overrides` (base default) — point at the
-        localhost proxy with the sentinel key.  Claude posts
-        ``/v1/messages`` to the proxy regardless of upstream protocol;
-        the proxy translates.
-        """
-        model = (config.get("llm") or {}).get("model")
-        if model and not str(model).startswith("${"):
-            return {"ANTHROPIC_MODEL": model}
-        return {}
+    def owned_artifacts(self, working_dir: Path) -> list[Path]:
+        return [
+            working_dir / "CLAUDE.md",
+            working_dir / ".mcp.json",
+            working_dir / ".claude",
+        ]
 
     def vscode_hint(self, project_dir: Path) -> list[str]:
         return [f"Open {project_dir} in VS Code and start the Claude extension."]
@@ -137,55 +71,35 @@ class ClaudeSetup(AgentSetup):
         working_dir: Path,
         pdir: Path,
     ) -> list[str]:
-        """Write ``.mcp.json`` and configure ``mlflow autolog claude``.
+        """Write ``.mcp.json``.
 
-        The env block in ``.mcp.json`` carries DSAGT/MLflow/embedding
-        routing for the MCP-server children — claude inherits parent
-        env into them, but baking it into the JSON is robust against
-        shells that don't have those vars set.
+        The env block carries DSAGT/MLflow/embedding routing for the MCP-server
+        children — claude inherits parent env into them, but baking it into the
+        JSON is robust against shells that don't have those vars set.
 
-        Also wires MLflow's first-class Claude Code integration via
-        ``.claude/settings.json``: a Stop hook that processes Claude's
-        transcript at session end and creates a rich MLflow trace with
-        full prompts, responses, and tool_use blocks.  This is the only
-        way to get high-fidelity agent-side traces in BYOA mode (without
-        the proxy) — Claude's native OTel emission carries only thin
-        ``api_response_body`` log events that don't roundtrip through
-        memory extraction.
+        No trace wiring here: DSAGT's own serverless pipeline (the MCP-server
+        heartbeat → ``ClaudeReader`` → ``ClaudeTranslator`` → ``MLflowSink``)
+        produces Claude's traces, uniformly with every other agent — so we do
+        NOT also wire MLflow's ``autolog claude`` Stop hook (which would
+        double-log the same turns, and only Claude can use it serverlessly).
         """
         del env, pdir
         actions: list[str] = []
         env_block = _mcp_env_block(config)
 
-        mcp_config: dict = {"mcpServers": {}}
-        for server in ("registry", "knowledge"):
-            entry: dict = {"command": "uv", "args": _mcp_server_args(server)}
-            if env_block:
-                entry["env"] = env_block
-            mcp_config["mcpServers"][f"dsagt-{server}"] = entry
+        entry: dict = {"command": "uv", "args": _mcp_server_args()}
+        if env_block:
+            entry["env"] = env_block
+        mcp_config: dict = {"mcpServers": {"dsagt": entry}}
 
         mcp_path = working_dir / ".mcp.json"
         mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
         actions.append(f"Wrote {mcp_path}")
 
-        # Configure mlflow autolog claude — writes .claude/settings.json
-        # with the MLflow Stop hook + tracking env vars.  Idempotent and
-        # preserves any existing keys in settings.json (mlflow's setup
-        # functions do a load → update → save, not a replace).
-        mlflow_port = (config.get("mlflow") or {}).get("port")
-        project_name = config.get("project")
-        if mlflow_port and project_name:
-            from mlflow.claude_code.config import setup_environment_config
-            from mlflow.claude_code.hooks import setup_hooks_config
-
-            settings_file = working_dir / ".claude" / "settings.json"
-            setup_hooks_config(settings_file)
-            setup_environment_config(
-                settings_file,
-                tracking_uri=f"http://localhost:{mlflow_port}",
-                experiment_name=project_name,
-            )
-            actions.append(f"Wrote {settings_file} (mlflow autolog claude)")
+        # Skills are mirrored into .claude/skills/ centrally via
+        # AgentSetup.setup_skills (driven by native_skills_dir) in
+        # dynamic_agent_record — see base.py.  Picked up on the next Claude
+        # start, which is fine: this runs at init/start, before launch.
         return actions
 
     def run_script(

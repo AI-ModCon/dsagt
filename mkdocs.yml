@@ -31,6 +31,13 @@ theme:
     - content.code.copy
     - content.code.annotate
 
+plugins:
+  - search
+  - include-markdown
+
+hooks:
+  - hooks/gen_use_cases.py
+
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -48,16 +55,16 @@ nav:
   - Home: index.md
   - Quick Start: quickstart.md
   - Architecture: architecture.md
+  - Capabilities:
+    - Provenance: provenance.md
+    - Knowledge Base: knowledge-base.md
+    - Skills: skills.md
+    - Memory: memory.md
+    - Observability: observability.md
   - MCP Servers: mcp-servers.md
-  - Knowledge Base: knowledge-base.md
-  - Tools & Skills: tools-skills.md
-  - Observability: observability.md
   - CLI Reference: cli.md
   - Use Cases:
     - Overview: use-cases/index.md
-    - Microbial Isolates: use-cases/microbial-isolates.md
-    - Cryo-EM: use-cases/cryoem.md
-    - VASP / ISAAC: use-cases/vasp.md
-    - AIDRIN Readiness Gate (Cryo-EM): use-cases/aidrin-cryoem.md
-    - AIDRIN Full Feature Tour: use-cases/aidrin-tour.md
+    # Individual use-case pages are generated from use_cases/<name>/README.md
+    # frontmatter and appended here by hooks/gen_use_cases.py.
   - Developer Guide: developer.md

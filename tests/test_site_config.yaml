@@ -1,0 +1,26 @@
+# Test site configuration — institution-specific values for integration tests.
+#
+# Copy this file to tests/test_site_config.yaml and fill in your values.
+# Unit tests (mocked) run without this file. Integration tests that hit
+# a real embedding API will skip if this file is missing.
+#
+# DO NOT commit test_site_config.yaml — it contains API endpoints and
+# model names specific to your institution.
+
+project: test-integration
+agent: claude
+
+llm:
+  model: claude-sonnet-4-5-20250929-v1-project          # LLM model name at your endpoint
+  base_url: https://api.example.com        # LLM API endpoint (Anthropic-compatible)
+  api_key: sk-QKnGITknkwJbBjhaPcj4QQ               # API key for LLM service
+
+embedding:
+  model: text-embedding-3-small-project            # embedding model at your endpoint
+  base_url: https://ai-incubator-api.pnnl.gov     # OpenAI-compatible embeddings URL
+  api_key: sk-QKnGITknkwJbBjhaPcj4QQ          # API key for embedding service
+
+mlflow:
+  port: 15001                              # test MLflow port
+  backend: sqlite
+

@@ -1,26 +1,32 @@
 """
 dsagt info <project> — summary of MLflow traces for triage.
 
-A terse, read-only snapshot of what the project's mlflow.db already knows:
-counts and token totals grouped by session and by source (agent turn,
-embedding, extraction).  Errors surface inline so a user can see "which
-session broke" without scrolling.  Deep investigation still happens in
-the MLflow UI (``dsagt mlflow <project>``); this command is the triage
-layer that tells you *where* to look first.
+A terse, read-only snapshot of what the project's serverless
+``sqlite:///<pdir>/mlflow.db`` store already knows: counts and token
+totals grouped by session and by source (agent turn, embedding,
+extraction).  Errors surface inline so a user can see "which session
+broke" without scrolling.  Deep investigation still happens in the MLflow
+UI (``mlflow ui --backend-store-uri sqlite:///<pdir>/mlflow.db``); this
+command is the triage layer that tells you *where* to look first.
 
 Aggregation reads ``trace_metadata`` for token totals + session id
 (MLflow stamps per-trace token usage as a JSON blob under
-``mlflow.trace.tokenUsage``; the OTLP receiver promotes our
-``session.id`` span attribute to ``mlflow.trace.session``).
+``mlflow.trace.tokenUsage``; the live tracer stamps ``mlflow.trace.session``).
 
-Source bucketing comes from the OTel ``service.name`` resource attribute
-on each trace's root span (set per emitting process by ``init_tracing``
-and the agent's own OTel SDK).  Possible values:
-  - ``claude-code`` / ``goose`` / ``cline`` / ``roo`` / ``codex`` —
-    agent-emitted LLM-call traces (the bulk of traffic)
-  - ``dsagt-knowledge-server`` / ``dsagt-registry-server`` — MCP server
-    spans (``kb.*``, ``registry.*``)
-  - ``dsagt-run`` — tool-execute spans
+Source bucketing reads the metadata DSAGT itself stamps on each trace — no
+span inspection:
+  - ``memory`` / ``skill`` / ``knowledge`` / ``registry`` — internal debug
+    traces, from the ``dsagt.source`` tag (the MCP tool category the agent
+    invoked, set on the trace root by the dispatch shell).
+  - ``execution`` — dsagt-run tool-execute traces (``dsagt.source``).
+  - ``episodic`` / ``code_use`` — background emitters (per-turn memory
+    extraction; trace-archive indexing), tagged at their off-thread call site
+    so their embedding writes don't orphan as untagged ``unknown`` roots.
+  - ``claude`` / ``goose`` / ``cline`` / ``codex`` — agent traces, from the
+    ``dsagt.agent`` metadata stamped by ``MLflowSink`` (the bulk of traffic).
+
+The ``Agent turns`` / ``Internal/debug`` headline splits the recovered agent
+conversation from all of DSAGT's own bookkeeping traces (:data:`_INTERNAL_SOURCES`).
 """
 
 from __future__ import annotations
@@ -28,7 +34,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 from pathlib import Path
 
 import yaml
@@ -39,7 +44,7 @@ _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
 _SECRET_LEAF_KEYS = {"api_key"}
 # Internal/derived sections — irrelevant for "where does this credential
 # come from" triage and would just clutter the output.
-_CONFIG_SOURCE_SKIP_PREFIXES = ("categories.", "extraction.", "knowledge.")
+_CONFIG_SOURCE_SKIP_PREFIXES = ("knowledge.", "skills.")
 
 
 def _mask_secret(value: str) -> str:
@@ -60,18 +65,18 @@ def _flatten(d: dict, prefix: str = ""):
 
 
 def _config_sources(project_name: str) -> list[dict]:
-    """Return per-leaf source info for the project's dsagt_config.yaml.
+    """Return per-leaf source info for the project's .dsagt/config.yaml.
 
     Walks the *raw* YAML (not the env-resolved version) so ${VAR} references
     are visible.  For each leaf, reports where the resolved value came from:
     ``config`` (literal in YAML), ``shell`` (``${VAR}`` resolved against
     ``os.environ``), or ``unresolved`` (``${VAR}`` with no value anywhere).
-    No ``.env`` file is read — dsagt-internal env lives in
-    ``dsagt_config.yaml`` + ``.runtime``; user-provided shell exports are
-    the only other source.
+    No ``.env`` file is read — dsagt-internal config lives in
+    ``.dsagt/config.yaml``; user-provided shell exports are the only other
+    source.
     """
     pdir = project_dir(project_name)
-    raw = yaml.safe_load((pdir / "dsagt_config.yaml").read_text()) or {}
+    raw = yaml.safe_load((pdir / ".dsagt" / "config.yaml").read_text()) or {}
 
     rows: list[dict] = []
     for path, value in _flatten(raw):
@@ -157,8 +162,9 @@ def _tokens(metadata: dict) -> tuple[int, int]:
 
     The value is a JSON string, not a dict — MLflow encodes structured
     metadata as strings so it round-trips through the same storage path
-    as arbitrary user tags.  Missing key → (0, 0); some traces (e.g. the
-    hardcoded gpt-4o-mini session-namer mock) legitimately have no usage.
+    as arbitrary user tags.  Missing key → (0, 0); some traces (e.g. an
+    agent's internal title-gen / session-namer call) legitimately have no
+    usage.
     """
     raw = metadata.get("mlflow.trace.tokenUsage")
     if not raw:
@@ -175,9 +181,9 @@ def _tokens_from_spans(spans) -> tuple[int, int]:
 
     Native claude OTel emission stamps these as span attributes on
     ``claude_code.llm_request`` spans (string-encoded — MLflow's OTLP
-    receiver JSON-encodes every attribute).  ``mlflow.trace.tokenUsage``
-    is only set by LiteLLM autolog (proxy mode); for BYOA we aggregate
-    from the spans themselves so the totals aren't always zero.
+    receiver JSON-encodes every attribute).  When ``mlflow.trace.tokenUsage``
+    isn't present on the trace metadata we aggregate from the spans
+    themselves so the totals aren't always zero.
 
     Returns ``(0, 0)`` for non-LLM traces (kb.search, tool.execute) —
     those don't carry token attributes.
@@ -225,116 +231,34 @@ def _fmt_count(n: int) -> str:
     return f"{n / 1_000_000:.1f}M"
 
 
-#: Map root-span name prefix → human-readable source bucket.  Claude's
-#: native OTel emission uses ``claude_code.*``; goose uses ``goose.*`` /
-#: ``dispatch_tool_call``; our internal services use the prefixes their
-#: ``init_tracing`` calls assign.  Used as the canonical bucket because
-#: MLflow's OTLP receiver doesn't surface the ``service.name`` resource
-#: attribute on the span data ``mlflow.search_traces`` returns — the
-#: name-prefix mapping is reliable across MLflow versions and gives the
-#: same answer (which emitting process produced this trace).
-_SPAN_NAME_TO_SOURCE: tuple[tuple[str, str], ...] = (
-    ("claude_code.", "claude"),
-    ("goose.", "goose"),
-    # Goose's Rust runtime emits root spans named after agent/provider
-    # operations (no namespace prefix): ``reply`` (agent turn),
-    # ``complete_with_model`` (provider LLM call), ``dispatch_tool_call``
-    # (tool invocation).  Verified against goose 1.7+ spans in
-    # crates/goose/src/agents/agent.rs and providers/openai.rs.
-    ("dispatch_tool_call", "goose"),
-    ("complete_with_model", "goose"),
-    ("reply", "goose"),
-    # dsagt-proxy spans emitted via LiteLLM autolog.  The proxy receives
-    # the agent's request as ``Received Proxy Server Request`` (LiteLLM's
-    # FastAPI handler span) and forwards via ``litellm_request`` (the
-    # actual upstream call).  Both carry mlflow.spanInputs/Outputs, so
-    # the UI's request/response columns light up.
-    ("Received Proxy Server Request", "dsagt-proxy"),
-    ("litellm_request", "dsagt-proxy"),
-    # LiteLLM emits ``proxy_pre_call`` spans for pre-call hooks (our
-    # DSAGTCallback's cache-breakpoint injection runs here).  These get
-    # their own trace_id but with parent_span_id pointing outside the
-    # trace, so the no-root-span fallback in _source_from_spans needs
-    # this name registered too.
-    ("proxy_pre_call", "dsagt-proxy"),
-    ("kb.", "dsagt-knowledge-server"),
-    ("registry.", "dsagt-registry-server"),
-    ("tool.execute", "dsagt-run"),
+#: The ``dsagt.source`` categories — internal (debug) traces DSAGT emits, as
+#: opposed to the recovered agent-conversation traces.  MCP tool categories
+#: (``memory`` / ``skill`` / ``knowledge`` / ``registry``), ``execution`` for
+#: dsagt-run, plus the two background emitters: ``episodic`` (per-turn memory
+#: extraction) and ``code_use`` (the trace-archive indexer).
+_INTERNAL_SOURCES = frozenset(
+    {"memory", "skill", "knowledge", "registry", "execution", "episodic", "code_use"}
 )
 
 
-def _bucket_from_span_name(name: str | None) -> str | None:
-    if not name:
-        return None
-    for prefix, bucket in _SPAN_NAME_TO_SOURCE:
-        if name.startswith(prefix):
-            return bucket
-    return None
+def _row_source_for(tags: dict, metadata: dict) -> str:
+    """Bucket a trace by who emitted it, from the metadata DSAGT itself stamps.
 
-
-def _source_from_spans(spans) -> str | None:
-    """Bucket a trace by who emitted it.
-
-    Tries ``service.name`` on span attributes / resource first (works for
-    proxy-mode traces and dsagt-internal services that stamp it
-    explicitly), then falls back to mapping the root span's NAME prefix
-    to a source bucket — necessary for native claude / goose OTel because
-    MLflow's OTLP receiver drops the ``service.name`` resource attribute
-    in the data ``mlflow.search_traces`` exposes.
-
-    ``mlflow.search_traces`` returns a ``spans`` column whose entries
-    vary in shape across MLflow versions (Span object, dict, or pandas
-    Series of dicts); we defend against both attribute and item access.
+    No span inspection: internal debug traces carry an explicit ``dsagt.source``
+    tag (see :data:`_INTERNAL_SOURCES`), set on the trace root by the MCP
+    dispatch shell / ``code_execute_span`` / the background emitters.  Agent
+    traces carry ``dsagt.agent`` metadata, stamped by ``MLflowSink``.  Neither
+    overlaps, so the bucket is a direct lookup; anything else (a stray trace
+    with neither — which should no longer happen now background work is tagged)
+    is ``"unknown"``.
     """
-    if spans is None:
-        return None
-    try:
-        for span in spans:
-            attrs = getattr(span, "attributes", None)
-            if attrs is None and isinstance(span, dict):
-                attrs = span.get("attributes")
-            if attrs and "service.name" in attrs:
-                return attrs["service.name"]
-            resource = getattr(span, "resource", None) or (
-                span.get("resource") if isinstance(span, dict) else None
-            )
-            if resource:
-                rattrs = getattr(resource, "attributes", None) or (
-                    resource.get("attributes")
-                    if isinstance(resource, dict) else None
-                )
-                if rattrs and "service.name" in rattrs:
-                    return rattrs["service.name"]
-        # No service.name anywhere — fall back to span-name-prefix
-        # bucketing on the root span (the one without a parent) first.
-        for span in spans:
-            parent = (
-                getattr(span, "parent_id", None)
-                or (span.get("parent_id") if isinstance(span, dict) else None)
-                or getattr(span, "parent_span_id", None)
-                or (span.get("parent_span_id") if isinstance(span, dict) else None)
-            )
-            if parent:
-                continue
-            name = getattr(span, "name", None) or (
-                span.get("name") if isinstance(span, dict) else None
-            )
-            bucket = _bucket_from_span_name(name)
-            if bucket:
-                return bucket
-        # No root present (rare — LiteLLM's proxy_pre_call spans have
-        # parent_span_id pointing outside their own trace).  Try any
-        # span whose name we recognize.
-        for span in spans:
-            name = getattr(span, "name", None) or (
-                span.get("name") if isinstance(span, dict) else None
-            )
-            bucket = _bucket_from_span_name(name)
-            if bucket:
-                return bucket
-    except (TypeError, AttributeError):
-        return None
-    return None
+    src = (tags or {}).get("dsagt.source")
+    if src:
+        return src
+    agent = (metadata or {}).get("dsagt.agent")
+    if agent and agent != "-":
+        return agent
+    return "unknown"
 
 
 def _is_error(state) -> bool:
@@ -363,6 +287,7 @@ def _project_created(pdir: Path) -> str | None:
     if not ts:
         return None
     from datetime import datetime, timezone
+
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
@@ -393,12 +318,46 @@ def _kb_collections(pdir: Path) -> list[dict]:
                     src = None
                 if src:
                     sources[src] = sources.get(src, 0) + 1
-        rows.append({
-            "collection": sub.name,
-            "chunks": n_chunks,
-            "by_source": sources,
-        })
+        rows.append(
+            {
+                "collection": sub.name,
+                "chunks": n_chunks,
+                "by_source": sources,
+            }
+        )
     return rows
+
+
+def _skills(pdir: Path) -> list[dict]:
+    """Installed + bundled skills for the project.
+
+    Reads the project's ``skills/`` plus the bundled skill dirs via
+    ``SkillRegistry`` (no embedder needed — this is a directory scan, not a
+    search).  Returns ``[{"name", "description"}, ...]``; empty on any
+    failure so the report never crashes on a malformed skill.
+    """
+    try:
+        from dsagt.registry import SkillRegistry
+
+        skills = SkillRegistry(runtime_dir=pdir, kb=None).list_skills()
+    except Exception:
+        return []
+    return [
+        {"name": s.get("name", "?"), "description": s.get("description") or ""}
+        for s in skills
+    ]
+
+
+def _print_skills(rows: list[dict]) -> None:
+    """Render the installed/bundled skill list (name — truncated description)."""
+    if not rows:
+        return
+    name_w = max(len(r["name"]) for r in rows)
+    print(f"Skills ({len(rows)}):")
+    for r in rows:
+        desc = r["description"][:80]
+        print(f"  {r['name']:<{name_w}}  {desc}")
+    print()
 
 
 def _kb_retrieval(traces) -> list[dict]:
@@ -424,9 +383,11 @@ def _kb_retrieval(traces) -> list[dict]:
             )
             if name != "kb.search":
                 continue
-            attrs = getattr(span, "attributes", None) or (
-                span.get("attributes") if isinstance(span, dict) else None
-            ) or {}
+            attrs = (
+                getattr(span, "attributes", None)
+                or (span.get("attributes") if isinstance(span, dict) else None)
+                or {}
+            )
             try:
                 hits = int(attrs.get("hits", 0))
             except (TypeError, ValueError):
@@ -443,8 +404,10 @@ def _kb_retrieval(traces) -> list[dict]:
 def _load_traces(mlflow_db: Path, project_name: str):
     """Return (traces_df, experiment_id_or_none).
 
-    Separate from the main reporting logic so the caller can decide what to
-    print when the experiment doesn't exist yet (new project, never run).
+    Reads the serverless ``sqlite:///<pdir>/mlflow.db`` store directly — no
+    server required.  Separate from the main reporting logic so the caller
+    can decide what to print when the experiment doesn't exist yet (new
+    project, never run).
     """
     import mlflow
 
@@ -453,7 +416,8 @@ def _load_traces(mlflow_db: Path, project_name: str):
     if exp is None:
         return None, None
     traces = mlflow.search_traces(
-        locations=[exp.experiment_id], max_results=5000,
+        locations=[exp.experiment_id],
+        max_results=5000,
     )
     return traces, exp.experiment_id
 
@@ -461,7 +425,9 @@ def _load_traces(mlflow_db: Path, project_name: str):
 def _report(project_name: str, config: dict, traces) -> dict:
     """Build the structured report dict.  CLI formats it; --json prints it."""
     agent_header = config.get("agent", "-")
-    model_header = config.get("llm", {}).get("model", "-")
+    # BYOA: dsagt no longer records the agent's LLM model (the agent talks to
+    # its provider directly).  Surface the embedding model dsagt configures.
+    model_header = config.get("embedding", {}).get("model", "-")
 
     if traces is None or traces.empty:
         return {
@@ -482,24 +448,25 @@ def _report(project_name: str, config: dict, traces) -> dict:
     # column once up front keeps pandas from re-parsing the dict on every
     # groupby.
     md = traces["trace_metadata"].apply(lambda m: m or {})
+    tags = (
+        traces["tags"].apply(lambda t: t or {})
+        if "tags" in traces.columns
+        else md.apply(lambda _: {})
+    )
     session = md.apply(lambda m: m.get("mlflow.trace.session") or "(no-session)")
     agent = md.apply(lambda m: m.get("dsagt.agent") or "-")
     errored = traces["state"].apply(_is_error)
 
-    # Source + tokens both walk the spans column.  Fall back to span data
-    # because MLflow's OTLP receiver doesn't surface ``service.name`` (so
-    # metadata-only bucketing returns "unknown" for everything) and only
-    # LiteLLM-autolog traces carry ``mlflow.trace.tokenUsage`` (so token
-    # totals are zero in BYOA mode without this fallback).
+    # Source comes from the metadata DSAGT stamps (dsagt.source tag /
+    # dsagt.agent), no span inspection.  Tokens still walk the spans column as
+    # a fallback because not all traces carry ``mlflow.trace.tokenUsage``.
     spans_col = traces["spans"] if "spans" in traces.columns else None
 
     def _row_source(idx: int) -> str:
-        if spans_col is not None:
-            return _source_from_spans(spans_col.iloc[idx]) or "unknown"
-        return "unknown"
+        return _row_source_for(tags.iloc[idx], md.iloc[idx])
 
     def _row_tokens(idx: int) -> tuple[int, int]:
-        # Trace metadata first (proxy / autolog shape), then aggregate
+        # Trace metadata first (when tokenUsage is present), then aggregate
         # span attrs (native claude OTel shape).
         m = md.iloc[idx]
         i, o = _tokens(m)
@@ -537,7 +504,9 @@ def _report(project_name: str, config: dict, traces) -> dict:
                 "errors": int(g["_err"].sum()),
             }
             if col == "_session":
-                row["agent"] = g["_agent"].mode().iloc[0] if not g["_agent"].empty else "-"
+                row["agent"] = (
+                    g["_agent"].mode().iloc[0] if not g["_agent"].empty else "-"
+                )
                 row["latest_request_time"] = g["request_time"].max()
             rows.append(row)
         if sort_by_recency:
@@ -552,12 +521,14 @@ def _report(project_name: str, config: dict, traces) -> dict:
         # the request column is the display-friendly form.  For an error we
         # just need "which session, which source, when" — the UI has the
         # payload.
-        errors.append({
-            "session": row["_session"],
-            "source": row["_source"],
-            "request_time": row["request_time"],
-            "trace_id": row["trace_id"],
-        })
+        errors.append(
+            {
+                "session": row["_session"],
+                "source": row["_source"],
+                "request_time": row["request_time"],
+                "trace_id": row["trace_id"],
+            }
+        )
 
     return {
         "project": project_name,
@@ -576,8 +547,8 @@ def _report(project_name: str, config: dict, traces) -> dict:
 
 def _print_text(r: dict) -> None:
     print(f"Project: {r['project']}")
-    print(f"  Agent:  {r['agent']}")
-    print(f"  Model:  {r['model']}")
+    print(f"  Agent:      {r['agent']}")
+    print(f"  Embedding:  {r['model']}")
     if r.get("created"):
         print(f"  Started: {r['created']}")
     print()
@@ -587,6 +558,7 @@ def _print_text(r: dict) -> None:
         _print_config_sources(config_sources)
 
     _print_kb_collections(r.get("kb_collections") or [])
+    _print_skills(r.get("skills") or [])
 
     if r["total_traces"] == 0:
         print("No traces recorded yet (run `dsagt start` to create a session).")
@@ -597,9 +569,23 @@ def _print_text(r: dict) -> None:
         f"Totals ({r['total_traces']} traces across {n_sessions} "
         f"session{'s' if n_sessions != 1 else ''}):"
     )
-    print(f"  Tokens: {_fmt_count(r['input_tokens'])} in / "
-          f"{_fmt_count(r['output_tokens'])} out")
+    print(
+        f"  Tokens: {_fmt_count(r['input_tokens'])} in / "
+        f"{_fmt_count(r['output_tokens'])} out"
+    )
     print(f"  Errors: {r['total_errors']}")
+    # Split agent turns (the substance) from DSAGT's own internal/debug traces
+    # (embedding, indexing, tool spans) so the headline isn't dominated by
+    # bookkeeping.  ``unknown`` counts as internal/debug — it's an orphaned
+    # DSAGT span, not an agent turn (and should be empty now background work is
+    # tagged); only genuine agent-conversation traces count as agent turns.
+    agent_traces = sum(
+        row["traces"]
+        for row in r["by_source"]
+        if row["source"] not in _INTERNAL_SOURCES and row["source"] != "unknown"
+    )
+    internal_traces = r["total_traces"] - agent_traces
+    print(f"  Agent turns: {agent_traces}   Internal/debug: {internal_traces}")
     print()
 
     print("By source:")
@@ -633,14 +619,15 @@ def _print_text(r: dict) -> None:
 
 
 def run(project: str, as_json: bool) -> int:
-    # Resolve ${ENV_VAR} references so the header shows the actual model
-    # name the proxy will route (not the placeholder from dsagt_config.yaml).
+    # Resolve ${ENV_VAR} references so the header shows resolved values
+    # (not ${VAR} placeholders from .dsagt/config.yaml).
     config = resolve_env_vars(load_config(project))
     pdir = Path(config["project_dir"])
-    mlflow_db = pdir / "mlflow" / "mlflow.db"
+    mlflow_db = pdir / "mlflow.db"
 
     sources = _config_sources(project)
     kb_collections = _kb_collections(pdir)
+    skills = _skills(pdir)
     created = _project_created(pdir)
 
     if not mlflow_db.exists():
@@ -650,7 +637,7 @@ def run(project: str, as_json: bool) -> int:
         r = {
             "project": project,
             "agent": config.get("agent", "-"),
-            "model": config.get("llm", {}).get("model", "-"),
+            "model": config.get("embedding", {}).get("model", "-"),
             "created": created,
             "total_traces": 0,
             "total_errors": 0,
@@ -661,6 +648,7 @@ def run(project: str, as_json: bool) -> int:
             "errors": [],
             "kb_retrieval": [],
             "kb_collections": kb_collections,
+            "skills": skills,
             "config_sources": sources,
         }
         if as_json:
@@ -673,6 +661,7 @@ def run(project: str, as_json: bool) -> int:
     r = _report(project, config, traces)
     r["created"] = created
     r["kb_collections"] = kb_collections
+    r["skills"] = skills
     r["config_sources"] = sources
 
     if as_json:

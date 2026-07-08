@@ -105,6 +105,17 @@ test_registry.yaml
 test_runtime/
 *.log
 provenance.log
+# Serverless MLflow store + any stray file-store trace dumps — never commit
+# a session's traces (they carry machine-local artifact paths).  Guards
+# against re-committing dumps like the pre-existing comb-flow-uni/**/mlruns/.
+mlflow.db
+mlruns/
+latex/
+design-notes/
+scratch/
+env_examples/
+notes.txt
+uv.lock
 
 # Demo outputs
 demo/output/
@@ -151,3 +162,6 @@ cline_mcp.json
 *.bak
 *.swp
 .*.swp
+
+# Local scratch for removed/parked code (not tracked)
+scratch/

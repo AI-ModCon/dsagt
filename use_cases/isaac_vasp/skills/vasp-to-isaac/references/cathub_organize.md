@@ -95,7 +95,7 @@ The `.db` file is a standard ASE database containing one row per structure, with
 Once the `.db` file is built, convert to ISAAC records:
 
 ```bash
-python3 ase_slab_db_to_isaac.py <OUT>/<DBNAME>.db ./isaac_records/ --electrode-type anode
+python3 ase_db_to_isaac.py <OUT>/<DBNAME>.db ./isaac_records/ --electrode-type anode
 ```
 
 See `slab_workflow.md` for the full slab pipeline.
@@ -107,6 +107,6 @@ See `slab_workflow.md` for the full slab pipeline.
 | Route | When to use |
 |---|---|
 | **cathub organize → folder2db** (this file) | Data is organized as surface reactions with gas references and adsorbate slabs. Produces CatHub-schema entries with reaction energies, `state`, `facet`, `species` key-value pairs. |
-| **make_slab_ase_db.py** (direct from VASP) | Raw VASP slab directories without a CatHub reaction structure. Useful for datasets not organized around specific reactions, or when you want richer INCAR-level metadata (smearing, convergence, Hubbard-U) in the db. |
+| **make_ase_db.py** (direct from VASP) | Raw VASP slab directories without a CatHub reaction structure. Useful for datasets not organized around specific reactions, or when you want richer INCAR-level metadata (smearing, convergence, Hubbard-U) in the db. |
 
-Both routes produce an ASE SQLite `.db` file that `ase_slab_db_to_isaac.py` can read directly.
+Both routes produce an ASE SQLite `.db` file that `ase_db_to_isaac.py` can read directly.

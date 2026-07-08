@@ -343,19 +343,29 @@ Goose, Roo Code, and Cline.
 % Knowledge centered above (Explicit, Domain); Registry above (Skills,
 % Tool Specs); MLflow directly above Episodic; dsagt-run directly above
 % Tool Records.  All x-coordinates fall out of the row-3 grid below.
-\node[svc] (knowledge) at (-0.9,-2) {Knowledge\\Server};
-\node[svc] (registry)  at (3.5,-2)  {Registry\\Server};
+\node[svc] (knowledge) at (-0.9,-2) {Knowledge};
+\node[svc] (registry)  at (3.5,-2)  {Registry};
 \node[art] (mlflow)    at (6.8,-2)  {MLflow\\Traces};
 % dsagt-run width matches the artifact boxes (18mm) so it visually
 % pairs with MLflow Traces and Tool Records on either side.
 \node[svc, minimum width=18mm] (dsagtrun) at (9.0,-2) {\texttt{dsagt-run}};
 
+% The Knowledge and Registry tool surfaces are now exposed by ONE merged
+% MCP server (dsagt-server).  A single container box spans + sits behind
+% both (background layer, lighter fill) so the two inner boxes still read
+% as distinct concern modules while the bridge conveys "one server".
+\begin{scope}[on background layer]
+  \node[draw, rounded corners=3pt, thick, fill=green!6,
+        fit=(knowledge)(registry), inner sep=1.2mm] (mcpbox) {};
+\end{scope}
+
 % Agent <-> MCP servers (symmetric forks; bidirectional because MCP is
 % request/response — the server replies travel back to the agent).
 \draw[bilink] (agent.south) -- ++(0,-0.3) -| (knowledge.north);
 \draw[bilink] (agent.south) -- ++(0,-0.3) -| (registry.north);
-% MCP label centered below the agent, between the two MCP-server forks.
-\node[lbl] at (1.3,-1.2) {MCP};
+% MCP label in the center of the merged-server box, in the gap between the
+% Knowledge and Registry modules — the bridge that joins them into one server.
+\node[lbl] at (1.3,-2) {MCP};
 
 % Agent -> MLflow + dsagt-run (fork off the same trunk as the MCP servers,
 % drop vertically directly above each box).
@@ -383,7 +393,7 @@ Goose, Roo Code, and Cline.
 % on every registered-tool invocation.
 \node[art] (explicit) at (-2.0,-4) {Explicit\\Memory};
 \node[art] (domain)   at (0.2,-4)  {Domain\\Knowledge};
-\node[art] (skills)   at (2.4,-4)  {Skills};
+\node[art] (skills)   at (2.4,-4)  {Skills\\Catalog};
 \node[art] (tools)    at (4.6,-4)  {Tool\\Specs};
 \node[art] (episodic) at (6.8,-4)  {Episodic\\Memory};
 \node[art] (history)  at (9.0,-4)  {Tool\\Records};

@@ -1,8 +1,66 @@
 """
-Knowledge base: semantic search over document collections.
+Knowledge base — hybrid semantic retrieval over document collections, and the
+shared substrate every other DSAGT capability searches against.
 
-Pluggable embedding backends (local sentence-transformers or OpenAI-compatible API)
-and vector-DB backends (FAISS or ChromaDB) with per-collection routing.
+A :class:`KnowledgeBase` holds one or more vector stores (each a single embedder
+over many collections) and fuses their results by Reciprocal Rank Fusion (RRF).
+Fusion runs at two levels: *within* a collection, dense vector similarity is
+blended with a BM25 sparse leg, so exact identifiers and error strings that dense
+embeddings under-rank still surface; *across* collections and stores, per-
+collection rankings are fused by rank alone — letting results from different
+embedding spaces combine without any cross-space score normalization.  The same
+surface backs document/domain-knowledge retrieval, explicit and episodic memory,
+tool-usage provenance, and skills discovery.  Design-wise it keeps maintenance
+bounded: one embedder per store, a bring-your-own external store is just another
+:class:`VectorStore` subclass added to the list, and the heavy document parsers
+are imported lazily so only actual ingestion pays for them, not server startup.
+
+The niche it fills
+------------------
+General coding agents have settled retrieval into two modes this KB deliberately
+does not compete with — agentic ``grep`` / tool search over *code* (Claude Code,
+Cursor, Windsurf et al. dropped codebase vector indexing outright) and *web
+search* for open-ended questions.  Neither serves **bounded, domain-scoped,
+vetted corpora of highly technical prose** — protocols, API references, domain
+knowledge, tool-use provenance — which is exactly where hybrid dense+sparse
+retrieval still wins and where general agents otherwise fall back to untrusted
+web search.  That curated, tagged, auditable, hit-it-*first* retrieval is the
+niche DSAGT fills to supplement general agents on specialized, highly technical
+task loads.  The design above is the 2026 best-practice answer to the two
+documented failure modes: hybrid search (BM25 recovers the exact identifiers
+dense vectors miss) and per-collection domain scoping (the antidote to
+"vector-search dilution", where pure-vector accuracy collapses on large
+heterogeneous corpora).
+
+References:
+  - Code agents drop vector indexing for agentic grep —
+    https://www.mindstudio.ai/blog/is-rag-dead-what-ai-agents-use-instead ;
+    https://vadim.blog/claude-code-no-indexing/
+  - Hybrid BM25 + dense + reranking, the highest-impact RAG upgrade —
+    https://www.digitalapplied.com/blog/hybrid-search-bm25-vector-reranking-reference-2026
+  - "When More Documents Hurt RAG": vector-search dilution, fixed by
+    domain-scoped retrieval — https://arxiv.org/abs/2606.11350
+  - 2026 enterprise knowledge management — trust / traceability favor curated
+    KBs over web search —
+    https://windowsforum.com/threads/2026-enterprise-ai-knowledge-management-from-search-to-governed-agent-workflows.410816/
+
+Class map — every edge is ``<branch>─<rel> Class``, where ``<rel>`` is one of
+``◇`` holds · ``◆`` owns · ``▷`` inherits  (``*`` = one per collection)::
+
+    KnowledgeBase                   federation infra: ingest pipeline +
+    │                               cross-collection RRF (_rrf_across)
+    └─◇ VectorStore «abstract» 1..*   BYO adapter port: one embedder, many
+        │                             collections; single-collection add/search
+        └─▷ ChromaVectorStore         local Chroma; hybrid dense+BM25 per
+            │                         collection, fused by _rrf_merge
+            ├─◇ Embedder «abstract» 1   text → vectors; .create() factory
+            │   │                       (one per store; may be shared)
+            │   ├─▷ LocalEmbedder       sentence-transformers, offline
+            │   └─▷ APIEmbedder         OpenAI /v1/embeddings + rate-limit retry
+            ├─◆ ChromaIndex  *          dense leg   (add/search/save/load)
+            └─◆ BM25Index    *          sparse leg  (build/search/save/load)
+
+    free fns: _rrf_merge · _rrf_across (rank fusion, used by store + KB)
 """
 
 from __future__ import annotations
@@ -12,65 +70,41 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
 
-# Silence noisy parser libraries.  pypdf logs "invalid pdf header", "EOF
-# marker not found", and "Ignoring wrong pointing object" at WARNING for
-# every malformed PDF it touches — usually image-derived "PDFs" or stripped
-# arXiv source.  We already count read/parse failures as ``skipped_files``
-# in the ingest result, so these per-file warnings add no signal and a lot
-# of noise.  Demote to ERROR so genuine PDF library bugs still surface.
+# Silence noisy warnings, progress bars from a host of libraries
+import warnings as _warnings
+
 for _noisy in ("pypdf", "pypdf2", "PyPDF2", "pdfminer", "fontTools"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
-# sentence-transformers / huggingface_hub / httpx emit a wall of INFO at
-# embedding-model load time: every cached HEAD request to huggingface.co,
-# the SentenceTransformer "Loading model from..." line, the cache redirects.
-# Demote to WARNING so end-of-session extraction doesn't bury the actual
-# extraction result under model-cache validation traffic.  Errors still
-# surface (genuine network failures, missing models, etc.).
-for _noisy in ("httpx", "httpcore", "huggingface_hub", "sentence_transformers",
-               "transformers", "transformers_modules"):
+for _noisy in (
+    "httpx",
+    "httpcore",
+    "huggingface_hub",
+    "sentence_transformers",
+    "transformers",
+    "transformers_modules",
+):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
-# huggingface_hub's "you are sending unauthenticated requests" warning is
-# emitted both via ``logger.warning`` and via ``warnings.warn`` (one
-# stderr line each).  It's informational — anonymous downloads work
-# fine, just at lower rate limits — but it surfaces under roo's
-# ``--debug`` (which forwards MCP-server stderr) and confuses users
-# who don't realise HF_TOKEN is unrelated to whether dsagt works.
-# Demote the logger and filter the warning.
 logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
 
-# ``transformers`` BertModel loader writes a "LOAD REPORT" table to stdout
-# when missing/unexpected keys differ from the checkpoint — informational
-# for ML researchers debugging finetunes, noise for everyone else.  Their
-# own env var silences it.
-import os as _os
-_os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-# Disable huggingface_hub's tqdm progress bars (the "Loading weights:
-# 100%|...| 199/199" line at model load).  For cached models this loads
-# in <1s — the bar is pure noise.
-_os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-# Silence the FutureWarning sentence-transformers prints about its own
-# renamed method (``get_sentence_embedding_dimension`` →
-# ``get_embedding_dimension``); upstream still calls the deprecated form.
-import warnings as _warnings
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
 _warnings.filterwarnings(
     "ignore",
     message="The `get_sentence_embedding_dimension` method has been renamed",
     category=FutureWarning,
 )
-# Silence huggingface_hub's "Warning: You are sending unauthenticated
-# requests to the HF Hub" notice (UserWarning on the ``huggingface_hub``
-# module).  Setting HF_TOKEN works too, but we never bake user creds
-# into MCP env blocks on disk — see ``_mcp_env_block`` docstring.
+
 _warnings.filterwarnings(
     "ignore",
     message=r".*unauthenticated requests to the HF Hub.*",
@@ -78,11 +112,13 @@ _warnings.filterwarnings(
 
 import numpy as np
 
-# llama_index is intentionally NOT imported at module top.
-# It pulls in ~400 transitive submodules and adds ~8s to cold start, which
-# matters because dsagt-run imports this module on every tool invocation
-# but only ever needs the embedding/search code paths, never the parsers.
-# llama_index is lazy-imported inside _chunk_file() and _get_parser().
+# llama_index is intentionally NOT imported at module top: it pulls in ~400
+# transitive submodules and adds ~8s to import.  Only document *ingest*
+# (kb_ingest / the `dsagt init` KB build) needs the parsers — search, memory,
+# provenance indexing, and skills never do — so importing it at module top
+# would add ~8s of blocking load to every MCP-server startup (and to
+# post-session extraction) for a parser most sessions never invoke.
+# Lazy-imported inside _chunk_file() / _get_parser() so only ingest pays for it.
 
 from dsagt.observability import (
     kb_embed_span,
@@ -92,17 +128,65 @@ from dsagt.observability import (
     traced,
 )
 
-
 CODE_LANGUAGES = {
-    ".py": "python", ".js": "javascript", ".ts": "typescript",
-    ".jsx": "javascript", ".tsx": "typescript", ".rs": "rust",
-    ".go": "go", ".java": "java", ".cpp": "cpp", ".c": "c",
-    ".rb": "ruby", ".php": "php",
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".jsx": "javascript",
+    ".tsx": "typescript",
+    ".rs": "rust",
+    ".go": "go",
+    ".java": "java",
+    ".cpp": "cpp",
+    ".c": "c",
+    ".rb": "ruby",
+    ".php": "php",
 }
 
 
-class BaseEmbeddingClient(ABC):
-    """Common interface for all embedding backends."""
+# ===========================================================================
+# Embedder — one per VectorStore
+# ===========================================================================
+
+
+class Embedder(ABC):
+    """Common interface for all embedding backends.
+
+    A stateless-after-construction leaf: a single :class:`VectorStore` has-a one
+    ``Embedder``, and the *same* instance can be shared by several stores (e.g. a
+    Chroma store and a FAISS store on one embedding space).
+    """
+
+    #: Short backend tag used for tracing spans ("local" / "api").
+    backend: str = "unknown"
+    #: Model identifier, for span labelling / collection listing.  Subclasses
+    #: set this in ``__init__``.
+    model: str | None = None
+
+    @classmethod
+    def create(
+        cls,
+        backend: str,
+        *,
+        model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        device: str | None = None,
+    ) -> "Embedder":
+        """Factory: construct the one embedder for a store, with explicit args.
+
+        The api-vs-local selector that stays after per-collection embedder
+        routing was removed: a store fixes a single embedder at construction.
+        Each backend pulls only the parameters it uses — no ``**kwargs`` splat.
+        """
+        backend = (backend or "api").lower()
+        if backend == "local":
+            return LocalEmbedder(model=model, device=device)
+        if backend == "api":
+            return APIEmbedder(model=model, base_url=base_url, api_key=api_key)
+        raise ValueError(
+            f"Unknown embedding backend {backend!r}. Choose from: local, api"
+        )
 
     @abstractmethod
     def embed(self, texts: list[str]) -> np.ndarray:
@@ -112,41 +196,17 @@ class BaseEmbeddingClient(ABC):
         pass
 
 
-class BaseVectorIndex(ABC):
-    """Common interface for all vector-index backends."""
-
-    @abstractmethod
-    def add(self, embeddings: np.ndarray) -> None:
-        """Append pre-normalized embeddings."""
-
-    @abstractmethod
-    def search(self, query_vec: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
-        """Return (scores, int_indices) arrays of length k."""
-
-    @abstractmethod
-    def save(self, directory: Path) -> None:
-        """Persist index to *directory*."""
-
-    @classmethod
-    @abstractmethod
-    def load(cls, directory: Path) -> "BaseVectorIndex":
-        """Load index from *directory*."""
-
-    @property
-    @abstractmethod
-    def size(self) -> int:
-        """Number of vectors stored."""
-
-
-class LocalEmbeddingClient(BaseEmbeddingClient):
+class LocalEmbedder(Embedder):
     """sentence-transformers, runs fully offline."""
+
+    backend = "local"
 
     #: Default local model.  ``bge-small-en-v1.5`` (33M params, ~130 MB
     #: on disk, ~250 MB resident) is ~3× faster and ~3× smaller than the
     #: ``bge-base`` variant we used previously, with ~2 nDCG@10 points
     #: lower MTEB retrieval score — a hard-to-notice difference for
     #: typical DSAGT KB sizes (single-digit thousands of chunks).
-    #: Override via ``embedding.model`` in ``dsagt_config.yaml`` (e.g.
+    #: Override via ``embedding.model`` in ``.dsagt/config.yaml`` (e.g.
     #: ``BAAI/bge-large-en-v1.5`` for higher quality at the cost of
     #: ~10× memory and ~5× CPU).
     DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
@@ -159,30 +219,36 @@ class LocalEmbeddingClient(BaseEmbeddingClient):
     ):
         import sys
         from sentence_transformers import SentenceTransformer
+
         model = model or self.DEFAULT_MODEL
+        self.model = model
         self.batch_size = batch_size
         # Probe the HF cache for the model's config.  If hit, load with
         # ``local_files_only=True`` so SentenceTransformer skips the
         # ETag-validation HEAD requests it would otherwise issue against
         # huggingface.co — those round-trips are anonymous (HF_TOKEN
-        # isn't propagated into MCP-server env blocks for cline / roo /
+        # isn't propagated into MCP-server env blocks for cline /
         # codex), so they trigger an "unauthenticated requests" warning
-        # surfaced under roo's ``--debug``.  Cache miss path stays
+        # surfaced under the agent's debug stream.  Cache miss path stays
         # online so first-run downloads still work.
         try:
             from huggingface_hub import try_to_load_from_cache
+
             cache_hit = try_to_load_from_cache(model, "config.json") is not None
         except Exception:
             cache_hit = False
         if cache_hit:
             self._model = SentenceTransformer(
-                model, device=device, local_files_only=True,
+                model,
+                device=device,
+                local_files_only=True,
             )
         else:
             print(
                 f"  Downloading {model} from HuggingFace "
                 "(set HF_TOKEN for faster throughput)...",
-                file=sys.stderr, flush=True,
+                file=sys.stderr,
+                flush=True,
             )
             self._model = SentenceTransformer(model, device=device)
         # Belt-and-suspenders: dsagt/__init__.py sets OMP_NUM_THREADS /
@@ -191,20 +257,20 @@ class LocalEmbeddingClient(BaseEmbeddingClient):
         # vars in some configurations.  Cap explicitly here.
         try:
             import torch
+
             torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", "4")))
         except Exception:  # noqa: BLE001 — best-effort cap, never fatal
             pass
         logger.info(
             "Loaded local embedding model: %s (dim=%d)",
-            model, self._model.get_sentence_embedding_dimension(),
+            model,
+            self._model.get_embedding_dimension(),
         )
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        if not texts:
-            return np.array([], dtype=np.float32)
         # Show the progress bar only for non-trivial inputs so single-query
         # search calls (kb.search → embed([query])) stay silent while large
-        # ingest / setup-kb runs surface tqdm progress.
+        # ingest runs surface tqdm progress.
         show_bar = len(texts) > self.batch_size
         return self._model.encode(
             texts,
@@ -214,19 +280,18 @@ class LocalEmbeddingClient(BaseEmbeddingClient):
         ).astype(np.float32)
 
 
-# --- rate-limit retry helpers (used by APIEmbeddingClient) ----------------
+# --- rate-limit retry helpers (used by APIEmbedder) ----------------
 #
-# We can't rely on litellm.num_retries alone for embedding rate limits.  Lab
-# LiteLLM proxies (notably PNNL's Azure-fronted instance) wrap upstream 429s
-# as APIConnectionError carrying the rate-limit error in a JSON message body,
-# which defeats litellm's exception-class-based retry detection.  Even when
-# litellm does retry, its default exponential backoff caps at ~30s total
-# across 5 attempts, while Azure's per-minute quota window asks for 60s+
-# between retries.  So we own this retry layer ourselves and disable
-# litellm's by passing ``num_retries=0`` per call.
+# The API embedder talks to an OpenAI-compatible ``/v1/embeddings`` endpoint
+# over httpx.  We own the retry layer because lab gateways (notably PNNL's
+# Azure-fronted instance) return upstream 429s with the quota window in the
+# body and ask for 60s+ between retries — longer than a generic exponential
+# backoff would wait.  Rate-limit / transient errors retry with a
+# retry-after-aware wait; auth / bad-request errors fail fast.
 
 _RETRY_AFTER_RE = re.compile(
-    r"retry after (\d+(?:\.\d+)?)\s*seconds?", re.IGNORECASE,
+    r"retry after (\d+(?:\.\d+)?)\s*seconds?",
+    re.IGNORECASE,
 )
 
 
@@ -246,31 +311,22 @@ def _extract_retry_after_seconds(message: str, default: float = 60.0) -> float:
 def _is_retryable_embedding_error(exc: Exception) -> bool:
     """Decide whether an embedding exception is worth retrying.
 
-    Detects rate-limit and transient errors across the various shapes
-    LiteLLM exposes them in.  Authentication / bad-request errors are
-    explicitly NOT retryable so we fail fast on misconfiguration.
+    Retries rate-limit (429) and transient server / network errors;
+    authentication and bad-request errors are explicitly NOT retryable so
+    we fail fast on misconfiguration.
     """
-    # litellm is a hard dependency — broken install if this fails.
-    import litellm
+    import httpx
 
-    if isinstance(exc, (
-        litellm.exceptions.AuthenticationError,
-        litellm.exceptions.BadRequestError,
-        litellm.exceptions.NotFoundError,
-        litellm.exceptions.PermissionDeniedError,
-    )):
-        return False
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        # 408 request timeout, 425 too early, 429 rate limit, 5xx server.
+        return code in (408, 425, 429, 500, 502, 503, 504)
 
-    if isinstance(exc, (
-        litellm.exceptions.RateLimitError,
-        litellm.exceptions.APIConnectionError,
-        litellm.exceptions.Timeout,
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.InternalServerError,
-    )):
+    # Connect / read timeouts and other transport failures are transient.
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
         return True
 
-    # Some lab proxies wrap rate limits as plain Exceptions with the upstream
+    # Some gateways wrap rate limits in a plain Exception with the upstream
     # body in str(exc).  Fall back to message inspection.
     msg = str(exc).lower()
     return any(k in msg for k in ("rate limit", "ratelimiterror", "429", "throttl"))
@@ -279,38 +335,47 @@ def _is_retryable_embedding_error(exc: Exception) -> bool:
 def _retry_wait_seconds(exc: Exception, attempt: int) -> float:
     """How long to sleep before the next retry attempt.
 
-    Rate-limit errors get the upstream-suggested wait (or 60s default).
-    Other transient errors get exponential backoff capped at 30s.
+    Honors a ``Retry-After`` header (or a retry-after hint in the body) on
+    rate-limit responses; other transient errors get exponential backoff
+    capped at 30s.
     """
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        retry_after = exc.response.headers.get("retry-after")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+        if exc.response.status_code == 429:
+            return _extract_retry_after_seconds(exc.response.text, default=60.0)
     msg = str(exc).lower()
     if "rate limit" in msg or "429" in msg or "throttl" in msg:
         return _extract_retry_after_seconds(str(exc), default=60.0)
-    return min(2.0 ** attempt, 30.0)
+    return min(2.0**attempt, 30.0)
 
 
-class APIEmbeddingClient(BaseEmbeddingClient):
-    """OpenAI-compatible embedding client backed by LiteLLM.
+class APIEmbedder(Embedder):
+    """Embedding client for an OpenAI-compatible ``/v1/embeddings`` endpoint.
 
-    LiteLLM normalizes a wide set of providers (OpenAI, Azure, Bedrock,
-    Vertex, Cohere, Voyage, Ollama, Together, etc.) behind a single
-    ``embedding(...)`` call.  This client adds two things on top:
+    Talks to the endpoint directly over httpx — no provider-abstraction
+    layer.  The model string is sent verbatim in the request body, so
+    gateway aliases (``text-embedding-3-small-project``) and HuggingFace-
+    style names with slashes (``nomic-ai/nomic-embed-text-v1``) pass
+    through unchanged.  Two things on top of the raw call:
 
     1. **Manual batching** of large inputs into ``batch_size``-sized
        requests so a single rate-limit hit only loses one batch and the
        user can see per-batch progress in the logs.
 
     2. **Explicit rate-limit retry** with retry-after-aware backoff
-       (see ``_embed_batch_with_retry``).  This is the layer that keeps
-       large ``kb_ingest`` and ``dsagt-setup-kb`` runs alive in the face
-       of TPM quotas — litellm's built-in retry isn't sufficient because
-       lab proxies wrap upstream 429s in a way that defeats its
-       exception-class detection, and its backoff is too short for the
-       60-second quota windows Azure enforces.
-
-    The model string passed to LiteLLM determines provider routing.  Bare
-    model names get an ``openai_like/`` prefix so the lab proxy receives
-    the model alias unchanged.
+       (see ``_embed_batch_with_retry``) — what keeps large ``kb_ingest``
+       and ``dsagt init`` KB builds alive against the 60-second quota
+       windows lab gateways enforce.
     """
+
+    backend = "api"
 
     def __init__(
         self,
@@ -320,12 +385,17 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         timeout: float = 300.0,
         batch_size: int = 100,
     ):
-        self.model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small-project")
-        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
+        import httpx
+
+        self.model = model or os.getenv(
+            "EMBEDDING_MODEL", "text-embedding-3-small-project"
+        )
+        self.base_url = (
+            base_url or os.getenv("EMBEDDING_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+        )
         # EMBEDDING_API_KEY is the canonical name; LLM_API_KEY/OPENAI_API_KEY
         # are legacy fallbacks from when the embedding endpoint shared the
-        # LLM endpoint's auth.  When embeddings route through dsagt's proxy
-        # (the default), this is a sentinel — the proxy holds the real key.
+        # LLM endpoint's auth.
         self.api_key = (
             api_key
             or os.getenv("EMBEDDING_API_KEY")
@@ -336,30 +406,21 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         self.batch_size = batch_size
 
         if not self.base_url:
-            raise ValueError("Embedding API base URL required via argument or OPENAI_BASE_URL env var")
+            raise ValueError(
+                "Embedding API base URL required via argument or "
+                "EMBEDDING_BASE_URL / OPENAI_BASE_URL env var"
+            )
         if not self.api_key:
-            raise ValueError("API key required via argument or LLM_API_KEY env var")
+            raise ValueError(
+                "API key required via argument or EMBEDDING_API_KEY env var"
+            )
 
-        # Always prefix with ``openai_like`` so LiteLLM dispatches to the
-        # OpenAI-wire-protocol client pointed at our ``base_url`` — the rest
-        # of DSAGT already assumes the embedding endpoint is OpenAI-compat,
-        # so there's no valid case for a different provider here.
-        #
-        # ``openai_like`` (not ``openai``) is deliberate on two counts: (a)
-        # ``openai`` matches LiteLLM's canonical model registry and silently
-        # normalizes aliases like ``text-embedding-3-small-project`` down to
-        # ``text-embedding-3-small``, which lab proxies then reject; (b)
-        # ``openai_like`` is the documented escape hatch for "endpoint
-        # speaks OpenAI but is not OpenAI" — it forwards the model string
-        # verbatim, preserving HuggingFace-style names (``lbl/nomic-embed-text``,
-        # ``nomic-ai/nomic-embed-text-v1``) whose slashes are part of the
-        # model identifier, not a provider prefix.
-        self._litellm_model = f"openai_like/{self.model}"
+        # ``base_url`` is the OpenAI-style root (typically ending in ``/v1``);
+        # the embeddings route hangs off it.
+        self._embeddings_url = self.base_url.rstrip("/") + "/embeddings"
+        self._client = httpx.Client(timeout=timeout)
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        if not texts:
-            return np.array([], dtype=np.float32)
-
         # Single small input: one call, no batch logging.
         if len(texts) <= self.batch_size:
             return self._embed_batch_with_retry(texts)
@@ -369,11 +430,13 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         n_batches = (len(texts) + self.batch_size - 1) // self.batch_size
         batches: list[np.ndarray] = []
         for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
+            batch = texts[i : i + self.batch_size]
             batch_num = i // self.batch_size + 1
             logger.info(
                 "Embedding batch %d/%d (%d texts)",
-                batch_num, n_batches, len(batch),
+                batch_num,
+                n_batches,
+                len(batch),
             )
             batches.append(self._embed_batch_with_retry(batch))
         return np.vstack(batches)
@@ -386,24 +449,22 @@ class APIEmbeddingClient(BaseEmbeddingClient):
         """Embed one batch with explicit rate-limit and transient-error retry.
 
         See the module-level rate-limit retry helpers for the rationale.
-        We pass ``num_retries=0`` to litellm so its built-in retry doesn't
-        race with ours and we don't end up double-retrying with conflicting
-        backoff strategies.
         """
-        import litellm
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"model": self.model, "input": texts}
 
         attempt = 0
         while True:
             attempt += 1
             try:
-                response = litellm.embedding(
-                    model=self._litellm_model,
-                    input=texts,
-                    api_base=self.base_url,
-                    api_key=self.api_key,
-                    timeout=self.timeout,
-                    num_retries=0,
+                resp = self._client.post(
+                    self._embeddings_url, json=payload, headers=headers
                 )
+                resp.raise_for_status()
+                data = resp.json()
                 break  # success
             except Exception as exc:
                 if not _is_retryable_embedding_error(exc) or attempt >= max_attempts:
@@ -412,69 +473,35 @@ class APIEmbeddingClient(BaseEmbeddingClient):
                 logger.warning(
                     "Embedding error (attempt %d/%d). "
                     "Waiting %.0fs then retrying. Cause: %s",
-                    attempt, max_attempts, wait, str(exc)[:200],
+                    attempt,
+                    max_attempts,
+                    wait,
+                    str(exc)[:200],
                 )
                 time.sleep(wait)
 
-        # Response shape mirrors OpenAI: response.data is a list of objects
-        # with .embedding (or ['embedding'] for dict access).
-        sorted_data = sorted(
-            response.data,
-            key=lambda d: d["index"] if isinstance(d, dict) else d.index,
-        )
-        vectors = [
-            d["embedding"] if isinstance(d, dict) else d.embedding
-            for d in sorted_data
-        ]
+        # Response shape is OpenAI's: ``data`` is a list of ``{"index": i,
+        # "embedding": [...]}`` objects, not guaranteed to be in input order.
+        sorted_data = sorted(data["data"], key=lambda d: d["index"])
+        vectors = [d["embedding"] for d in sorted_data]
         return np.array(vectors, dtype=np.float32)
 
     def close(self) -> None:
-        # No client object to close anymore — LiteLLM owns its own pool.
-        pass
-
-class FAISSIndex(BaseVectorIndex):
-    """Inner-product FAISS flat index (cosine similarity on L2-normed vecs)."""
-
-    _FILENAME = "index.faiss"
-
-    def __init__(self, dim: int | None = None):
-        self._dim = dim
-        self._index = None  # lazy-init on first add
-
-    def _ensure_init(self, dim: int) -> None:
-        if self._index is None:
-            import faiss
-            self._dim = dim
-            self._index = faiss.IndexFlatIP(dim)
-
-    def add(self, embeddings: np.ndarray) -> None:
-        self._ensure_init(embeddings.shape[1])
-        self._index.add(embeddings)
-
-    def search(self, query_vec: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
-        k = min(k, self._index.ntotal)
-        scores, indices = self._index.search(query_vec.reshape(1, -1), k)
-        return scores[0], indices[0]
-
-    def save(self, directory: Path) -> None:
-        import faiss
-        faiss.write_index(self._index, str(directory / self._FILENAME))
-
-    @classmethod
-    def load(cls, directory: Path) -> "FAISSIndex":
-        import faiss
-        obj = cls()
-        obj._index = faiss.read_index(str(directory / cls._FILENAME))
-        obj._dim = obj._index.d
-        return obj
-
-    @property
-    def size(self) -> int:
-        return 0 if self._index is None else self._index.ntotal
+        self._client.close()
 
 
-class ChromaIndex(BaseVectorIndex):
-    """ChromaDB-backed index.  Requires ``chromadb`` package."""
+# ===========================================================================
+# ChromaIndex — single-collection dense vector wrapper (ChromaVectorStore's leg)
+# ===========================================================================
+
+
+class ChromaIndex:
+    """ChromaDB-backed dense index for ONE collection.  Requires ``chromadb``.
+
+    A plain helper owned by :class:`ChromaVectorStore` — not a pluggable
+    "vector-DB backend".  Stores cosine-space HNSW vectors plus a positional
+    id list so returned integer indices line up with the chunk list.
+    """
 
     _META_FILE = "chroma_ids.json"  # maps int position → chroma id
 
@@ -495,7 +522,12 @@ class ChromaIndex(BaseVectorIndex):
 
     # ChromaDB stores ids internally; we maintain a positional list so that
     # returned integer indices are consistent with the chunk list.
-    def add(self, embeddings: np.ndarray, metadatas: list[dict] | None = None) -> None:
+    def add(
+        self,
+        embeddings: np.ndarray,
+        metadatas: list[dict] | None = None,
+        documents: list[str] | None = None,
+    ) -> None:
         start = len(self._ids)
         new_ids = [str(start + i) for i in range(len(embeddings))]
         self._ids.extend(new_ids)
@@ -508,20 +540,32 @@ class ChromaIndex(BaseVectorIndex):
         batch_size = 5000
         for i in range(0, len(new_ids), batch_size):
             kwargs: dict = {
-                "ids": new_ids[i:i + batch_size],
-                "embeddings": embeddings_list[i:i + batch_size],
+                "ids": new_ids[i : i + batch_size],
+                "embeddings": embeddings_list[i : i + batch_size],
             }
             if metadatas is not None:
-                kwargs["metadatas"] = metadatas[i:i + batch_size]
+                kwargs["metadatas"] = metadatas[i : i + batch_size]
+            # Store the chunk text as the Chroma *document* too — that's what
+            # ``where_document`` ($contains / $regex) matches against.
+            if documents is not None:
+                kwargs["documents"] = documents[i : i + batch_size]
             self._col.add(**kwargs)
 
-    def search(self, query_vec: np.ndarray, k: int, where: dict | None = None) -> tuple[np.ndarray, np.ndarray]:
+    def search(
+        self,
+        query_vec: np.ndarray,
+        k: int,
+        where: dict | None = None,
+        where_document: dict | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         k = min(k, len(self._ids))
         if k == 0:
             return np.array([], dtype=np.float32), np.array([], dtype=np.int64)
         query_kwargs: dict = {"query_embeddings": [query_vec.tolist()], "n_results": k}
         if where is not None:
             query_kwargs["where"] = where
+        if where_document is not None:
+            query_kwargs["where_document"] = where_document
         results = self._col.query(**query_kwargs)
         chroma_ids = results["ids"][0]
         distances = results["distances"][0]  # cosine distance (0=identical)
@@ -547,6 +591,10 @@ class ChromaIndex(BaseVectorIndex):
         return len(self._ids)
 
 
+# ===========================================================================
+# BM25 — the sparse leg fused with dense vectors per collection
+# ===========================================================================
+
 # BM25 sparse-retrieval token splitter.  Splits on every non-alphanumeric
 # character so ``snake_case`` and ``kebab-case`` identifiers fan out into
 # their parts; this matters because much of what an agent searches the KB
@@ -563,15 +611,15 @@ def _bm25_tokenize(text: str) -> list[str]:
 class BM25Index:
     """Sparse BM25 keyword index over a collection's chunk texts.
 
-    Maintained alongside the dense vector index so :meth:`KnowledgeBase.search`
-    can fuse the two via Reciprocal Rank Fusion.  Stored as a single
-    pickle file (``bm25.pkl``) per collection.
+    Maintained alongside the dense vector index so single-collection search
+    can fuse the two via Reciprocal Rank Fusion.  Stored as a single pickle
+    file (``bm25.pkl``) per collection — its presence is also what marks a
+    collection as *hybrid*.
 
-    Rebuilt from scratch on every ``add_entries`` / ``append`` because BM25
-    IDF stats are corpus-global — there is no cheap incremental update.
-    For DSAGT corpus sizes (single-digit thousands of chunks) the rebuild
-    is millisecond-scale, so this is fine.  Watch the cost if a collection
-    grows past tens of thousands of entries.
+    Rebuilt from scratch on every write because BM25 IDF stats are
+    corpus-global — there is no cheap incremental update.  For DSAGT corpus
+    sizes (single-digit thousands of chunks) the rebuild is millisecond-scale.
+    Watch the cost if a collection grows past tens of thousands of entries.
     """
 
     _FILENAME = "bm25.pkl"
@@ -582,6 +630,7 @@ class BM25Index:
 
     def build(self, texts: list[str]) -> None:
         from rank_bm25 import BM25Okapi
+
         if not texts:
             self._bm25 = None
             self._n = 0
@@ -613,12 +662,14 @@ class BM25Index:
 
     def save(self, directory: Path) -> None:
         import pickle
+
         with open(directory / self._FILENAME, "wb") as f:
             pickle.dump({"bm25": self._bm25, "n": self._n}, f)
 
     @classmethod
     def load(cls, directory: Path) -> "BM25Index":
         import pickle
+
         obj = cls()
         path = directory / cls._FILENAME
         if path.exists():
@@ -631,6 +682,11 @@ class BM25Index:
     @property
     def size(self) -> int:
         return self._n
+
+
+# ===========================================================================
+# Reciprocal Rank Fusion — within a collection AND across collections/stores
+# ===========================================================================
 
 
 def _rrf_merge(
@@ -658,141 +714,514 @@ def _rrf_merge(
     return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
 
 
-# map short names to embedding client constructors
-EMBEDDER_REGISTRY: dict[str, type[BaseEmbeddingClient]] = {
-    "local": LocalEmbeddingClient,
-    "api": APIEmbeddingClient,
-}
+def _chunk_key(chunk: dict) -> tuple:
+    """Stable identity for a result chunk, for cross-collection RRF.
 
-# map short names to vector-index constructors
-VECTORINDEX_REGISTRY: dict[str, type[BaseVectorIndex]] = {
-    "faiss": FAISSIndex,
-    "chroma": ChromaIndex,
-}
-
-
-def _make_embedder(backend: str, **kwargs) -> BaseEmbeddingClient:
-    backend = backend.lower()
-    if backend not in EMBEDDER_REGISTRY:
-        raise ValueError(f"Unknown embedding backend '{backend}'. "
-                         f"Choose from: {list(EMBEDDER_REGISTRY)}")
-    return EMBEDDER_REGISTRY[backend](**kwargs)
-
-
-def _make_index(backend: str, **kwargs) -> BaseVectorIndex:
-    backend = backend.lower()
-    if backend not in VECTORINDEX_REGISTRY:
-        raise ValueError(f"Unknown vector-index backend '{backend}'. "
-                         f"Choose from: {list(VECTORINDEX_REGISTRY)}")
-    return VECTORINDEX_REGISTRY[backend](**kwargs)
-
-
-@dataclass
-class CollectionRoute:
+    Different collections (and, later, different stores/embedders) live in
+    incomparable score spaces, so fusion is rank-only.  We key on the chunk's
+    own metadata rather than score; ``id``-based fallback keeps distinct chunks
+    distinct even when metadata is sparse.
     """
-    Describes which embedding client and vector-index backend to use for a
-    named collection.
+    meta = chunk.get("metadata", {})
+    return (
+        meta.get("collection"),
+        meta.get("source_file"),
+        meta.get("chunk_index"),
+        chunk.get("text", "")[:64],
+    )
 
-    Parameters
-    ----------
-    embedding_backend : str
-        Key in EMBEDDER_REGISTRY, e.g. ``"local"`` or ``"api"``.
-    vector_db : str
-        Key in VECTORINDEX_REGISTRY, e.g. ``"faiss"`` or ``"chroma"``.
-    embedder_kwargs : dict
-        Extra kwargs forwarded to the embedding client constructor.
-    index_kwargs : dict
-        Extra kwargs forwarded to the vector-index constructor.
-    description : str
-        Human-readable note shown in ``list_collections()`` when no
-        DESCRIPTION.md file exists.
-    hybrid : bool
-        If True (default), maintain a BM25 sparse index alongside the
-        dense vector index and fuse results via Reciprocal Rank Fusion
-        on every search.  Costs one pickle file per collection and a
-        rebuild on every write; gains are exact-token recall (API
-        names, error strings, identifiers) that cosine on dense
-        embeddings tends to under-rank.  Set False to skip BM25 entirely
-        for a collection.
+
+def _rrf_across(result_lists: list[list[dict]], k: int = 60) -> list[dict]:
+    """Rank-fuse per-collection result lists (each ``[{chunk, score}, ...]``).
+
+    Rank-only RRF across the lists — no cross-space score normalization, which
+    is exactly what lets results from different embedding spaces fuse correctly.
+    Returns a single list of result dicts (``score`` replaced by the RRF score),
+    sorted by descending fused score.
+    """
+    scores: dict[tuple, float] = {}
+    rep: dict[tuple, dict] = {}
+    for results in result_lists:
+        for rank, r in enumerate(results):
+            key = _chunk_key(r["chunk"])
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
+            rep.setdefault(key, r)
+    ordered = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [{**rep[key], "score": float(score)} for key, score in ordered]
+
+
+# ---------------------------------------------------------------------------
+# Recency weighting (episodic session_memory only)
+# ---------------------------------------------------------------------------
+
+#: The one collection recency applies to.  Mirrors
+#: ``memory.SESSION_MEMORY_COLLECTION`` as a literal to avoid a knowledge→memory
+#: import (memory imports knowledge, not the reverse).
+_RECENCY_COLLECTION = "session_memory"
+
+#: Max fractional boost a brand-new fact gets over its raw relevance.  A *boost*,
+#: never a penalty: recency only lifts recent facts, so a strongly-relevant old
+#: fact (e.g. a day-1 threshold that never changed) is never buried — it keeps
+#: its full relevance score while a same-relevance newer fact edges ahead.
+_RECENCY_BOOST = 0.5
+
+
+def _apply_recency(
+    results: list[dict],
+    half_life_days: float,
+    now: float,
+    boost: float = _RECENCY_BOOST,
+) -> list[dict]:
+    """Re-rank ``[{chunk, score}, ...]`` by relevance × a recency factor.
+
+    ``factor = 1 + boost · 2^(-age / half_life)`` — newest facts get up to
+    ``1+boost``, decaying toward ``1`` (no change) with the given half-life.
+    Facts without a numeric ``ts_epoch`` get factor ``1.0`` (unweighted), never
+    dropped.  Pure + side-effect-free so it's unit-testable without an embedder.
+    """
+    hl_seconds = max(1.0, half_life_days * 86400.0)
+    weighted = []
+    for r in results:
+        ts = r["chunk"].get("metadata", {}).get("ts_epoch")
+        if ts is None:
+            factor = 1.0
+        else:
+            age = max(0.0, now - float(ts))
+            factor = 1.0 + boost * (0.5 ** (age / hl_seconds))
+        weighted.append({**r, "score": r["score"] * factor, "recency_factor": factor})
+    weighted.sort(key=lambda r: r["score"], reverse=True)
+    return weighted
+
+
+# ===========================================================================
+# VectorStore — one embedder, many collections (the BYO adapter port)
+# ===========================================================================
+
+
+class VectorStore(ABC):
+    """One :class:`Embedder`, many collections: store + single-collection search.
+
+    The adapter contract a BYO store implements: subclass this and wrap your
+    own backend.  :class:`KnowledgeBase` holds a list of these and fuses their
+    collections.  Heterogeneity (mixed embedding spaces) is expressed by having
+    *several* stores in the list, never by routing within one store.
+
+    TODO (deferred to the second concrete store — BYO/FAISS, see
+    knowledge-base-plan.md): most of :class:`ChromaVectorStore` is backend-
+    agnostic — the BM25 sparse leg, the dense+sparse hybrid fusion, the
+    ``chunks.jsonl`` payload, ``_normalize``.  Only the dense index
+    (add/query/persist over Chroma's HNSW) is Chroma-specific.  When a second
+    store lands, lift that reusable machinery into a shared base that defers
+    only the dense primitives to subclasses, so a FAISS/BYO store reuses it
+    rather than copying it.  Not extracted now: with one impl the seam can't be
+    validated.  Dense-only stores (external adapters with no local sparse leg)
+    are modelled as a *separate store type*, not a per-instance flag.
     """
 
-    embedding_backend: str = "api"
-    vector_db: str = "chroma"
-    embedder_kwargs: dict = field(default_factory=dict)
-    index_kwargs: dict = field(default_factory=dict)
-    description: str = ""
-    hybrid: bool = True
+    embedder: Embedder
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+    @property
+    @abstractmethod
+    def collections(self) -> list[str]:
+        """Names of the collections this store hosts."""
 
-    @classmethod
-    def from_dict(cls, d: dict) -> "CollectionRoute":
-        return cls(**d)
+    @abstractmethod
+    def has_collection(self, name: str) -> bool:
+        """Whether *name* is hosted by this store."""
+
+    @abstractmethod
+    def collection_info(self, name: str) -> dict:
+        """Listing metadata for *name* (description, embedder, vector_db)."""
+
+    @abstractmethod
+    def embed(self, texts: list[str]) -> np.ndarray:
+        """Embed *texts* with this store's embedder (L2-normalized)."""
+
+    @abstractmethod
+    def add_chunks(
+        self,
+        collection: str,
+        chunks: list[dict],
+        return_embeddings: bool = False,
+    ) -> dict:
+        """Embed + store pre-built ``{text, metadata}`` chunks into *collection*."""
+
+    @abstractmethod
+    def add_entries(
+        self,
+        texts: list[str],
+        collection: str,
+        metadatas: list[dict] | None = None,
+        return_embeddings: bool = False,
+    ) -> dict:
+        """Embed + store raw *texts* (with optional metadata) into *collection*."""
+
+    @abstractmethod
+    def search(
+        self,
+        query: str,
+        collection: str,
+        top_k: int,
+        where: dict | None = None,
+        where_document: dict | None = None,
+    ) -> list[dict]:
+        """Single-collection hybrid search → ``[{chunk, score}, ...]``."""
+
+    def close(self) -> None:
+        pass
+
+
+class ChromaVectorStore(VectorStore):
+    """Local-ChromaDB store: one embedder, many collections under *index_dir*.
+
+    Each collection lives in ``<index_dir>/<name>/`` as a Chroma persistent
+    collection (dense), a ``chunks.jsonl`` payload, and a ``bm25.pkl`` sparse
+    leg.  The embedder is fixed for the whole store; it is built lazily (via
+    :meth:`Embedder.create`) so server startup can background-load it, or injected
+    directly for reuse across stores.
+
+    The local store is **unconditionally hybrid**: it writes a BM25 sparse leg on
+    every write and fuses dense + sparse on every (unfiltered) search.  Dense-only
+    retrieval is not a toggle here — a metadata-``where`` filter falls back to
+    dense-only for that one query (BM25 has no filter equivalent), and dense-only
+    *stores* (external/BYO adapters with no local sparse leg) are a separate store
+    type, not a flag on this one.
+    """
+
+    def __init__(
+        self,
+        index_dir: str | Path,
+        embedder: Embedder | None = None,
+        *,
+        backend: str = "api",
+        model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        device: str | None = None,
+    ):
+        self.index_dir = Path(index_dir)
+        self.index_dir.mkdir(parents=True, exist_ok=True)
+
+        # Embedder is either injected (shareable across stores) or built lazily
+        # from explicit args.  Lazy build keeps the ~5-10s sentence-transformers
+        # load off the hot path (see preload via KnowledgeBase).  backend/model
+        # are kept as lightweight labels so listing never forces a model load.
+        self._embedder = embedder
+        if embedder is not None:
+            self._backend, self._model = embedder.backend, embedder.model
+        else:
+            self._backend, self._model = backend, model
+        self._base_url, self._api_key, self._device = base_url, api_key, device
+        # Serializes embedder construction so a background preload and a
+        # foreground first-query call don't race and double-load the model.
+        self._embedder_lock = threading.Lock()
+
+        # Collection runtime caches: name → (ChromaIndex, chunks) and name → BM25.
+        self._cache: dict[str, tuple[ChromaIndex, list[dict]]] = {}
+        self._bm25_cache: dict[str, BM25Index] = {}
+
+    # -- embedder ------------------------------------------------------------
+
+    @property
+    def embedder(self) -> Embedder:  # type: ignore[override]
+        with self._embedder_lock:
+            if self._embedder is None:
+                self._embedder = Embedder.create(
+                    self._backend,
+                    model=self._model,
+                    base_url=self._base_url,
+                    api_key=self._api_key,
+                    device=self._device,
+                )
+            return self._embedder
+
+    @property
+    def backend(self) -> str:
+        return self._backend
+
+    @property
+    def model(self) -> str | None:
+        return self._model
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        with kb_embed_span(self.backend, self.model, len(texts)):
+            return self._normalize(self.embedder.embed(texts))
+
+    @staticmethod
+    def _normalize(arr: np.ndarray) -> np.ndarray:
+        norms = np.linalg.norm(arr, axis=-1, keepdims=True)
+        return arr / np.where(norms > 0, norms, 1)
+
+    # -- collection inventory ------------------------------------------------
+
+    @property
+    def collections(self) -> list[str]:
+        return [
+            p.name
+            for p in self.index_dir.iterdir()
+            if p.is_dir() and (p / "chroma_ids.json").exists()
+        ]
+
+    def has_collection(self, name: str) -> bool:
+        return (self.index_dir / name / "chroma_ids.json").exists()
+
+    def collection_info(self, name: str) -> dict:
+        coll_dir = self.index_dir / name
+        desc_path = coll_dir / "DESCRIPTION.md"
+        description = desc_path.read_text() if desc_path.exists() else ""
+        return {
+            "name": name,
+            "description": description,
+            "embedding_backend": self.backend,
+            "embedding_model": self.model or "default",
+            "vector_db": "chroma",
+        }
+
+    # -- writes --------------------------------------------------------------
+
+    def add_chunks(
+        self,
+        collection: str,
+        chunks: list[dict],
+        return_embeddings: bool = False,
+    ) -> dict:
+        """Embed + store pre-built ``{text, metadata}`` chunks.
+
+        The shared write path for both document ingest (chunks carry
+        ``source_file`` / ``file_type``) and structured entries.  Rebuilds the
+        BM25 sparse leg on every write (the store is unconditionally hybrid).
+        """
+        coll_dir = self.index_dir / collection
+        coll_dir.mkdir(parents=True, exist_ok=True)
+
+        texts = [c["text"] for c in chunks]
+        metadatas = [c.get("metadata", {}) for c in chunks]
+        embeddings = self.embed(texts)
+
+        if (coll_dir / "chunks.jsonl").exists():
+            index, existing_chunks = self._load(collection)
+        else:
+            index = ChromaIndex(collection_name=coll_dir.name, persist_dir=coll_dir)
+            existing_chunks = []
+
+        try:
+            index.add(embeddings, metadatas=metadatas, documents=texts)
+        except Exception as e:
+            hint = self._stale_index_message(collection, e)
+            if hint:
+                raise RuntimeError(hint) from e
+            raise
+        index.save(coll_dir)
+
+        with open(coll_dir / "chunks.jsonl", "a") as f:
+            for chunk in chunks:
+                f.write(json.dumps(chunk) + "\n")
+
+        all_chunks = existing_chunks + chunks
+        self._rebuild_bm25(collection, all_chunks)
+        self._cache[collection] = (index, all_chunks)
+
+        result = {
+            "collection": collection,
+            "entries_added": len(chunks),
+            "total_entries": len(all_chunks),
+        }
+        if return_embeddings:
+            result["embeddings"] = embeddings
+        return result
+
+    def add_entries(
+        self,
+        texts: list[str],
+        collection: str,
+        metadatas: list[dict] | None = None,
+        return_embeddings: bool = False,
+    ) -> dict:
+        """Add raw *texts* (no parsing/chunking) as entries in *collection*."""
+        coll_dir = self.index_dir / collection
+        existing = 0
+        if (coll_dir / "chunks.jsonl").exists():
+            _, existing_chunks = self._load(collection)
+            existing = len(existing_chunks)
+
+        chunks = []
+        for i, text in enumerate(texts):
+            entry_meta = metadatas[i] if metadatas else {}
+            chunks.append(
+                {
+                    "text": text,
+                    "metadata": {
+                        "collection": collection,
+                        "source_file": "entry",
+                        "chunk_index": existing + i,
+                        **entry_meta,
+                    },
+                }
+            )
+        return self.add_chunks(collection, chunks, return_embeddings=return_embeddings)
+
+    # -- single-collection hybrid search ------------------------------------
+
+    def search(
+        self,
+        query: str,
+        collection: str,
+        top_k: int,
+        where: dict | None = None,
+        where_document: dict | None = None,
+    ) -> list[dict]:
+        index, chunks = self._load(collection)
+        query_emb = self.embed([query])[0]
+
+        # A ``where`` (metadata) or ``where_document`` (text content) filter
+        # disables the BM25 leg — BM25 has no filter equivalent, so a filtered
+        # search is dense-only.
+        filtered = where is not None or where_document is not None
+        do_hybrid = not filtered
+        # Oversample the per-ranker pools so RRF has depth on small top_k.
+        candidate_k = min(
+            max(top_k * 10, 50) if do_hybrid else top_k,
+            len(chunks),
+        )
+
+        with kb_index_search_span("chroma", candidate_k, filtered):
+            try:
+                if filtered:
+                    dense_scores, dense_indices = index.search(
+                        query_emb,
+                        candidate_k,
+                        where=where,
+                        where_document=where_document,
+                    )
+                else:
+                    dense_scores, dense_indices = index.search(query_emb, candidate_k)
+            except Exception as e:
+                hint = self._stale_index_message(collection, e)
+                if hint:
+                    raise RuntimeError(hint) from e
+                raise
+
+        if do_hybrid:
+            bm25 = self._get_bm25(collection)
+            _, sparse_indices = bm25.search(query, candidate_k)
+            dense_ranking = [int(i) for i in dense_indices if i >= 0]
+            sparse_ranking = [int(i) for i in sparse_indices]
+            merged = _rrf_merge([dense_ranking, sparse_ranking])
+            results = [
+                {"chunk": chunks[idx], "score": float(score)} for idx, score in merged
+            ]
+        else:
+            results = [
+                {"chunk": chunks[i], "score": float(dense_scores[j])}
+                for j, i in enumerate(dense_indices)
+                if i >= 0
+            ]
+        return results[:top_k]
+
+    # -- persistence helpers -------------------------------------------------
+
+    def _rebuild_bm25(self, collection: str, chunks: list[dict]) -> None:
+        """Build (or rebuild) the BM25 index for *collection* from *chunks*."""
+        bm25 = BM25Index()
+        bm25.build([c["text"] for c in chunks])
+        bm25.save(self.index_dir / collection)
+        self._bm25_cache[collection] = bm25
+
+    def _get_bm25(self, collection: str) -> BM25Index:
+        cached = self._bm25_cache.get(collection)
+        if cached is not None:
+            return cached
+        bm25 = BM25Index.load(self.index_dir / collection)
+        self._bm25_cache[collection] = bm25
+        return bm25
+
+    def _load(self, name: str) -> tuple[ChromaIndex, list[dict]]:
+        """Load a collection's index + chunks (cached in memory)."""
+        if name in self._cache:
+            return self._cache[name]
+
+        coll_dir = self.index_dir / name
+        if not coll_dir.exists():
+            raise ValueError(f"Collection '{name}' not found")
+
+        index = ChromaIndex.load(coll_dir)
+        with open(coll_dir / "chunks.jsonl") as f:
+            chunks = [json.loads(line) for line in f]
+
+        self._cache[name] = (index, chunks)
+        return index, chunks
+
+    @staticmethod
+    def _stale_index_message(collection: str, exc: Exception) -> str | None:
+        """Return a user-friendly hint when *exc* looks like a dim mismatch.
+
+        Chroma raises ``InvalidDimensionException`` with "dimension" in the
+        message when a query vector's dimension doesn't match the index's —
+        i.e. the embedder that BUILT the index was swapped for one with a
+        different output dim (the user changed ``embedding.backend`` /
+        ``embedding.model`` after init).  Detect on message-shape.
+        """
+        msg = str(exc).lower()
+        if "dimension" in msg or "dim mismatch" in msg or "shape" in msg:
+            return (
+                f"Embedding dimension mismatch in collection {collection!r}. "
+                f"The index was built with a different embedder than the one "
+                f"currently configured.  Drop the stale collection "
+                f"(`rm -rf <project>/kb_index/{collection}`) and re-create the "
+                f"project with `dsagt init` so it rebuilds with the active "
+                f"embedding settings."
+            )
+        return None
+
+    def close(self) -> None:
+        if self._embedder is not None:
+            self._embedder.close()
+        self._embedder = None
+        self._cache.clear()
+        self._bm25_cache.clear()
+
+
+# ===========================================================================
+# KnowledgeBase — the federation infra: a list of stores + ingest pipeline
+# ===========================================================================
 
 
 class KnowledgeBase:
-    """
-    Collection-based document retrieval with pluggable embedder & vector-DB routing.
+    """Collection-based document retrieval over one-or-more vector stores.
 
-    Each collection lives in ``<index_dir>/<collection_name>/`` and may use a
-    *different* embedding model and vector-index backend.  Routing is controlled
-    by a dictionary of :class:`CollectionRoute` objects keyed on collection name.
+    Holds a **list** of :class:`VectorStore`s (today just the internal local
+    Chroma store) and its job is to **fuse their collections**: collection→store
+    routing plus rank-fusion across collections.  It also owns the document
+    ingestion pipeline (collect / parse / chunk → ``VectorStore.add_chunks``) and
+    cross-collection reranking.  This is the shared substrate every KB consumer
+    (retrieval, memory, provenance, skills) calls into.
 
     Quick-start
     -----------
     .. code-block:: python
 
-        from knowledge_base import KnowledgeBase, CollectionRoute
-
-        kb = KnowledgeBase(
-            index_dir="./kb_store",
-            routes={
-                # GPU-heavy research docs → local model + FAISS
-                "research": CollectionRoute(
-                    embedding_backend="local",
-                    vector_db="faiss",
-                    embedder_kwargs={"model": "BAAI/bge-base-en-v1.5"},
-                ),
-                # Fast live ingestion → API + Chroma
-                "support": CollectionRoute(
-                    embedding_backend="api",
-                    vector_db="chroma",
-                    embedder_kwargs={"model": "text-embedding-3-small"},
-                ),
-            },
-        )
-
+        kb = KnowledgeBase(index_dir="./kb_store", default_embedder="local")
         kb.ingest("./docs/research", "research")
         results = kb.search("transformer architecture", "research")
-
-    Embedding backends
-    ------------------
-    ``"local"``
-        sentence-transformers, no network required.
-    ``"api"``
-        OpenAI-compatible REST API.  Reads ``LLM_API_KEY`` env var.
-
-    Vector-index backends
-    ---------------------
-    ``"chroma"``
-        ChromaDB HNSW index (default).  Supports metadata filtering
-        and incremental updates.
-    ``"faiss"``
-        Flat inner-product index.  Faster for small static collections
-        but no metadata filtering.
     """
 
     FILE_TYPES = [
-        "pdf", "md", "rst", "txt", "py", "docx",
-        "json", "yaml", "yml",
+        "pdf",
+        "md",
+        "rst",
+        "txt",
+        "py",
+        "docx",
+        "json",
+        "yaml",
+        "yml",
         # Packaging metadata: agents reading this index need to know which
         # version of a library to install when registering tools that
         # depend on it.  pyproject.toml is the modern standard; setup.cfg
         # is still common in older codebases.
-        "toml", "cfg",
+        "toml",
+        "cfg",
     ]
-    _ROUTE_FILE = "route.json"
 
     def __init__(
         self,
@@ -801,48 +1230,36 @@ class KnowledgeBase:
         chunk_overlap: int = 128,
         rerank_model: str = "BAAI/bge-reranker-v2-m3",
         default_rerank: bool = False,
-        # Global default route (used when collection has no specific route)
+        recency_half_life_days: float | None = None,
+        # Internal store's embedder (one per store, fixed at construction).
+        # Explicit args — callers unpack their config here, no kwargs dict.
         default_embedder: str | None = None,
-        default_index: str | None = None,
-        embedder_kwargs: dict | None = None,
-        # Per-collection routing registry
-        routes: dict[str, CollectionRoute] | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        device: str | None = None,
     ):
         self.index_dir = Path(index_dir)
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.rerank_model = rerank_model
         self.default_rerank = default_rerank
+        # Episodic recency weighting (session_memory only); None = off.
+        self._recency_half_life_days = recency_half_life_days
 
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build default route from explicit kwargs (config-driven).
-        # No env var reads — callers pass config values through.
-        self._default_route = CollectionRoute(
-            embedding_backend=default_embedder or "api",
-            vector_db=default_index or "chroma",
-            embedder_kwargs=embedder_kwargs or {},
+        # The internal store: local Chroma, one embedder, many collections.
+        # External BYO stores would be appended to ``self._stores`` (deferred).
+        self._store = ChromaVectorStore(
+            self.index_dir,
+            backend=default_embedder or "api",
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            device=device,
         )
-
-        # Per-collection route registry
-        self._routes: dict[str, CollectionRoute] = routes or {}
-
-        # Shared embedder cache: embedder_key → client instance
-        # Key is "<embedding_backend>|<sorted embedder_kwargs>" so identical configs share one client.
-        self._embedder_cache: dict[str, BaseEmbeddingClient] = {}
-        # Serializes embedder construction so a background preload (see
-        # ``preload_default_embedder``) and a foreground first-query call
-        # don't race and double-load the model.  Construction is rare;
-        # the lock isn't a hot-path concern.
-        import threading as _threading
-        self._embedder_lock = _threading.Lock()
-
-        # Collection runtime cache: name → (BaseVectorIndex, list[dict])
-        self._cache: dict[str, tuple[BaseVectorIndex, list[dict]]] = {}
-
-        # BM25 sparse-index cache for hybrid-enabled collections.  Loaded
-        # from disk on first search, rebuilt and resaved on every write.
-        self._bm25_cache: dict[str, BM25Index] = {}
+        self._stores: list[VectorStore] = [self._store]
 
         # Per-file-type parser cache. Constructing a CodeSplitter loads the
         # tree-sitter language definition (~25ms each), so a 300-file ingest
@@ -858,124 +1275,93 @@ class KnowledgeBase:
 
         self._reranker = None
 
-    @staticmethod
-    def _stale_index_message(collection: str, exc: Exception) -> str | None:
-        """Return a user-friendly hint when *exc* looks like a dim mismatch.
+    # -- store routing -------------------------------------------------------
 
-        Chroma raises ``InvalidDimensionException`` and FAISS raises
-        ``RuntimeError``/``AssertionError`` with "dimension" in the
-        message when a query vector's dimension doesn't match the index's.
-        That happens when the embedder used to BUILD the index has been
-        swapped for one with a different output dim — typically because
-        the user changed ``embedding.backend`` or ``embedding.model`` in
-        their config after init.  Detect on message-shape (no chroma
-        import here) and return the recovery instructions.
-        """
-        msg = str(exc).lower()
-        if "dimension" in msg or "dim mismatch" in msg or "shape" in msg:
-            return (
-                f"Embedding dimension mismatch in collection {collection!r}. "
-                f"The index was built with a different embedder than the one "
-                f"currently configured.  Run `dsagt setup-kb` with the active "
-                f"embedding settings, then drop the stale collection: "
-                f"`rm -rf <project>/kb_index/{collection}` and re-init/start "
-                f"the project."
-            )
-        return None
+    def _store_for(self, collection: str) -> VectorStore:
+        """Return the store hosting *collection*, else raise ``ValueError``."""
+        for store in self._stores:
+            if store.has_collection(collection):
+                return store
+        raise ValueError(f"Collection '{collection}' not found")
 
-    # route management
+    @property
+    def collections(self) -> list[str]:
+        """Union of collection names across all stores."""
+        seen: list[str] = []
+        for store in self._stores:
+            for name in store.collections:
+                if name not in seen:
+                    seen.append(name)
+        return seen
 
-    def register_route(self, collection: str, route: CollectionRoute) -> None:
-        """Register (or update) a routing rule for *collection*.
-
-        Updates the in-memory routing table AND persists ``route.json``
-        to disk so the mapping survives server restarts.
-        """
-        self._routes[collection] = route
-        coll_dir = self.index_dir / collection
-        coll_dir.mkdir(exist_ok=True)
-        (coll_dir / self._ROUTE_FILE).write_text(json.dumps(route.to_dict(), indent=2))
-        logger.info("Registered route for '%s': embedder=%s index=%s",
-                    collection, route.embedding_backend, route.vector_db)
-
-    def _get_route(self, collection: str) -> CollectionRoute:
-        return self._routes.get(collection, self._default_route)
-
-    def _get_embedder(self, route: CollectionRoute) -> BaseEmbeddingClient:
-        """Return (possibly cached) embedder matching *route*.
-
-        Routes carry per-collection overrides (e.g. a specific model name);
-        credentials (api_key, base_url) live on the kb's default route.
-        Merge so explicit routes inherit defaults unless they override.
-        """
-        merged = {**self._default_route.embedder_kwargs, **route.embedder_kwargs}
-        key = f"{route.embedding_backend}|{sorted(merged.items())}"
-        with self._embedder_lock:
-            if key not in self._embedder_cache:
-                self._embedder_cache[key] = _make_embedder(
-                    route.embedding_backend, **merged
-                )
-            return self._embedder_cache[key]
+    def list_collections(self) -> list[dict]:
+        return [
+            store.collection_info(name)
+            for store in self._stores
+            for name in store.collections
+        ]
 
     def preload_default_embedder(self) -> None:
-        """Kick off embedder construction in a daemon thread.
+        """Kick off internal-store embedder construction in a daemon thread.
 
-        Called at MCP server startup so the heavy load — sentence-
-        transformers import, ``SentenceTransformer(...)`` model load,
-        etc., ~5–10s for the default local backend — happens in
-        parallel with the rest of server bootstrap.  By the time the
-        agent makes its first kb call, the embedder is cached and the
-        call completes immediately instead of paying the load cost.
-
-        Failure inside the thread is swallowed: the model-load error
-        will surface again (with full traceback) on the first real
-        embedding call, where the agent can surface it usefully.  The
-        background thread shouldn't crash the server before the agent
-        even gets a chance to query.
+        Called at MCP server startup so the heavy load (sentence-transformers
+        import + model load, ~5-10s) happens in parallel with the rest of
+        bootstrap.  Failure is swallowed: it resurfaces with a full traceback
+        on the first real embedding call.
         """
-        import threading
 
         def _load() -> None:
             try:
-                self._get_embedder(self._default_route)
+                self._store.embedder  # noqa: B018 — triggers lazy construction
             except Exception as e:
                 logger.warning("Background embedder preload failed: %s", e)
 
         threading.Thread(
-            target=_load, name="dsagt-embedder-preload", daemon=True,
+            target=_load, name="dsagt-embedder-preload", daemon=True
         ).start()
 
-    @property
-    def collections(self) -> list[str]:
-        return [p.name for p in self.index_dir.iterdir() if p.is_dir() and
-                ((p / "index.faiss").exists() or (p / "chroma_ids.json").exists())]
+    def embed_texts(
+        self, texts: list[str], collection: str | None = None
+    ) -> np.ndarray:
+        """Embed *texts* with the internal store's embedder (L2-normalized)."""
+        return self._store.embed(texts)
 
-    def list_collections(self) -> list[dict]:
-        result = []
-        for name in self.collections:
-            coll_dir = self.index_dir / name
-            desc_path = coll_dir / "DESCRIPTION.md"
+    # -- structured entries (delegate to internal store) --------------------
 
-            # Ensure the persisted route is loaded into _routes so we always
-            # report the actual model/backend, not the server default.
-            if name not in self._routes:
-                persisted = self._load_route(name)
-                if persisted:
-                    self._routes[name] = persisted
+    @traced(
+        "kb.add_entries",
+        capture=["collection"],
+        extract_return={"n_entries": lambda r: r.get("entries_added")},
+    )
+    def add_entries(
+        self,
+        texts: list[str],
+        collection: str,
+        metadatas: list[dict] | None = None,
+        return_embeddings: bool = False,
+    ) -> dict:
+        """Add pre-formed text entries with optional metadata to a collection.
 
-            route = self._routes.get(name, self._default_route)
-            description = (
-                desc_path.read_text() if desc_path.exists()
-                else route.description
-            )
-            result.append({
-                "name": name,
-                "description": description,
-                "embedding_backend": route.embedding_backend,
-                "embedding_model": route.embedder_kwargs.get("model", "default"),
-                "vector_db": route.vector_db,
-            })
-        return result
+        Unlike ``ingest``/``append``, this skips document parsing and chunking.
+        Used by episodic memory, tool_executions, and other structured entry
+        types that produce their own text representations.  Metadata is stored
+        as native Chroma metadata for ``where`` filtering.
+        """
+        obs.set_inputs(
+            {
+                "collection": collection,
+                "n_entries": len(texts),
+                "texts_preview": [t[:200] for t in texts[:3]],
+            }
+        )
+        return self._store.add_entries(
+            texts,
+            collection,
+            metadatas=metadatas,
+            return_embeddings=return_embeddings,
+        )
+
+    # -- document ingestion pipeline ----------------------------------------
 
     @traced(
         "kb.ingest",
@@ -990,51 +1376,23 @@ class KnowledgeBase:
         folder: str | Path,
         collection_name: str | None = None,
         file_types: list[str] | None = None,
-        route: CollectionRoute | None = None,
         exclude_patterns: list[str] | None = None,
     ) -> dict:
-        """
-        Ingest *folder* as a new collection.
-
-        Parameters
-        ----------
-        folder : path
-            Source directory.
-        collection_name : str, optional
-            Defaults to folder name.
-        file_types : list[str], optional
-            Extensions to include (without leading dot).
-        route : CollectionRoute, optional
-            Override routing for this collection.  Persisted to disk so
-            subsequent ``search`` / ``append`` calls use the same backend.
-        exclude_patterns : list[str], optional
-            Glob-style patterns matched (via :func:`fnmatch.fnmatch`)
-            against each file's path *relative to* ``folder``.  Any file
-            whose relative path matches any pattern is skipped.  Patterns
-            are checked against both the full relative path and the
-            basename, so ``"tests/*"`` excludes a top-level tests dir and
-            ``"test_*.py"`` excludes test files anywhere in the tree.
-            Useful for skipping tests, build artifacts, and private modules
-            without inflating the embed cost of large libraries.
-        """
+        """Ingest *folder* as a new collection in the internal store."""
         folder = Path(folder)
         collection = collection_name or folder.name
         file_types = file_types or self.FILE_TYPES
 
-        obs.set_inputs({
-            "folder": str(folder),
-            "collection": collection,
-            "file_types": file_types,
-        })
-
-        # Set route in memory so _get_embedder resolves during the build.
-        # Persisted to disk via register_route after the index is built.
-        if route is not None:
-            self._routes[collection] = route
-        active_route = self._get_route(collection)
+        obs.set_inputs(
+            {
+                "folder": str(folder),
+                "collection": collection,
+                "file_types": file_types,
+            }
+        )
 
         coll_dir = self.index_dir / collection
-        coll_dir.mkdir(exist_ok=True)
+        coll_dir.mkdir(parents=True, exist_ok=True)
 
         # Record source folder so the MCP server can detect re-ingests vs. conflicts.
         (coll_dir / "source.txt").write_text(str(folder.resolve()))
@@ -1046,16 +1404,10 @@ class KnowledgeBase:
         files = self._collect_files(folder, file_types, exclude_patterns)
         logger.info("Found %d files to process", len(files))
 
-        # Reset the per-ingest skip counter; _chunk_file bumps it on
-        # read/parse failure.  We surface the result in the return dict
-        # so callers (and the user looking at dsagt-setup-kb output)
-        # notice if a non-trivial number of files were silently dropped.
         self._chunk_skip_count = 0
         chunks = [chunk for f in files for chunk in self._chunk_file(f, collection)]
         n_skipped = self._chunk_skip_count
-        logger.info(
-            "Created %d chunks (skipped %d files)", len(chunks), n_skipped,
-        )
+        logger.info("Created %d chunks (skipped %d files)", len(chunks), n_skipped)
 
         if not chunks:
             return {
@@ -1065,28 +1417,7 @@ class KnowledgeBase:
                 "skipped_files": n_skipped,
             }
 
-        embedder = self._get_embedder(active_route)
-        with kb_embed_span(active_route.embedding_backend,
-                           active_route.embedder_kwargs.get("model"), len(chunks)):
-            embeddings = self._normalize(embedder.embed([c["text"] for c in chunks]))
-
-        index = _make_index(active_route.vector_db,
-                            **self._index_init_kwargs(active_route, coll_dir))
-        index.add(embeddings)
-        index.save(coll_dir)
-
-        # Persist route AFTER index is built — guarantees route.json always
-        # reflects what was actually used, never overwritten by a racing job.
-        self.register_route(collection, active_route)
-
-        with open(coll_dir / "chunks.jsonl", "w") as f:
-            for chunk in chunks:
-                f.write(json.dumps(chunk) + "\n")
-
-        if active_route.hybrid:
-            self._rebuild_bm25(collection, chunks)
-
-        self._cache[collection] = (index, chunks)
+        self._store.add_chunks(collection, chunks)
         return {
             "collection": collection,
             "files": len(files),
@@ -1111,15 +1442,15 @@ class KnowledgeBase:
         """Append documents to an existing collection."""
         file_types = file_types or self.FILE_TYPES
 
-        obs.set_inputs({
-            "collection": collection,
-            "n_paths": len(paths),
-            "paths_preview": [str(p) for p in paths[:5]],
-        })
+        obs.set_inputs(
+            {
+                "collection": collection,
+                "n_paths": len(paths),
+                "paths_preview": [str(p) for p in paths[:5]],
+            }
+        )
 
-        index, existing_chunks = self._load(collection)
-        active_route = self._get_route(collection)
-        coll_dir = self.index_dir / collection
+        store = self._store_for(collection)  # raises ValueError if missing
 
         files: list[Path] = []
         for p in paths:
@@ -1132,364 +1463,136 @@ class KnowledgeBase:
                 logger.warning("Path not found, skipping: %s", p)
 
         if not files:
-            return {"collection": collection, "files": 0, "chunks_added": 0,
-                    "total_chunks": len(existing_chunks), "skipped_files": 0}
+            return {
+                "collection": collection,
+                "files": 0,
+                "chunks_added": 0,
+                "skipped_files": 0,
+            }
 
-        # Reset and capture per-file skip count, same pattern as ingest().
         self._chunk_skip_count = 0
         new_chunks = [chunk for f in files for chunk in self._chunk_file(f, collection)]
         n_skipped = self._chunk_skip_count
         if not new_chunks:
-            return {"collection": collection, "files": len(files),
-                    "chunks_added": 0, "total_chunks": len(existing_chunks),
-                    "skipped_files": n_skipped}
+            return {
+                "collection": collection,
+                "files": len(files),
+                "chunks_added": 0,
+                "skipped_files": n_skipped,
+            }
 
-        embedder = self._get_embedder(active_route)
-        with kb_embed_span(active_route.embedding_backend,
-                           active_route.embedder_kwargs.get("model"), len(new_chunks)):
-            embeddings = self._normalize(embedder.embed([c["text"] for c in new_chunks]))
-        index.add(embeddings)
-        index.save(coll_dir)
-
-        with open(coll_dir / "chunks.jsonl", "a") as f:
-            for chunk in new_chunks:
-                f.write(json.dumps(chunk) + "\n")
-
-        all_chunks = existing_chunks + new_chunks
-        if active_route.hybrid:
-            self._rebuild_bm25(collection, all_chunks)
-        self._cache[collection] = (index, all_chunks)
+        result = store.add_chunks(collection, new_chunks)
         return {
             "collection": collection,
             "files": len(files),
             "chunks_added": len(new_chunks),
-            "total_chunks": len(all_chunks),
+            "total_chunks": result.get("total_entries"),
             "skipped_files": n_skipped,
         }
 
-    @traced(
-        "kb.add_entries",
-        capture=["collection"],
-        extract_return={"n_entries": lambda r: r.get("entries_added")},
-    )
-    def add_entries(
-        self,
-        texts: list[str],
-        collection: str,
-        metadatas: list[dict] | None = None,
-        route: CollectionRoute | None = None,
-        return_embeddings: bool = False,
-    ) -> dict:
-        """Add pre-formed text entries with optional metadata to a collection.
-
-        Unlike ``ingest``/``append``, this skips document parsing and chunking.
-        Each text is embedded and stored as-is.  Used by episodic memory,
-        tool_executions, and other structured entry types that produce their
-        own text representations rather than ingesting raw documents.
-
-        Parameters
-        ----------
-        texts : list[str]
-            Text content for each entry (will be embedded).
-        collection : str
-            Target collection name (created if it doesn't exist).
-        metadatas : list[dict], optional
-            Per-entry metadata dicts.  On ChromaDB-backed collections these
-            are stored as native metadata for ``where`` filtering.  On all
-            backends they are merged into the chunk metadata in chunks.jsonl.
-        route : CollectionRoute, optional
-            Override routing for this collection (persisted to disk).
-        return_embeddings : bool, optional
-            If True, include the freshly-computed embeddings in the result
-            dict under the ``"embeddings"`` key.  Callers that need the
-            embeddings for downstream work (e.g. centroid-based outlier
-            detection in memory extraction) should set this so they can
-            avoid a second round-trip to the embedding API.
-
-        Returns
-        -------
-        dict
-            ``{collection, entries_added, total_entries}`` plus
-            ``"embeddings"`` (numpy ndarray) if ``return_embeddings=True``.
-        """
-        obs.set_inputs({
-            "collection": collection,
-            "n_entries": len(texts),
-            "texts_preview": [t[:200] for t in texts[:3]],
-        })
-
-        if not texts:
-            result = {"collection": collection, "entries_added": 0, "total_entries": 0}
-            if return_embeddings:
-                result["embeddings"] = np.array([], dtype=np.float32)
-            return result
-
-        coll_dir = self.index_dir / collection
-        coll_dir.mkdir(exist_ok=True)
-
-        if route is not None:
-            self._routes[collection] = route
-        active_route = self._get_route(collection)
-
-        embedder = self._get_embedder(active_route)
-        with kb_embed_span(active_route.embedding_backend,
-                           active_route.embedder_kwargs.get("model"), len(texts)):
-            embeddings = self._normalize(embedder.embed(texts))
-
-        # Load existing or create new index
-        if (coll_dir / "chunks.jsonl").exists():
-            index, existing_chunks = self._load(collection)
-        else:
-            index = _make_index(
-                active_route.vector_db,
-                **self._index_init_kwargs(active_route, coll_dir),
-            )
-            existing_chunks = []
-
-        # Build chunk dicts (consistent with chunks.jsonl format)
-        new_chunks = []
-        for i, text in enumerate(texts):
-            entry_meta = metadatas[i] if metadatas else {}
-            chunk = {
-                "text": text,
-                "metadata": {
-                    "collection": collection,
-                    "source_file": "entry",
-                    "chunk_index": len(existing_chunks) + i,
-                    **entry_meta,
-                },
-            }
-            new_chunks.append(chunk)
-
-        # Store embeddings (with metadata on ChromaDB)
-        try:
-            if active_route.vector_db == "chroma" and metadatas is not None:
-                index.add(embeddings, metadatas=metadatas)
-            else:
-                index.add(embeddings)
-        except Exception as e:
-            hint = self._stale_index_message(collection, e)
-            if hint:
-                raise RuntimeError(hint) from e
-            raise
-
-        index.save(coll_dir)
-        self.register_route(collection, active_route)
-
-        # Append to chunks.jsonl
-        with open(coll_dir / "chunks.jsonl", "a") as f:
-            for chunk in new_chunks:
-                f.write(json.dumps(chunk) + "\n")
-
-        all_chunks = existing_chunks + new_chunks
-        if active_route.hybrid:
-            self._rebuild_bm25(collection, all_chunks)
-        self._cache[collection] = (index, all_chunks)
-
-        result = {
-            "collection": collection,
-            "entries_added": len(texts),
-            "total_entries": len(all_chunks),
-        }
-        if return_embeddings:
-            result["embeddings"] = embeddings
-        return result
-
-    def embed_texts(self, texts: list[str], collection: str) -> np.ndarray:
-        """Embed texts using the embedder configured for a collection.
-
-        Returns L2-normalized float32 array of shape (n_texts, dim).
-        """
-        route = self._get_route(collection)
-        embedder = self._get_embedder(route)
-        return self._normalize(embedder.embed(texts))
+    # -- federated search ----------------------------------------------------
 
     @traced("kb.search", capture=["collection", "top_k", "rerank"])
     def search(
         self,
         query: str,
-        collection: str,
+        collection: str | None = None,
+        collections: list[str] | None = None,
         top_k: int = 5,
         rerank: bool | None = None,
         where: dict | None = None,
+        where_document: dict | None = None,
     ) -> list[dict]:
-        """Search *collection* with *query*.
+        """Search one or many collections, fusing across them by rank.
 
-        Parameters
-        ----------
-        rerank : bool, optional
-            Use cross-encoder reranking.  Defaults to ``self.default_rerank``
-            (set from ``knowledge.rerank`` in dsagt_config.yaml).
-        where : dict, optional
-            ChromaDB ``where`` filter clause.  Only effective on ChromaDB-backed
-            collections; silently ignored for FAISS collections.  When set,
-            disables the BM25 sparse leg of hybrid search (BM25 has no
-            metadata-filter equivalent), so the result is dense-only.
+        A single collection routes straight to its store's hybrid search.
+        Multiple collections fan out — each store searched, then the per-
+        collection rankings fused by Reciprocal Rank Fusion (rank-only, so
+        different embedding spaces compose correctly).  Optional cross-encoder
+        rerank runs over the fused candidates.
+
+        Missing collections are skipped with a warning; the search fails only
+        when *every* requested collection is absent.
         """
         if rerank is None:
             rerank = self.default_rerank
 
-        obs.set_inputs({"query": query, "collection": collection, "top_k": top_k})
+        targets = collections or ([collection] if collection else [])
+        if not targets:
+            raise ValueError("Provide 'collection' or 'collections'")
 
-        index, chunks = self._load(collection)
-        active_route = self._get_route(collection)
-        embedder = self._get_embedder(active_route)
+        obs.set_inputs({"query": query, "collections": targets, "top_k": top_k})
 
-        with kb_embed_span(active_route.embedding_backend,
-                           active_route.embedder_kwargs.get("model"), 1):
-            query_emb = self._normalize(embedder.embed([query]))[0]
-
-        # Wider candidate pool when reranking (cross-encoder reorders top-N)
-        # OR when hybrid (RRF fuses two ranked lists; needs candidates from
-        # each ranker before merging).  Floor of 50 keeps RRF meaningful on
-        # small top_k.
-        filtered = where is not None and active_route.vector_db == "chroma"
-        do_hybrid = active_route.hybrid and not filtered
-        oversample = (rerank or do_hybrid)
-        candidate_k = min(
-            max(top_k * 10, 50) if oversample else top_k,
-            len(chunks),
+        # Oversample per-collection pools when reranking, fusing >1 collection,
+        # or recency-weighting (so a recent fact can be lifted from deep in the
+        # pool, not merely reordered within an already-cut top_k).
+        recency_target = bool(
+            self._recency_half_life_days and targets == [_RECENCY_COLLECTION]
         )
+        oversample = rerank or len(targets) > 1 or recency_target
+        candidate_k = max(top_k * 10, 50) if oversample else top_k
 
-        with kb_index_search_span(active_route.vector_db, candidate_k, filtered):
+        per_coll: list[list[dict]] = []
+        errors: list[str] = []
+        for coll in targets:
             try:
-                if filtered:
-                    dense_scores, dense_indices = index.search(
-                        query_emb, candidate_k, where=where,
+                store = self._store_for(coll)
+                per_coll.append(
+                    store.search(
+                        query,
+                        coll,
+                        candidate_k,
+                        where=where,
+                        where_document=where_document,
                     )
-                else:
-                    dense_scores, dense_indices = index.search(
-                        query_emb, candidate_k,
-                    )
-            except Exception as e:
-                hint = self._stale_index_message(collection, e)
-                if hint:
-                    raise RuntimeError(hint) from e
-                raise
+                )
+            except (ValueError, FileNotFoundError, KeyError) as e:
+                logger.warning("Search failed for '%s': %s", coll, e)
+                errors.append(str(e))
 
-        if do_hybrid:
-            bm25 = self._get_bm25(collection)
-            _, sparse_indices = bm25.search(query, candidate_k)
-            dense_ranking = [int(i) for i in dense_indices if i >= 0]
-            sparse_ranking = [int(i) for i in sparse_indices]
-            merged = _rrf_merge([dense_ranking, sparse_ranking])
-            results = [
-                {"chunk": chunks[idx], "score": float(score)}
-                for idx, score in merged
-            ]
-        else:
-            results = [
-                {"chunk": chunks[i], "score": float(dense_scores[j])}
-                for j, i in enumerate(dense_indices) if i >= 0
-            ]
+        if not per_coll:
+            if len(targets) == 1:
+                raise ValueError(
+                    errors[0] if errors else f"Collection '{targets[0]}' not found"
+                )
+            raise ValueError(f"All collections failed: {'; '.join(errors)}")
 
-        if rerank and results:
-            with kb_rerank_span(self.rerank_model, len(results)):
-                final = self._rerank(query, results, top_k)
+        fused = per_coll[0] if len(per_coll) == 1 else _rrf_across(per_coll)
+
+        # Episodic recency: a recent corrected fact outranks a stale one without
+        # any contradiction detection — recency is the ranker for session_memory
+        # (mutually exclusive with the cross-encoder; the two are alternative
+        # rerankers and recency is the one that matters for a time-ordered log).
+        if recency_target and fused:
+            final = _apply_recency(fused, self._recency_half_life_days, time.time())[
+                :top_k
+            ]
+        elif rerank and fused:
+            with kb_rerank_span(self.rerank_model, len(fused)):
+                final = self._rerank(query, fused, top_k)
         else:
-            final = results[:top_k]
+            final = fused[:top_k]
 
         obs.set("hits", len(final))
-        obs.set_outputs({
-            "hits": len(final),
-            "top_texts": [r["chunk"].get("text", "")[:200] for r in final[:3]],
-        })
+        obs.set_outputs(
+            {
+                "hits": len(final),
+                "top_texts": [r["chunk"].get("text", "")[:200] for r in final[:3]],
+            }
+        )
         return final
-
-    def _rebuild_bm25(self, collection: str, chunks: list[dict]) -> None:
-        """Build (or rebuild) the BM25 index for *collection* from *chunks*.
-
-        Called from every write path of a hybrid-enabled collection.  BM25
-        IDF stats are corpus-global, so there is no incremental update —
-        we always rebuild from the full chunk list.  Cached on the KB
-        instance and persisted to ``<collection>/bm25.pkl``.
-        """
-        bm25 = BM25Index()
-        bm25.build([c["text"] for c in chunks])
-        bm25.save(self.index_dir / collection)
-        self._bm25_cache[collection] = bm25
-
-    def _get_bm25(self, collection: str) -> BM25Index:
-        """Return the cached BM25 index, loading from disk on first hit.
-
-        Raises ``FileNotFoundError`` if the collection's route has
-        ``hybrid=True`` but no ``bm25.pkl`` exists on disk — i.e. the
-        collection was built by a pre-hybrid dsagt.  Migration is
-        ``delete the collection and re-ingest``; we deliberately do NOT
-        rebuild lazily on first search because that would silently turn
-        the next search into an N-document tokenization run.
-        """
-        cached = self._bm25_cache.get(collection)
-        if cached is not None:
-            return cached
-        coll_dir = self.index_dir / collection
-        bm25_path = coll_dir / BM25Index._FILENAME
-        if not bm25_path.exists():
-            raise FileNotFoundError(
-                f"Collection '{collection}' has hybrid=True in its route but "
-                f"no bm25.pkl on disk. The collection was built before hybrid "
-                f"retrieval was added. To fix: delete {coll_dir} and re-ingest, "
-                f"or set hybrid=False in route.json."
-            )
-        bm25 = BM25Index.load(coll_dir)
-        self._bm25_cache[collection] = bm25
-        return bm25
-
-    @staticmethod
-    def _normalize(arr: np.ndarray) -> np.ndarray:
-        norms = np.linalg.norm(arr, axis=-1, keepdims=True)
-        return arr / np.where(norms > 0, norms, 1)
-
-    def _index_init_kwargs(self, route: CollectionRoute, coll_dir: Path) -> dict:
-        """Extra kwargs needed by some index constructors at init time."""
-        if route.vector_db == "chroma":
-            return {"collection_name": coll_dir.name,
-                    "persist_dir": coll_dir, **route.index_kwargs}
-        return dict(route.index_kwargs)
-
-    def _load_route(self, collection: str) -> CollectionRoute | None:
-        route_path = self.index_dir / collection / self._ROUTE_FILE
-        if route_path.exists():
-            return CollectionRoute.from_dict(json.loads(route_path.read_text()))
-        return None
-
-    def _load(self, name: str) -> tuple[BaseVectorIndex, list[dict]]:
-        """Load collection index + chunks (cached in memory)."""
-        if name in self._cache:
-            return self._cache[name]
-
-        coll_dir = self.index_dir / name
-        if not coll_dir.exists():
-            raise ValueError(f"Collection '{name}' not found")
-
-        # Restore persisted route if not already registered
-        if name not in self._routes:
-            persisted = self._load_route(name)
-            if persisted:
-                self._routes[name] = persisted
-
-        active_route = self._get_route(name)
-
-        # Pick correct loader
-        if active_route.vector_db == "chroma":
-            index = ChromaIndex.load(coll_dir)
-        else:
-            index = FAISSIndex.load(coll_dir)
-
-        with open(coll_dir / "chunks.jsonl") as f:
-            chunks = [json.loads(line) for line in f]
-
-        self._cache[name] = (index, chunks)
-        return index, chunks
 
     def _rerank(self, query: str, results: list[dict], top_k: int) -> list[dict]:
         if self._reranker is None:
             from sentence_transformers import CrossEncoder
+
             self._reranker = CrossEncoder(self.rerank_model, max_length=512)
         pairs = [[query, r["chunk"]["text"]] for r in results]
         scores = self._reranker.predict(pairs, show_progress_bar=False)
         ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
         return [{**r, "rerank_score": float(s)} for r, s in ranked[:top_k]]
+
+    # -- file discovery + chunking ------------------------------------------
 
     def _collect_files(
         self,
@@ -1501,19 +1604,13 @@ class KnowledgeBase:
         glob exclusions.
 
         Pure function relative to filesystem state — no caching, no
-        side-effecting attributes.  Extracted from ``ingest()`` so file
-        discovery and exclusion logic can be tested in isolation without
-        spinning up an embedder, an index, or a chunker.
-
-        Patterns are checked against the relative path, the basename, and
-        each individual path segment, so ``"tests"`` excludes any file
-        whose path contains a ``tests/`` directory regardless of depth.
+        side-effecting attributes.  Patterns are checked against the relative
+        path, the basename, and each individual path segment, so ``"tests"``
+        excludes any file whose path contains a ``tests/`` directory.
         """
         from fnmatch import fnmatch
 
-        all_files = [
-            f for ext in file_types for f in folder.glob(f"**/*.{ext}")
-        ]
+        all_files = [f for ext in file_types for f in folder.glob(f"**/*.{ext}")]
 
         if not exclude_patterns:
             return all_files
@@ -1522,7 +1619,8 @@ class KnowledgeBase:
             rel = str(f.relative_to(folder))
             name = f.name
             return any(
-                fnmatch(rel, pat) or fnmatch(name, pat)
+                fnmatch(rel, pat)
+                or fnmatch(name, pat)
                 or any(fnmatch(part, pat) for part in Path(rel).parts)
                 for pat in exclude_patterns
             )
@@ -1532,7 +1630,9 @@ class KnowledgeBase:
         if n_excluded:
             logger.info(
                 "Excluded %d/%d files via %d pattern(s)",
-                n_excluded, len(all_files), len(exclude_patterns),
+                n_excluded,
+                len(all_files),
+                len(exclude_patterns),
             )
         return kept
 
@@ -1544,17 +1644,7 @@ class KnowledgeBase:
 
         # Per-file read/parse failures are kept as soft failures (count
         # surfaced in ingest()'s return dict) rather than aborting the
-        # whole ingest, because real-world directories like cloned
-        # upstream repos contain occasional unreadable files (binary
-        # blobs misnamed .txt, malformed UTF-8) that shouldn't kill an
-        # ingest of thousands of files.  Callers see the skip count
-        # and can investigate if it's suspiciously high.
-        #
-        # llama_index's SimpleDirectoryReader prints "Failed to load file
-        # ... Skipping..." directly to stdout (literal print(), not
-        # logger) for every file it can't parse — there's no level switch
-        # for this.  Capture it: the file is already counted as a miss
-        # below, so the per-file print is pure noise.
+        # whole ingest
         try:
             with contextlib.redirect_stdout(_io.StringIO()):
                 docs = SimpleDirectoryReader(input_files=[str(path)]).load_data()
@@ -1568,7 +1658,9 @@ class KnowledgeBase:
         parser = self._get_parser(file_type)
         try:
             nodes = parser.get_nodes_from_documents(docs)
-        except (ValueError, RuntimeError) as e:
+        except Exception as e:
+            # A single malformed file (or a tree-sitter ABI mismatch in the
+            # code parser) must not abort the whole ingest — skip it.
             logger.warning("Could not parse %s: %s", path, e)
             self._chunk_skip_count += 1
             return
@@ -1577,7 +1669,9 @@ class KnowledgeBase:
             if not text:
                 continue
             yield {
-                "id": hashlib.sha256(f"{path}:{i}:{text[:100]}".encode()).hexdigest()[:16],
+                "id": hashlib.sha256(f"{path}:{i}:{text[:100]}".encode()).hexdigest()[
+                    :16
+                ],
                 "text": text,
                 "metadata": {
                     "source_file": str(path),
@@ -1588,13 +1682,7 @@ class KnowledgeBase:
             }
 
     def _get_parser(self, file_type: str):
-        """Return a cached parser for *file_type*, building it on first use.
-
-        Parsers are stateless after construction.  ``CodeSplitter`` in
-        particular loads a tree-sitter language definition on every
-        construction (~25ms), so a large ingest used to pay this cost per
-        file; now it pays once per file type.
-        """
+        """Return a cached parser for *file_type*, building it on first use."""
         cached = self._parsers.get(file_type)
         if cached is not None:
             return cached
@@ -1625,11 +1713,9 @@ class KnowledgeBase:
         return parser
 
     def close(self) -> None:
-        for client in self._embedder_cache.values():
-            client.close()
-        self._embedder_cache.clear()
+        for store in self._stores:
+            store.close()
         self._parsers.clear()
-        self._bm25_cache.clear()
 
     def __enter__(self):
         return self

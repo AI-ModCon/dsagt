@@ -14,10 +14,10 @@ import time
 
 import mcp.types as types
 
-
 # ---------------------------------------------------------------------------
 # In-process MCP tool invocation (for unit tests)
 # ---------------------------------------------------------------------------
+
 
 def call_tool_sync(server, name: str, arguments: dict) -> str:
     """Invoke a tool handler on an MCP server and return the response text."""
@@ -105,54 +105,72 @@ def read_mcp_message(proc, timeout: float = 10.0, expect_id=None) -> dict:
 
 def mcp_initialize(proc) -> dict:
     """Send MCP initialize handshake and return the server's response."""
-    send_mcp_message(proc, {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "test", "version": "1.0"},
+    send_mcp_message(
+        proc,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1.0"},
+            },
         },
-    })
+    )
     response = read_mcp_message(proc, expect_id=1)
 
-    send_mcp_message(proc, {
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized",
-    })
+    send_mcp_message(
+        proc,
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+        },
+    )
 
     return response
 
 
 def mcp_list_tools(proc) -> dict:
     """Request tools/list and return the response."""
-    send_mcp_message(proc, {
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/list",
-        "params": {},
-    })
+    send_mcp_message(
+        proc,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {},
+        },
+    )
     return read_mcp_message(proc, expect_id=2)
 
 
-def mcp_call_tool(proc, tool_name: str, arguments: dict,
-                  msg_id: int = 3, timeout: float = 30.0) -> dict:
+def mcp_call_tool(
+    proc, tool_name: str, arguments: dict, msg_id: int = 3, timeout: float = 30.0
+) -> dict:
     """Call an MCP tool and return the JSON-RPC response."""
-    send_mcp_message(proc, {
-        "jsonrpc": "2.0",
-        "id": msg_id,
-        "method": "tools/call",
-        "params": {
-            "name": tool_name,
-            "arguments": arguments,
+    send_mcp_message(
+        proc,
+        {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": arguments,
+            },
         },
-    })
+    )
     return read_mcp_message(proc, timeout=timeout, expect_id=msg_id)
 
 
-def start_server(cmd: list[str], env: dict = None) -> subprocess.Popen:
-    """Start a server subprocess with stdio pipes."""
+def start_server(cmd: list[str], env: dict = None, cwd: str = None) -> subprocess.Popen:
+    """Start a server subprocess with stdio pipes.
+
+    ``cwd`` sets the working directory — ``dsagt-server`` discovers its project
+    config from cwd (see ``observability.find_project_config``), so startup tests
+    must run it from the project dir.
+    """
     proc_env = os.environ.copy()
     if env:
         proc_env.update(env)
@@ -164,4 +182,5 @@ def start_server(cmd: list[str], env: dict = None) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
         env=proc_env,
+        cwd=cwd,
     )

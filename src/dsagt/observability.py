@@ -1,50 +1,46 @@
 """
-DSAgt observability — span emission via MLflow's native tracer provider.
+DSAgt observability — first-party span emission over the serverless MLflow store.
 
-Business modules (knowledge.py, provenance.py, registry_server.py, run_tool.py)
-import the small public surface defined here.  ``init_tracing`` installs
-MLflow's own ``TracerProvider`` as the OTel global, so every
-``trace.get_tracer(...)`` call routes spans into MLflow's native trace store
-with full ``mlflow.spanInputs`` / ``mlflow.spanOutputs`` integration and
-direct access to ``InMemoryTraceManager`` for trace-metadata stamping.
+DSAGT writes every trace to one ``sqlite:///<pdir>/mlflow.db`` store (no server).
+TWO emission paths share that one store; they differ because MLflow's API forces
+it, not by accident:
 
-Public surface
---------------
-init_tracing(service_name, *, mlflow_url=None, session_id=None)
-    Configure MLflow's tracer provider once per process.  Reads
-    ``./dsagt_config.yaml`` for ``mlflow.port`` + ``project`` and
-    ``./.runtime`` for ``session_id``.  Raises ``RuntimeError`` when no
-    MLflow URL is available — processes that legitimately run without
-    tracing (one-shot setup tools, tests) should not call this function.
+  * LIVE tracer (``mlflow.start_span``) — first-party DSAGT spans emitted *as the
+    MCP server / dsagt-run runs*.  Uses MLflow's active-span context for
+    auto-nesting and the ``obs`` proxy.  Each trace's root is tagged
+    ``dsagt.source`` with the MCP tool *category* the agent invoked
+    (memory / skill / knowledge / registry), or ``execution`` for dsagt-run —
+    set at the dispatch boundary, so the UI can filter this *debugging* view
+    apart from agent traces and bucket it by concern.
+  * REPLAY sink (``MLflowSink`` → ``mlflow.start_span_no_context``) — a finished
+    agent ``traces.Trace`` backfilled after the fact with the transcript's
+    original timestamps.  ``start_span`` cannot backdate (it has no
+    ``start_time_ns`` param), so replay *must* use ``start_span_no_context``;
+    live *should* use ``start_span`` (no_context establishes no active span,
+    which would kill the ``obs`` proxy and auto-nesting).  Hence two paths, one
+    store — neither is a historical leftover.
 
-traced(span_name, *, capture=(), extract_return=None)
-    Decorator. Opens a span around a function call, captures named arguments
-    and (optionally) return-value-derived attributes, records exceptions, and
-    sets duration_ms.
+Layout (top → bottom)
+---------------------
+  setup        find_project_config · resolve_tracking_uri · init_tracing
+  live tracer  open_span ─┬─ traced       (decorate a function)
+                          ├─ child_span   (open a sub-span)
+                          └─ obs          (annotate the span you're inside)
+               tagging:   open_span(source=…) → _attach_trace_metadata
+                          (dsagt.source set on the trace's root only)
+               factories: kb_* · registry_* · code_execute_span
+  replay sink  MLflowSink  (Trace → backdated spans; a traces.TraceCollector consumer)
 
-child_span(name, **attrs)
-    Context manager for nested spans inside a ``@traced`` method.
-
-obs
-    Process-wide proxy for the *current* span.  ``obs.set("hits", 5)`` is a
-    no-op when no span is active, so business code can annotate without
-    branching on whether tracing is on.
-
-llm_source(source) / llm_call_context(source)
-    Marker decorator/context for LLM-call origin tagging.  Stamps
-    ``dsagt.source`` (+ ``dsagt.agent``) on traces created inside the block
-    via MLflow's native ``tracing.context`` API, so the UI's session/source
-    filters surface every LLM call's origin (extraction, embedding, agent).
+``traced`` and ``child_span`` *open* a span; ``obs`` *annotates* whichever span
+is currently open.  All three no-op when tracing was never initialized, so
+business code never imports MLflow and never branches on whether tracing is on.
 """
 
 from __future__ import annotations
 
-import asyncio
-import atexit
 import functools
 import inspect
 import logging
-import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -52,123 +48,22 @@ from typing import Any, Callable, Iterable, Mapping
 
 logger = logging.getLogger(__name__)
 
-# Module-level state. _initialized guards against double-init in test runs
-# and in subprocesses where init_tracing might be called more than once.
-#
-# NOTE on _default_session_id:
-#   This is intentionally a process-global rather than threaded through
-#   every span helper.  DSAgt runs one process per project, so the session
-#   id is a process-wide constant set at startup by init_tracing(), and
-#   propagating it implicitly via this module-level value lets business
-#   code in knowledge.py / provenance.py / registry_server.py emit spans
-#   without ever knowing about session ids.  The cost is that tests have
-#   to monkeypatch the global to isolate (see _reset_tracing fixture in
-#   test_observability.py).
-#
-#   If DSAgt ever grows a multi-tenant mode (one server process serving
-#   many projects), the right replacement is OTel baggage:
-#       from opentelemetry import baggage
-#       sid = baggage.get_baggage("session.id")
-#   which gives per-request context propagation that works correctly
-#   across concurrent requests.  Until then, the global is simpler.
+# Module-level state. _initialized guards every span helper: without a tracking
+# store + experiment set (init_tracing), mlflow.start_span would write to
+# MLflow's default location, so the helpers no-op until init_tracing succeeds.
+# DSAGT runs one process per project, so the session id is a process-wide
+# constant set once at startup and tagged onto each internal trace for grouping.
 _initialized = False
-_tracer_provider = None
 _default_session_id: str | None = None
-# Strategy pointers bound at init_tracing time. Both exist to keep
-# backend-specific behavior out of call sites:
-#
-# _metadata_stamper(dict)
-#   Write key/value metadata to the currently-active trace via MLflow's
-#   InMemoryTraceManager (so it lands in trace_metadata, queryable in
-#   the UI).
-#
-# _llm_context_factory(dict) → context manager
-#   Tag every trace created inside the returned context.  Uses
-#   mlflow.tracing.context which stamps at trace-creation time — the only
-#   reliable window for LLM traces emitted via mlflow.litellm.autolog.
-_metadata_stamper: "Callable[[dict], None] | None" = None
-_llm_context_factory: "Callable[[dict], Any] | None" = None
 
 
-def init_tracing(
-    service_name: str,
-    mlflow_url: str | None = None,
-    session_id: str | None = None,
-) -> None:
-    """Install MLflow's tracer provider as the OTel global.
-
-    Every ``trace.get_tracer(...)`` call (from ``@traced`` / ``child_span``
-    in MCP servers, dsagt-run, and the proxy) routes spans into MLflow's
-    native trace store.  This gives ``mlflow.spanInputs`` / ``mlflow.spanOutputs``
-    full integration and direct access to ``InMemoryTraceManager`` for
-    trace-metadata stamping (session id, source, agent).
-
-    Single source of truth: reads ``./dsagt_config.yaml`` for
-    ``mlflow.port`` + ``project``; reads ``./.runtime`` for ``session_id``.
-    No env-var fallback, no parent-walk — every dsagt service runs with
-    cwd == project_dir by contract.
-
-    The ``mlflow_url`` and ``session_id`` keyword args are kept for tests
-    and proxy mode, where the caller plants known values directly.
-
-    Raises ``RuntimeError`` when no MLflow URL is available.  Processes
-    that legitimately run without tracing (one-shot setup tools, tests)
-    should not call this function; tests install a test provider directly.
-    """
-    global _initialized, _default_session_id
-    global _metadata_stamper, _llm_context_factory
-
-    if _initialized:
-        if session_id:
-            _default_session_id = session_id
-        return
-
-    cfg_pdir, cfg = find_project_config()
-    _default_session_id = session_id or _read_session_id_from_runtime(cfg_pdir)
-    mlflow_url = mlflow_url or _mlflow_url_from_config(cfg)
-
-    if not mlflow_url:
-        raise RuntimeError(
-            f"{service_name}: no observability backend configured. "
-            f"Expected dsagt_config.yaml with mlflow.port set in cwd or a "
-            f"parent directory.  Processes that legitimately run without "
-            f"tracing should not call init_tracing at all."
-        )
-
-    project_name = (cfg or {}).get("project")
-    if not project_name:
-        raise RuntimeError(
-            "no 'project' in dsagt_config.yaml — this should never happen "
-            "for a project created via `dsagt init`."
-        )
-
-    _install_mlflow_provider(mlflow_url, project_name)
-    _metadata_stamper = _stamp_metadata_mlflow
-    _llm_context_factory = _mlflow_llm_context
-
-    # Autolog every LiteLLM completion/embedding call from this process into
-    # MLflow.  With MLflow's tracer provider installed, autolog stamps full
-    # request/response into ``mlflow.spanInputs`` / ``mlflow.spanOutputs``
-    # natively.  This feeds memory extraction (it queries MLflow for
-    # session traces) and ``dsagt info``.  ``dsagt-run`` doesn't make
-    # litellm calls, so skip there.
-    if service_name != "dsagt-run":
-        import mlflow
-
-        mlflow.litellm.autolog()
-    _initialized = True
-    atexit.register(_shutdown)
-    logger.info(
-        "init_tracing: service=%s mlflow=%s project=%s session=%s",
-        service_name,
-        mlflow_url,
-        project_name,
-        _default_session_id or "<none>",
-    )
+# ===========================================================================
+# Setup — where am I, where do I write, wire MLflow up
+# ===========================================================================
 
 
 def find_project_config() -> tuple[Path | None, dict | None]:
-    """Read ``./dsagt_config.yaml`` from cwd.
+    """Read ``./.dsagt/config.yaml`` from cwd.
 
     Returns ``(cwd, parsed_config)`` or ``(None, None)`` if cwd isn't a
     project directory.  No walking — services that need this info run
@@ -181,7 +76,7 @@ def find_project_config() -> tuple[Path | None, dict | None]:
     helper is only for services running inside the project.
     """
     cwd = Path.cwd().resolve()
-    candidate = cwd / "dsagt_config.yaml"
+    candidate = cwd / ".dsagt" / "config.yaml"
     if not candidate.exists():
         return None, None
     try:
@@ -193,299 +88,199 @@ def find_project_config() -> tuple[Path | None, dict | None]:
         return cwd, None
 
 
-def _mlflow_url_from_config(cfg: dict | None) -> str | None:
-    """Return ``http://localhost:<port>`` from a parsed dsagt_config.yaml."""
-    if not cfg:
-        return None
-    port = (cfg.get("mlflow") or {}).get("port")
-    return f"http://localhost:{port}" if port else None
+def resolve_tracking_uri(config: dict | None) -> str:
+    """Compute the serverless MLflow tracking URI for DSAGT self-logging.
 
+    Always ``sqlite:///<project_dir>/mlflow.db`` — DSAGT knows where it writes;
+    there is no server to point at.  ``project_dir`` comes from the resolved
+    config (injected by ``session.load_config``), falling back to cwd for
+    in-project callers.
 
-def _read_session_id_from_runtime(project_dir: Path | None) -> str | None:
-    """Read the active session id from ``<project_dir>/.runtime``.
-
-    ``dsagt mlflow`` writes ``session_id`` here at startup; every service
-    running for the duration of that MLflow daemon shares one session id.
+    The MLflow client honors a ``sqlite:`` URI directly (auto-creating +
+    migrating the DB on first use), so self-logging needs no listener and this
+    never has to fail.  SQLite is MLflow's supported serverless backend — the
+    filesystem store (``file:`` / ``./mlruns``) is deprecated as of Feb 2026.
+    DSAGT emits only traces (no runs/models), so the experiment's default
+    artifact dir is never materialized.
     """
-    if project_dir is None:
-        return None
-    runtime_file = project_dir / ".runtime"
-    if not runtime_file.exists():
-        return None
-    try:
-        import json as _json
-
-        return _json.loads(runtime_file.read_text()).get("session_id")
-    except Exception as e:
-        logger.debug("could not read session_id from %s: %s", runtime_file, e)
-        return None
+    cfg = config or {}
+    pdir = cfg.get("project_dir")
+    base = Path(pdir).resolve() if pdir else Path.cwd().resolve()
+    return f"sqlite:///{base / 'mlflow.db'}"
 
 
-def _install_mlflow_provider(mlflow_url: str, project_name: str) -> None:
-    """Wire MLflow's tracer provider in as the OTel global.
+def init_tracing(
+    service_name: str,
+    mlflow_url: str | None = None,
+    session_id: str | None = None,
+) -> None:
+    """Point MLflow at the project's serverless store + experiment.
 
-    Force MLflow's lazy provider to initialize via its private init hook
-    so we can hand the resulting TracerProvider to OTel below.  The
-    underscore on the init function is MLflow-internal — pinning the
-    mlflow version range in pyproject.toml keeps that boundary stable.
+    After this, every ``mlflow.start_span`` (from ``@traced`` / ``child_span``
+    in the MCP server and dsagt-run) lands in ``sqlite:///<pdir>/mlflow.db``.
+    The tracking URI is the serverless ``sqlite:///<pdir>/mlflow.db`` computed by
+    :func:`resolve_tracking_uri`.  The session id, passed by the MCP server at
+    startup, tags internal traces for grouping.
+
+    The ``mlflow_url`` and ``session_id`` keyword args are kept for tests, where
+    the caller plants known values directly.
+
+    Never raises.  When cwd isn't a dsagt project dir, logs and no-ops so
+    one-shot tools / tests outside a project simply run untraced.
     """
+    global _initialized, _default_session_id
+
+    if _initialized:
+        if session_id:
+            _default_session_id = session_id
+        return
+
+    cfg_pdir, cfg = find_project_config()
+    project_name = (cfg or {}).get("project")
+    if not project_name:
+        logger.warning(
+            "%s: no .dsagt/config.yaml with a 'project' in cwd (%s) — tracing "
+            "disabled for this process.",
+            service_name,
+            Path.cwd(),
+        )
+        return
+
+    _default_session_id = session_id
+    if mlflow_url is None:
+        resolve_cfg = dict(cfg)
+        resolve_cfg["project_dir"] = str(cfg_pdir)
+        mlflow_url = resolve_tracking_uri(resolve_cfg)
+
     import mlflow
-    from mlflow.tracing import provider as mp
-    from opentelemetry import trace
-    from opentelemetry.util._once import Once
 
     mlflow.set_tracking_uri(mlflow_url)
     mlflow.set_experiment(project_name)
-
-    mp._initialize_tracer_provider()
-
-    # OTel guards set_tracer_provider with a one-shot Once flag — the first
-    # caller wins.  Reset so installation always takes effect even if
-    # something accessed get_tracer earlier and locked in the no-op global.
-    trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
-    trace._TRACER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
-    trace.set_tracer_provider(mp.provider.get())
-
-
-def _stamp_metadata_on_trace(request_id: str, metadata: dict) -> None:
-    """Write metadata to a specific MLflow trace by id.
-
-    Used when the caller has the trace_id in hand (e.g. inside the proxy's
-    ``_DSAGTMlflowLogger`` right after ``start_trace``).  ``stamp_metadata``
-    is the higher-level version that looks up the current trace via the
-    active OTel span.
-    """
-    try:
-        from mlflow.tracing.trace_manager import InMemoryTraceManager
-
-        with InMemoryTraceManager.get_instance().get_trace(request_id) as t:
-            if t is not None:
-                t.info.trace_metadata.update({k: str(v) for k, v in metadata.items()})
-    except Exception as e:
-        logger.debug("metadata stamp failed for %s: %s", request_id, e)
-
-
-def _stamp_metadata_mlflow(metadata: dict) -> None:
-    """Write metadata to the currently-active trace's trace_metadata."""
-    from opentelemetry import trace
-
-    span = trace.get_current_span()
-    ctx = span.get_span_context()
-    if not ctx.is_valid:
-        return
-    _stamp_metadata_on_trace(f"tr-{ctx.trace_id:032x}", metadata)
-
-
-def stamp_metadata(metadata: dict) -> None:
-    """Stamp arbitrary key/value metadata on the currently-active trace.
-
-    No-op when no backend is configured (tests, standalone tools).
-    """
-    if _metadata_stamper is not None and metadata:
-        _metadata_stamper(metadata)
-
-
-def _mlflow_llm_context(metadata: dict):
-    """MLflow native tracing.context — stamps at trace-creation time.
-
-    Used by ``llm_call_context`` so every LLM trace emitted via
-    ``mlflow.litellm.autolog`` inside the block lands in MLflow with
-    ``dsagt.source`` / ``dsagt.agent`` / ``mlflow.trace.session`` already
-    set on its trace_metadata.
-    """
-    import mlflow
-
-    return mlflow.tracing.context(metadata=metadata)
-
-
-@contextmanager
-def llm_call_context(source: str):
-    """Stamp ``dsagt.source`` (+ ``dsagt.agent``, ``mlflow.trace.session``)
-    on traces created inside this block.
-    """
-    metadata = {"dsagt.source": source}
-    if agent := os.environ.get("DSAGT_AGENT"):
-        metadata["dsagt.agent"] = agent
-    if _default_session_id:
-        metadata["mlflow.trace.session"] = _default_session_id
-    if _llm_context_factory is not None:
-        with _llm_context_factory(metadata):
-            yield
-    else:
-        yield
-
-
-def llm_source(source: str):
-    """Decorator form of ``llm_call_context`` for tidy call sites.
-
-    Handles both sync and async.  Every LLM call made inside the decorated
-    function lands in MLflow with ``dsagt.source = <source>`` metadata,
-    letting the UI distinguish extraction / embedding / agent-turn origins
-    at a glance.
-    """
-
-    def dec(fn):
-        if asyncio.iscoroutinefunction(fn):
-
-            @functools.wraps(fn)
-            async def aw(*a, **kw):
-                with llm_call_context(source):
-                    return await fn(*a, **kw)
-
-            return aw
-
-        @functools.wraps(fn)
-        def sw(*a, **kw):
-            with llm_call_context(source):
-                return fn(*a, **kw)
-
-        return sw
-
-    return dec
-
-
-def extract_cache_stats(usage: dict) -> tuple[int, int]:
-    """Extract (cache_read, cache_write) tokens from a LiteLLM usage dict.
-
-    LiteLLM's ``Usage`` object doesn't backfill cache fields across
-    providers; whichever shape the upstream returned is the one populated.
-    The configured ``LLM_PROVIDER`` (passed to ``dsagt-proxy --provider X``
-    and used as the LiteLLM provider prefix in the model_list) decides
-    which response format we get back.  The four field-name conventions
-    we've seen in practice are all checked here so this function works
-    regardless of provider config:
-
-    Cache read (tokens served from cache at the lower rate):
-        - ``cache_read_input_tokens``           — Anthropic, Bedrock-Claude
-        - ``prompt_tokens_details.cached_tokens`` — OpenAI, Azure-OpenAI
-        - ``cached_content_token_count``        — Gemini
-        - ``prompt_cache_hit_tokens``           — DeepSeek
-
-    Cache write (only Anthropic-family bills cache writes separately at
-    the 1.25× premium; OpenAI/Gemini/DeepSeek auto-cache without a
-    distinct write fee, so the field doesn't exist):
-        - ``cache_creation_input_tokens``       — Anthropic, Bedrock-Claude
-    """
-    if not isinstance(usage, dict):
-        return (0, 0)
-
-    details = usage.get("prompt_tokens_details") or {}
-    if not isinstance(details, dict):
-        details = {}
-
-    read = (
-        usage.get("cache_read_input_tokens")
-        or details.get("cached_tokens")
-        or usage.get("cached_content_token_count")
-        or usage.get("prompt_cache_hit_tokens")
-        or 0
+    _initialized = True
+    logger.info(
+        "init_tracing: service=%s mlflow=%s project=%s session=%s",
+        service_name,
+        mlflow_url,
+        project_name,
+        _default_session_id or "<none>",
     )
-    write = usage.get("cache_creation_input_tokens") or 0
-    return (int(read), int(write))
 
 
-def _shutdown() -> None:
-    """Flush and shut down the tracer provider. Registered via atexit."""
-    global _tracer_provider
-    if _tracer_provider is None:
-        return
-    try:
-        _tracer_provider.shutdown()
-    except Exception as e:
-        logger.debug("tracer shutdown raised: %s", e)
-    _tracer_provider = None
+# ===========================================================================
+# Live tracer — first-party debug spans, emitted as code runs
+# ===========================================================================
 
-
-def get_tracer(name: str):
-    """Return an OTel tracer routed through the OTLP provider installed by
-    ``init_tracing``."""
-    from opentelemetry import trace
-
-    return trace.get_tracer(name)
+# ----- the span primitive -----
 
 
 @contextmanager
-def open_span(name: str):
-    """Open a span on the installed tracer provider.
+def open_span(name: str, span_type: str | None = None, source: str | None = None):
+    """Open a span on the serverless MLflow store.
 
-    Single OTel code path — provider selection happens once at
-    ``init_tracing`` time.  Yields ``None`` if tracing was never initialized
-    (test paths that skip init_tracing monkeypatch module state directly).
+    Single tracing code path — ``mlflow.start_span`` auto-nests under whatever
+    span is already active (its own context model), so child spans Just Work.
+    Yields ``None`` when tracing was never initialized (one-shot tools / tests
+    outside a project), so the helpers below degrade to no-ops.
+
+    ``source`` is set only on the *categorization root* of a trace — the MCP
+    dispatch span and ``tool.execute`` — and tags the whole trace
+    ``dsagt.source`` for the debug-view filter (see :func:`_attach_trace_metadata`).
+    Inner spans pass ``source=None`` and inherit the root's tag.
     """
     if not _initialized:
         yield None
         return
-    tracer = get_tracer("dsagt.observability")
-    with tracer.start_as_current_span(name) as span:
+    import mlflow
+    from mlflow.entities import SpanType
+
+    with mlflow.start_span(name=name, span_type=span_type or SpanType.UNKNOWN) as span:
+        _attach_trace_metadata(source)
         yield span
 
 
-def configure_litellm_retries(
-    num_retries: int = 5,
-    request_timeout: float = 300.0,
-) -> None:
-    """Configure LiteLLM module-level retry / timeout knobs and quiet its
-    stdout chatter.
+# ----- attribute-value helpers -----
 
-    These are independent of tracing — even ``dsagt-setup-kb`` running before
-    any project exists (and therefore with no MLflow endpoint) gets the
-    rate-limit-resilient embedding path.
 
-    LiteLLM's ``num_retries`` retries on transient failures including 429s
-    with exponential backoff.  We also retry inside APIEmbeddingClient with
-    finer control, but the litellm-level setting acts as a backstop for
-    other code paths (e.g. the proxy).
+def _coerce_attr(value: Any) -> Any:
+    if isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_coerce_attr(v) for v in value]
+    return str(value)
 
-    LiteLLM is also chatty by default: every error prints a "Give Feedback /
-    Get Help" footer to stdout, and every successful call duplicates a log
-    line through the ``LiteLLM`` logger.  Both make ``dsagt-setup-kb`` output
-    nearly unreadable during long ingests with retries.  We suppress them
-    here so DSAgt's own progress logs are visible.
+
+def truncate(value: str, limit: int = 256) -> str:
+    """Truncate a string for span attributes.
+
+    Span backends (and the MLflow trace UI) handle short attribute values
+    much better than multi-megabyte stdout/stderr blobs.  The full payload
+    lives in ``trace_archive/<record_id>.json``; the span just carries a
+    head/tail summary so a human glancing at the UI can tell what happened.
     """
-    # litellm[proxy] is a hard dependency in pyproject.toml — failing this
-    # import means a broken install, not "tracing optional".
-    import litellm
+    if value is None:
+        return ""
+    if len(value) <= limit:
+        return value
+    head = limit - 32
+    return value[:head] + f"... [+{len(value) - head} chars]"
 
-    litellm.num_retries = num_retries
-    litellm.request_timeout = request_timeout
 
-    # Kill the "Give Feedback / Get Help" + "Provider List" stdout footers
-    # that LiteLLM prints on every exception.  These are aimed at first-time
-    # users; for a long-running embed job they make the output unreadable.
-    litellm.suppress_debug_info = True
+# ----- trace tagging — the dsagt.source debug filter + session grouping -----
+#
+# dsagt.source names the MCP tool *category* that was invoked — one of
+# {memory, skill, knowledge, registry} (the four concern modules of the merged
+# dsagt-server), plus ``execution`` for dsagt-run's out-of-process data-tool
+# runs.  It is assigned at the *entry point*, not derived from the span name:
+# the MCP dispatch shell knows which concern owns each tool and stamps the
+# category on the trace's root span, so e.g. ``search_skills`` calling into
+# ``kb.search`` is tagged ``skill`` (the tool the agent called), not
+# ``knowledge`` (the subsystem that happened to do the work).  Inner spans
+# inherit the root's tag; agent traces carry no ``dsagt.source`` at all, which
+# is what lets the MLflow UI filter the debug view in or out.
 
-    # Stop the duplicate INFO log lines.  LiteLLM emits its own
-    # "Wrapper: Completed Call" line on every embedding call, and propagation
-    # to the root logger doubles each one (once via LiteLLM's namespace, once
-    # via root).  Mute the namespace and stop propagation.
-    _llm_log = logging.getLogger("LiteLLM")
-    _llm_log.setLevel(logging.WARNING)
-    _llm_log.propagate = False
 
-    logger.debug(
-        "configure_litellm_retries: num_retries=%d timeout=%.0fs",
-        num_retries,
-        request_timeout,
+def _attach_trace_metadata(source: str | None) -> None:
+    """Tag the current trace as a DSAGT-internal (debug) trace.
+
+    Called from :func:`open_span` on a categorization root (``source`` set):
+
+    - ``dsagt.source`` tag: the MCP tool category / ``execution`` — powers the
+      UI's debug-view filter.
+    - ``mlflow.trace.session`` metadata: groups this process's internal traces
+      under one session (reserved MLflow key, drives the native session filter).
+
+    No-op for inner spans (``source is None``) — they inherit the root's tag.
+    """
+    if not source:
+        return
+    metadata = (
+        {"mlflow.trace.session": _default_session_id} if _default_session_id else None
     )
+    import mlflow
+
+    mlflow.update_current_trace(tags={"dsagt.source": source}, metadata=metadata)
 
 
-# ---------------------------------------------------------------------------
-# obs — process-wide proxy for the current span
-# ---------------------------------------------------------------------------
+# ----- annotate the active span -----
 
 
-class _Obs:
-    """No-op-safe proxy for the active span.
+class _ActiveSpanProxy:
+    """The *annotate* verb that complements the *open* verbs (traced/child_span).
 
-    Business code uses ``obs.set("hits", 5)`` instead of importing OTel. When
-    no span is active (tracing disabled, or call site outside any traced
-    block), every method silently does nothing.
+    Where ``traced`` / ``child_span`` open a span, this annotates whichever span
+    is currently open — ``obs.set("hits", 5)`` from inside a ``@traced`` body
+    attaches to that body's span.  It exists so business code (knowledge.py,
+    provenance.py, registry_tools.py) never imports MLflow and never branches on
+    whether tracing is on: when no span is active (tracing disabled, or call
+    site outside any traced block) every method silently does nothing.
+
+    The process-wide singleton is exported as ``obs``.
     """
 
     def set(self, key: str, value: Any) -> None:
         span = self._current()
         if span is not None and value is not None:
-            span.set_attribute(key, value)
+            span.set_attribute(key, _coerce_attr(value))
 
     def set_many(self, attrs: Mapping[str, Any]) -> None:
         span = self._current()
@@ -493,53 +288,45 @@ class _Obs:
             return
         for k, v in attrs.items():
             if v is not None:
-                span.set_attribute(k, v)
+                span.set_attribute(k, _coerce_attr(v))
 
     def event(self, name: str, **attrs: Any) -> None:
         span = self._current()
         if span is None:
             return
+        from mlflow.entities import SpanEvent
+
         clean_attrs = {k: v for k, v in attrs.items() if v is not None}
-        span.add_event(name, attributes=clean_attrs)
+        span.add_event(SpanEvent(name, attributes=clean_attrs))
 
     def set_inputs(self, inputs: Any) -> None:
-        """Populate the trace's ``request`` field for the MLflow trace UI.
-
-        Stamps ``mlflow.spanInputs`` as a JSON-serialized OTel attribute —
-        this is the same key MLflow's ``LiveSpan.set_inputs`` writes, so it
-        flows through to MLflow's ``request`` column in ``search_traces``.
-        For non-MLflow OTel backends (Jaeger, Tempo) it just shows up as a
-        regular span attribute, harmlessly.
-        """
+        """Populate the trace's ``request`` field for the MLflow trace UI."""
         span = self._current()
         if span is None or inputs is None:
             return
-        span.set_attribute("mlflow.spanInputs", _to_json(inputs))
+        span.set_inputs(inputs)
 
     def set_outputs(self, outputs: Any) -> None:
         """Populate the trace's ``response`` field for the MLflow trace UI."""
         span = self._current()
         if span is None or outputs is None:
             return
-        span.set_attribute("mlflow.spanOutputs", _to_json(outputs))
+        span.set_outputs(outputs)
 
     @staticmethod
     def _current():
-        """Return the currently-active OTel span, or ``None`` if none."""
-        from opentelemetry import trace
-
-        span = trace.get_current_span()
-        if span is None or not span.get_span_context().is_valid:
+        """Return the currently-active MLflow span, or ``None`` if none."""
+        if not _initialized:
             return None
-        return span
+        import mlflow
+
+        return mlflow.get_current_active_span()
 
 
-obs = _Obs()
+obs = _ActiveSpanProxy()
 
 
-# ---------------------------------------------------------------------------
-# traced — decorator for top-level method instrumentation
-# ---------------------------------------------------------------------------
+# ----- open a span — decorator + context manager -----
 
 
 def traced(
@@ -548,7 +335,7 @@ def traced(
     capture: Iterable[str] = (),
     extract_return: Mapping[str, Callable[[Any], Any]] | None = None,
 ) -> Callable:
-    """Wrap a function in an OTel span.
+    """Wrap a function in an MLflow span.
 
     Parameters
     ----------
@@ -560,16 +347,15 @@ def traced(
         work.
     extract_return
         Optional mapping of attribute name → function applied to the return
-        value to extract that attribute. Use this for things like
-        ``{"hits": lambda r: len(r)}``.
+        value to extract that attribute (e.g. ``{"hits": lambda r: len(r)}``).
 
     Behavior
     --------
     * Captures the configured args as attributes (skipping ``None``).
     * Always sets ``duration_ms``.
-    * Always sets the DSAgt session id (if init_tracing was given one).
-    * Records exceptions via ``span.record_exception`` and sets ERROR status.
-    * Re-raises after recording.
+    * Tags the trace ``dsagt.source`` + session for the debug view.
+    * Records exceptions and sets ERROR status (MLflow auto-records the
+      exception on context exit); re-raises after recording.
     """
     capture = tuple(capture)
     extract_return = dict(extract_return or {})
@@ -582,7 +368,6 @@ def traced(
             with open_span(span_name) as span:
                 if span is None:
                     return fn(*args, **kwargs)
-                _attach_trace_metadata(span_name)
 
                 # Capture configured arguments as span attributes.  Looked up
                 # by name against the function signature so positional and
@@ -605,9 +390,8 @@ def traced(
                 start = time.perf_counter()
                 try:
                     result = fn(*args, **kwargs)
-                except Exception as exc:
-                    span.record_exception(exc)
-                    _set_error_status(span, str(exc))
+                except Exception:
+                    span.set_status("ERROR")
                     raise
                 finally:
                     span.set_attribute(
@@ -641,113 +425,31 @@ def traced(
     return decorator
 
 
-_SOURCE_BY_PREFIX = (
-    ("tool.", "tool"),
-    ("kb.", "knowledge"),
-    ("registry.", "registry"),
-)
-
-
-def _derive_source(span_name: str | None) -> str | None:
-    """Map a span name to a ``dsagt.source`` value.
-
-    Prefix-based dispatch so every span we open lands with a source tag
-    without touching the call site.  LLM traces get their source from the
-    proxy's ``_DSAGTMlflowLogger`` (agent) or ``@llm_source`` (extraction,
-    embedding) instead — this helper covers the non-LLM spans our own
-    instrumentation emits.
-    """
-    if not span_name:
-        return None
-    for prefix, source in _SOURCE_BY_PREFIX:
-        if span_name.startswith(prefix):
-            return source
-    return None
-
-
-def _attach_trace_metadata(span_name: str | None) -> None:
-    """Stamp session + source on the currently-active trace.
-
-    - ``mlflow.trace.session``: process-wide session id (reserved MLflow
-      key; powers the UI's native session filter).
-    - ``dsagt.source``: derived from the span name prefix — so every span
-      we open lands in ``dsagt info``'s "by source" bucket.
-
-    No-op when no backend is configured or no span is active; the
-    metadata stamper handles both cases.
-    """
-    md: dict[str, str] = {}
-    if _default_session_id:
-        md["mlflow.trace.session"] = _default_session_id
-    src = _derive_source(span_name)
-    if src:
-        md["dsagt.source"] = src
-    if md:
-        stamp_metadata(md)
-
-
-def _to_json(value: Any) -> str:
-    """Serialize *value* to JSON for an OTel attribute.
-
-    OTel attributes only accept primitives + sequences of primitives;
-    MLflow's ``mlflow.spanInputs`` / ``mlflow.spanOutputs`` keys expect
-    a JSON-encoded payload that the trace UI deserializes for display.
-    """
-    import json
-
-    try:
-        return json.dumps(value, default=str)
-    except (TypeError, ValueError):
-        return str(value)
-
-
-def _coerce_attr(value: Any) -> Any:
-    if isinstance(value, (str, bool, int, float)):
-        return value
-    if isinstance(value, (list, tuple)):
-        return [_coerce_attr(v) for v in value]
-    return str(value)
-
-
-def _set_error_status(span, message: str) -> None:
-    # OTel is mandatory; if Status/StatusCode disappears or moves, we want
-    # the resulting ImportError to surface immediately so the dep upgrade
-    # gets caught at the test level rather than silently disabling error
-    # status on every traced exception path.
-    from opentelemetry.trace import Status, StatusCode
-
-    span.set_status(Status(StatusCode.ERROR, message))
-
-
-# ---------------------------------------------------------------------------
-# Typed span helpers — populated incrementally as later stages need them.
-#
-# The convention is: every span name DSAgt emits has a helper here. Business
-# modules call the helper, never tracer.start_as_current_span directly. This
-# keeps span names, attribute schemas, and required fields in one file.
-# ---------------------------------------------------------------------------
-
-
 @contextmanager
-def child_span(name: str, **attrs: Any):
+def child_span(name: str, *, span_type: str | None = None, **attrs: Any):
     """Open a child span with arbitrary attributes.
 
-    Use this from inside a ``@traced`` method when you need to break a method
-    into sub-phases (e.g. embed / index_search / rerank inside kb.search).
-    Prefer the typed helpers below when one exists for your operation.
+    Use this from inside a ``@traced`` method to break a method into sub-phases
+    (e.g. embed / index_search / rerank inside kb.search).  Prefer the typed
+    factories below when one exists for your operation.
     """
-    with open_span(name) as span:
+    with open_span(name, span_type=span_type) as span:
         if span is None:
             yield None
             return
-        _attach_trace_metadata(name)
         for k, v in attrs.items():
             if v is not None:
                 span.set_attribute(k, _coerce_attr(v))
         yield span
 
 
-# ----- Knowledge base spans (Stage 1) -----
+# ----- named span factories -----
+#
+# Every span name DSAgt emits has a factory here. Business modules call the
+# factory, never mlflow.start_span directly, so span names, attribute schemas,
+# and span types stay in one file.
+
+# Knowledge base spans.
 
 
 def kb_embed_span(backend: str | None, model: str | None, n_texts: int):
@@ -755,10 +457,13 @@ def kb_embed_span(backend: str | None, model: str | None, n_texts: int):
 
     Used for both query embedding (kb.search) and chunk embedding (kb.ingest,
     kb.append, kb.add_entries).  Backend-agnostic: ``backend`` is ``"api"``
-    for LiteLLM/HTTP embedders or ``"local"`` for sentence-transformers.
+    for the HTTP embedder or ``"local"`` for sentence-transformers.
     """
+    from mlflow.entities import SpanType
+
     return child_span(
         "kb.embed",
+        span_type=SpanType.EMBEDDING,
         backend=backend,
         model=model,
         n_texts=n_texts,
@@ -767,8 +472,11 @@ def kb_embed_span(backend: str | None, model: str | None, n_texts: int):
 
 def kb_index_search_span(vector_db: str | None, k: int, filtered: bool):
     """Span around an underlying vector index search call."""
+    from mlflow.entities import SpanType
+
     return child_span(
         "kb.index_search",
+        span_type=SpanType.RETRIEVER,
         vector_db=vector_db,
         k=k,
         filtered=filtered,
@@ -784,23 +492,28 @@ def kb_rerank_span(model: str | None, n_pairs: int):
     )
 
 
-# ----- Registry server spans (Stage 4) -----
-#
-# Only the deliberate, infrequent registry operations are instrumented.
-# search_registry / search_skills are intentionally NOT instrumented — they
+# Registry spans.  Only the deliberate, infrequent registry operations are
+# instrumented.  search_registry / search_skills are intentionally NOT — they
 # are high-frequency low-information per call, and the agent-side LLM trace
 # already records that they were invoked.
 
 
-def registry_save_tool_span(tool_name: str | None):
-    """Span around ``save_tool_spec``."""
-    return child_span("registry.save_tool_spec", tool_name=tool_name)
+def registry_save_code_span(code_name: str | None):
+    """Span around ``save_code_spec``."""
+    from mlflow.entities import SpanType
+
+    return child_span(
+        "registry.save_code_spec", span_type=SpanType.TOOL, code_name=code_name
+    )
 
 
 def registry_install_deps_span(packages: list[str] | None):
     """Span around an ``install_dependencies`` call."""
+    from mlflow.entities import SpanType
+
     return child_span(
         "registry.install_dependencies",
+        span_type=SpanType.TOOL,
         package_count=len(packages) if packages else 0,
         # First few package names are useful in the UI for at-a-glance
         # identification; full list is in the LLM call record if needed.
@@ -810,414 +523,198 @@ def registry_install_deps_span(packages: list[str] | None):
 
 def registry_reconstruct_pipeline_span(fmt: str | None):
     """Span around a ``reconstruct_pipeline`` call."""
-    return child_span("registry.reconstruct_pipeline", format=fmt or "bash")
+    from mlflow.entities import SpanType
+
+    return child_span(
+        "registry.reconstruct_pipeline", span_type=SpanType.TOOL, format=fmt or "bash"
+    )
 
 
-# ----- Tool execution spans (Stage 3) -----
+# Code execution spans (dsagt-run).
 
 
-def tool_execute_span(record_id: str, tool_name: str):
-    """Span around a single ``dsagt-run`` tool execution.
+def code_execute_span(record_id: str, code_name: str):
+    """Span around a single ``dsagt-run`` code execution.
 
-    This is a *top-level* span, not a child of any LLM call span.  The agent
-    CLI (Claude Code, Goose, etc.) spawns ``dsagt-run`` in its own process
-    tree without OTel context propagation, so the LLM-call-to-tool-execution
-    parent/child linkage cannot be expressed in the trace tree directly.
-    Instead, every ``tool.execute`` span carries:
-
-    * ``session.id`` (attached automatically via init_tracing's session_id)
-    * ``record_id`` — matches the ``tool_use_id`` in the proxy's intent record,
-      which is how trace_archive correlates execution to LLM intent today.
-    * ``tool_name`` — for filtering in the MLflow UI.
-
-    Filter by ``session.id`` in the MLflow trace view to see all tool
-    executions for a given project alongside the LLM calls that requested
-    them.  Cross-reference via ``record_id`` for full intent → execution
-    linkage when needed.
+    A *top-level, categorization-root* span: the agent CLI spawns ``dsagt-run``
+    in its own process tree, so this trace stands alone in the store rather than
+    nesting under any MCP-dispatch span.  It carries ``record_id`` (correlates
+    to the ``trace_archive`` record) and ``code_name``, and is tagged
+    ``dsagt.source=execution`` — its own bucket, distinct from the four MCP tool
+    categories, since these are actual code runs rather than meta-ops.
     """
+    from mlflow.entities import SpanType
 
     @contextmanager
     def _wrapper():
-        with open_span("tool.execute") as span:
+        with open_span(
+            "code.execute", span_type=SpanType.TOOL, source="execution"
+        ) as span:
             if span is None:
                 yield None
                 return
-            _attach_trace_metadata("tool.execute")
             span.set_attribute("record_id", record_id)
-            span.set_attribute("tool_name", tool_name)
+            span.set_attribute("code_name", code_name)
             yield span
 
     return _wrapper()
 
 
-def truncate(value: str, limit: int = 256) -> str:
-    """Truncate a string for span attributes.
+# ===========================================================================
+# Replay sink — finished agent Trace → backdated MLflow spans
+# ===========================================================================
 
-    Span backends (and the MLflow trace UI) handle short attribute values
-    much better than multi-megabyte stdout/stderr blobs.  The full payload
-    lives in ``trace_archive/<record_id>.json``; the span just carries a
-    head/tail summary so a human glancing at the UI can tell what happened.
+_S_PER_NS = 1e9
+
+
+def _to_ns(epoch_s: float | None) -> int | None:
+    return int(epoch_s * _S_PER_NS) if epoch_s is not None else None
+
+
+class MLflowSink:
+    """Render a :class:`~dsagt.traces.Trace` into MLflow spans (a trace consumer).
+
+    The agent half of observability: where ``@traced`` / ``obs`` emit DSAGT's
+    own first-party debug spans live, this replays a finished transcript's
+    :class:`~dsagt.traces.Trace` after the fact into the *same* store.  It uses
+    ``mlflow.start_span_no_context`` — the only API that accepts an explicit
+    ``parent_span`` and backdated ``start_time_ns`` — and mirrors the span
+    conventions of MLflow's own ``claude_code`` autolog so foreign traces render
+    identically in the Chat UI: an AGENT root, ``llm`` children carrying
+    ``message.format="anthropic"`` + ``mlflow.chat.tokenUsage``, and
+    ``tool_<name>`` children.  Agent traces carry no ``dsagt.source`` tag, so
+    they stay in the normal view, separate from the internal debug traces.
+
+    A session ``Trace`` carries one AGENT subtree per turn; the sink emits **one
+    MLflow trace per AGENT root**, matching the per-prompt granularity autolog's
+    Stop hook produces.  MLflow mints its own trace/span ids, so each trace is
+    tagged ``dsagt.trace_id = <trace_id>:<root span_id>`` (a stable per-turn
+    idempotency key).
+
+    A *consumer* of :class:`~dsagt.traces.TraceCollector`: ``name`` keys its own
+    ack file (``.dsagt/trace_acks_mlflow.json``); ``write`` logs the trace.
+    Spans are plain dicts (see ``traces`` module docstring), so this reads them
+    directly — no per-object serialization.
     """
-    if value is None:
-        return ""
-    if len(value) <= limit:
-        return value
-    head = limit - 32
-    return value[:head] + f"... [+{len(value) - head} chars]"
 
+    name = "mlflow"
 
-# ---------------------------------------------------------------------------
-# Phase 2: dsagt-proxy callback (cache breakpoints + sidechannel detection)
-# ---------------------------------------------------------------------------
-#
-# When ``dsagt start --enable-proxy`` is set, the proxy intercepts every
-# LLM call and emits OTLP spans to MLflow's /v1/traces endpoint via
-# LiteLLM's built-in "otel" callback.  Two extra concerns can't be done
-# by pure observation — they require request mutation / response logging
-# at the proxy hot path:
-#
-#   1. Anthropic prompt-cache breakpoint injection (saves money on
-#      multi-turn sessions; anthropic + bedrock-anthropic honor it,
-#      others ignore the marker).
-#   2. Sidechannel-call detection (agents' hardcoded title-gen / session-
-#      namer models would 400 against lab gateways; we mock them and
-#      surface a single warning at teardown so the user can spot a typo
-#      in their primary llm.model vs. a harmless sidechannel hit).
-#
-# These live here (not in provenance.py) because they're observation-time
-# concerns, gated by proxy mode, and consumed by the proxy entry point
-# in commands/proxy_server.py via :func:`init_proxy_tracing`.
+    def __init__(self, tracking_uri: str, experiment: str):
+        self._uri = tracking_uri
+        self._experiment = experiment
 
-_CACHE_MARKER = {"type": "ephemeral"}
+    def write(self, trace) -> list[str]:
+        """Log every turn subtree; return the MLflow trace id of each."""
+        import mlflow
 
+        mlflow.set_tracking_uri(self._uri)
+        mlflow.set_experiment(trace.project or self._experiment)
 
-def _inject_cache_breakpoints(messages: list, kwargs: dict) -> None:
-    """Mark the largest stable request prefix as cacheable.
+        children: dict[str, list] = {}
+        for span in trace.spans:
+            if span["parent_id"] is not None:
+                children.setdefault(span["parent_id"], []).append(span)
 
-    Anthropic prompt caching keys on the prefix UP TO each marked block, so
-    one marker at the end of the tools array caches "system + tools", and a
-    second on the system message itself ensures the system block is cached
-    even on requests with no tools.  Subsequent turns within the 5-minute
-    TTL pay 10% on the cached prefix instead of 100%.
+        trace_ids = []
+        for root in trace.spans:
+            if root["parent_id"] is None:
+                trace_ids.append(
+                    self._emit_subtree(root, children.get(root["span_id"], []), trace)
+                )
+        return trace_ids
 
-    Mutates ``messages`` and ``kwargs`` in place — the proxy reads the same
-    objects on its way to the upstream call.
+    def _emit_subtree(self, root, children, trace) -> str:
+        """Emit one MLflow trace for an AGENT ``root`` and its direct children."""
+        import mlflow
+        from mlflow.entities import SpanType
+        from mlflow.tracing.constant import (
+            SpanAttributeKey,
+            TokenUsageKey,
+            TraceMetadataKey,
+        )
+        from mlflow.tracing.trace_manager import InMemoryTraceManager
 
-    Marker is ``{"type": "ephemeral"}``; LiteLLM forwards it as
-    ``cache_control`` to anthropic-family providers (Anthropic direct,
-    Bedrock-Claude).  Providers without prompt caching (current OpenAI
-    automatic caching ignores explicit markers, Cohere/Mistral/etc just
-    drop them) treat it as a no-op, so this is safe to set unconditionally.
-    """
-    # 1) Tools: stamp the last tool definition.  In LiteLLM's OpenAI-shape
-    #    the tool dict carries cache_control as a top-level key and the
-    #    Anthropic translator picks it up.
-    tools = kwargs.get("tools") or []
-    if tools and isinstance(tools[-1], dict):
-        tools[-1]["cache_control"] = _CACHE_MARKER
+        kind_to_type = {
+            "AGENT": SpanType.AGENT,
+            "LLM": SpanType.LLM,
+            "TOOL": SpanType.TOOL,
+            "OTHER": SpanType.UNKNOWN,
+        }
 
-    # 2) System message: stamp the last text block.  For string content we
-    #    promote to block format because cache_control lives on the block,
-    #    not the message itself.
-    for msg in messages:
-        if msg.get("role") != "system":
-            continue
-        content = msg.get("content")
-        if isinstance(content, str):
-            msg["content"] = [
-                {
-                    "type": "text",
-                    "text": content,
-                    "cache_control": _CACHE_MARKER,
+        ml_root = mlflow.start_span_no_context(
+            name=root["name"],
+            span_type=kind_to_type[root["kind"]],
+            inputs={"prompt": root["attributes"].get("prompt", "")},
+            start_time_ns=_to_ns(root["start_time"]),
+        )
+
+        for span in children:
+            if span["kind"] == "LLM":
+                child = mlflow.start_span_no_context(
+                    name=span["name"],
+                    parent_span=ml_root,
+                    span_type=SpanType.LLM,
+                    start_time_ns=_to_ns(span["start_time"]),
+                    inputs={
+                        "model": span["model"] or "unknown",
+                        "messages": span["request"],
+                    },
+                    attributes={
+                        "model": span["model"] or "unknown",
+                        SpanAttributeKey.MESSAGE_FORMAT: "anthropic",
+                    },
+                )
+                if span["usage"]:
+                    inp = span["usage"].get("input_tokens") or 0
+                    out = span["usage"].get("output_tokens") or 0
+                    child.set_attribute(
+                        SpanAttributeKey.CHAT_USAGE,
+                        {
+                            TokenUsageKey.INPUT_TOKENS: inp,
+                            TokenUsageKey.OUTPUT_TOKENS: out,
+                            TokenUsageKey.TOTAL_TOKENS: inp + out,
+                        },
+                    )
+                child.set_outputs(
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": span["response"],
+                    }
+                )
+            else:  # TOOL / OTHER
+                child = mlflow.start_span_no_context(
+                    name=span["name"],
+                    parent_span=ml_root,
+                    span_type=kind_to_type[span["kind"]],
+                    start_time_ns=_to_ns(span["start_time"]),
+                    inputs=span["attributes"].get("input", {}),
+                    attributes={
+                        "tool_name": span["attributes"].get("tool_name"),
+                        "tool_id": span["attributes"].get("tool_id"),
+                    },
+                )
+                child.set_outputs({"result": span["attributes"].get("result", "")})
+            child.end(end_time_ns=_to_ns(span["end_time"]))
+
+        # Trace-level metadata: session correlation + the per-turn canonical id
+        # (idempotency key) + request/response previews for the trace list.
+        try:
+            mgr = InMemoryTraceManager.get_instance()
+            with mgr.get_trace(ml_root.trace_id) as in_mem:
+                meta = {
+                    TraceMetadataKey.TRACE_SESSION: trace.session_id,
+                    "dsagt.trace_id": f"{trace.trace_id}:{root['span_id']}",
+                    "dsagt.agent": trace.agent,
                 }
-            ]
-        elif isinstance(content, list) and content:
-            last_block = content[-1]
-            if isinstance(last_block, dict):
-                last_block["cache_control"] = _CACHE_MARKER
-        break
+                in_mem.info.trace_metadata = {**in_mem.info.trace_metadata, **meta}
+                if prompt := root["attributes"].get("prompt"):
+                    in_mem.info.request_preview = str(prompt)[:1000]
+                if response := root["attributes"].get("response"):
+                    in_mem.info.response_preview = str(response)[:1000]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("MLflowSink: could not stamp trace metadata: %s", e)
 
-
-# ---------------------------------------------------------------------------
-# Sidechannel model-call handling
-# ---------------------------------------------------------------------------
-#
-# Every agent platform hardcodes a small/fast model for internal features
-# (goose → gpt-4o-mini session-namer; claude → claude-haiku-4-5... title
-# generator; the next agent will pick its own).  When the user's gateway
-# doesn't carry that exact bare name — which is the norm for lab gateways
-# that alias every model — those requests would 400 and clutter MLflow.
-#
-# Rather than maintain a per-vendor list of known hardcoded names (which
-# rots as vendors rename their sidechannel models), DSAGT catches all of
-# them with one wildcard LiteLLM route, records which names fired, and
-# surfaces a single yellow warning at session teardown so the user can
-# distinguish a harmless sidechannel from a typo in their own config.
-#
-# Callers import the specific thing they need:
-#   commands/proxy_server._generate_config → SIDECHANNEL_WILDCARD_ROUTE_YAML
-#   DSAGTCallback.log_success_event        → record_sidechannel_call()
-#   commands/cli._cmd_start (teardown)     → print_sidechannel_warning()
-
-import json as _json  # local alias keeps the section self-contained
-import sys as _sys
-from datetime import datetime as _datetime, timezone as _timezone
-from pathlib import Path as _Path
-
-#: Env var the parent process exports so the proxy's DSAGT callback can tell
-#: "this is the configured primary model" from "this is a sidechannel hit".
-SIDECHANNEL_PRIMARY_MODEL_ENV = "DSAGT_PRIMARY_MODEL"
-
-#: JSONL file (one entry per intercepted call) that the proxy subprocess
-#: appends to and the parent reads at teardown.  Lives at the project
-#: directory root, adjacent to ``trace_archive/``.
-SIDECHANNEL_LOG_FILENAME = "sidechannel.jsonl"
-
-#: Canned reply the wildcard returns.  Short enough that goose's
-#: session-namer (expects ≤4 words) and claude's title generator both
-#: accept it without error.
-_SIDECHANNEL_CANNED_RESPONSE = "session"
-
-#: Post-routing model name LiteLLM resolves the wildcard catchall to.  Only
-#: true mock hits end up here; explicit primary entries and aliases route
-#: to the real upstream regardless of what name the client requested.  The
-#: sidechannel detector uses this to avoid flagging alias hits as
-#: sidechannel — see ``record_sidechannel_call``.
-SIDECHANNEL_CATCHALL_MODEL = "openai/dsagt-sidechannel-catchall"
-
-#: Where the user can read the longer explanation.  Printed in the warning.
-SIDECHANNEL_DOC_LOCATION = "README.md § Sidechannel model calls"
-
-#: YAML fragment appended to the proxy's ``model_list`` after the primary
-#: route.  LiteLLM prefers exact matches over wildcards, so the configured
-#: model still routes normally; everything else falls through to the mock.
-#:
-#: ``api_base`` has to be a syntactically valid URL but is never dialed —
-#: ``mock_response`` short-circuits upstream entirely.
-SIDECHANNEL_WILDCARD_ROUTE_YAML = f"""\
-  - model_name: "*"
-    litellm_params:
-      model: {SIDECHANNEL_CATCHALL_MODEL}
-      api_base: http://invalid.local
-      api_key: unused
-      mock_response: "{_SIDECHANNEL_CANNED_RESPONSE}"
-"""
-
-
-def _sidechannel_client_requested_model(kwargs: dict) -> str | None:
-    """Return the model name the client sent, not the post-routing target.
-
-    LiteLLM mutates ``kwargs["model"]`` to the resolved route during
-    completion, so by the time callbacks fire the original name is gone
-    from there — a wildcard hit's ``kwargs["model"]`` is always the
-    wildcard's ``litellm_params.model`` target.
-
-    ``standard_logging_object.model_group`` preserves the name from the
-    client's request body.  For exact matches it equals the configured
-    primary; for wildcard hits it's the actual sidechannel name (e.g.
-    ``gpt-4o-mini``, ``claude-haiku-4-5-20251001``) — which is what the
-    warning needs to show.
-    """
-    slo = kwargs.get("standard_logging_object") or {}
-    if isinstance(slo, dict):
-        grp = slo.get("model_group")
-        if grp:
-            return grp.split("/", 1)[-1]
-    # Fallback: whatever kwargs has. Worse (may be the catchall name) but
-    # still informative if standard_logging_object isn't populated.
-    m = kwargs.get("model") or ""
-    return m.split("/", 1)[-1] or None
-
-
-def record_sidechannel_call(records_dir, kwargs: dict) -> None:
-    """Append a JSONL entry when a request hit the wildcard catchall.
-
-    Detection rule: ``kwargs["model"]`` (the post-routing target LiteLLM
-    selected) equals ``SIDECHANNEL_CATCHALL_MODEL``.  This is the only
-    reliable discriminator: name-based comparison against the primary
-    misclassifies alias hits (e.g. ``claude-sonnet-4-5`` aliased to a
-    longer lab-gateway model name) as sidechannel even though they
-    actually routed to the real upstream.
-
-    Called from the DSAGT callback's success handler, so only successful
-    calls get logged — failures land in MLflow as errors regardless.
-    No-ops when ``SIDECHANNEL_PRIMARY_MODEL_ENV`` isn't set.
-    """
-    primary = os.environ.get(SIDECHANNEL_PRIMARY_MODEL_ENV)
-    if not primary:
-        return
-
-    routed_to = kwargs.get("model") or ""
-    if routed_to != SIDECHANNEL_CATCHALL_MODEL:
-        return  # real upstream call (primary entry or alias) — not a sidechannel
-
-    requested = _sidechannel_client_requested_model(kwargs)
-    if not requested:
-        return
-
-    entry = {
-        "timestamp": _datetime.now(_timezone.utc).isoformat().replace("+00:00", "Z"),
-        "model": requested,
-        "agent": os.environ.get("DSAGT_AGENT", ""),
-        "session": os.environ.get("DSAGT_SESSION_ID", ""),
-    }
-    path = _Path(records_dir).parent / SIDECHANNEL_LOG_FILENAME
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a") as f:
-            f.write(_json.dumps(entry) + "\n")
-    except Exception as e:
-        logger.debug("sidechannel log append failed: %s", e)
-
-
-def print_sidechannel_warning(project_dir, session_id: str | None) -> None:
-    """Read ``SIDECHANNEL_LOG_FILENAME`` under *project_dir*, dedup within
-    *session_id*, and print a yellow warning to stdout.
-
-    No-op when nothing was logged for this session (common case).  The
-    warning lists each unique model that hit the wildcard along with the
-    call count, and points the user at ``SIDECHANNEL_DOC_LOCATION`` for the
-    two possible causes (harmless sidechannel vs config typo).
-
-    ANSI colors are only emitted when stdout is a TTY — CI logs stay clean.
-    """
-    log_path = _Path(project_dir) / SIDECHANNEL_LOG_FILENAME
-    if not log_path.exists():
-        return
-
-    # Dedup by model name within the current session only.  The file is
-    # append-only across runs, so older sessions' entries are still present
-    # but don't belong in this run's warning.
-    seen: dict[str, int] = {}
-    try:
-        for line in log_path.read_text().splitlines():
-            if not line.strip():
-                continue
-            entry = _json.loads(line)
-            if session_id and entry.get("session") != session_id:
-                continue
-            model = entry.get("model") or "<unknown>"
-            seen[model] = seen.get(model, 0) + 1
-    except (OSError, ValueError):
-        return
-
-    if not seen:
-        return
-
-    tty = _sys.stdout.isatty()
-    yellow = "\033[33m" if tty else ""
-    bold = "\033[1m" if tty else ""
-    reset = "\033[0m" if tty else ""
-
-    print()
-    print(f"{yellow}{bold}  ⚠ Sidechannel model calls intercepted:{reset}")
-    for model, count in sorted(seen.items(), key=lambda kv: -kv[1]):
-        s = "s" if count != 1 else ""
-        print(f"{yellow}      {model}  ({count} call{s}){reset}")
-    print(f"{yellow}    Two possible causes:{reset}")
-    print(
-        f"{yellow}      (1) agent sidechannel (e.g. title generator) — safe to ignore{reset}"
-    )
-    print(
-        f"{yellow}      (2) typo in dsagt_config.yaml llm.model — these replies are canned, not real{reset}"
-    )
-    print(f"{yellow}    See: {SIDECHANNEL_DOC_LOCATION}{reset}")
-
-
-# ---------------------------------------------------------------------------
-# DSAGTCallback — LiteLLM CustomLogger for proxy-mode cache + sidechannel
-# ---------------------------------------------------------------------------
-
-
-def _make_dsagt_callback(records_dir):
-    """Construct a LiteLLM CustomLogger with cache injection + sidechannel.
-
-    Lazy-imports LiteLLM so the rest of observability.py is testable
-    without it on the import path.  Trace transport is via
-    ``litellm.callbacks = ["otel"]``, configured by :func:`init_proxy_tracing`
-    — this callback is only for the two intercept-time concerns LiteLLM
-    autolog can't cover.
-    """
-    from litellm.integrations.custom_logger import CustomLogger
-
-    class DSAGTCallback(CustomLogger):
-        def __init__(self, records_dir):
-            self.records_dir = records_dir
-
-        def log_pre_api_call(self, model, messages, kwargs):
-            _inject_cache_breakpoints(messages, kwargs)
-
-        def log_success_event(self, kwargs, response_obj, start_time, end_time):
-            record_sidechannel_call(self.records_dir, kwargs)
-
-        async def async_log_success_event(
-            self, kwargs, response_obj, start_time, end_time
-        ):
-            record_sidechannel_call(self.records_dir, kwargs)
-
-        def log_failure_event(self, kwargs, response_obj, start_time, end_time):
-            logger.warning("LLM call failed: model=%s", kwargs.get("model"))
-
-        async def async_log_failure_event(
-            self, kwargs, response_obj, start_time, end_time
-        ):
-            logger.warning("LLM call failed: model=%s", kwargs.get("model"))
-
-    return DSAGTCallback(records_dir)
-
-
-def init_proxy_tracing(
-    mlflow_url: str, project: str, session_id: str | None, records_dir
-) -> None:
-    """Configure LiteLLM proxy → MLflow native MlflowLogger transport, plus
-    install the DSAGT cache + sidechannel callback.
-
-    Installs MLflow's tracer provider (so any span helpers in the proxy
-    process emit through MLflow), then plants ``_DSAGTMlflowLogger`` (a
-    subclass of LiteLLM's ``MlflowLogger``) into LiteLLM's logger cache so
-    the string ``"mlflow"`` in ``success_callback``/``failure_callback``
-    routes through it.  The subclass stamps ``mlflow.trace.session`` /
-    ``dsagt.source=agent`` / ``dsagt.agent`` on every proxy-captured trace
-    in the narrow window between trace creation and export.
-
-    Caller is ``commands/proxy_server.py:main``.  ``records_dir`` is the
-    project's ``trace_archive/`` so the sidechannel jsonl lands adjacent.
-    """
-    global _initialized, _default_session_id
-    global _metadata_stamper, _llm_context_factory
-
-    _install_mlflow_provider(mlflow_url, project)
-    _metadata_stamper = _stamp_metadata_mlflow
-    _llm_context_factory = _mlflow_llm_context
-    if session_id:
-        _default_session_id = session_id
-    _initialized = True
-
-    # Install our MlflowLogger subclass so trace metadata stamping happens
-    # in the narrow window between trace creation and export.  Lazy import
-    # to keep the import graph clean (provenance imports observability,
-    # not the other way round at top level).
-    from dsagt.provenance import install_mlflow_logger_with_session_tag
-
-    install_mlflow_logger_with_session_tag()
-
-    import litellm
-
-    # Cache + sidechannel callback (intercept-time concerns).
-    callback = _make_dsagt_callback(records_dir)
-    litellm.callbacks = [callback]
-
-    # Register the built-in "mlflow" callback by NAME, not instance.  LiteLLM
-    # async dispatch resolves names to logger classes via _in_memory_loggers
-    # at each call; passing a string ensures our pre-seeded subclass is used
-    # (it passes the isinstance(MlflowLogger) check).
-    if "mlflow" not in (litellm.success_callback or []):
-        litellm.success_callback = (litellm.success_callback or []) + ["mlflow"]
-    if "mlflow" not in (litellm.failure_callback or []):
-        litellm.failure_callback = (litellm.failure_callback or []) + ["mlflow"]
-
-    logger.info(
-        "init_proxy_tracing: service=dsagt-proxy mlflow=%s session=%s",
-        mlflow_url,
-        session_id,
-    )
+        ml_root.set_outputs({"response": root["attributes"].get("response", "")})
+        ml_root.end(end_time_ns=_to_ns(root["end_time"]))
+        return ml_root.trace_id

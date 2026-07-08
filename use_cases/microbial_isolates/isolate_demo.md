@@ -1,12 +1,18 @@
 # DSAgt Demo: Microbial Isolate Processing
 
+> **Estimated time:** advanced / not a 10-minute demo. The isolate data is
+> pulled from **NERSC** (requires an account + allocation — step 2), and
+> `megahit` assembly runs minutes per sample across ~11 isolates. Treat this as
+> a bring-your-own-HPC-data walkthrough; substitute your own FASTQ files for the
+> NERSC path if you don't have NERSC access.
+
 This guide documents a reproducible DSAgt demonstration for microbial isolate data processing using `fastp` and `megahit`.
 
 ## Prerequisites
 
 - DSAgt installed (`uv sync --all-groups`)
-- An agent platform installed (e.g., `claude` for Claude Code, or `goose`)
-- `test_site_config.yaml` configured with valid API keys and embedding endpoint
+- An agent platform installed and **already authenticated** (e.g., `claude` for Claude Code, or
+  `goose`) — BYOA: dsagt writes no credentials. The default local embedder needs no API key.
 - Conda (for installing fastp and megahit)
 
 ## Setup
@@ -21,7 +27,7 @@ conda run -n isolate fastp --version
 conda run -n isolate megahit --version
 ```
 
-Note the conda env prefix (e.g., `~/miniconda3/envs/isolate/bin/`) — you'll reference these paths when registering the tools.
+Note the conda env prefix (e.g., `~/miniconda3/envs/isolate/bin/`) — you'll reference these paths when registering the codes.
 
 ### 2. Collect data
 
@@ -45,7 +51,9 @@ git clone https://github.com/voutcn/megahit.git demo_repos/megahit
 dsagt init isolate-pipeline --agent claude
 ```
 
-Edit `~/dsagt-projects/isolate-pipeline/dsagt_config.yaml` — set your API keys and embedding endpoint.
+(The default local embedder needs no key. To use a hosted embedder instead, set
+`embedding.backend: api` in `~/dsagt-projects/isolate-pipeline/.dsagt/config.yaml`
+and export `EMBEDDING_API_KEY` in your shell — never written to disk.)
 
 ### 5. Start the session
 
@@ -53,7 +61,7 @@ Edit `~/dsagt-projects/isolate-pipeline/dsagt_config.yaml` — set your API keys
 dsagt start isolate-pipeline
 ```
 
-The agent launches from the project directory with MCP servers connected. Services clean up automatically when the agent exits.
+The agent launches from the project directory with the MCP server connected. Serverless — there are no background services to clean up.
 
 ## Execution
 
@@ -70,7 +78,7 @@ The collection will contain:
 4) best practices for fastp and megahit: use_cases/microbial_isolates/fastp_megahit_best_practices.md
 ```
 
-### 2. Register tools
+### 2. Register codes
 
 ```text
 Let's add <CONDA_PREFIX>/fastp to the registry
@@ -100,7 +108,7 @@ We can process them one at a time.
 Search for a skill that can generate a datacard for our processed data, then use it.
 ```
 
-The agent should find the bundled `datacard-generator` skill via `search_skills`.
+The agent should find the `datacard-generator` skill in the `genesis` catalog via `search_skills` and install it with `install_skill` (only `skill-creator` ships bundled; domain skills come from catalogs).
 
 ### 6. Reconstruct pipeline
 
@@ -113,7 +121,7 @@ The agent calls `reconstruct_pipeline` to generate a reproducible script from th
 ## Post-Conditions
 
 1. Knowledge base contains collection `microbial_isolates` with all listed references indexed.
-2. Tool registry includes `fastp` and `megahit` tool specs (wrapped with `dsagt-run`).
+2. Code registry includes `fastp` and `megahit` code specs (wrapped with `dsagt-run`).
 3. Processed output directories exist for each isolate sample.
 4. For each completed sample:
    - Preprocessed FASTQ output exists
@@ -121,8 +129,8 @@ The agent calls `reconstruct_pipeline` to generate a reproducible script from th
    - Assembly output exists, including `final.contigs.fa`
 5. A Level 1 datacard exists for the processed dataset.
 6. A reconstructed pipeline script (bash or Snakemake) is available.
-7. Tool execution records in `trace_archive/` document the full provenance chain.
-8. MLflow traces capture token usage, latency, and full request/response history.
+7. Code execution records in `trace_archive/` document the full provenance chain.
+8. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history. View with `mlflow ui --backend-store-uri sqlite:///~/dsagt-projects/isolate-pipeline/mlflow.db`.
 
 ### Note
 

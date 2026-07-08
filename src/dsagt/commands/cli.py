@@ -1,255 +1,431 @@
 """
 DSAgt CLI — project initialization and session management.
 
-Two flows:
+``dsagt init`` is the single, interactive, re-runnable place a user expresses
+every choice; the prompts mirror ``.dsagt/config.yaml`` 1:1 and it writes the
+per-agent instructions + MCP config.  ``dsagt start <project>`` refreshes the
+dynamic agent record (MCP config + native-skills mirror, idempotent) and then
+launches the agent — ``cd <project> && <agent>`` plus the refresh (the MCP
+server owns the session lifecycle, minting session ids into
+``.dsagt/state.yaml`` and catching up post-session extraction in the
+background at startup).
 
-1. **BYOA** (default): ``dsagt init --agent <name>`` writes per-agent
-   MCP config artifacts.  ``dsagt mlflow <project>`` backgrounds MLflow
-   and prints the OTel routing exports the user pastes into the shell
-   that runs ``claude`` / ``goose``.  Native-OTel traces appear in the
-   MLflow UI but use a shape (``api_response_body`` log events) that
-   ``dsagt memory`` cannot extract from — for episodic memory, use
-   proxy mode.
-2. **Proxy mode**: ``dsagt start --enable-proxy <project>`` interposes
-   a LiteLLM proxy between the agent and its provider, autologs every
-   LLM call into MLflow with ``mlflow.spanInputs`` /
-   ``mlflow.spanOutputs`` populated.  This is the canonical shape that
-   ``dsagt memory --project X`` reads for episodic-memory extraction
-   and that the MLflow UI's request/response columns surface natively.
+The agent talks to its provider directly — DSAGT never interposes on its
+traffic.  Self-logging goes to a serverless ``sqlite:///<pdir>/mlflow.db``
+store (no server to run).
 
 Usage:
-    dsagt init <project> --agent <platform> [--mlflow-port <n>] [--location <path>]
-    dsagt mlflow <project>
-    dsagt memory --project <project>
-    dsagt start <project> [--agent <platform>] [--mlflow-port <n>]
+    dsagt init [<project>]              # interactive; re-run to reconfigure
+    dsagt init <project> --agent <platform> [--location <path>]
+                         [--include <asset>... | --exclude <asset>...]   # non-interactive
+    dsagt start <project>
     dsagt info <project> [--json]
-    dsagt stop <project>
+    dsagt traces <project> [--port <n>]
     dsagt smoke-test
-    dsagt setup-kb [--collection <name>] [--embedding-* flags]
     dsagt list
     dsagt mv <project> <location>
     dsagt rm <project> [-y] [--keep-files]
 """
 
 import argparse
-import json
 import logging
 import os
-import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 from dsagt.agents import (
     agent_env,
     dynamic_agent_record,
     launch_agent,
-    static_agent_files_present,
     static_agent_record,
     AGENTS,
 )
 from dsagt.session import (
+    DEFAULT_PROJECTS_BASE,
     VALID_AGENTS,
     list_projects,
     load_config,
     init_project,
-    mlflow_command,
     move_project,
-    persist_agent_choice,
-    pick_free_port,
     project_dir,
+    read_config_file,
+    remove_collection,
     remove_project,
-    run_extraction,
-    start_services,
-    stop_services,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _cmd_init(args):
-    """Create a new BYOA project.
+# ---------------------------------------------------------------------------
+# Interactive prompt helpers
+#
+# Selection-style prompts (agent, KB collections, skill sources) use
+# ``questionary`` for arrow-key navigation + space-to-toggle checkboxes — no
+# typing required.  Free-text (name / location) and y/N confirms stay plain.
+# These run only on the interactive (TTY) path; automation drives init via
+# flags and never reaches them.
+# ---------------------------------------------------------------------------
 
-    Writes the agent's static files (instructions, state dirs) and the
-    runtime artifacts (MCP config: ``.mcp.json`` for claude, ``goose.yaml``
-    for goose, etc.) populated with the MLflow port pinned at init time.
-    Then prints the env-var block + launch one-liner the user needs to
-    run their own agent.
+
+def _prompt(text: str, default: str | None = None) -> str:
+    """Free-text prompt; empty input returns *default*."""
+    suffix = f" [{default}]" if default not in (None, "") else ""
+    resp = input(f"{text}{suffix}: ").strip()
+    return resp or (default or "")
+
+
+def _confirm(text: str, default: bool = False) -> bool:
+    """Yes/no prompt; empty input returns *default*."""
+    hint = "Y/n" if default else "y/N"
+    resp = input(f"{text} [{hint}] ").strip().lower()
+    if not resp:
+        return default
+    return resp in ("y", "yes")
+
+
+def _select(message: str, options: list[str], default: str) -> str:
+    """Single-select menu (arrow keys).  Aborts init on cancel (Ctrl-C)."""
+    import questionary
+
+    answer = questionary.select(message, choices=options, default=default).ask()
+    if answer is None:
+        raise SystemExit("dsagt init: cancelled.")
+    return answer
+
+
+def _checkbox(message: str, choices: list[tuple[str, str, bool]]) -> list[str]:
+    """Multi-select checkbox menu (space toggles, enter confirms).
+
+    *choices* is a list of ``(value, label, checked)``.  Returns the selected
+    values.  Aborts init on cancel (Ctrl-C).
     """
-    location = Path(args.location).resolve() if args.location else None
-    pdir, mlflow_port = init_project(
-        args.project,
-        args.agent,
-        mlflow_port=args.mlflow_port,
-        location=location,
-    )
-    print(f"Project created: {pdir}")
-    print(f"  Agent:        {args.agent}")
-    print(f"  MLflow port:  {mlflow_port}")
-    print()
+    import questionary
 
-    config = load_config(args.project)
-    for action in static_agent_record(config, args.agent, pdir):
-        print(f"  {action}")
-    # Pass the user's shell env so per-agent ``write_dynamic`` can read
-    # provider creds (e.g., cline.write_dynamic invokes ``cline auth``
-    # with ANTHROPIC_API_KEY / ANTHROPIC_MODEL from the shell).
-    for action in dynamic_agent_record(config, env=dict(os.environ), working_dir=pdir):
-        print(f"  {action}")
+    qchoices = [
+        questionary.Choice(title=label, value=value, checked=checked)
+        for value, label, checked in choices
+    ]
+    # ``instruction=""`` suppresses questionary's own hint line — our message
+    # already spells out the controls.
+    answer = questionary.checkbox(message, choices=qchoices, instruction="").ask()
+    if answer is None:
+        raise SystemExit("dsagt init: cancelled.")
+    return answer
 
-    setup = AGENTS[args.agent]()
 
-    print()
-    cred_hints = setup.byoa_env_hints(mlflow_port, args.project, pdir)
-    if cred_hints:
-        print("Provider credentials (set in your shell; skip any your agent is")
-        print("already configured to handle for plain chat/coding):")
-        print()
-        for var, hint in cred_hints:
-            print(f"  export {var}=...   # {hint}")
-        print()
+def _current_assets(pdir: Path) -> list[str]:
+    """Asset names whose collection already exists in the project's kb_index."""
+    from dsagt.commands.setup_core_kb import all_assets, asset_collection_name
 
-    print("Three ways to start:")
-    print()
-    print(f"  1. dsagt start {args.project} [--enable-proxy]")
-    print("     → DSAGT runs everything (MLflow + agent; proxy if requested).")
-    print()
-    print(f"  2. cat {pdir}/dsagt-launch.sh")
-    print("     → view & run the commands manually for full transparency.")
-    print()
-    print(f"  3. bash {pdir}/dsagt-launch.sh")
-    print("     → starts MLflow, sets env, then prints how to launch the agent.")
-    print()
-    print("Options 2 & 3 are BYOA-only (no proxy).")
-    if args.agent == "claude":
-        print()
-        print("Note: `mlflow autolog claude` was configured automatically.")
-        print(
-            f"      Traces appear at http://localhost:{mlflow_port} after each session."
+    present = []
+    for asset in all_assets():
+        try:
+            coll = asset_collection_name(asset)
+        except ValueError:
+            continue
+        if (pdir / "kb_index" / coll).exists():
+            present.append(asset)
+    return present
+
+
+def _skills_block_for(source_names: list[str]) -> dict:
+    """Build the ``skills`` config block from the selected skill-source names."""
+    from dsagt.skills import KNOWN_SOURCES
+
+    sources = []
+    for name in source_names:
+        src = KNOWN_SOURCES[name]
+        sources.append(
+            {
+                "name": name,
+                "url": src["url"],
+                "branch": src.get("branch", "main"),
+                "subdir": src.get("subdir"),
+            }
         )
+    return {"sources": sources}
+
+
+def _episodic_block(enabled: bool) -> dict | None:
+    """The ``episodic`` config block, or ``None`` when the user didn't opt in.
+
+    Enabling captures each completed turn into ``session_memory`` (mechanical
+    chunk + tag + embed).  ``None`` keeps a disabled project's config minimal
+    (``enabled: false`` is backfilled on read).
+    """
+    if not enabled:
+        return None
+    return {"enabled": True}
+
+
+def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None):
+    """Resolve the init choices (the 1:1 mirror of the config).
+
+    Selection questions: agent platform, packaged KB document *collections*,
+    skill-catalog *sources*, and the episodic-memory opt-in.  The bundled
+    ``tools`` collection is always provisioned and is NOT a per-project choice.
+    Project name + folder location are resolved by the caller.  Embedding /
+    chunk_size / rerank are code defaults, not init choices.
+
+    Interactive: questionary select/checkbox menus + y/N, pre-filled with the
+    project's current choices on re-init.  Non-interactive (no TTY): drive from
+    ``--include`` / ``--exclude`` / ``--episodic`` flags — the automation/test
+    path.
+    """
+    from dsagt.commands.setup_core_kb import COLLECTIONS, resolve_assets
+    from dsagt.skills import KNOWN_SOURCES
+
+    coll_choices = list(COLLECTIONS)
+    skill_choices = list(KNOWN_SOURCES)
+
+    if interactive:
+        agent = _select(
+            "Agent platform",
+            list(VALID_AGENTS),
+            default=existing.get("agent") or args.agent or "claude",
+        )
+
+        # Knowledge collections (heavy doc collections; default none).
+        # Labels are bare names — short enough to never wrap the terminal.
+        cur_colls = set(existing.get("knowledge", {}).get("collections", []))
+        collections = _checkbox(
+            "Knowledge collections (space toggles, ↑/↓ to move, enter confirms)",
+            [(c, c, c in cur_colls) for c in coll_choices],
+        )
+
+        # Skill-catalog sources (default genesis on a fresh project).
+        cur_srcs = set(
+            s["name"] for s in existing.get("skills", {}).get("sources", [])
+        ) or {"genesis"}
+        skill_names = _checkbox(
+            "Skill catalog sources (space toggles, ↑/↓ to move, enter confirms)",
+            [(s, s, s in cur_srcs) for s in skill_choices],
+        )
+
+        # Episodic memory (opt-in): captures session turns into session_memory.
+        cur_epi = existing.get("episodic", {}) or {}
+        enable_epi = _confirm(
+            "Enable episodic memory? (captures session turns into searchable "
+            "memory)",
+            default=bool(cur_epi.get("enabled")),
+        )
+        episodic = _episodic_block(enable_epi)
+    else:
+        agent = args.agent or existing.get("agent")
+        if not agent:
+            raise SystemExit("dsagt init: --agent is required (non-interactive).")
+        # --include / --exclude pick the full asset set; split it.
+        full = resolve_assets(include=args.include, exclude=args.exclude)
+        collections = [a for a in full if a in COLLECTIONS]
+        skill_names = [a for a in full if a in KNOWN_SOURCES]
+        # Episodic is flag-driven here (automation); omit --episodic to leave it
+        # off.  Re-pass it on re-init — like --include/--exclude, flags are
+        # authoritative on the non-interactive path.
+        episodic = _episodic_block(getattr(args, "episodic", False))
+
+    return {
+        "agent": agent,
+        # The bundled ``tools`` collection is always provisioned.
+        "assets": ["codes", *collections, *skill_names],
+        "knowledge": {"collections": collections},
+        "skills": _skills_block_for(skill_names),
+        "episodic": episodic,
+    }
+
+
+def _handle_destructive(
+    existing: dict, settings: dict, pdir: Path, interactive: bool
+) -> None:
+    """Detect destructive deltas on re-init and prompt delete-or-keep.
+
+    Non-interactive (no TTY): never deletes — warns and keeps, so automation
+    can't lose data and ``input()`` is never called on a closed stdin.
+
+    Never touches agent-populated data: ``tool_use`` / ``session_memory``
+    collections, ``.dsagt/`` memory, ``trace_archive/``, ``skills/``.
+    """
+    from dsagt.commands.setup_core_kb import asset_collection_name
+
+    protected = {"code_use", "session_memory"}
+
+    # Agent switch → old platform's files are now stale.
+    old_agent = existing.get("agent")
+    new_agent = settings["agent"]
+    if old_agent and old_agent != new_agent:
+        setup = AGENTS[old_agent]()
+        stale = [p for p in setup.owned_artifacts(pdir) if p.exists()]
+        if stale:
+            print(f"\n  Switching agent {old_agent} → {new_agent} leaves stale files:")
+            for p in stale:
+                print(f"    {p}")
+            if interactive and _confirm("  Delete these stale files?", default=True):
+                import shutil
+
+                for p in stale:
+                    if p.is_dir():
+                        shutil.rmtree(p)
+                    else:
+                        p.unlink()
+                print("  Deleted.")
+            else:
+                print("  Kept (remove them manually if you want them gone).")
+
+    # Removed KB collections → their dirs are now orphaned.
+    new_colls = set()
+    for a in settings["assets"]:
+        try:
+            new_colls.add(asset_collection_name(a))
+        except ValueError:
+            pass
+    for a in _current_assets(pdir):
+        try:
+            coll = asset_collection_name(a)
+        except ValueError:
+            continue
+        if coll in new_colls or coll in protected:
+            continue
+        if interactive and _confirm(
+            f"\n  Collection '{coll}' was dropped from the asset set. Remove it?",
+            default=False,
+        ):
+            if remove_collection(pdir, coll):
+                print(f"  Removed kb_index/{coll}.")
+        else:
+            print(
+                f"\n  Collection '{coll}' was dropped from the asset set "
+                "(kept on disk)."
+            )
+
+
+def _cmd_init(args):
+    """Create or reconfigure a BYOA project — interactive and re-runnable.
+
+    ``dsagt init`` is the single place a user expresses every choice; the
+    prompts mirror ``.dsagt/config.yaml`` 1:1.  On an existing project it
+    becomes a settings editor (prompts prefilled with current values) and
+    prompts before any destructive change (agent switch, removed collection).
+    Non-interactive (no TTY) drives from flags — the automation/test path.
+    """
+    interactive = sys.stdin.isatty()
+
+    # Project name
+    name = args.project
+    if interactive and not name:
+        name = _prompt("Project name")
+    if not name:
+        raise SystemExit("dsagt init: project name required.")
+
+    # Existing project? → re-init (settings editor).
+    try:
+        existing_pdir = project_dir(name)
+    except FileNotFoundError:
+        existing_pdir = None
+    existing = read_config_file(existing_pdir) if existing_pdir else {}
+    reinit = bool(existing)
+
+    # Location (first init only; re-init keeps the registered path).  The
+    # prompt collects the full project directory and defaults to one that
+    # already ends in the project name.  If the user types a path that ends
+    # in the project name we take it as-is; otherwise we append the name —
+    # so both "~/proj/myproj" and "~/proj" land at "~/proj/myproj".
+    if reinit:
+        location = existing_pdir.parent
+        pdir_preview = existing_pdir
+    else:
+        if interactive:
+            default_full = str(DEFAULT_PROJECTS_BASE / name)
+            entered = Path(_prompt("Project location", default=default_full)).resolve()
+            proj_dir = entered if entered.name == name else entered / name
+            location = proj_dir.parent
+        else:
+            location = Path(args.location).resolve() if args.location else None
+        pdir_preview = (location or DEFAULT_PROJECTS_BASE) / name
+
+    settings = _collect_settings(args, interactive, existing, pdir_preview)
+
+    if reinit:
+        _handle_destructive(existing, settings, existing_pdir, interactive)
+
+    include = settings["assets"] if settings["assets"] else None
+    exclude = ["all"] if not settings["assets"] else None
+    pdir = init_project(
+        name,
+        settings["agent"],
+        location=location,
+        include=include,
+        exclude=exclude,
+        knowledge=settings["knowledge"],
+        skills=settings["skills"],
+        episodic=settings["episodic"],
+    )
+
+    agent = settings["agent"]
+    config = load_config(name)
+
+    # 1. Actions first (Wrote … / Mirrored …).
     print()
-    print("After your session, extract memory:")
-    print(f"  dsagt memory --project {args.project}")
+    for action in static_agent_record(config, agent, pdir):
+        print(action)
+    # Pass the user's shell env so per-agent ``write_dynamic`` can read
+    # provider creds (e.g., cline.write_dynamic invokes ``cline auth``).
+    for action in dynamic_agent_record(config, env=dict(os.environ), working_dir=pdir):
+        print(action)
+
+    # 2. Project summary.
+    print()
+    print(f"Project directory:  {pdir}")
+    print(f"Agent:              {agent}")
+    print(f"Trace store:        sqlite:///{pdir}/mlflow.db")
+
+    # 3. Startup instructions.
+    print()
+    print(f"Start {agent} in the project directory, or run:")
+    print(f"  dsagt start {name}")
+    if AGENTS[agent]().vscode_hint(pdir):
+        print()
+        print(
+            f"Or open the project directory in VS Code and start the "
+            f"{agent} extension"
+        )
 
 
 def _cmd_start(args):
-    """Start a project session: resolve agent → pick ports → start services →
-    write agent configs → launch.
+    """Refresh the dynamic agent record, then ``cd <project> && <agent>``.
 
-    Order matters: services start before the agent's runtime configs are
-    written so the actually-bound ports flow into MCP env blocks.
-    Static files (instructions) are written here only if missing — when
-    the user ran ``dsagt init --agent X``, the static record was already
-    written at init time and we don't touch it.
+    The refresh (``dynamic_agent_record``: per-agent MCP config +
+    native-skills mirror, all idempotent) backstops the install-time mirror
+    the MCP tools run (``agents.refresh_native_skills``) — e.g. a skill dir
+    dropped in by hand still mirrors here — and lets a credential-dependent
+    step skipped at init (cline auth) pick up once the vars are in the
+    shell.  Session lifecycle (session-id
+    minting, post-session extraction catch-up) is owned by the MCP server
+    at startup.
+
+    The per-project runtime env (e.g. ``CLINE_DIR`` / ``CODEX_HOME`` that
+    point an agent at its init-written config) is applied so the launched
+    agent finds what ``init`` set up.
     """
     config = load_config(args.project)
     pdir = Path(config["project_dir"])
 
-    # Step 1: resolve agent.  CLI overrides YAML.  If neither is set,
-    # fail with a one-line message naming both options.
-    yaml_agent = config.get("agent")
-    agent = args.agent or yaml_agent
-    if not agent:
-        raise ValueError(
-            "No agent specified.  Pass --agent <platform> or set 'agent:' in "
-            f"{pdir / 'dsagt_config.yaml'}."
-        )
-    if agent not in VALID_AGENTS:
-        raise ValueError(f"agent must be one of {VALID_AGENTS}, got '{agent}'")
-    config["agent"] = agent
+    print(f"  Project:  {config['project']}")
+    print(f"  Agent:    {config['agent']}")
+    print(f"  Dir:      {pdir}")
+    print()
 
-    # Step 2: persist agent into YAML if this is the project's first
-    # encounter with one.  CLI overrides on later runs are per-run only
-    # — they don't touch the YAML default.
-    if not yaml_agent:
-        persist_agent_choice(args.project, agent)
+    for action in dynamic_agent_record(config, env=dict(os.environ), working_dir=pdir):
+        print(f"  {action}")
 
-    # Step 3: write the static record on demand — when init didn't run
-    # with --agent, when the user switched agents, or when a marker
-    # file was deleted.  Idempotent: skips when already present.
-    if not static_agent_files_present(agent, pdir):
-        for action in static_agent_record(config, agent, pdir):
-            print(f"  {action}")
-
-    # Step 4: synthesize session id (one per start, threaded through every
-    # subprocess via DSAGT_SESSION_ID so the MLflow UI can filter to one
-    # session).
-    config["session_id"] = (
-        f"{config['project']}-"
-        f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    env = agent_env(config)
+    return launch_agent(
+        config,
+        env,
+        pdir,
+        script_path=args.script,
+        max_turns=args.max_turns,
     )
-
-    # Step 5: start MLflow (and optionally dsagt-proxy).  Picks free ports
-    # automatically and writes them to <project>/.runtime; CLI overrides
-    # are honored if present.  EVERYTHING from here on must be inside the
-    # try/finally — otherwise an exception between service start and
-    # ``launch_agent`` leaks subprocesses we just spawned.
-    if args.mlflow_port:
-        config.setdefault("mlflow", {})["port"] = args.mlflow_port
-    if args.enable_proxy:
-        # Marker that triggers proxy subprocess in start_services + URL
-        # injection in agent_env.  Port is picked by start_services via
-        # pick_free_port — same path as MLflow.
-        config.setdefault("proxy", {})
-    ports = start_services(config)
-    if "proxy" in ports:
-        print(f"  Ports: mlflow={ports['mlflow']}, proxy={ports['proxy']}")
-    else:
-        print(f"  Ports: mlflow={ports['mlflow']}")
-
-    try:
-        # Step 7: build env, write dynamic agent configs (with the actual
-        # MLflow port baked in), launch.
-        env = agent_env(config)
-        for action in dynamic_agent_record(config, env, pdir):
-            print(f"  {action}")
-
-        print()
-        print(f"  Project:  {config['project']}")
-        print(f"  Agent:    {config['agent']}")
-        print(f"  Dir:      {pdir}")
-        print(f"  MLflow:   http://localhost:{config['mlflow']['port']}")
-        print()
-
-        return launch_agent(
-            config,
-            env,
-            pdir,
-            script_path=args.script,
-            max_turns=args.max_turns,
-        )
-    finally:
-        print()
-        # Extraction is best-effort — don't let its failures keep us from
-        # cleaning up services.
-        try:
-            result = run_extraction(args.project)
-            n_indexed = result.get("tool_use_indexed", 0)
-            if n_indexed:
-                print(f"  Indexed {n_indexed} tool execution(s) into tool_use")
-            if result.get("status") == "ok":
-                print(f"  Extracted {result['total_entries']} memories from session")
-            elif result.get("status") == "empty":
-                print("  No session exchanges to extract")
-            # ``tool_use_only`` is the BYOA default (no DSAGT_MEMORY_*
-            # configured); the indexed-count line above already covered it.
-        except Exception as e:
-            print(f"  WARNING: extraction failed: {e}")
-
-        # Phase 2 proxy mode: surface any sidechannel-call hits from this
-        # session so the user can spot a typo in their primary llm.model
-        # vs. a harmless agent title-gen / session-namer call.  No-op
-        # when the proxy didn't run or no hits were logged.
-        try:
-            from dsagt.observability import print_sidechannel_warning
-
-            print_sidechannel_warning(pdir, config.get("session_id"))
-        except Exception as e:
-            logger.debug("sidechannel warning failed: %s", e)
-
-        _stop_one(args.project)
 
 
 def _cmd_list(args):
@@ -263,28 +439,19 @@ def _cmd_list(args):
 
     for name, path in projects.items():
         pdir = Path(path)
-        config_path = pdir / "dsagt_config.yaml"
+        cfg_file = pdir / ".dsagt" / "config.yaml"
 
-        # Best-effort: if the config is readable, show agent + service status.
-        # If the project dir is gone or config is broken, just show the path.
+        # Best-effort: if the config is readable, show the agent.  If the
+        # project dir is gone or the config is broken, just show the path.
         agent = ""
-        status = ""
-        if config_path.exists():
+        if cfg_file.exists():
             try:
                 config = load_config(name)
                 agent = config.get("agent", "")
             except (FileNotFoundError, ValueError):
                 pass
 
-        runtime_path = pdir / ".runtime"
-        if runtime_path.exists():
-            state = json.loads(runtime_path.read_text())
-            ports = state.get("ports", {})
-            status = f"running (mlflow:{ports.get('mlflow','?')})"
-        else:
-            status = "stopped"
-
-        print(f"  {name:<20} {agent:<14} {status:<40} {path}")
+        print(f"  {name:<20} {agent:<14} {path}")
 
 
 def _cmd_mv(args):
@@ -297,9 +464,7 @@ def _cmd_mv(args):
 def _cmd_rm(args):
     """Unregister a project and (by default) delete its directory.
 
-    With ``--all``: bulk-remove every registered project.  Reaps active
-    services per-project (via ``stop_services``) before removing so a
-    leftover ``.runtime`` doesn't block ``remove_project``.
+    With ``--all``: bulk-remove every registered project.
     """
     if args.all and args.project:
         raise SystemExit("dsagt rm: pass either a project name or --all, not both.")
@@ -354,12 +519,6 @@ def _cmd_rm_all(args) -> int:
 
     failures: list[tuple[str, str]] = []
     for name in sorted(projects):
-        # Reap any active MLflow daemon so remove_project's .runtime
-        # safety check doesn't block bulk teardown.
-        try:
-            stop_services(name)
-        except Exception as e:
-            logger.debug("stop_services(%s) raised: %s", name, e)
         try:
             remove_project(name, keep_files=args.keep_files)
             verb_past = "Unregistered" if args.keep_files else "Removed"
@@ -375,379 +534,6 @@ def _cmd_rm_all(args) -> int:
     return 0
 
 
-def _cmd_setup_kb(args):
-    """Build the core knowledge base collections."""
-    from dsagt.commands.setup_core_kb import run_setup_kb
-
-    run_setup_kb(args)
-
-
-def _cmd_mlflow(args):
-    """Run MLflow in the foreground.
-
-    Pins the port from the project's internal config so MCP servers
-    (which bake the URL into their artifacts at init time) agree on
-    where traces land.  Reaps any prior MLflow we left behind on this
-    project before binding so a stale leftover doesn't block the new
-    one.  If the port is still busy after reap, surfaces the offender
-    via ``lsof`` so the user knows what to kill.
-
-    With ``--background-only``: idempotent fast-path used by the launch
-    shim.  If MLflow is already running on this project's pinned port,
-    do nothing and exit 0; otherwise start it and return.
-    """
-    config = load_config(args.project)
-    pdir = Path(config["project_dir"])
-    background_only = getattr(args, "background_only", False)
-
-    port = config.get("mlflow", {}).get("port")
-    if port is None:
-        port = pick_free_port()
-
-    # --background-only: short-circuit if MLflow is already up on this port.
-    # Detect via a TCP probe — the .runtime PID may be stale across machines.
-    if background_only and _port_responds(port):
-        return 0
-
-    # Reap any prior dsagt-spawned MLflow on this project so it doesn't
-    # hold the pinned port.  Same machinery dsagt start uses.
-    from dsagt.session import reap_runtime
-
-    reaped = reap_runtime(pdir / ".runtime")
-    for msg in reaped:
-        print(f"  {msg}")
-
-    busy = _port_holder(port)
-    if busy:
-        line, pid = busy
-        print(f"  Port {port} held by:")
-        print(f"    {line}")
-        if pid:
-            ancestry = _process_ancestry(pid)
-            if ancestry:
-                print(f"  Process tree: {ancestry}")
-        if pid and _free_port(port, pid):
-            print(f"  Freed port {port}.")
-        else:
-            msg = [
-                f"Error: could not free port {port}.",
-            ]
-            if pid:
-                msg.append(f"Try manually:  kill -9 {pid}")
-            else:
-                msg.append(
-                    "(could not parse PID from lsof output — kill the "
-                    "process shown above by hand)"
-                )
-            msg.append(
-                "Or re-init with a different port: "
-                "`dsagt init <new-project> --mlflow-port <other>`."
-            )
-            print("\n".join(msg), file=sys.stderr)
-            return 1
-
-    cmd = mlflow_command(pdir, config.get("mlflow", {}), port=port)
-
-    log_path = pdir / "mlflow.log"
-    log_fd = open(log_path, "wb")
-    proc = subprocess.Popen(
-        cmd,
-        start_new_session=True,
-        stdout=log_fd,
-        stderr=subprocess.STDOUT,
-    )
-
-    agent = config["agent"]
-    session_id = (
-        f"{args.project}-" f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-    )
-
-    runtime_file = pdir / ".runtime"
-    runtime_file.write_text(
-        json.dumps(
-            {
-                "pids": {"mlflow": proc.pid},
-                "ports": {"mlflow": port},
-                "session_id": session_id,
-                "started_at": datetime.now(timezone.utc).isoformat(),
-            },
-            indent=2,
-        )
-        + "\n"
-    )
-
-    mlflow_url = f"http://localhost:{port}"
-    print("  Starting MLflow in background (gunicorn boot ~2-5s)...", flush=True)
-    experiment_id = _wait_and_resolve_experiment(port, args.project, timeout=20.0)
-
-    if background_only:
-        # Shim is calling us; it handles the env exports itself. Print one
-        # confirmation line so the user sees what happened, then return.
-        print(f"  MLflow ready at {mlflow_url} (pid {proc.pid})")
-        return 0
-
-    print()
-    print(f"  Project:        {args.project}")
-    print(f"  PID:            {proc.pid}")
-    print(f"  UI:             {mlflow_url}")
-    if experiment_id is not None:
-        print(f"  Experiment id:  {experiment_id}")
-    else:
-        print(
-            f"  Experiment id:  <unresolved within 20s — agent traces "
-            f"won't bucket; check {log_path}>"
-        )
-    print(f"  Session id:     {session_id}")
-    print(f"  Logs:           {log_path}")
-    print()
-    print("  OTel routing for the shell that runs your agent (these go")
-    print("  straight to the agent's external OTel SDK; project / agent /")
-    print(f"  session_id are read from {pdir}/dsagt_config.yaml")
-    print("  + .runtime by dsagt's own services, no need to export them):")
-    print()
-    # Why http/protobuf + signal-specific TRACES_ENDPOINT:
-    #   - OTel SDKs default to gRPC (port 4317); without this set, claude
-    #     silently tries gRPC and drops every span.
-    #   - Generic OTEL_EXPORTER_OTLP_ENDPOINT auto-appends /v1/traces; we
-    #     use the signal-specific TRACES_ENDPOINT (used as-is) to avoid the
-    #     double-append "...v1/traces/v1/traces" 404.
-    print("    export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf")
-    print(f"    export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT={mlflow_url}/v1/traces")
-    if experiment_id is not None:
-        print(
-            f"    export OTEL_EXPORTER_OTLP_HEADERS="
-            f'"x-mlflow-experiment-id={experiment_id}"'
-        )
-    print(
-        f"    export OTEL_RESOURCE_ATTRIBUTES="
-        f'"service.name={agent},session.id={session_id}"'
-    )
-
-    setup = AGENTS[agent]()
-    if setup.telemetry_env:
-        print()
-        print(f"  Agent telemetry verbosity for {agent} — without these, OTel")
-        print("  spans carry only counts/cost/duration; tool_use payloads")
-        print("  (which memory extraction needs) are absent:")
-        print()
-        for k, v in sorted(setup.telemetry_env.items()):
-            print(f"    export {k}={v}")
-        if agent == "claude":
-            # File-mode bodies — writes full request/response JSON to
-            # <pdir>/api_bodies/, stamps body_ref on the span event so the
-            # trace links to the on-disk file.  =1 (inline) mode would post
-            # to /v1/logs which MLflow's OTLP receiver returns 404 for, so
-            # the bodies vanish.  See agents/claude.py for the full reasoning.
-            print(f"    export OTEL_LOG_RAW_API_BODIES=file:{pdir}/api_bodies")
-
-    print()
-    print("  Note: MLflow always creates a 'Default' experiment (id=0) on")
-    print("  init.  It will stay empty; ignore it.  Your traces land in the")
-    print(f"  '{args.project}' experiment.")
-    print()
-    print(f"  To stop MLflow: dsagt stop {args.project}")
-    print()
-    return 0
-
-
-def _process_ancestry(pid: str) -> str:
-    """Return ``pid (etime) cmd → ppid (etime) cmd → ...`` walking up to PID 1.
-
-    Helps diagnose orphans: a zombie MLflow worker re-parented to PID 1
-    after its dsagt parent died shows up as ``... → 1 systemd``, while a
-    genuinely-still-running dsagt parent shows up by name.  Best-effort:
-    returns empty string if ps isn't available or the chain breaks.
-    """
-    chain: list[str] = []
-    cur = pid
-    seen: set[str] = set()
-    while cur and cur not in seen and cur != "0":
-        seen.add(cur)
-        try:
-            result = subprocess.run(
-                ["ps", "-p", cur, "-o", "pid=,ppid=,etime=,command="],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=2.0,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return ""
-        line = result.stdout.strip()
-        if not line:
-            break
-        parts = line.split(None, 3)
-        if len(parts) < 4:
-            break
-        this_pid, ppid, etime, cmd = parts
-        chain.append(f"{this_pid} ({etime}) {cmd[:60]}")
-        if cur == "1":
-            break
-        cur = ppid
-    return " → ".join(chain)
-
-
-def _free_port(
-    port: int, pid: str, term_timeout: float = 3.0, kill_timeout: float = 1.5
-) -> bool:
-    """SIGTERM *pid*, wait for *port* to free, escalate to SIGKILL if not.
-
-    Returns True if the port is free at the end.  MLflow's gunicorn parent
-    usually releases the socket on SIGTERM after its workers wind down;
-    a stuck worker needs SIGKILL.  We don't gate on process name — the
-    contract is "the pinned MLflow port is dsagt's; reclaim it" — but we
-    log what we kill so the user has a record.
-    """
-    try:
-        target = int(pid)
-    except ValueError:
-        return False
-
-    for sig, timeout in (
-        (signal.SIGTERM, term_timeout),
-        (signal.SIGKILL, kill_timeout),
-    ):
-        try:
-            os.kill(target, sig)
-        except ProcessLookupError:
-            pass  # already gone — still need to confirm port is free
-        except PermissionError:
-            return False
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if _port_holder(port) is None:
-                return True
-            time.sleep(0.2)
-    return _port_holder(port) is None
-
-
-def _port_responds(port: int) -> bool:
-    """Return True if something is accepting TCP connections on *port*.
-
-    Used by ``--background-only`` to short-circuit when MLflow is
-    already up.  socket.connect_ex returns 0 on success, errno otherwise.
-    """
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.5)
-        return s.connect_ex(("127.0.0.1", port)) == 0
-
-
-def _port_holder(port: int) -> tuple[str, str | None] | None:
-    """Return ``(lsof_line, pid)`` for the process holding *port*, or None.
-
-    Uses ``lsof`` (macOS + Linux).  Returns None when the port is free
-    or when ``lsof`` isn't available (in which case the bind attempt
-    will surface the failure anyway).  ``pid`` is the second whitespace
-    field of the lsof line; None if the line couldn't be parsed.
-    """
-    try:
-        # Combine protocol + port into a single -i filter; multiple -i
-        # arguments are OR'd, which used to make us match any listening
-        # TCP socket (e.g., rapportd) regardless of the requested port.
-        result = subprocess.run(
-            ["lsof", f"-iTCP:{port}", "-sTCP:LISTEN", "-P", "-n"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=3.0,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    lines = [l for l in result.stdout.splitlines() if l and not l.startswith("COMMAND")]
-    if not lines:
-        return None
-    line = lines[0]
-    parts = line.split()
-    pid = parts[1] if len(parts) >= 2 and parts[1].isdigit() else None
-    return (line, pid)
-
-
-def _wait_and_resolve_experiment(
-    port: int,
-    project: str,
-    timeout: float,
-) -> str | None:
-    """Poll MLflow until it answers, then look up / create the experiment.
-
-    Returns the numeric experiment id on success, None on timeout or
-    error (caller still prints the URL — the user can find the id in
-    the UI).
-    """
-    import socket
-    import time
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                break
-        except (ConnectionRefusedError, OSError):
-            time.sleep(0.25)
-    else:
-        return None
-    try:
-        import mlflow
-
-        mlflow.set_tracking_uri(f"http://localhost:{port}")
-        return str(mlflow.set_experiment(project).experiment_id)
-    except Exception as e:
-        logger.debug("could not resolve experiment id: %s", e)
-        return None
-
-
-def _stop_one(project: str) -> int:
-    """Stop services for a single project via the .runtime state file.
-
-    Returns the number of services killed (0 when nothing was running),
-    so callers can report "nothing to do" cleanly.  Idempotent — safe
-    to call when no project state file exists.
-    """
-    try:
-        load_config(project)  # validates the project is registered + parsable
-    except (FileNotFoundError, ValueError) as e:
-        # Registered project whose config is missing or malformed — skip
-        # rather than abort a multi-project sweep.
-        print(f"  [{project}] skipping: {e}")
-        return 0
-
-    msgs = stop_services(project)
-    for msg in msgs:
-        print(f"  [{project}] {msg}")
-    if not msgs:
-        print(f"  [{project}] no running services.")
-    return len(msgs)
-
-
-def _cmd_stop(args):
-    """Stop running services.
-
-    Without a project argument, sweeps every registered project so the
-    common "I just want to clean up whatever's running" case doesn't
-    require remembering which project name was active.  With a project,
-    behaves as before — single-target.
-
-    Output rules: every action gets a line, prefixed with the project
-    name; when nothing happened anywhere we still print a final summary.
-    """
-    if args.project:
-        _stop_one(args.project)
-        return
-
-    projects = list_projects()
-    if not projects:
-        print("  No projects registered.")
-        return
-
-    total = 0
-    for name in sorted(projects):
-        total += _stop_one(name)
-
-    if total == 0:
-        print(f"  Swept {len(projects)} project(s); nothing to stop.")
-
-
 def _cmd_info(args):
     """Triage summary of a project's MLflow traces."""
     from dsagt.commands.info import run
@@ -755,57 +541,11 @@ def _cmd_info(args):
     return run(args.project, as_json=args.json)
 
 
-def _cmd_memory(args):
-    """Extract episodic memory from accumulated session traces.
+def _cmd_traces(args):
+    """Open the MLflow trace viewer over the project's store (catch-up first)."""
+    from dsagt.commands.traces import run
 
-    Tracks a high-water-mark timestamp in
-    ``<project>/.dsagt/extracted_at.json``.  Each invocation extracts
-    traces newer than the mark and updates it.  In BYOA mode (no
-    ``DSAGT_SESSION_ID`` minted by ``dsagt start``), session boundaries
-    are fuzzy — we batch all unprocessed traces into one extraction.
-    """
-    config = load_config(args.project)
-    pdir = Path(config["project_dir"])
-    state_path = pdir / ".dsagt" / "extracted_at.json"
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-
-    last_extracted = None
-    if state_path.exists():
-        last_extracted = json.loads(state_path.read_text()).get("last_extracted_at")
-        print(f"  Last extraction watermark: {last_extracted}")
-    else:
-        print("  No prior extraction recorded — processing all available traces.")
-
-    now = datetime.now(timezone.utc).isoformat()
-    result = run_extraction(args.project)
-    status = result.get("status", "unknown")
-    n_indexed = result.get("tool_use_indexed", 0)
-    if n_indexed:
-        print(f"  Indexed {n_indexed} tool execution(s) into tool_use")
-    if status == "ok":
-        print(f"  Extracted {result.get('total_entries', 0)} memories")
-        state_path.write_text(
-            json.dumps(
-                {
-                    "last_extracted_at": now,
-                    "previous": last_extracted,
-                },
-                indent=2,
-            )
-            + "\n"
-        )
-    elif status == "empty":
-        print("  No new traces to extract")
-    elif status == "tool_use_only":
-        print(
-            "  LLM-based memory extraction skipped: set "
-            "DSAGT_MEMORY_API_KEY and DSAGT_MEMORY_MODEL in your shell "
-            "to enable.  Optional: DSAGT_MEMORY_BASE_URL, "
-            "DSAGT_MEMORY_PROVIDER."
-        )
-    else:
-        print(f"  Extraction returned status={status}: {result}")
-    return 0
+    return run(args.project, port=args.port)
 
 
 def _cmd_smoke_test(args):
@@ -817,8 +557,9 @@ def _cmd_smoke_test(args):
 
     With ``--all``, run the harness in parallel for every agent in
     ``VALID_AGENTS``.  Each agent has its own project name (``smoke-test-X``)
-    so they don't collide on MLflow ports, kb_index, or registry entries.
-    Output is per-agent log files; the summary prints in finish order.
+    so they don't collide on the sqlite MLflow store, kb_index, or registry
+    entries.  Output is per-agent log files; the summary prints in finish
+    order.
     """
     pkg_dir = Path(__file__).resolve().parent.parent.parent.parent
     script = pkg_dir / "tests" / "smoke_test" / "run.sh"
@@ -842,7 +583,6 @@ def _run_smoke_all(script: Path) -> int:
     progress instead of waiting for the slowest agent before any output.
     """
     import tempfile
-    import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     agents = list(VALID_AGENTS)
@@ -890,29 +630,69 @@ _USER_ERRORS = (FileNotFoundError, FileExistsError, ValueError, RuntimeError)
 
 
 def main(argv=None):
+    from dsagt import __version__
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # `dsagt mlflow <project>` is an unlisted alias for `traces` — the word
+    # people reach for when they want the MLflow viewer.  Rewritten before
+    # parsing (only the command slot: the first non-flag token) so argparse —
+    # and therefore --help — only ever knows `traces`.
+    for i, tok in enumerate(argv):
+        if tok.startswith("-"):
+            continue
+        if tok == "mlflow":
+            argv[i] = "traces"
+        break
+
     parser = argparse.ArgumentParser(
         prog="dsagt", description="DSAgt project and session management."
     )
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--version", action="version", version=f"dsagt {__version__}")
 
     sub = parser.add_subparsers(dest="command")
 
-    p_init = sub.add_parser("init", help="Create a new project")
-    p_init.add_argument("project", help="Project name (human-readable alias)")
-    p_init.add_argument(
-        "--agent", choices=VALID_AGENTS, required=True, help="Agent platform (required)"
+    p_init = sub.add_parser(
+        "init",
+        help="Create or reconfigure a project (interactive; re-runnable)",
     )
     p_init.add_argument(
-        "--mlflow-port",
-        type=int,
+        "project",
+        nargs="?",
+        help="Project name (also the folder name).  Prompted if omitted in a TTY.",
+    )
+    p_init.add_argument(
+        "--agent",
+        choices=VALID_AGENTS,
         default=None,
-        help="MLflow port to pin (default: pick a free one).  Written to "
-        "the internal config so MCP servers + dsagt mlflow agree on it.",
+        help="Agent platform.  Prompted interactively; required non-interactively.",
     )
     p_init.add_argument(
         "--location",
         default=None,
-        help="Parent directory for the project (default: ~/dsagt-projects/)",
+        help="Parent directory for the project (default: ~/dsagt-projects/).  "
+        "Non-interactive path; interactive prompts for the full project dir.",
+    )
+    _kb_sel = p_init.add_mutually_exclusive_group()
+    _kb_sel.add_argument(
+        "--include",
+        nargs="+",
+        metavar="ASSET",
+        help="KB assets to provision into the project (or 'all' for "
+        "everything).  Default: bundled tools + the genesis skill catalog.",
+    )
+    _kb_sel.add_argument(
+        "--exclude",
+        nargs="+",
+        metavar="ASSET",
+        help="Provision the default KB set minus these assets ('all' to "
+        "create the project with no bundled KB content).",
+    )
+    p_init.add_argument(
+        "--episodic",
+        action="store_true",
+        help="Enable episodic memory (captures session turns into searchable "
+        "memory).  Off by default.",
     )
 
     p_start = sub.add_parser("start", help="Start a project session")
@@ -925,56 +705,18 @@ def main(argv=None):
         "thereafter, a per-run override (doesn't update the YAML default).",
     )
     p_start.add_argument(
-        "--mlflow-port",
-        type=int,
-        default=None,
-        help="Override the MLflow port from dsagt_config.yaml.  Useful when "
-        "the configured port is permanently taken on your machine.",
-    )
-    p_start.add_argument(
-        "--enable-proxy",
-        action="store_true",
-        help="Spawn dsagt-proxy and route the agent's LLM calls through it. "
-        "For agents that don't natively emit OTel traces with full "
-        "LLM-call payloads (cline, roo, codex partial), the proxy is "
-        "what makes their conversations visible in MLflow at all — "
-        "every agent turn becomes an inspectable trace (real-time "
-        "audit, replay, debugging) and memory extraction works as a "
-        "downstream consequence.  Agents with "
-        "otel_payload_support='full' (claude, goose) emit their own "
-        "traces and don't need the flag.  Port is auto-picked.",
-    )
-    p_start.add_argument(
         "--script",
         default=None,
         help="Path to a goose-run instructions file. When set, the agent runs "
         "non-interactively (GOOSE_MODE=auto) against this script — used by "
         "the smoke test to share the full dsagt start lifecycle (config "
-        "generation, services, memory extraction, cleanup) with manual runs.",
+        "generation, memory extraction) with manual runs.",
     )
     p_start.add_argument(
         "--max-turns",
         type=int,
         default=30,
         help="Cap on agent turn count when --script is set (default: 30).",
-    )
-
-    p_mlflow = sub.add_parser(
-        "mlflow", help="Run MLflow in the foreground against a project's store"
-    )
-    p_mlflow.add_argument("project", help="Project name")
-    p_mlflow.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help="Override the port from dsagt_config.yaml",
-    )
-    p_mlflow.add_argument(
-        "--background-only",
-        action="store_true",
-        help="Start MLflow in background and exit. Skip the OTel-export "
-        "block (the launch shim handles env setup itself). "
-        "Idempotent: no-op if MLflow is already running on this project.",
     )
 
     p_info = sub.add_parser(
@@ -988,23 +730,17 @@ def main(argv=None):
         help="Emit the structured report as JSON instead of formatted text",
     )
 
-    p_memory = sub.add_parser(
-        "memory",
-        help="Extract episodic memory from accumulated session traces "
-        "(BYOA: run after one or more agent sessions to populate the KB)",
+    p_traces = sub.add_parser(
+        "traces",
+        help="Open the MLflow trace viewer over a project's store (runs catch-up "
+        "first, deep-links to the Traces tab, quiets the mlflow noise)",
     )
-    p_memory.add_argument("--project", required=True, help="Project name")
-
-    p_stop = sub.add_parser(
-        "stop",
-        help="Stop project services (including orphans on configured ports). "
-        "Without a project argument, sweeps every registered project.",
-    )
-    p_stop.add_argument(
-        "project",
-        nargs="?",
-        default=None,
-        help="Project name (omit to sweep all registered projects)",
+    p_traces.add_argument("project", help="Project name")
+    p_traces.add_argument(
+        "--port",
+        type=int,
+        default=5000,
+        help="Port for the local MLflow UI (default: 5000)",
     )
 
     p_smoke = sub.add_parser(
@@ -1024,13 +760,6 @@ def main(argv=None):
         help="Run the smoke harness in parallel for every agent.  Per-agent "
         "logs go to a temp dir; verdicts print in finish order.",
     )
-
-    p_setup_kb = sub.add_parser(
-        "setup-kb", help="Build the core knowledge base collections"
-    )
-    from dsagt.commands.setup_core_kb import add_setup_kb_args
-
-    add_setup_kb_args(p_setup_kb)
 
     sub.add_parser("list", help="List all registered projects and their status")
 
@@ -1058,8 +787,12 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
+    # The CLI speaks to the user via ``print()``; library logs are diagnostic.
+    # Default the console to WARNING so INFO chatter (embedder load, route
+    # registration, catalog indexing) doesn't bury the init/start output.
+    # ``--verbose`` opts into the full DEBUG stream.
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(asctime)s [dsagt] %(message)s",
         datefmt="%H:%M:%S",
     )
@@ -1071,12 +804,9 @@ def main(argv=None):
     cmds = {
         "init": _cmd_init,
         "start": _cmd_start,
-        "mlflow": _cmd_mlflow,
-        "memory": _cmd_memory,
         "info": _cmd_info,
-        "stop": _cmd_stop,
+        "traces": _cmd_traces,
         "smoke-test": _cmd_smoke_test,
-        "setup-kb": _cmd_setup_kb,
         "list": _cmd_list,
         "mv": _cmd_mv,
         "rm": _cmd_rm,

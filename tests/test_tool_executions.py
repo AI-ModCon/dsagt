@@ -4,9 +4,9 @@ Tests for tool execution record indexing.
 Tests render_execution_text, execution_metadata, index_execution_record,
 and index_trace_archive.  KnowledgeBase embedding is mocked.
 
-Record formats match the actual output from:
-  - proxy_callback.py (intent + report, execution=None)
-  - run.py (execution only, no intent/report)
+Records match the output of ``dsagt-run`` (run.py): an ``execution`` block
+with no intent/report.  (The pre-BYOA proxy_callback.py producer, which wrote
+intent/report records, was removed — see scratch/excised_proxy_provenance.py.)
 """
 
 import json
@@ -14,21 +14,20 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 
 from dsagt.provenance import (
-    TOOL_EXECUTIONS_COLLECTION as COLLECTION_NAME,
+    CODE_USE_COLLECTION as COLLECTION_NAME,
+    CodeUseIndexer,
     execution_metadata,
-    index_execution_record,
     index_trace_archive,
     render_execution_text,
 )
-from dsagt.knowledge import CollectionRoute, KnowledgeBase
-
+from dsagt.knowledge import KnowledgeBase
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def fake_embed(texts: list[str]) -> np.ndarray:
     dim = 8
@@ -39,33 +38,6 @@ def fake_embed(texts: list[str]) -> np.ndarray:
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     norms[norms == 0] = 1
     return vecs / norms
-
-
-def make_proxy_record(
-    tool="fastp",
-    params=None,
-    session="s1",
-    record_id="toolu_001",
-    agent_output="Filtering complete.",
-):
-    """Proxy callback record: intent + report, execution=None."""
-    return {
-        "record_id": record_id,
-        "tool_name": tool,
-        "session_id": session,
-        "intent": {
-            "command": tool,
-            "parameters": params or {"q": 20, "in1": "sample.fq.gz"},
-            "timestamp_requested": "2024-01-15T10:30:00+00:00",
-            "session_id": session,
-        },
-        "execution": None,
-        "report": {
-            "agent_output": agent_output,
-            "timestamp_reported": "2024-01-15T10:30:13+00:00",
-            "wrapper_used": False,
-        },
-    }
 
 
 def make_wrapper_record(
@@ -81,7 +53,7 @@ def make_wrapper_record(
     """Wrapper (dsagt-run) record: execution only, no intent/report."""
     return {
         "record_id": record_id,
-        "tool_name": tool,
+        "code_name": tool,
         "session_id": session,
         "execution": {
             "exact_command": [tool, "-q", "20", "--in1", "sample.fq.gz"],
@@ -100,15 +72,8 @@ def make_wrapper_record(
 # render_execution_text
 # ---------------------------------------------------------------------------
 
-class TestRenderExecutionText:
 
-    def test_proxy_record_uses_intent(self):
-        """Proxy record renders parameters from intent layer."""
-        record = make_proxy_record()
-        text = render_execution_text(record)
-        assert "Tool: fastp" in text
-        assert "Parameters:" in text
-        assert "Agent report:" in text
+class TestRenderExecutionText:
 
     def test_wrapper_record_uses_exact_command(self):
         """Wrapper record renders exact command from execution layer."""
@@ -137,12 +102,6 @@ class TestRenderExecutionText:
         text = render_execution_text(record)
         assert "..." in text
 
-    def test_long_agent_output_truncated(self):
-        """Long agent output in proxy record is truncated."""
-        record = make_proxy_record(agent_output="y" * 600)
-        text = render_execution_text(record)
-        assert "..." in text
-
     def test_exact_command_list_joined(self):
         """exact_command as a list is joined with spaces."""
         record = make_wrapper_record()
@@ -157,9 +116,9 @@ class TestRenderExecutionText:
         assert "Duration:" in text
 
     def test_minimal_record(self):
-        """Record with only tool_name renders."""
-        text = render_execution_text({"tool_name": "ls"})
-        assert "Tool: ls" in text
+        """Record with only code_name renders."""
+        text = render_execution_text({"code_name": "ls"})
+        assert "Code: ls" in text
 
     def test_empty_record(self):
         """Record with nothing renders tool as unknown."""
@@ -171,29 +130,17 @@ class TestRenderExecutionText:
 # execution_metadata
 # ---------------------------------------------------------------------------
 
+
 class TestExecutionMetadata:
-
-    def test_proxy_record_metadata(self):
-        """Proxy record extracts metadata from top-level and intent fields."""
-        record = make_proxy_record()
-        meta = execution_metadata(record)
-
-        assert meta["tool_name"] == "fastp"
-        assert meta["session_id"] == "s1"
-        assert meta["wrapper_used"] == 0
-        assert "return_code" not in meta
-        assert meta["timestamp"] == "2024-01-15T10:30:00+00:00"
-        assert meta["record_id"] == "toolu_001"
 
     def test_wrapper_record_metadata(self):
         """Wrapper record extracts metadata from top-level and execution fields."""
         record = make_wrapper_record()
         meta = execution_metadata(record)
 
-        assert meta["tool_name"] == "fastp"
+        assert meta["code_name"] == "fastp"
         assert meta["session_id"] == "s1"
         assert meta["return_code"] == 0
-        assert meta["wrapper_used"] == 1
         assert meta["timestamp"] == "2024-01-15T10:30:01+00:00"
         assert meta["record_id"] == "rec_001"
 
@@ -205,67 +152,100 @@ class TestExecutionMetadata:
 
     def test_missing_session_defaults_to_unknown(self):
         """Missing session_id defaults to 'unknown'."""
-        record = {"tool_name": "ls"}
+        record = {"code_name": "ls"}
         meta = execution_metadata(record)
         assert meta["session_id"] == "unknown"
 
-    def test_top_level_fields_preferred(self):
-        """Top-level tool_name/session_id are used over intent fields."""
-        record = make_proxy_record(tool="fastp", session="s1")
-        record["tool_name"] = "override_tool"
-        record["session_id"] = "override_session"
+    def test_null_session_coerced_to_unknown(self):
+        """Regression: a record written outside a minted session stores
+        session_id: null.  ``.get(default)`` returns None for a present-but-null
+        key, and a None metadata value makes ChromaDB reject the whole batch —
+        so it must coerce to 'unknown'."""
+        record = {"code_name": "ls", "session_id": None}
         meta = execution_metadata(record)
-        assert meta["tool_name"] == "override_tool"
-        assert meta["session_id"] == "override_session"
+        assert meta["session_id"] == "unknown"
+        assert None not in meta.values()
 
 
 # ---------------------------------------------------------------------------
-# index_execution_record
+# CodeUseIndexer — idempotent, incremental heartbeat indexing
 # ---------------------------------------------------------------------------
 
-class TestIndexExecutionRecord:
 
-    def test_indexes_into_tool_executions_collection(self, tmp_path):
-        """Single record is indexed into the tool_executions collection."""
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+class TestCodeUseIndexer:
+
+    def _write(self, trace_dir: Path, record: dict):
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        rid = record["record_id"]
+        (trace_dir / f"{record.get('code_name', 'x')}_{rid}.json").write_text(
+            json.dumps(record)
+        )
+
+    def test_incremental_and_idempotent(self, tmp_path):
+        """Each tick indexes only new records; a re-tick with nothing new is a
+        no-op (the bug the cursor-less batch had — re-indexing everything)."""
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
 
-            kb = KnowledgeBase(index_dir=tmp_path / "kb")
-            record = make_proxy_record()
-            result = index_execution_record(record, kb)
+            pdir = tmp_path / "proj"
+            (pdir / ".dsagt").mkdir(parents=True)
+            kb = KnowledgeBase(index_dir=pdir / "kb")
+            indexer = CodeUseIndexer(kb, pdir)
 
-            assert result["collection"] == COLLECTION_NAME
-            assert result["entries_added"] == 1
+            r1 = make_wrapper_record()
+            r1["record_id"] = "r1"
+            self._write(pdir / "trace_archive", r1)
+            assert indexer.tick() == 1  # first record indexed
+            assert indexer.tick() == 0  # nothing new → no-op (idempotent)
 
-            results = kb.search(
-                "fastp quality", collection=COLLECTION_NAME,
-                top_k=5, rerank=False,
-            )
-            assert len(results) > 0
-            assert "fastp" in results[0]["chunk"]["text"]
+            r2 = make_wrapper_record()
+            r2["record_id"] = "r2"
+            self._write(pdir / "trace_archive", r2)
+            assert indexer.tick() == 1  # only the new one
+            assert indexer.tick() == 0
 
+            # The ack set persists exactly the indexed record ids.
+            acks = json.loads((pdir / ".dsagt" / "code_use_acks.json").read_text())
+            assert set(acks) == {"r1", "r2"}
             kb.close()
 
-    def test_indexes_wrapper_record(self, tmp_path):
-        """Wrapper-only record is also indexable."""
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
-            mock_embedder = MagicMock()
-            mock_embedder.embed = fake_embed
-            mock_make.return_value = mock_embedder
+    def test_tick_traced_wraps_in_code_use_source_span(self, tmp_path):
+        """The background triggers use tick_traced so the indexer's kb.* writes
+        nest under a dsagt.source=code_use root instead of orphaning."""
+        pdir = tmp_path / "proj"
+        (pdir / ".dsagt").mkdir(parents=True)
+        kb = MagicMock()
+        indexer = CodeUseIndexer(kb, pdir)
 
-            kb = KnowledgeBase(index_dir=tmp_path / "kb")
-            record = make_wrapper_record()
-            result = index_execution_record(record, kb)
+        opened = {}
 
-            assert result["entries_added"] == 1
-            kb.close()
+        class _Span:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def _fake_open_span(name, span_type=None, source=None):
+            opened["name"] = name
+            opened["source"] = source
+            return _Span()
+
+        with patch("dsagt.observability.open_span", _fake_open_span):
+            # No records → tick returns 0, but the span must still be opened
+            # with the right source.
+            assert indexer.tick_traced() == 0
+
+        assert opened["source"] == "code_use"
+        assert opened["name"] == "code_use.index"
 
 
 # ---------------------------------------------------------------------------
 # index_trace_archive
 # ---------------------------------------------------------------------------
+
 
 class TestIndexTraceArchive:
 
@@ -273,18 +253,21 @@ class TestIndexTraceArchive:
         trace_dir.mkdir(parents=True, exist_ok=True)
         for i, record in enumerate(records):
             rid = record.get("record_id", f"rec_{i}")
-            path = trace_dir / f"{record.get('tool_name', 'unknown')}_{rid}.json"
+            path = trace_dir / f"{record.get('code_name', 'unknown')}_{rid}.json"
             path.write_text(json.dumps(record))
 
     def test_indexes_all_records(self, tmp_path):
         """Indexes all records in trace_dir."""
         trace_dir = tmp_path / "trace_archive"
-        self._write_records(trace_dir, [
-            make_proxy_record(record_id="t1"),
-            make_wrapper_record(tool="megahit", record_id="t2"),
-        ])
+        self._write_records(
+            trace_dir,
+            [
+                make_wrapper_record(record_id="t1"),
+                make_wrapper_record(tool="megahit", record_id="t2"),
+            ],
+        )
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -300,12 +283,15 @@ class TestIndexTraceArchive:
     def test_skips_already_indexed(self, tmp_path):
         """Records with IDs in indexed_ids are skipped."""
         trace_dir = tmp_path / "trace_archive"
-        self._write_records(trace_dir, [
-            make_proxy_record(record_id="t1"),
-            make_proxy_record(record_id="t2"),
-        ])
+        self._write_records(
+            trace_dir,
+            [
+                make_wrapper_record(record_id="t1"),
+                make_wrapper_record(record_id="t2"),
+            ],
+        )
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -322,12 +308,15 @@ class TestIndexTraceArchive:
     def test_updates_indexed_ids(self, tmp_path):
         """indexed_ids set is updated with newly indexed record IDs."""
         trace_dir = tmp_path / "trace_archive"
-        self._write_records(trace_dir, [
-            make_proxy_record(record_id="t1"),
-            make_wrapper_record(record_id="t2"),
-        ])
+        self._write_records(
+            trace_dir,
+            [
+                make_wrapper_record(record_id="t1"),
+                make_wrapper_record(record_id="t2"),
+            ],
+        )
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -344,7 +333,7 @@ class TestIndexTraceArchive:
         trace_dir = tmp_path / "trace_archive"
         trace_dir.mkdir()
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -358,7 +347,7 @@ class TestIndexTraceArchive:
 
     def test_nonexistent_directory(self, tmp_path):
         """Non-existent trace_dir returns zeros."""
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -369,15 +358,18 @@ class TestIndexTraceArchive:
             assert result["indexed"] == 0
             kb.close()
 
-    def test_skips_records_without_intent_or_execution(self, tmp_path):
-        """Records missing both intent and execution are skipped."""
+    def test_skips_records_without_execution(self, tmp_path):
+        """Records with no execution layer are skipped (counted as errors)."""
         trace_dir = tmp_path / "trace_archive"
-        self._write_records(trace_dir, [
-            {"record_id": "bad", "tool_name": "unknown", "report": {"agent_output": "something"}},
-            make_proxy_record(record_id="good"),
-        ])
+        self._write_records(
+            trace_dir,
+            [
+                {"record_id": "bad", "code_name": "unknown"},
+                make_wrapper_record(record_id="good"),
+            ],
+        )
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -390,13 +382,16 @@ class TestIndexTraceArchive:
             kb.close()
 
     def test_accepts_wrapper_only_records(self, tmp_path):
-        """Wrapper-only records (no intent) are valid and indexed."""
+        """Wrapper records (execution only) are valid and indexed."""
         trace_dir = tmp_path / "trace_archive"
-        self._write_records(trace_dir, [
-            make_wrapper_record(record_id="w1"),
-        ])
+        self._write_records(
+            trace_dir,
+            [
+                make_wrapper_record(record_id="w1"),
+            ],
+        )
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -411,9 +406,9 @@ class TestIndexTraceArchive:
     def test_idempotent_reindex(self, tmp_path):
         """Running index_trace_archive twice doesn't duplicate entries."""
         trace_dir = tmp_path / "trace_archive"
-        self._write_records(trace_dir, [make_proxy_record(record_id="t1")])
+        self._write_records(trace_dir, [make_wrapper_record(record_id="t1")])
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -434,6 +429,7 @@ class TestIndexTraceArchive:
 # End-to-end: index + filtered search
 # ---------------------------------------------------------------------------
 
+
 class TestIndexAndSearch:
 
     def _index_records(self, tmp_path, records):
@@ -442,20 +438,20 @@ class TestIndexAndSearch:
         trace_dir.mkdir(exist_ok=True)
         for r in records:
             rid = r.get("record_id", "x")
-            path = trace_dir / f"{r.get('tool_name', 'unknown')}_{rid}.json"
+            path = trace_dir / f"{r.get('code_name', 'unknown')}_{rid}.json"
             path.write_text(json.dumps(r))
         return trace_dir
 
     def test_search_by_tool_name(self, tmp_path):
-        """Index multiple records, search filtered by tool_name."""
+        """Index multiple records, search filtered by code_name."""
         records = [
-            make_proxy_record(tool="fastp", session="s1", record_id="t1"),
-            make_proxy_record(tool="megahit", session="s1", record_id="t2"),
-            make_proxy_record(tool="fastp", session="s2", record_id="t3"),
+            make_wrapper_record(tool="fastp", session="s1", record_id="t1"),
+            make_wrapper_record(tool="megahit", session="s1", record_id="t2"),
+            make_wrapper_record(tool="fastp", session="s2", record_id="t3"),
         ]
         trace_dir = self._index_records(tmp_path, records)
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -466,22 +462,23 @@ class TestIndexAndSearch:
             results = kb.search(
                 "quality filtering parameters",
                 collection=COLLECTION_NAME,
-                top_k=10, rerank=False,
-                where={"tool_name": "fastp"},
+                top_k=10,
+                rerank=False,
+                where={"code_name": "fastp"},
             )
             for r in results:
-                assert r["chunk"]["metadata"]["tool_name"] == "fastp"
+                assert r["chunk"]["metadata"]["code_name"] == "fastp"
             kb.close()
 
     def test_search_by_session(self, tmp_path):
         """Index multiple records, search filtered by session_id."""
         records = [
-            make_proxy_record(tool="fastp", session="s1", record_id="t1"),
-            make_proxy_record(tool="fastp", session="s2", record_id="t2"),
+            make_wrapper_record(tool="fastp", session="s1", record_id="t1"),
+            make_wrapper_record(tool="fastp", session="s2", record_id="t2"),
         ]
         trace_dir = self._index_records(tmp_path, records)
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -492,7 +489,8 @@ class TestIndexAndSearch:
             results = kb.search(
                 "fastp",
                 collection=COLLECTION_NAME,
-                top_k=10, rerank=False,
+                top_k=10,
+                rerank=False,
                 where={"session_id": "s1"},
             )
             for r in results:
@@ -507,7 +505,7 @@ class TestIndexAndSearch:
         ]
         trace_dir = self._index_records(tmp_path, records)
 
-        with patch("dsagt.knowledge._make_embedder") as mock_make:
+        with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
             mock_make.return_value = mock_embedder
@@ -518,7 +516,8 @@ class TestIndexAndSearch:
             results = kb.search(
                 "tool execution",
                 collection=COLLECTION_NAME,
-                top_k=10, rerank=False,
+                top_k=10,
+                rerank=False,
                 where={"return_code": 1},
             )
             for r in results:

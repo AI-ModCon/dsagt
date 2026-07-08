@@ -1,28 +1,23 @@
 """
-dsagt-setup-kb: Build core knowledge base collections.
+Knowledge-base asset builder — the engine behind ``dsagt init``'s KB
+provisioning.  No longer a standalone command (``dsagt setup-kb`` was
+retired); ``session._provision_kb`` calls :func:`resolve_assets` +
+:func:`ensure_assets` to build the requested assets into the shared
+``~/dsagt-projects/kb_index/`` once, then copies them per project.
 
-Downloads and indexes:
-- nemo_curator: NVIDIA NeMo Curator (code, docs, tutorials)
-- aidrin: AI Data Readiness Inspector (code, papers)
+Asset namespace (the ``--include`` / ``--exclude`` selectors on ``dsagt init``):
+- ``tools``                bundled tool specs (cheap, local)
+- skill catalogs           ``genesis`` (default), ``scientific``, ``composio``, …
+- scientific collections   ``nemo_curator``, ``aidrin`` (clone external repos; docs + papers only, not source)
 
-The embedding service is configured via CLI flags or environment variables
-(``LLM_API_KEY``, ``OPENAI_BASE_URL``, ``EMBEDDING_MODEL``).  API-backed
-embedding of the full core KB typically takes 15-30 minutes.
-
-Usage:
-    dsagt-setup-kb
-    dsagt-setup-kb --index-dir ./my_kb_index
-    dsagt-setup-kb --collection nemo_curator
-    dsagt-setup-kb --embedding-base-url https://api.example.com/v1 \\
-                   --embedding-api-key sk-... \\
-                   --embedding-model text-embedding-3-small
+:data:`DEFAULT_ASSETS` (bundled tools + the genesis skill catalog) is the
+cheap set installed automatically on a machine's first project.  Embedding
+config comes from the project's ``.dsagt/config.yaml`` (local backend by
+default — no credentials needed).
 """
 
-import argparse
-import os
 import shutil
 import subprocess
-import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -89,18 +84,21 @@ NVIDIA's scalable data curation library for LLM training data.
 - PII detection and removal
 
 ## Use For
-Building data curation pipelines, understanding filter implementations,
+Building data curation pipelines, understanding the available filters,
 quality assessment strategies.
 """,
         "sources": [
             {
                 "type": "github",
-                "url": "https://github.com/NVIDIA/NeMo-Curator",
+                "url": "https://github.com/NVIDIA-NeMo/Curator",
                 "branch": "main",
-                # Top-level subdirs to clone.  examples + tutorials are
-                # kept on purpose: agents writing pipelines benefit from
-                # concrete usage patterns more than from prose docs alone.
-                "include": ["docs", "nemo_curator", "tutorials", "examples"],
+                # Docs only — the library source (and the notebook/script
+                # tutorials) are deliberately omitted.  A vector index is a
+                # poor way to retrieve code (the agent's native file search
+                # beats it), and skipping the source tree keeps ingestion
+                # fast for onboarding.  clone_github still pulls the top-level
+                # files (README, pyproject.toml, …) for install metadata.
+                "include": ["docs"],
             },
         ],
     },
@@ -123,10 +121,15 @@ readiness evaluation for ML pipelines.
         "sources": [
             {
                 "type": "github",
-                # FIX 1: Correct URL (AIDRIN is uppercase)
                 "url": "https://github.com/kaveenh/AIDRIN",
-                # FIX 2: Correct branch (develop, not main)
                 "branch": "develop",
+                # Docs only — omit the `aidrin` source package.  The docs
+                # and the two arxiv papers below cover how to use the tool;
+                # code retrieval is better served by the agent's native
+                # file search, and skipping the source speeds ingestion.
+                # clone_github still keeps the top-level files (README,
+                # pyproject.toml, requirements.txt, …) for install metadata.
+                "include": ["docs"],
             },
             {"type": "arxiv", "id": "2406.19256"},  # AIDRIN paper
             {"type": "arxiv", "id": "2404.05779"},  # Data Readiness Survey
@@ -135,7 +138,9 @@ readiness evaluation for ML pipelines.
 }
 
 
-def clone_github(url: str, dest: Path, branch: str = "main", include: list[str] | None = None):
+def clone_github(
+    url: str, dest: Path, branch: str = "main", include: list[str] | None = None
+):
     """Clone a GitHub repo, optionally keeping only specific directories.
 
     When *include* is set, the named subdirectories are copied AND any
@@ -175,7 +180,7 @@ def clone_github(url: str, dest: Path, branch: str = "main", include: list[str] 
 def download_arxiv(paper_id: str, dest: Path):
     """Download arXiv paper (source if available, else PDF)."""
     client = httpx.Client(timeout=60.0, follow_redirects=True)
-    
+
     try:
         # Try source tarball first
         response = client.get(f"https://arxiv.org/e-print/{paper_id}")
@@ -190,7 +195,7 @@ def download_arxiv(paper_id: str, dest: Path):
                 return
             except tarfile.ReadError:
                 tar_path.unlink()
-        
+
         # Fall back to PDF
         response = client.get(f"https://arxiv.org/pdf/{paper_id}.pdf")
         response.raise_for_status()
@@ -216,11 +221,10 @@ def setup_collection(
     compat with direct callers), a fresh KB is constructed and closed
     around this call.
 
-    ``run_setup_kb`` always passes a shared *kb* so a multi-collection
-    run pays the model-load cost once, not N times.
+    ``ensure_assets`` always passes a shared *kb* so a multi-asset build
+    pays the model-load cost once, not N times.  It also prints the
+    user-facing progress line, so this function stays quiet.
     """
-    print(f"Setting up {name}...", flush=True)
-
     with tempfile.TemporaryDirectory() as tmp:
         download_dir = Path(tmp) / name
         download_dir.mkdir()
@@ -248,16 +252,19 @@ def setup_collection(
         owned_kb = kb is None
         if owned_kb:
             from dsagt.knowledge import KnowledgeBase
+
             kb = KnowledgeBase(
                 index_dir=index_dir,
                 default_embedder=embedding_backend,
-                default_index=vector_db,
-                embedder_kwargs=embedder_kwargs,
+                model=embedder_kwargs.get("model"),
+                base_url=embedder_kwargs.get("base_url"),
+                api_key=embedder_kwargs.get("api_key"),
             )
         try:
             result = kb.ingest(
                 download_dir,
-                exclude_patterns=config.get("exclude_patterns") or DEFAULT_EXCLUDE_PATTERNS,
+                exclude_patterns=config.get("exclude_patterns")
+                or DEFAULT_EXCLUDE_PATTERNS,
             )
             skipped = result.get("skipped_files", 0)
             miss_msg = f", {skipped} file misses" if skipped else ""
@@ -275,229 +282,250 @@ def _current_dsagt_version() -> str:
     """Return the installed dsagt package version, or ``"unknown"`` if absent."""
     try:
         from importlib.metadata import version
+
         return version("dsagt")
     except Exception:
         return "unknown"
 
 
-def add_setup_kb_args(parser):
-    """Add setup-kb arguments to a parser or subparser.
+# ---------------------------------------------------------------------------
+# Installable KB assets — the namespace for ``dsagt init``'s
+# ``--include`` / ``--exclude`` selectors.
+#
+# Three kinds, all built into the shared ``~/dsagt-projects/kb_index/`` and
+# copied per-project:
+#   "codes"        bundled tool specs (package data; cheap, fully local)
+#   <catalog>      a skill-catalog source from ``skills.KNOWN_SOURCES``
+#                  (e.g. "genesis", "k-dense-ai", "composio", "antigravity")
+#   <collection>   a heavy scientific doc collection from ``COLLECTIONS``
+#                  (e.g. "nemo_curator", "aidrin" — clones external repos)
+#
+# DEFAULT_ASSETS is the cheap core a first-ever ``dsagt init`` installs
+# automatically; everything else is opt-in via ``--include``.
+# ---------------------------------------------------------------------------
 
-    Called from both the standalone ``dsagt-setup-kb`` entry point and the
-    ``dsagt setup-kb`` subcommand so the argument set is defined once.
+#: The default per-project / first-init asset set: bundled tools + the
+#: genesis skill catalog.  Kept deliberately cheap (one small local embed +
+#: one git clone) so onboarding needs no manual step.
+DEFAULT_ASSETS: tuple[str, ...] = ("codes", "genesis")
+
+
+def all_assets() -> list[str]:
+    """Every installable asset name, in canonical install order (cheap → heavy)."""
+    from dsagt.skills import KNOWN_SOURCES
+
+    return ["codes", *KNOWN_SOURCES, *COLLECTIONS]
+
+
+def asset_collection_name(asset: str) -> str:
+    """The ``kb_index`` collection directory a given asset materializes as."""
+    from dsagt.registry import CODES_COLLECTION, CATALOG_COLLECTION_PREFIX
+    from dsagt.skills import KNOWN_SOURCES, _repo_slug
+
+    if asset == "codes":
+        return CODES_COLLECTION
+    if asset in KNOWN_SOURCES:
+        return CATALOG_COLLECTION_PREFIX + _repo_slug(KNOWN_SOURCES[asset]["url"])
+    if asset in COLLECTIONS:
+        return asset
+    raise ValueError(f"unknown KB asset: {asset!r}")
+
+
+def resolve_assets(
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> list[str]:
+    """Resolve the requested asset set from ``--include`` / ``--exclude``.
+
+    - ``include`` and ``exclude`` are mutually exclusive.
+    - The literal ``"all"`` expands to every installable asset.
+    - No selector → :data:`DEFAULT_ASSETS`.
+    - ``--exclude all`` → ``[]`` (empty stub; the project's KB is created but
+      holds no bundled content).
+
+    Returns names in canonical install order so a build pays the cheap
+    (local) assets before the heavy (network) ones.
     """
-    parser.add_argument(
-        "--index-dir",
-        type=Path,
-        default=DEFAULT_INDEX_DIR,
-        help=f"Index directory (default: {DEFAULT_INDEX_DIR})",
-    )
-    parser.add_argument(
-        "--collection",
-        choices=list(COLLECTIONS.keys()),
-        help="Setup only this collection",
-    )
-    parser.add_argument(
-        "--embedding-backend",
-        choices=["api", "local"],
-        default="local",
-        help=(
-            "Embedding backend (default: local — sentence-transformers, "
-            "no API credentials needed).  Pass --embedding-backend api to "
-            "build collections against a hosted embedding endpoint; that "
-            "path requires --embedding-base-url and --embedding-api-key (or "
-            "the corresponding env vars)."
-        ),
-    )
-    parser.add_argument(
-        "--embedding-model", default=None,
-        help="Embedding model name (falls back to EMBEDDING_MODEL env var)",
-    )
-    parser.add_argument(
-        "--embedding-base-url", default=None,
-        help="Embedding API base URL (falls back to OPENAI_BASE_URL env var)",
-    )
-    parser.add_argument(
-        "--embedding-api-key", default=None,
-        help="Embedding API key (falls back to LLM_API_KEY / OPENAI_API_KEY env var)",
-    )
-    parser.add_argument(
-        "--vector-db",
-        choices=["chroma", "faiss"],
-        default="chroma",
-        help="Vector database backend (default: chroma)",
-    )
-    parser.add_argument(
-        "--rebuild",
-        action="store_true",
-        help="Re-ingest collections that already exist in the index directory "
-        "(default: skip existing).",
-    )
+    if include and exclude:
+        raise ValueError("--include and --exclude are mutually exclusive")
+    known = all_assets()
 
-
-def run_setup_kb(args):
-    """Run the core knowledge base setup.
-
-    Accepts a parsed argparse.Namespace with the fields added by
-    ``add_setup_kb_args``.  Called from both the ``dsagt setup-kb``
-    subcommand and the standalone ``dsagt-setup-kb`` entry point.
-    """
-    # Show only warnings/errors during setup-kb — the per-collection
-    # print() lines below are the user-visible progress story.  Surfacing
-    # every "Found N files" / "Created M chunks" log line on top creates
-    # the noisy play-by-play we deliberately stripped out.
-    #
-    # ``force=True`` overrides cli.py's earlier basicConfig (which sets
-    # INFO + a "[dsagt]" format for the rest of the CLI).  Without
-    # ``force``, the second basicConfig is a no-op because the root
-    # logger already has handlers, and the INFO-level chatter survives.
-    import logging as _logging
-    _logging.basicConfig(
-        level=_logging.WARNING,
-        format="%(levelname)s: %(message)s",
-        force=True,
-    )
-
-    # Check git is available.
-    try:
-        subprocess.run(["git", "--version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        raise RuntimeError("git is required but not found on PATH")
-
-    # Resolve embedding config with env-var fallback so the user gets a
-    # clear error up front rather than 5 minutes into the first ingest.
-    embedder_kwargs: dict = {}
-    if args.embedding_backend == "api":
-        api_key = args.embedding_api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
-        base_url = args.embedding_base_url or os.getenv("OPENAI_BASE_URL")
-        model = args.embedding_model or os.getenv("EMBEDDING_MODEL")
-        missing = [n for n, v in [("api key", api_key), ("base URL", base_url), ("model", model)] if not v]
-        if missing:
+    def _validate(names: list[str]) -> None:
+        bad = [n for n in names if n != "all" and n not in known]
+        if bad:
             raise ValueError(
-                "API embedding backend requires "
-                + ", ".join(missing)
-                + ". Pass via --embedding-* flags or set LLM_API_KEY, "
-                "OPENAI_BASE_URL, EMBEDDING_MODEL."
+                f"unknown KB asset(s): {', '.join(bad)}.  "
+                f"Choose from: {', '.join(known)} (or 'all')."
             )
-        embedder_kwargs = {"api_key": api_key, "base_url": base_url, "model": model}
-    elif args.embedding_model:
-        embedder_kwargs = {"model": args.embedding_model}
 
-    # Configure LiteLLM retries before any embedding work.  setup-kb is a
-    # one-shot bootstrap tool — no project exists yet, no MLflow to trace
-    # to, so we skip init_tracing entirely.  @traced decorators inside
-    # KnowledgeBase see no backend and short-circuit cleanly.
-    from dsagt.observability import configure_litellm_retries
-    configure_litellm_retries()
+    if include is not None:
+        _validate(include)
+        if "all" in include:
+            return list(known)
+        sel = set(include)
+        return [a for a in known if a in sel]
+    if exclude is not None:
+        _validate(exclude)
+        if "all" in exclude:
+            return []
+        excl = set(exclude)
+        return [a for a in DEFAULT_ASSETS if a not in excl]
+    return list(DEFAULT_ASSETS)
 
-    # One KnowledgeBase per setup-kb invocation.  The embedder cache
-    # lives on the KB instance, so creating fresh KBs per collection
-    # would reload the local sentence-transformers model every time
-    # (~11s × N collections of pure waste).  Threaded through to
-    # setup_collection (and used directly for the bundled tools+skills
-    # block below) so the model loads once.
-    args.index_dir.mkdir(parents=True, exist_ok=True)
-    from dsagt.knowledge import KnowledgeBase
-    from dsagt.registry import (
-        SKILLS_COLLECTION, TOOLS_COLLECTION,
-        ToolRegistry, SkillRegistry, _parse_frontmatter,
-    )
-    shared_kb = KnowledgeBase(
-        index_dir=args.index_dir,
-        default_embedder=args.embedding_backend,
-        default_index=args.vector_db,
-        embedder_kwargs=embedder_kwargs or {},
-    )
+
+def _model_is_cached(model_id: str) -> bool:
+    """True if *model_id* is already in the local HuggingFace cache.
+
+    Best-effort: on any error (offline, API change) returns True so we never
+    print a misleading "downloading" message for an already-present model.
+    """
     try:
-        # Bundled tools + skills: each spec file is a single chunk with
-        # rich metadata.  Wipe-and-rebuild every run — there's no
-        # version sentinel, so the user controls when this happens.
-        current_version = _current_dsagt_version()
+        from huggingface_hub import try_to_load_from_cache
 
-        tool_paths = [
-            p for p in sorted(ToolRegistry._PACKAGE_TOOLS_DIR.glob("*.md"))
-            if _parse_frontmatter(p).get("name")
-        ]
-        skill_dirs = [
-            d for d in sorted(SkillRegistry._PACKAGE_SKILLS_DIR.iterdir())
-            if d.is_dir()
-            and (d / "SKILL.md").exists()
-            and _parse_frontmatter(d / "SKILL.md").get("name")
-        ]
-
-        for name in (TOOLS_COLLECTION, SKILLS_COLLECTION):
-            coll_dir = args.index_dir / name
-            if coll_dir.exists():
-                shutil.rmtree(coll_dir)
-
-        if tool_paths:
-            tool_specs = [_parse_frontmatter(p) for p in tool_paths]
-            shared_kb.add_entries(
-                texts=[p.read_text() for p in tool_paths],
-                collection=TOOLS_COLLECTION,
-                metadatas=[{
-                    "tool_name": s["name"],
-                    "tags": ",".join(s.get("tags", [])),
-                    "executable": s.get("executable", ""),
-                    "has_dependencies": str(bool(s.get("dependencies"))),
-                    "source": "bundled",
-                    "dsagt_version": current_version,
-                } for s in tool_specs],
-            )
-
-        if skill_dirs:
-            skill_specs = [_parse_frontmatter(d / "SKILL.md") for d in skill_dirs]
-            shared_kb.add_entries(
-                texts=[(d / "SKILL.md").read_text() for d in skill_dirs],
-                collection=SKILLS_COLLECTION,
-                metadatas=[{
-                    "skill_name": s["name"],
-                    "tags": ",".join(s.get("tags", [])),
-                    "source": "bundled",
-                    "dsagt_version": current_version,
-                } for s in skill_specs],
-            )
-
-        print("  bundled tools + skills: indexed", flush=True)
-
-        collections = {args.collection: COLLECTIONS[args.collection]} if args.collection else COLLECTIONS
-
-        for name, config in collections.items():
-            target_dir = args.index_dir / name
-            if _collection_exists(target_dir):
-                if not args.rebuild:
-                    print(f"  {name}: already indexed (use --rebuild to force)",
-                          flush=True)
-                    continue
-                shutil.rmtree(target_dir)
-            setup_collection(
-                name, config, args.index_dir,
-                embedder_kwargs=embedder_kwargs,
-                embedding_backend=args.embedding_backend,
-                vector_db=args.vector_db,
-                kb=shared_kb,
-            )
-    finally:
-        shared_kb.close()
+        # A sentence-transformers model always ships a config.json; a str path
+        # back means the file is cached (None / sentinel ⇒ not cached).
+        return isinstance(try_to_load_from_cache(model_id, "config.json"), str)
+    except Exception:
+        return True
 
 
-def main():
-    """Standalone entry point (``dsagt-setup-kb``)."""
-    parser = argparse.ArgumentParser(
-        description="Setup DSAGT core knowledge base",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Embedding config is taken from CLI flags, then from these env vars:\n"
-            "  LLM_API_KEY / OPENAI_API_KEY   API key for the embedding endpoint\n"
-            "  OPENAI_BASE_URL                OpenAI-compatible base URL\n"
-            "  EMBEDDING_MODEL                Embedding model name\n\n"
-            "Full core KB embedding typically takes 15-30 minutes over an API.\n\n"
-            "This command can also be run as: dsagt setup-kb"
-        ),
+def _build_bundled_tools(kb, index_dir: Path) -> int:
+    """(Re)build the bundled-tools collection from the package's tool specs.
+
+    Each spec file is one chunk with rich metadata.  Wipe-and-rebuild so a
+    dsagt upgrade refreshes the bundled set.  Returns the number indexed.
+    """
+    from dsagt.registry import CODES_COLLECTION, CodeRegistry, _parse_frontmatter
+
+    coll_dir = index_dir / CODES_COLLECTION
+    if coll_dir.exists():
+        shutil.rmtree(coll_dir)
+
+    code_paths = [
+        p
+        for p in sorted(CodeRegistry._PACKAGE_CODES_DIR.glob("*/SKILL.md"))
+        if _parse_frontmatter(p).get("name")
+    ]
+    if not code_paths:
+        return 0
+
+    current_version = _current_dsagt_version()
+    code_specs = [_parse_frontmatter(p) for p in code_paths]
+    kb.add_entries(
+        texts=[p.read_text() for p in code_paths],
+        collection=CODES_COLLECTION,
+        metadatas=[
+            {
+                "code_name": s["name"],
+                "tags": ",".join(s.get("tags", [])),
+                "executable": s.get("executable", ""),
+                "has_dependencies": str(bool(s.get("dependencies"))),
+                "source": "bundled",
+                "dsagt_version": current_version,
+            }
+            for s in code_specs
+        ],
     )
-    add_setup_kb_args(parser)
-    run_setup_kb(parser.parse_args())
+    return len(code_paths)
 
 
-if __name__ == "__main__":
-    main()
+def ensure_assets(
+    asset_names: list[str],
+    index_dir: Path,
+    *,
+    embedding_backend: str = "local",
+    embedder_kwargs: dict | None = None,
+    vector_db: str = "chroma",
+    rebuild: bool = False,
+    kb=None,
+) -> dict:
+    """Build the named *asset_names* into *index_dir* (the shared KB cache).
+
+    Idempotent: an asset whose collection already exists is skipped unless
+    *rebuild*, so a second ``dsagt init`` pays nothing.  Reuses *kb* when
+    given (keeps the embedder model warm); otherwise constructs and closes
+    one.  Best-effort per asset for catalogs (a clone failure warns and
+    continues); a heavy-collection failure propagates.
+
+    Returns ``{"built": [...], "skipped": [...]}``.
+    """
+    from dsagt.skills import KNOWN_SOURCES, sync_source
+
+    index_dir.mkdir(parents=True, exist_ok=True)
+
+    # Decide what actually needs building first, so we stay silent and cheap
+    # when a later init's requested set is already cached.
+    to_build = [
+        a
+        for a in asset_names
+        if rebuild or not _collection_exists(index_dir / asset_collection_name(a))
+    ]
+    skipped = [a for a in asset_names if a not in to_build]
+    if not to_build:
+        return {"built": [], "skipped": skipped}
+
+    owned = kb is None
+    if owned:
+        from dsagt.knowledge import KnowledgeBase
+
+        ek = embedder_kwargs or {}
+        kb = KnowledgeBase(
+            index_dir=index_dir,
+            default_embedder=embedding_backend,
+            model=ek.get("model"),
+            base_url=ek.get("base_url"),
+            api_key=ek.get("api_key"),
+        )
+
+    built: list[str] = []
+    try:
+        # The model loads on the first embed below; announce it so the load
+        # (or one-time download) isn't a silent pause.  Distinguish the two so
+        # we don't claim a download when the model is already cached.  API
+        # backend has no local model to load.
+        if embedding_backend == "local":
+            from dsagt.knowledge import LocalEmbedder
+
+            model_id = (embedder_kwargs or {}).get(
+                "model"
+            ) or LocalEmbedder.DEFAULT_MODEL
+            if _model_is_cached(model_id):
+                print("  Loading embedding model …", flush=True)
+            else:
+                print("  Downloading embedding model (one-time) …", flush=True)
+
+        for asset in to_build:
+            if asset == "codes":
+                print("  Indexing bundled tools …", flush=True)
+                _build_bundled_tools(kb, index_dir)
+                built.append(asset)
+            elif asset in KNOWN_SOURCES:
+                print(f"  Fetching skill catalog: {asset} …", flush=True)
+                try:
+                    sync_source(asset, kb=kb, force=rebuild)
+                    built.append(asset)
+                except Exception as e:  # noqa: BLE001 — best-effort, keep going
+                    print(f"    skipped {asset} ({e})", flush=True)
+            else:  # heavy scientific collection
+                print(
+                    f"  Fetching collection: {asset} (may take a few minutes) …",
+                    flush=True,
+                )
+                coll = index_dir / asset_collection_name(asset)
+                if coll.exists():
+                    shutil.rmtree(coll)
+                setup_collection(
+                    asset,
+                    COLLECTIONS[asset],
+                    index_dir,
+                    embedder_kwargs=embedder_kwargs or {},
+                    embedding_backend=embedding_backend,
+                    vector_db=vector_db,
+                    kb=kb,
+                )
+                built.append(asset)
+    finally:
+        if owned:
+            kb.close()
+
+    return {"built": built, "skipped": skipped}

@@ -1,0 +1,63 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "mock-iro2-110-slab-0001",
+  "record_type": "dft_calculation",
+  "record_domain": "materials",
+  "source_type": "MOCK",
+  "_note": "Reference SHAPE/values for the isaac_skills_demo. Derived from the tiny mock_slab/ stub, NOT a real DFT run.",
+  "timestamps": {
+    "created_utc": "2026-06-01T10:00:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "IrO2 (110) slab",
+      "formula": "IrO2",
+      "provenance": "mock"
+    },
+    "sample_form": "surface_slab"
+  },
+  "system": {
+    "domain": "materials",
+    "technique": "DFT",
+    "instrument": {
+      "instrument_type": "compute",
+      "instrument_name": "VASP",
+      "vendor_or_project": "VASP"
+    },
+    "configuration": {
+      "code_version": "6.3.2",
+      "compute_architecture": "cpu",
+      "cores": null
+    }
+  },
+  "computation": {
+    "method": {
+      "family": "DFT",
+      "functional_class": "GGA",
+      "functional_name": "PBE",
+      "pseudopotential": "PAW",
+      "cutoff_eV": 520.0,
+      "spin_treatment": "collinear",
+      "hubbard_u": {"Ir": 4.0}
+    },
+    "relaxation": {
+      "is_relaxation": true,
+      "nsw": 50,
+      "converged": true,
+      "ionic_steps": 50
+    }
+  },
+  "results": {
+    "total_energy_eV": -132.84210000,
+    "energy_sigma0_eV": -132.84210000,
+    "n_atoms": 12,
+    "n_species": {"Ir": 4, "O": 8},
+    "total_magnetization_muB": 8.0123,
+    "max_residual_force_eV_per_A": 0.011
+  },
+  "assets": [
+    {"name": "POSCAR", "role": "structure_input"},
+    {"name": "INCAR", "role": "calc_parameters"},
+    {"name": "OUTCAR", "role": "calc_output"}
+  ]
+}

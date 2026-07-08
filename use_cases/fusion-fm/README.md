@@ -1,5 +1,13 @@
 # Fusion Foundation Model — XGC AI Training Use Case
 
+> **Estimated time:** ~30 minutes on an HPC login node — **not a 10-minute demo
+> and data is not included.** This is an advanced, bring-your-own-data example:
+> the XGC cases below are HPC-scale ADIOS2 BP5 output (up to ~1.3M mesh nodes)
+> that must be supplied by the user, and the scripts require `adios2` + `torch`
+> plus MATEY's `BaseCFDGraphDataset`. Point the paths below at your own XGC run.
+> DSAgt drives this via the bundled skill (see **Skill** below), which registers
+> and runs these scripts as codes with provenance.
+
 **Domain:** Plasma physics — gyrokinetic turbulence simulation  
 **Simulation code:** XGC (X-point Gyrokinetic Code)  
 **Data format:** ADIOS2 BP5 (one directory per simulation run)  
@@ -7,7 +15,8 @@
 
 ## Data
 
-Three example simulation cases live in `example_xgc_data/`:
+Three example simulation cases are referenced under `example_xgc_data/` (**not
+shipped in-repo** — substitute your own XGC output directories):
 
 | Case | Machine | Nodes | nphi | Steps | Has f3d |
 |------|---------|-------|------|-------|---------|
