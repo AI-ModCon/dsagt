@@ -109,10 +109,11 @@ def test_empty_trace_writes_nothing(tmp_path):
     assert kb.calls == []
 
 
-def test_extraction_span_tagged_episodic_not_memory(tmp_path):
+def test_extraction_span_tagged_episodic_with_inputs_outputs(tmp_path):
     """The per-turn embedding runs off the heartbeat, so it must carry
     dsagt.source=episodic — filtering apart from the user-facing memory tools
-    (kb_remember / kb_get_memories) that carry dsagt.source=memory."""
+    (kb_remember / kb_get_memories) that carry dsagt.source=memory — and record
+    its turn/chunk counts as inputs/outputs so the trace isn't null-request."""
     from unittest.mock import patch
 
     opened = {}
@@ -124,7 +125,14 @@ def test_extraction_span_tagged_episodic_not_memory(tmp_path):
         def __exit__(self, *a):
             return False
 
+        def set_inputs(self, v):
+            opened["inputs"] = v
+
+        def set_outputs(self, v):
+            opened["outputs"] = v
+
     def _fake_open_span(name, span_type=None, source=None):
+        opened["name"] = name
         opened["source"] = source
         return _Span()
 
@@ -132,5 +140,11 @@ def test_extraction_span_tagged_episodic_not_memory(tmp_path):
     ext = MemoryExtractor(kb, runtime_dir=tmp_path, session_id="proj:s")
     with patch("dsagt.observability.open_span", _fake_open_span):
         ext.write(_one_turn_trace())
+
+    assert opened["name"] == "memory.extract"
+    assert opened["source"] == "episodic"
+    # one exchange in; two chunks (user question + assistant answer) out.
+    assert opened["inputs"] == {"n_turns": 1}
+    assert opened["outputs"] == {"chunks_indexed": 2}
 
     assert opened["source"] == "episodic"

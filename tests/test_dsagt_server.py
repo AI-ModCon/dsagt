@@ -84,6 +84,39 @@ def test_merged_server_exposes_all_tools(tmp_path):
     assert len(set(names)) == len(names)  # no name collision
 
 
+def test_dispatch_root_span_records_tool_inputs_and_outputs(tmp_path, monkeypatch):
+    """The categorization-root span must carry the tool arguments as its inputs
+    and the handler result as its outputs.
+
+    Without this, every MCP tool trace shows a null Request and empty
+    Inputs/Outputs in the MLflow UI, because the trace-level fields are read
+    from the root span and the dispatch wrapper is the root.
+    """
+    import mlflow
+
+    import dsagt.observability as obs_module
+    from dsagt.mcp.server import build_dispatch_server
+
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    mlflow.set_experiment("test")
+    monkeypatch.setattr(obs_module, "_initialized", True)
+    monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+    async def echo(args):
+        return {"echoed": args["q"]}
+
+    tools = [types.Tool(name="demo", description="d", inputSchema={"type": "object"})]
+    server = build_dispatch_server("test", tools, {"demo": echo}, {"demo": "knowledge"})
+
+    out = _call(server, "demo", {"q": "hello"})
+    assert json.loads(out) == {"echoed": "hello"}
+
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    root = next(s for s in trace.data.spans if s.name == "demo")
+    assert root.inputs == {"q": "hello"}
+    assert root.outputs == {"echoed": "hello"}
+
+
 def test_registry_tool_returns_plain_string(tmp_path):
     """Registry handlers return a bare string — passed through unchanged."""
     server = _make_merged_server(tmp_path)
