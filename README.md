@@ -51,7 +51,7 @@ To upgrade later, reinstall — re-running `dsagt init` reconfigures an existing
 pip install --upgrade "git+https://github.com/AI-ModCon/dsagt.git"
 ```
 
-> Pin to a specific release: e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@v0.2.0"`.
+> Pin to a specific release: e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@0.2.0"`.
 <!-- md-shared:install:end -->
 
 ### For development
