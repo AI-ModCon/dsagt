@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/cli/">
+        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/memory/">
       
       
-        <link rel="prev" href="../mcp-servers/">
+        <link rel="prev" href="../skills/">
       
       
-        <link rel="next" href="../use-cases/">
+        <link rel="next" href="../observability/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>CLI Reference - DSAgt</title>
+        <title>Memory - DSAgt</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#cli-reference" class="md-skip">
+        <a href="#memory" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              CLI Reference
+              Memory
             
           </span>
         </div>
@@ -280,10 +280,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../provenance/" class="md-tabs__link">
           
   
@@ -319,11 +321,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../cli/" class="md-tabs__link">
         
   
   
@@ -505,26 +505,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
             
   
   
@@ -542,7 +547,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -641,10 +646,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../memory/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -660,6 +692,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#explicit-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explicit memory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#episodic-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Episodic memory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#try-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Try it
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -731,37 +816,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    CLI Reference
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
         
   
   
@@ -777,76 +835,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#project-management" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Project Management
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Project Management">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#deprecated-dsagt-init-flags-backcompat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deprecated dsagt init flags (backcompat)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#project-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Project Location
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#viewing-traces" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Viewing traces
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1132,38 +1120,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#project-management" class="md-nav__link">
+  <a href="#explicit-memory" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Project Management
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Project Management">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#deprecated-dsagt-init-flags-backcompat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deprecated dsagt init flags (backcompat)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#project-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Project Location
+        Explicit memory
       
     </span>
   </a>
@@ -1171,10 +1131,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#viewing-traces" class="md-nav__link">
+  <a href="#episodic-memory" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Viewing traces
+        Episodic memory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#try-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Try it
       
     </span>
   </a>
@@ -1201,91 +1172,48 @@
   
 
 
-<h1 id="cli-reference">CLI Reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
-<p>All commands are available after <a href="../#installation">installation</a> and activating your virtual environment.</p>
-<h2 id="project-management">Project Management<a class="headerlink" href="#project-management" title="Permanent link">&para;</a></h2>
-<!-- Shared with README.md — edit there, not here. -->
-
-<table>
-<thead>
-<tr>
-<th>Command</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>dsagt init</code></td>
-<td>Create or reconfigure a project — interactive menu for name, location, agent, knowledge collections, skill sources, and the episodic-memory opt-in; sets up the KB and writes the per-agent MCP config</td>
-</tr>
-<tr>
-<td><code>dsagt start &lt;name&gt;</code></td>
-<td>Launch the agent in the project directory (equivalent to <code>cd &lt;project&gt; &amp;&amp; &lt;agent&gt;</code>)</td>
-</tr>
-<tr>
-<td><code>dsagt info &lt;name&gt; [--json]</code></td>
-<td>Resolved config (with source per value) and a session/trace summary</td>
-</tr>
-<tr>
-<td><code>dsagt traces &lt;name&gt; [--port &lt;n&gt;]</code></td>
-<td>Open the MLflow trace viewer over the project's store (runs catch-up first, deep-links to the Traces tab, quiets the mlflow noise)</td>
-</tr>
-<tr>
-<td><code>dsagt list</code></td>
-<td>List all projects with agent and path</td>
-</tr>
-<tr>
-<td><code>dsagt mv &lt;name&gt; &lt;new-location&gt;</code></td>
-<td>Move a project to a new location</td>
-</tr>
-<tr>
-<td><code>dsagt rm &lt;name&gt; [-y] [--keep-files]</code></td>
-<td>Unregister a project (and optionally delete its directory)</td>
-</tr>
-<tr>
-<td><code>dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline]</code></td>
-<td>End-to-end install verification</td>
-</tr>
-</tbody>
-</table>
-<h3 id="deprecated-dsagt-init-flags-backcompat">Deprecated <code>dsagt init</code> flags (backcompat)<a class="headerlink" href="#deprecated-dsagt-init-flags-backcompat" title="Permanent link">&para;</a></h3>
-<p>The pre-menu flags still work — the automation/CI path — but are <strong>deprecated</strong> in favor of the interactive menu. Each one skips its corresponding prompt:</p>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Prompt it replaces</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>&lt;name&gt;</code> (positional)</td>
-<td>Project name</td>
-</tr>
-<tr>
-<td><code>--agent &lt;platform&gt;</code></td>
-<td>Agent platform</td>
-</tr>
-<tr>
-<td><code>--location &lt;path&gt;</code></td>
-<td>Project location</td>
-</tr>
-<tr>
-<td><code>--include … \| --exclude …</code></td>
-<td>Knowledge collections / skill sources</td>
-</tr>
-<tr>
-<td><code>--episodic</code></td>
-<td>"Enable episodic memory?"</td>
-</tr>
-</tbody>
-</table>
-<p>New usage should prefer bare <code>dsagt init</code> and the menu.</p>
-<h2 id="project-location">Project Location<a class="headerlink" href="#project-location" title="Permanent link">&para;</a></h2>
-<p>The default project location is <code>~/dsagt-projects/&lt;name&gt;/</code>. </p>
-<h2 id="viewing-traces">Viewing traces<a class="headerlink" href="#viewing-traces" title="Permanent link">&para;</a></h2>
-<p>The trace store is a serverless SQLite file — browse it with <code>dsagt traces</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;name&gt;<span class="w">   </span><span class="c1"># runs: mlflow ui --backend-store-uri sqlite:///&lt;project-path&gt;/mlflow.db</span>
+<h1 id="memory">Memory<a class="headerlink" href="#memory" title="Permanent link">&para;</a></h1>
+<p>DSAgt gives the agent two kinds of persistent memory backed by the project's vector store: <strong>explicit memory</strong> — facts the user confirms — and opt-in <strong>episodic memory</strong> — an automatic record of session turns. Both are retrievable by the agent with <code>kb_search</code> / <code>kb_get_memories</code> MCP tools.</p>
+<h2 id="explicit-memory">Explicit memory<a class="headerlink" href="#explicit-memory" title="Permanent link">&para;</a></h2>
+<p>Explicit memories are facts the user confirms during a session. The agent saves them via <code>kb_remember</code>, which writes to both the ChromaDB collection and <code>&lt;project&gt;/.dsagt/explicit_memories.yaml</code>. It fetches them via <code>kb_get_memories</code> on demand — typically when you ask it to recall something — so they are not auto-loaded at session start. </p>
+<h2 id="episodic-memory">Episodic memory<a class="headerlink" href="#episodic-memory" title="Permanent link">&para;</a></h2>
+<p>When episodic memory is enabled, DSAgt reads the agent's transcript as the session runs and captures each completed turn into the <code>session_memory</code> collection — a fast, local chunk-and-embed pass that reuses the same embedder as the rest of the <a href="../knowledge-base/">knowledge base</a>.</p>
+<p>Retrieval over <code>session_memory</code> filters first to a session, then by regex over the query's key terms, before a final <strong>recency-weighted</strong> semantic ranking: a newer turn edges out a stale one as a bounded boost, so a corrected fact wins by recency while a strongly-relevant old turn is never buried.</p>
+<h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># name it `demo`; answer &quot;yes&quot; to &quot;Enable episodic memory?&quot; to also capture turns</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dsagt<span class="w"> </span>start<span class="w"> </span>demo
+</code></pre></div>
+<p>Then, in the agent — <strong>explicit</strong> memory (you confirm a fact to store):</p>
+<ol>
+<li>
+<blockquote>
+<p>Remember that <code>samples.csv</code> has null values in the status and timestamp columns.</p>
+</blockquote>
+</li>
+<li>
+<blockquote>
+<p><em>(later, or in a new session)</em> What do you remember about the samples dataset?</p>
+</blockquote>
+</li>
+</ol>
+<p>Confirm it persisted to disk:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cat<span class="w"> </span>~/dsagt-projects/demo/.dsagt/explicit_memories.yaml
+</code></pre></div>
+<p>And <strong>episodic</strong> memory (captured automatically — no <code>remember</code> step):</p>
+<ol>
+<li>
+<blockquote>
+<p>For this dataset, let's treat any column with over 5% nulls as unusable.</p>
+</blockquote>
+</li>
+<li>
+<blockquote>
+<p><em>(later, or in a new session)</em> What null threshold did we agree on for unusable columns?</p>
+</blockquote>
+</li>
+</ol>
+<p>The agent recalls the decision from <code>session_memory</code> even though you never explicitly stored it. Confirm the collection materialized:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ls<span class="w"> </span>~/dsagt-projects/demo/kb_index/session_memory/
 </code></pre></div>
 
 

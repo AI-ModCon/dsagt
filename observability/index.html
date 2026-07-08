@@ -13,10 +13,10 @@
         <link rel="canonical" href="https://ai-modcon.github.io/dsagt/observability/">
       
       
-        <link rel="prev" href="../tools-skills/">
+        <link rel="prev" href="../memory/">
       
       
-        <link rel="next" href="../cli/">
+        <link rel="next" href="../mcp-servers/">
       
       
         
@@ -280,6 +280,28 @@
   
   
   
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../provenance/" class="md-tabs__link">
+          
+  
+  
+  Capabilities
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
   
     <li class="md-tabs__item">
       <a href="../mcp-servers/" class="md-tabs__link">
@@ -289,65 +311,6 @@
     
   
   MCP Servers
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../knowledge-base/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Knowledge Base
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../tools-skills/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Tools & Skills
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    
-  
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Observability
 
       </a>
     </li>
@@ -542,17 +505,74 @@
       
   
   
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capabilities
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capabilities
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
   
   
     <li class="md-nav__item">
-      <a href="../mcp-servers/" class="md-nav__link">
+      <a href="../provenance/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    MCP Servers
+    Provenance
   
 
     
@@ -564,9 +584,10 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
@@ -591,22 +612,23 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
   
     <li class="md-nav__item">
-      <a href="../tools-skills/" class="md-nav__link">
+      <a href="../skills/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Tools & Skills
+    Skills
   
 
     
@@ -618,9 +640,38 @@
     </li>
   
 
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
     
-      
-      
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
   
   
     
@@ -686,10 +737,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#starting-mlflow" class="md-nav__link">
+  <a href="#two-feeds" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Starting MLflow
+        Two feeds
       
     </span>
   </a>
@@ -709,10 +760,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#agent-otel-coverage" class="md-nav__link">
+  <a href="#agent-trace-coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent OTel Coverage
+        Agent trace coverage
       
     </span>
   </a>
@@ -725,21 +776,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#provenance-and-reconstruction" class="md-nav__link">
+  <a href="#try-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Provenance and Reconstruction
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stopping-mlflow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stopping MLflow
+        Try it
       
     </span>
   </a>
@@ -750,6 +790,41 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-servers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Servers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -801,10 +876,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
             
   
   
@@ -822,8 +897,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_9">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -868,7 +943,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/microbial-isolates/" class="md-nav__link">
+      <a href="../use-cases/microbial_isolates/" class="md-nav__link">
         
   
   
@@ -924,7 +999,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/vasp/" class="md-nav__link">
+      <a href="../use-cases/isaac_vasp/" class="md-nav__link">
         
   
   
@@ -952,7 +1027,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/aidrin-cryoem/" class="md-nav__link">
+      <a href="../use-cases/aidrin_readiness_gate/" class="md-nav__link">
         
   
   
@@ -980,7 +1055,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/aidrin-tour/" class="md-nav__link">
+      <a href="../use-cases/aidrin_full_tour/" class="md-nav__link">
         
   
   
@@ -1062,10 +1137,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#starting-mlflow" class="md-nav__link">
+  <a href="#two-feeds" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Starting MLflow
+        Two feeds
       
     </span>
   </a>
@@ -1085,10 +1160,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#agent-otel-coverage" class="md-nav__link">
+  <a href="#agent-trace-coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent OTel Coverage
+        Agent trace coverage
       
     </span>
   </a>
@@ -1101,21 +1176,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#provenance-and-reconstruction" class="md-nav__link">
+  <a href="#try-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Provenance and Reconstruction
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stopping-mlflow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stopping MLflow
+        Try it
       
     </span>
   </a>
@@ -1143,11 +1207,16 @@
 
 
 <h1 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h1>
-<p>DSAgt provides end-to-end trace visibility through a local MLflow instance. All internal layers emit OTLP HTTP spans to MLflow's <code>/v1/traces</code> endpoint.</p>
-<h2 id="starting-mlflow">Starting MLflow<a class="headerlink" href="#starting-mlflow" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>mlflow<span class="w"> </span>&lt;project-name&gt;
+<p>DSAgt logs traces to a <strong>MLflow</strong> via an SQLite file at <code>~/dsagt-projects/&lt;project&gt;/mlflow.db</code>. To view in the MLflow UI:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;project&gt;<span class="w"> </span><span class="c1"># rund dsagt mlflow ui --backend-store-uri sqlite:///&lt;project&gt;/mlflow.db</span>
 </code></pre></div>
-<p>Prints the MLflow UI URL and the <code>export</code> block for routing agent OTel output. The port is pinned at <code>dsagt init</code> time and listed by <code>dsagt info &lt;name&gt;</code>.</p>
+<p><code>dsagt info &lt;name&gt;</code> prints the resolved tracking URI and a session/trace summary. The tracking URI resolves as <code>MLFLOW_TRACKING_URI</code> env → project config → the <code>sqlite:///&lt;project&gt;/mlflow.db</code> default.</p>
+<h2 id="two-feeds">Two feeds<a class="headerlink" href="#two-feeds" title="Permanent link">&para;</a></h2>
+<p>DSAgt reconstructs traces from what the agent writes to disk. Traces come from two places:</p>
+<ol>
+<li><strong>DSAgt spans (live).</strong> DSAgt instruments its own code and emits spans directly to the store as it runs.</li>
+<li><strong>Agent traces (post-hoc).</strong> The MCP server's in-session heartbeat reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — recovering prompts, responses, and tool calls.</li>
+</ol>
 <h2 id="trace-coverage">Trace Coverage<a class="headerlink" href="#trace-coverage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1164,57 +1233,32 @@
 <td>Per-phase timing trees</td>
 </tr>
 <tr>
-<td>Tool executions</td>
-<td><code>tool.execute</code></td>
+<td>Code executions</td>
+<td><code>code.execute</code></td>
 <td>Exit code, duration, file counts, truncated stderr. Full payload in <code>trace_archive/&lt;record_id&gt;.json</code></td>
 </tr>
 <tr>
 <td>Registry events</td>
-<td><code>save_tool_spec</code>, <code>install_dependencies</code>, <code>reconstruct_pipeline</code></td>
+<td><code>save_code_spec</code>, <code>install_dependencies</code>, <code>reconstruct_pipeline</code></td>
 <td>Span metadata</td>
 </tr>
 <tr>
-<td>Native agent OTel</td>
-<td>LLM call spans</td>
-<td>Coverage varies by agent (see below)</td>
+<td>Agent traces</td>
+<td>one AGENT subtree per turn (<code>llm</code> / <code>tool_&lt;name&gt;</code> children)</td>
+<td>Prompts, responses, tool calls, and token usage where the transcript carries them</td>
 </tr>
 </tbody>
 </table>
-<h3 id="agent-otel-coverage">Agent OTel Coverage<a class="headerlink" href="#agent-otel-coverage" title="Permanent link">&para;</a></h3>
-<p>Export the variables printed by <code>dsagt mlflow</code> before launching your agent:</p>
-<table>
-<thead>
-<tr>
-<th>Agent</th>
-<th>Coverage</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>claude</td>
-<td>Full request/response payloads</td>
-</tr>
-<tr>
-<td>goose</td>
-<td>Full request/response payloads</td>
-</tr>
-<tr>
-<td>codex</td>
-<td>Token counts and tool names</td>
-</tr>
-<tr>
-<td>opencode</td>
-<td>None natively</td>
-</tr>
-</tbody>
-</table>
-<p>Every span carries the project's <code>session.id</code> for filtering in the MLflow trace view.</p>
-<h2 id="provenance-and-reconstruction">Provenance and Reconstruction<a class="headerlink" href="#provenance-and-reconstruction" title="Permanent link">&para;</a></h2>
-<p>Tool execution records on disk (<code>trace_archive/&lt;record_id&gt;.json</code>) provide the canonical provenance chain. The agent calls <code>reconstruct_pipeline</code> to render the archive as a reproducible bash script or Snakemake workflow.</p>
-<h2 id="stopping-mlflow">Stopping MLflow<a class="headerlink" href="#stopping-mlflow" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>stop<span class="w"> </span>&lt;project-name&gt;
+<h3 id="agent-trace-coverage">Agent trace coverage<a class="headerlink" href="#agent-trace-coverage" title="Permanent link">&para;</a></h3>
+<p>Agent traces are reconstructed from each agent's on-disk session record. A per-agent reader + translator runs for every supported agent (claude, codex, goose, opencode, cline), uniformly. Fidelity is capped by what the transcript persisted (e.g. token counts and timing appear where the agent recorded them).</p>
+<p>Every span carries the project's session id (minted per launch into <code>&lt;project&gt;/.dsagt/state.yaml</code>) for filtering in the MLflow trace view.</p>
+<p>The trace scan runs at periodic intervals (2m) inside the MCP server — At each interval DSAgt reads new transcript records, translates completed turns, and translates the canonical trace format to episodic memory in the knowledge base, and MLflow records in the MLFlow store. </p>
+<h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># follow the prompts: name it `demo`, then pick your agent</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>dsagt<span class="w"> </span>start<span class="w"> </span>demo<span class="w">      </span><span class="c1"># …run a prompt or two, then exit the agent</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;project&gt;
 </code></pre></div>
-<p>Releases the port and stops the gunicorn workers. The PID is stored in <code>&lt;project&gt;/.runtime</code>.</p>
+<p>Open MLflow UI to see both feeds in one store: DSAgt's own <code>kb.*</code> / <code>code.execute</code> spans and the per-turn agent traces recovered from the transcript. <code>dsagt info demo</code> prints the same session/trace summary from the command line.</p>
 
 
 
