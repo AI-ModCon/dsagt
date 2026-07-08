@@ -19,7 +19,10 @@ dependencies = [
     "mcp>=1.0.0",                       # MCP server protocol
     "mlflow==3.11.1",                  # trace store & observability
     # Knowledge base
-    "numpy>=1.26",                      # embedding vector math
+    # torch 2.2.2 (latest available for Intel Mac) was compiled against NumPy 1.x
+    # and fails to import with NumPy 2.x, so cap numpy on that platform only.
+    "numpy>=1.26,<2.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "numpy>=1.26; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "llama-index-core>=0.11",          # document & code chunking
     "llama-index-readers-file>=0.1",   # SimpleDirectoryReader file readers
     "tree-sitter-language-pack>=0.2,<1.6",  # code-aware chunking (1.6+ rewrite breaks CodeSplitter)
@@ -86,9 +89,4 @@ required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'"
-]
-# torch 2.2.2 (latest available for Intel Mac) was compiled against NumPy 1.x
-# and fails to import with NumPy 2.x. Cap numpy on that platform only.
-constraint-dependencies = [
-    "numpy<2.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
