@@ -380,7 +380,7 @@ class AgentSetup(ABC):
     def runtime_env(self, config: dict) -> dict[str, str]:
         """Dsagt-owned env vars the agent process needs at runtime (BYOA).
 
-        Default is empty: DSAGT no longer forces any telemetry env on the
+        Default is empty: DSAGT sets no telemetry env on the
         agent (agent traces are recovered post-hoc from the on-disk
         transcript, not by native OTel emission).  Subclasses override
         only to set per-project state-dir env (``CLINE_DIR``,

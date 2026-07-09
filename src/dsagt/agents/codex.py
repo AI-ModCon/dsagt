@@ -68,7 +68,7 @@ def _render_codex_config(mcp_env: dict) -> str:
     set on the codex CLI directly
     (``--dangerously-bypass-approvals-and-sandbox``) instead of here.
 
-    No ``[otel]`` block: DSAGT no longer forces codex's native telemetry
+    No ``[otel]`` block: DSAGT doesn't touch codex's native telemetry
     (nor the ``log_user_prompt`` privacy override).  Codex's conversation
     history is recovered post-hoc from its on-disk session rollout.
     """

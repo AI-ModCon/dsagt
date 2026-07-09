@@ -202,10 +202,10 @@ class LocalEmbedder(Embedder):
     backend = "local"
 
     #: Default local model.  ``bge-small-en-v1.5`` (33M params, ~130 MB
-    #: on disk, ~250 MB resident) is ~3× faster and ~3× smaller than the
-    #: ``bge-base`` variant we used previously, with ~2 nDCG@10 points
-    #: lower MTEB retrieval score — a hard-to-notice difference for
-    #: typical DSAGT KB sizes (single-digit thousands of chunks).
+    #: on disk, ~250 MB resident) is ~3× faster and ~3× smaller than
+    #: ``bge-base`` for ~2 nDCG@10 points lower MTEB retrieval score — a
+    #: hard-to-notice difference for typical DSAGT KB sizes (single-digit
+    #: thousands of chunks).
     #: Override via ``embedding.model`` in ``.dsagt/config.yaml`` (e.g.
     #: ``BAAI/bge-large-en-v1.5`` for higher quality at the cost of
     #: ~10× memory and ~5× CPU).
@@ -394,8 +394,8 @@ class APIEmbedder(Embedder):
             base_url or os.getenv("EMBEDDING_BASE_URL") or os.getenv("OPENAI_BASE_URL")
         )
         # EMBEDDING_API_KEY is the canonical name; LLM_API_KEY/OPENAI_API_KEY
-        # are legacy fallbacks from when the embedding endpoint shared the
-        # LLM endpoint's auth.
+        # are accepted as fallbacks for setups where the embedding endpoint
+        # shares the LLM endpoint's auth.
         self.api_key = (
             api_key
             or os.getenv("EMBEDDING_API_KEY")

@@ -53,8 +53,8 @@ extraction will see no agent-conversation traces; tool execution and KB
 observability still work via dsagt-run / MCP-server spans.
 
 MCP config: cline 3.x loads whatever file ``CLINE_MCP_SETTINGS_PATH``
-names (hand-written files work — the old "only ``cline mcp add`` is
-loaded" behavior is gone), with the schema
+names — a hand-written file works, not only one written by ``cline mcp
+add`` — with the schema
 ``{"mcpServers": {<name>: {"transport": {type, command, args, env}}}}``.
 The env block rides in ``transport.env`` so dsagt MCP-server children
 get ``MLFLOW_TRACKING_URI``, ``DSAGT_PROJECT_DIR``, ``EMBEDDING_*``.

@@ -249,7 +249,7 @@ def _row_source_for(tags: dict, metadata: dict) -> str:
     dispatch shell / ``code_execute_span`` / the background emitters.  Agent
     traces carry ``dsagt.agent`` metadata, stamped by ``MLflowSink``.  Neither
     overlaps, so the bucket is a direct lookup; anything else (a stray trace
-    with neither — which should no longer happen now background work is tagged)
+    with neither — background work is tagged, so this shouldn't occur)
     is ``"unknown"``.
     """
     src = (tags or {}).get("dsagt.source")
@@ -425,8 +425,8 @@ def _load_traces(mlflow_db: Path, project_name: str):
 def _report(project_name: str, config: dict, traces) -> dict:
     """Build the structured report dict.  CLI formats it; --json prints it."""
     agent_header = config.get("agent", "-")
-    # BYOA: dsagt no longer records the agent's LLM model (the agent talks to
-    # its provider directly).  Surface the embedding model dsagt configures.
+    # BYOA: dsagt doesn't record the agent's LLM model (the agent talks to its
+    # provider directly), so surface the embedding model dsagt configures.
     model_header = config.get("embedding", {}).get("model", "-")
 
     if traces is None or traces.empty:
