@@ -1,3 +1,17 @@
+---
+title: Genesis Skills for Data Curation
+domain: Skill management — external skill catalog (Genesis / OSTI GitLab) driving a data-curation pipeline
+summary: >-
+  Sync the Genesis skill catalog, install data-curation skills (datacard
+  generation, Croissant validation), ground them in KB-ingested domain docs,
+  and produce a datacard for a small curated dataset.
+status: published
+order: 60
+guides:
+  - text: Genesis Skills Walkthrough
+    path: README.md
+---
+
 # DSAgt Demo: Genesis Skills for a Data-Curation Pipeline
 
 > **Estimated time:** ~10 minutes (all data is bundled and tiny; the one
