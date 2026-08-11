@@ -17,10 +17,17 @@ Add a use case by dropping a ``README.md`` with YAML frontmatter into
 
 It then appears in the overview table, gets its own docs page, and lands in
 the "Use Cases" nav group — no edits to mkdocs.yml or the docs tree required.
+
+Demo-bundle links (a downloadable ``.tar.gz`` snapshot of the use case's
+folder, hosted on Google Drive) come from ``use_cases/links.csv`` (columns:
+folder name, URL) keyed by folder name, and are rendered only on the
+generated docs page (alongside the GitHub source link) — READMEs carry no
+hardcoded copy, so there's nothing to keep in sync.
 """
 
 from __future__ import annotations
 
+import csv
 import logging
 from pathlib import Path
 
@@ -35,6 +42,16 @@ INDEX_URI = "use-cases/index.md"
 # Populated in on_config, consumed in on_files / on_page_markdown within the
 # same build.  Module-level is fine: each build re-runs on_config first.
 _use_cases: list[dict] = []
+
+
+def _load_demo_urls(uc_dir: Path) -> dict[str, str]:
+    csv_path = uc_dir / "links.csv"
+    if not csv_path.is_file():
+        return {}
+    with csv_path.open(encoding="utf-8", newline="") as f:
+        return {
+            name.strip(): url.strip() for name, url in csv.reader(f) if name.strip()
+        }
 
 
 def _parse_frontmatter(text: str) -> dict | None:
@@ -55,6 +72,7 @@ def _discover(config) -> list[dict]:
     found: list[dict] = []
     if not uc_dir.is_dir():
         return found
+    demo_urls = _load_demo_urls(uc_dir)
     for folder in sorted(p for p in uc_dir.iterdir() if p.is_dir()):
         readme = folder / "README.md"
         if not readme.is_file():
@@ -80,6 +98,7 @@ def _discover(config) -> list[dict]:
                 "summary": " ".join(str(fm["summary"]).split()),
                 "order": fm.get("order", 100),
                 "guides": fm.get("guides") or [],
+                "demo_url": demo_urls.get(folder.name),
             }
         )
     found.sort(key=lambda u: (u["order"], u["title"].lower()))
@@ -95,9 +114,7 @@ def on_config(config):
     for item in config.nav or []:
         if isinstance(item, dict) and isinstance(item.get("Use Cases"), list):
             children = item["Use Cases"]
-            present = {
-                next(iter(c.values())) for c in children if isinstance(c, dict)
-            }
+            present = {next(iter(c.values())) for c in children if isinstance(c, dict)}
             for uc in _use_cases:
                 uri = f"use-cases/{uc['name']}.md"
                 if uri not in present:
@@ -114,6 +131,8 @@ def _render_page(uc: dict, repo_url: str) -> str:
             f"({gh}/tree/main/use_cases/{uc['name']}/)",
             "",
         ]
+    if uc["demo_url"]:
+        out += [f"**Demo bundle:** [Download `.tar.gz`]({uc['demo_url']})", ""]
     out += [uc["summary"], ""]
     guides = [g for g in uc["guides"] if isinstance(g, dict)]
     if guides:
@@ -122,9 +141,7 @@ def _render_page(uc: dict, repo_url: str) -> str:
             path = g.get("path", "")
             text = g.get("text") or path
             if gh and path:
-                out.append(
-                    f"- [{text}]({gh}/blob/main/use_cases/{uc['name']}/{path})"
-                )
+                out.append(f"- [{text}]({gh}/blob/main/use_cases/{uc['name']}/{path})")
             elif text:
                 out.append(f"- {text}")
         out.append("")
