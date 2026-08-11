@@ -10,13 +10,21 @@ Add a use case by dropping a ``README.md`` with YAML frontmatter into
     summary: One or two sentences shown in the overview table and page.
     status: published                         # omit, or 'draft' to hide it
     order: 10                                 # optional sort key (default 100)
-    guides:                                   # optional walkthrough links
+    guides:                                   # optional walkthrough doc(s)
       - text: Walkthrough
         path: demo.md                         # path within the use-case folder
     ---
 
 It then appears in the overview table, gets its own docs page, and lands in
 the "Use Cases" nav group — no edits to mkdocs.yml or the docs tree required.
+
+Each ``guides[].path`` doc (often the README itself, sometimes a dedicated
+walkthrough file) is inlined into the generated page rather than linked out to
+GitHub: its own frontmatter and leading ``# Title`` line are stripped (the
+generated page supplies its own), and every relative link/image is rewritten
+— to another use case's generated page when it points at that use case's
+folder or guide doc, otherwise to a GitHub blob/tree URL, since only ``docs/``
+itself is served by the built site.
 
 Demo-bundle links (a downloadable ``.tar.gz`` snapshot of the use case's
 folder, hosted on Google Drive) come from ``use_cases/links.csv`` (columns:
@@ -29,6 +37,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import re
 from pathlib import Path
 
 import yaml
@@ -38,6 +47,10 @@ log = logging.getLogger("mkdocs.hooks.use_cases")
 
 TABLE_MARKER = "<!-- USE_CASES_TABLE -->"
 INDEX_URI = "use-cases/index.md"
+
+_FENCE_RE = re.compile(r"^(```|~~~)")
+_H1_RE = re.compile(r"^#\s")
+_LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^()\s]+)(\))")
 
 # Populated in on_config, consumed in on_files / on_page_markdown within the
 # same build.  Module-level is fine: each build re-runs on_config first.
@@ -65,6 +78,80 @@ def _parse_frontmatter(text: str) -> dict | None:
     except yaml.YAMLError:
         return None
     return data if isinstance(data, dict) else None
+
+
+def _strip_frontmatter(text: str) -> str:
+    if not text.startswith("---"):
+        return text
+    parts = text.split("---", 2)
+    return parts[2].lstrip("\n") if len(parts) >= 3 else text
+
+
+def _strip_leading_h1(text: str) -> str:
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines) or not _H1_RE.match(lines[i]):
+        return text  # no leading title line — leave the body as-is
+    i += 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    return "\n".join(lines[i:])
+
+
+def _rewrite_link_target(
+    target: str,
+    uc: dict,
+    gh: str,
+    uc_names: set[str],
+    page_by_path: dict[Path, str],
+) -> str:
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) or target.startswith("#"):
+        return target  # absolute URL (incl. mailto:) or a same-page anchor
+    path, sep, fragment = target.partition("#")
+    repo_root = uc["dir"].parent.parent
+    resolved = (uc["dir"] / path).resolve()
+    try:
+        rel = resolved.relative_to(repo_root)
+    except ValueError:
+        return target  # escapes the repo entirely — leave it alone
+    if resolved in page_by_path:
+        return f"{page_by_path[resolved]}.md"  # links at another use case's guide page
+    use_cases_dir = uc["dir"].parent
+    if resolved.parent == use_cases_dir and resolved.name in uc_names:
+        return f"{resolved.name}.md"  # links straight at a sibling use case's folder
+    kind = "tree" if resolved.is_dir() else "blob"
+    return f"{gh}/{kind}/main/{rel.as_posix()}" + (sep + fragment if sep else "")
+
+
+def _inline_readme(
+    uc: dict,
+    path: str,
+    gh: str,
+    uc_names: set[str],
+    page_by_path: dict[Path, str],
+) -> str:
+    text = (uc["dir"] / path).read_text(encoding="utf-8")
+    text = _strip_leading_h1(_strip_frontmatter(text))
+    in_fence = False
+    lines = []
+    for line in text.splitlines():
+        if _FENCE_RE.match(line.strip()):
+            in_fence = not in_fence
+            lines.append(line)
+            continue
+        if in_fence:
+            lines.append(line)
+            continue
+        line = _LINK_RE.sub(
+            lambda m: m[1]
+            + _rewrite_link_target(m[2], uc, gh, uc_names, page_by_path)
+            + m[3],
+            line,
+        )
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _discover(config) -> list[dict]:
@@ -99,6 +186,7 @@ def _discover(config) -> list[dict]:
                 "order": fm.get("order", 100),
                 "guides": fm.get("guides") or [],
                 "demo_url": demo_urls.get(folder.name),
+                "dir": folder.resolve(),
             }
         )
     found.sort(key=lambda u: (u["order"], u["title"].lower()))
@@ -122,7 +210,9 @@ def on_config(config):
     return config
 
 
-def _render_page(uc: dict, repo_url: str) -> str:
+def _render_page(
+    uc: dict, repo_url: str, uc_names: set[str], page_by_path: dict[Path, str]
+) -> str:
     gh = (repo_url or "").rstrip("/")
     out = [f"# {uc['title']}", "", f"**Domain:** {uc['domain']}", ""]
     if gh:
@@ -134,27 +224,28 @@ def _render_page(uc: dict, repo_url: str) -> str:
     if uc["demo_url"]:
         out += [f"**Demo bundle:** [Download `.tar.gz`]({uc['demo_url']})", ""]
     out += [uc["summary"], ""]
-    guides = [g for g in uc["guides"] if isinstance(g, dict)]
-    if guides:
-        out += ["## Guides", ""]
-        for g in guides:
-            path = g.get("path", "")
-            text = g.get("text") or path
-            if gh and path:
-                out.append(f"- [{text}]({gh}/blob/main/use_cases/{uc['name']}/{path})")
-            elif text:
-                out.append(f"- {text}")
-        out.append("")
+    for g in uc["guides"]:
+        if not isinstance(g, dict):
+            continue
+        path = g.get("path", "")
+        if path:
+            out += [_inline_readme(uc, path, gh, uc_names, page_by_path), ""]
     return "\n".join(out)
 
 
 def on_files(files, config):
+    uc_names = {uc["name"] for uc in _use_cases}
+    page_by_path: dict[Path, str] = {}
+    for uc in _use_cases:
+        for g in uc["guides"]:
+            if isinstance(g, dict) and g.get("path"):
+                page_by_path[(uc["dir"] / g["path"]).resolve()] = uc["name"]
     for uc in _use_cases:
         files.append(
             File.generated(
                 config,
                 f"use-cases/{uc['name']}.md",
-                content=_render_page(uc, config.repo_url),
+                content=_render_page(uc, config.repo_url, uc_names, page_by_path),
             )
         )
     return files
