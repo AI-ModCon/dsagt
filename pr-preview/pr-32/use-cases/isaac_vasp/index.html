@@ -962,10 +962,104 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#guides" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Guides
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-register-the-converter-as-a-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Register the converter as a code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-run-the-conversion-through-dsagt-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run the conversion through dsagt-run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-reconstruct-the-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Reconstruct the pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
       
     </span>
   </a>
@@ -1098,10 +1192,104 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#guides" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Guides
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-register-the-converter-as-a-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Register the converter as a code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-run-the-conversion-through-dsagt-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run the conversion through dsagt-run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-reconstruct-the-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Reconstruct the pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
       
     </span>
   </a>
@@ -1130,9 +1318,88 @@
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/isaac_vasp/"><code>use_cases/isaac_vasp/</code></a></p>
 <p><strong>Demo bundle:</strong> <a href="https://drive.google.com/uc?export=download&amp;id=1uH0r7ryF9nUJaE1fxXZMAzBjiE4TXxWu">Download <code>.tar.gz</code></a></p>
 <p>Convert VASP DFT input/output into an AI-ready ISAAC record — register the conversion tooling and build the pipeline against bundled NEB fixture data (no DFT run, no HPC).</p>
-<h2 id="guides">Guides<a class="headerlink" href="#guides" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>Estimated time:</strong> ~15 minutes — the NEB fixture data is bundled in this
+folder, so the only real cost is a one-time <code>pip install pymatgen</code>. No DFT run,
+no HPC.</p>
+</blockquote>
+<p><strong>Goal:</strong> register a converter as a DSAgt <strong>code</strong>, then have the agent run it
+through <code>dsagt-run</code> to turn a VASP nudged-elastic-band (NEB) calculation into an
+<a href="https://github.com/ISAAC-DOE/isaac-ai-ready-record">ISAAC AI-Ready Record</a> —
+with the execution captured in <code>trace_archive/</code>.</p>
 <ul>
-<li><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/isaac_vasp/README.md">VASP → ISAAC Walkthrough</a></li>
+<li>Converter: <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/isaac_vasp/vasp_neb_to_isaac.py"><code>vasp_neb_to_isaac.py</code></a> parses the NEB
+  <code>OUTCAR</code>s with <code>pymatgen.io.vasp</code> and emits a v1.05 record.</li>
+<li>Data: the <code>neb/00..04/</code> subdirs are a small NEB fixture (5 images) copied from
+  the pymatgen test suite — bundled here so the demo runs without a DFT code.</li>
+<li>Schema: <a href="https://github.com/ISAAC-DOE/isaac-ai-ready-record/blob/main/schema/isaac_record_v1.json">isaac_record_v1.json</a>.</li>
+</ul>
+<p>For the <strong>skill-management</strong> counterpart of this workflow (the agent discovers,
+installs, and authors the converter as a skill on tiny mock data), see the
+sister demo <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/isaac_skills_demo"><code>isaac_skills_demo</code></a>.</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>DSAgt installed (<code>uv sync --all-groups</code>) and an agent platform installed and
+  <strong>already authenticated</strong> (BYOA — dsagt writes no credentials; the default
+  local embedder needs no API key).</li>
+<li><code>pymatgen</code> importable in the environment <code>dsagt</code> runs in
+  (<code>uv pip install pymatgen</code>) — the converter uses <code>pymatgen.io.vasp</code>.</li>
+</ul>
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pymatgen<span class="w">                 </span><span class="c1"># the converter&#39;s one real dependency</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dsagt<span class="w"> </span>init<span class="w"> </span>isaac-vasp<span class="w"> </span>--agent<span class="w"> </span>claude
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/isaac-vasp
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts&quot;</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>cp<span class="w"> </span>use_cases/isaac_vasp/vasp_neb_to_isaac.py<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts/&quot;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/isaac_vasp/neb<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data_neb&quot;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isaac-vasp
+</code></pre></div>
+<h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
+<p>Paste each prompt into the agent, one at a time.</p>
+<h3 id="1-register-the-converter-as-a-code">1. Register the converter as a code<a class="headerlink" href="#1-register-the-converter-as-a-code" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Register a code named vasp-neb-to-isaac. Its executable is
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>`python codes/scripts/vasp_neb_to_isaac.py`, which takes a positional NEB
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>directory argument (containing 00/, 01/, ... image subdirs) and an optional
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>`--output` path. Run it with `--help` first to confirm the interface, then save
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>the code spec with the positional `neb_dir` and the `--output` option.
+</code></pre></div>
+<p><strong>Verify:</strong> <code>Search the registry for the vasp-neb-to-isaac code.</code> →
+<code>$PROJ/codes/vasp-neb-to-isaac/SKILL.md</code> should exist.</p>
+<h3 id="2-run-the-conversion-through-dsagt-run">2. Run the conversion through dsagt-run<a class="headerlink" href="#2-run-the-conversion-through-dsagt-run" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Using the registered vasp-neb-to-isaac code, convert the NEB calculation in
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>data_neb/ and write the ISAAC record to data_neb/isaac_neb_record.json. Use the
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>exact dsagt-run command from the spec so the execution is recorded. Then tell me
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>the record&#39;s reaction-energy / barrier fields and how many images it summarized.
+</code></pre></div>
+<p><strong>Expect:</strong> the agent runs <code>dsagt-run --code vasp-neb-to-isaac -- python
+codes/scripts/vasp_neb_to_isaac.py data_neb/ --output data_neb/isaac_neb_record.json</code>,
+pymatgen parses the five OUTCARs, and a v1.05 ISAAC record lands with the
+<code>computation</code> / <code>measurement</code> blocks populated (5 NEB images). Compare against the
+reference <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/isaac_vasp/isaac_neb_record.json"><code>isaac_neb_record.json</code></a> shipped here.</p>
+<h3 id="3-reconstruct-the-pipeline">3. Reconstruct the pipeline<a class="headerlink" href="#3-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Reconstruct the pipeline from the execution records as a script.
+</code></pre></div>
+<h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Code registry contains the <code>vasp-neb-to-isaac</code> spec (<code>codes/vasp-neb-to-isaac/SKILL.md</code>).</li>
+<li><code>trace_archive/</code> holds the conversion's provenance record.</li>
+<li><code>data_neb/isaac_neb_record.json</code> is a valid ISAAC v1.05 record matching the
+   shape of the bundled <code>isaac_neb_record.json</code>.</li>
+<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the run —
+   <code>mlflow ui --backend-store-uri sqlite:///$PROJ/mlflow.db</code>.</li>
+</ol>
+<h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>isaac-vasp<span class="w"> </span>-y
+</code></pre></div>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The <code>neb/</code> OUTCARs are public pymatgen test fixtures vendored here for a
+  self-contained demo. They are large (~32 MB total); a future revision may fetch
+  them on demand instead of shipping them in-repo.</li>
+<li>The bundled <code>skills/vasp-to-isaac/</code> skill is a broader <strong>slab/bulk</strong> converter
+  (a different pymatgen workflow that needs <code>vasprun.xml</code>-bearing slab/bulk data,
+  not the NEB fixture here). It's shipped as a reference skill; the NEB converter
+  above is what this folder's data actually exercises.</li>
 </ul>
 
 
