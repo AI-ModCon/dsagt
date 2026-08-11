@@ -1,3 +1,18 @@
+---
+title: Fusion Foundation Model (XGC)
+domain: Plasma physics — gyrokinetic turbulence simulation (XGC) training-data prep
+summary: >-
+  Preprocess HPC-scale XGC ADIOS2 BP5 simulation output into GNN-ready npz
+  files and a PyTorch Dataset for training a plasma foundation model, via a
+  bundled skill that registers the scripts as DSAgt codes with provenance.
+  Advanced, bring-your-own-data.
+status: published
+order: 80
+guides:
+  - text: XGC Training Walkthrough
+    path: README.md
+---
+
 # Fusion Foundation Model — XGC AI Training Use Case
 
 > **Estimated time:** ~30 minutes on an HPC login node — **not a 10-minute demo
