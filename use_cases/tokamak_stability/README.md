@@ -1,3 +1,18 @@
+---
+title: Tokamak Stability (M3D-C1)
+domain: Plasma physics — linear MHD stability analysis of tokamak configurations (M3D-C1)
+summary: >-
+  Register M3D-C1 HDF5 analysis codes, then have the agent compute Miller
+  parameters and the safety factor, generate poloidal-spectra and
+  kinetic-energy plots, and reconstruct the session from MLflow traces as a
+  reusable script. Advanced, bring-your-own-data.
+status: published
+order: 90
+guides:
+  - text: Tokamak Stability Walkthrough
+    path: README.md
+---
+
 # Fusion energy use case
 
 > **Estimated time:** advanced / not a 10-minute demo. Setup is the cost:
