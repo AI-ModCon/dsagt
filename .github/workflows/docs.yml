@@ -5,10 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, reopened, synchronize, closed]
   workflow_dispatch:
 
 jobs:
   docs:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -33,3 +35,37 @@ jobs:
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: uv run mkdocs gh-deploy --force
+
+  preview:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: preview-${{ github.event.number }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event.action != 'closed'
+
+      - uses: actions/setup-python@v5
+        if: github.event.action != 'closed'
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        if: github.event.action != 'closed'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install docs dependencies
+        if: github.event.action != 'closed'
+        run: uv sync --group docs
+
+      - name: Build docs
+        if: github.event.action != 'closed'
+        run: uv run mkdocs build
+
+      - name: Deploy PR preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: ./site
