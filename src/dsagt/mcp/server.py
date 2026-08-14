@@ -76,14 +76,15 @@ def build_dispatch_server(
     in the single-concern test servers / one-shot tools.
     """
     tool_category = tool_category or {}
-    server = Server(name)
 
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return tools
+    async def on_list_tools(ctx, params) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=tools)
 
-    @server.call_tool()
-    async def call_tool(tool_name: str, arguments: dict) -> list[types.TextContent]:
+    async def on_call_tool(
+        ctx, params: types.CallToolRequestParams
+    ) -> types.CallToolResult:
+        tool_name = params.name
+        arguments = params.arguments or {}
         handler = handlers[tool_name]  # KeyError = bug in list_tools schema
         with open_span(tool_name, source=tool_category.get(tool_name)) as span:
             try:
@@ -104,9 +105,9 @@ def build_dispatch_server(
             if isinstance(result, str)
             else json.dumps(result, ensure_ascii=False)
         )
-        return [types.TextContent(type="text", text=text)]
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
 
-    return server
+    return Server(name, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
 HEARTBEAT_INTERVAL_S = 45.0

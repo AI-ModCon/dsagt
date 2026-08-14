@@ -21,13 +21,10 @@ import mcp.types as types
 
 def call_tool_sync(server, name: str, arguments: dict) -> str:
     """Invoke a tool handler on an MCP server and return the response text."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = asyncio.run(handler(req))
-    return result.root.content[0].text
+    params = types.CallToolRequestParams(name=name, arguments=arguments)
+    handler = server.get_request_handler("tools/call").handler
+    result = asyncio.run(handler(None, params))
+    return result.content[0].text
 
 
 def call_tool_json(server, name: str, arguments: dict) -> dict:
@@ -37,13 +34,10 @@ def call_tool_json(server, name: str, arguments: dict) -> dict:
 
 async def call_tool_async(server, name: str, arguments: dict) -> str:
     """Invoke a tool handler inside a running event loop."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = await handler(req)
-    return result.root.content[0].text
+    params = types.CallToolRequestParams(name=name, arguments=arguments)
+    handler = server.get_request_handler("tools/call").handler
+    result = await handler(None, params)
+    return result.content[0].text
 
 
 # ---------------------------------------------------------------------------

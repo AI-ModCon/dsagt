@@ -16,9 +16,10 @@ from unittest.mock import MagicMock
 
 import mcp.types as types
 import pytest
+from mcp_helpers import call_tool_sync
 
 from dsagt.mcp.server import _build_kb_from_config, create_dsagt_server
-from dsagt.registry import SkillRegistry, CodeRegistry
+from dsagt.registry import CodeRegistry, SkillRegistry
 
 
 def _make_merged_server(tmp_path: Path):
@@ -35,19 +36,13 @@ def _make_merged_server(tmp_path: Path):
 
 
 def _list_tools(server) -> list[str]:
-    handler = server.request_handlers[types.ListToolsRequest]
-    res = asyncio.run(handler(types.ListToolsRequest(method="tools/list")))
-    return sorted(t.name for t in res.root.tools)
+    handler = server.get_request_handler("tools/list").handler
+    res = asyncio.run(handler(None, None))
+    return sorted(t.name for t in res.tools)
 
 
 def _call(server, name: str, arguments: dict) -> str:
-    handler = server.request_handlers[types.CallToolRequest]
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    res = asyncio.run(handler(req))
-    return res.root.content[0].text
+    return call_tool_sync(server, name, arguments)
 
 
 def test_merged_server_exposes_all_tools(tmp_path):

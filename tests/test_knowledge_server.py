@@ -16,21 +16,16 @@ import threading
 from unittest.mock import MagicMock
 
 import pytest
-import mcp.types as types
+from mcp_helpers import call_tool_async
+from mcp_helpers import call_tool_json as call_tool
 
 from dsagt.mcp.knowledge_tools import create_knowledge_server, setup_runtime_kb
-from mcp_helpers import call_tool_json as call_tool
 
 
 async def _call_tool_async(server, name: str, arguments: dict) -> dict:
     """Invoke a tool handler inside a running event loop."""
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[types.CallToolRequest]
-    result = await handler(req)
-    return json.loads(result.root.content[0].text)
+    result = await call_tool_async(server, name, arguments)
+    return json.loads(result)
 
 
 async def call_tool_and_await_job(
@@ -757,6 +752,7 @@ class TestOpenMPWorkaround:
     def test_kmp_duplicate_lib_ok_is_set(self):
         """KMP_DUPLICATE_LIB_OK is set after importing dsagt.mcp.knowledge_tools."""
         import os
+
         import dsagt.mcp.knowledge_tools  # noqa: F401
 
         assert os.environ.get("KMP_DUPLICATE_LIB_OK") == "TRUE"
@@ -774,12 +770,11 @@ class TestRerankSchemaDefault:
 
     def _get_rerank_default(self, server):
         """Extract the rerank default from the kb_search tool schema."""
-        req = types.ListToolsRequest(method="tools/list")
-        handler = server.request_handlers[types.ListToolsRequest]
-        result = asyncio.run(handler(req))
-        for tool in result.root.tools:
+        handler = server.get_request_handler("tools/list").handler
+        result = asyncio.run(handler(None, None))
+        for tool in result.tools:
             if tool.name == "kb_search":
-                return tool.inputSchema["properties"]["rerank"]["default"]
+                return tool.input_schema["properties"]["rerank"]["default"]
         raise AssertionError("kb_search tool not found")
 
     def test_rerank_default_from_kb(self, mock_kb):
@@ -867,18 +862,17 @@ class TestKbSearchMultiCollection:
 class TestKbSearchSchema:
 
     def _get_tool(self, server, name):
-        req = types.ListToolsRequest(method="tools/list")
-        handler = server.request_handlers[types.ListToolsRequest]
-        result = asyncio.run(handler(req))
-        for tool in result.root.tools:
+        handler = server.get_request_handler("tools/list").handler
+        result = asyncio.run(handler(None, None))
+        for tool in result.tools:
             if tool.name == name:
                 return tool
         return None
 
     def test_kb_search_has_collections_param(self, server):
         tool = self._get_tool(server, "kb_search")
-        assert "collections" in tool.inputSchema["properties"]
+        assert "collections" in tool.input_schema["properties"]
 
     def test_kb_search_query_is_only_required(self, server):
         tool = self._get_tool(server, "kb_search")
-        assert tool.inputSchema["required"] == ["query"]
+        assert tool.input_schema["required"] == ["query"]

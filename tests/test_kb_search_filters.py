@@ -9,10 +9,9 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-import mcp.types as types
+from mcp_helpers import call_tool_json as call_tool
 
 from dsagt.mcp.knowledge_tools import create_knowledge_server
-from mcp_helpers import call_tool_json as call_tool
 
 
 def make_search_result(text, source_file, chunk_index=0, score=0.9, extra_meta=None):
@@ -285,12 +284,11 @@ class TestSearchResultMetadata:
 class TestSearchSchemaFilters:
 
     def _get_kb_search_schema(self, server):
-        req = types.ListToolsRequest(method="tools/list")
-        handler = server.request_handlers[types.ListToolsRequest]
-        result = asyncio.run(handler(req))
-        for tool in result.root.tools:
+        handler = server.get_request_handler("tools/list").handler
+        result = asyncio.run(handler(None, None))
+        for tool in result.tools:
             if tool.name == "kb_search":
-                return tool.inputSchema
+                return tool.input_schema
         raise AssertionError("kb_search not found")
 
     def test_filter_params_in_schema(self, server):
