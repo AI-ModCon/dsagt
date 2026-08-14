@@ -84,7 +84,7 @@ def build_dispatch_server(
         ctx, params: types.CallToolRequestParams
     ) -> types.CallToolResult:
         tool_name = params.name
-        arguments = params.arguments or {}
+        arguments = params.arguments
         handler = handlers[tool_name]  # KeyError = bug in list_tools schema
         with open_span(tool_name, source=tool_category.get(tool_name)) as span:
             try:
