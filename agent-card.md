@@ -20,7 +20,7 @@ metrics:
     - # Provenance trace completeness
 
 agent_card:
-  name: "DSAgt (DataSmith Agent)"
+  name: "DSAgt (DataSmith Agent Toolkit)"
   description: "AI-assisted data pipeline builder developed under the DOE Genesis Mission. Wraps an MCP-compatible agent CLI with code registration, a semantic knowledge base, skill discovery, execution provenance, and observability infrastructure to accelerate AI-ready scientific data preparation."
   provider:
     organization: "DOE AI ModCon Base Data Team (DOE Genesis Mission)"
@@ -104,7 +104,7 @@ Extensions:
 
 ---
 
-# DSAgt (DataSmith Agent)
+# DSAgt (DataSmith Agent Toolkit)
 
 DSAgt is an AI-assisted data pipeline builder. It connects an MCP-compatible agent CLI (Claude Code, Goose, Codex, opencode, or Cline) to code registration, a semantic knowledge base, skill discovery, execution provenance, and observability infrastructure — without modifying the agent itself.
 
