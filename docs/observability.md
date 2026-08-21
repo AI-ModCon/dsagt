@@ -1,6 +1,10 @@
 # Observability
 
-DSAgt logs traces to a **MLflow** via an SQLite file at `~/dsagt-projects/<project>/mlflow.db`. To view in the MLflow UI:
+DSAgt logs traces to a **MLflow** via an SQLite file at `~/dsagt-projects/<project>/mlflow.db`.
+
+![DSAgt observability](assets/observability.png)
+
+To view in the MLflow UI:
 
 ```bash
 dsagt traces <project> # rund dsagt mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db

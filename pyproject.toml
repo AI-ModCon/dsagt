@@ -30,6 +30,7 @@ dependencies = [
     "sentence-transformers==5.4.0",    # local embeddings & reranking
     "transformers==4.47.0",            # pin for sentence-transformers
     "rank-bm25>=0.2.2",                # sparse keyword retrieval
+    "ruyaml>=0.91.0",
 ]
 
 [project.scripts]

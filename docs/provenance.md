@@ -2,9 +2,13 @@
 
 DSAgt makes every data operation a reproducible, auditable step. The agent registers a **code** — a CLI executable — and every run of that code is wrapped for provenance capture, so the whole pipeline can later be reconstructed from the record.
 
+![DSAgt provenance](assets/provenance.png)
+
 ## Codes
 
 Codes are CLI executables defined as markdown files with YAML frontmatter under `<project>/codes/`. The agent registers new codes via the MCP server's `save_code_spec` tool and finds existing ones via `search_registry`.
+
+![DSAgt code registry](assets/code-registry.png)
 
 A code spec includes:
 
