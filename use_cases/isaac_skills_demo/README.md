@@ -1,3 +1,18 @@
+---
+title: Skill-Driven VASP → ISAAC Conversion
+domain: Skill management — external skill catalog (K-Dense) authoring a VASP → ISAAC converter
+summary: >-
+  A lightweight mock of the isaac_vasp workflow where the agent itself
+  discovers, syncs, installs, and authors skills (pymatgen, skill-creator) to
+  convert mock VASP output into an ISAAC record, vetting the skill-management
+  feature end-to-end.
+status: published
+order: 70
+guides:
+  - text: Skill-Driven VASP → ISAAC Walkthrough
+    path: README.md
+---
+
 # DSAgt Demo: Skill-Driven VASP → ISAAC Conversion
 
 > **Estimated time:** ~15 minutes — the agent flow runs in seconds on the
