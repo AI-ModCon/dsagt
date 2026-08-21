@@ -14,9 +14,9 @@ envelope means codes mirror into the agent's native skills dir unchanged
 runnable command in context at invocation time, alongside MCP discovery
 via ``search_registry``.
 When registered, executables are wrapped with dsagt-run + uv run --with.
-The wrapper lives *inside* the stored shell command by design: execution
-used to be dispatched by MCP-server tools, but agents routinely sidestepped
-those with their own bash tools, losing provenance.  Baking dsagt-run into
+The wrapper is baked *inside* the stored shell command by design: agents
+routinely run their own bash tools, sidestepping any MCP-mediated execution,
+so provenance has to be captured at the shell boundary.  Baking dsagt-run into
 the command the agent copies makes the bash path harmless — the residual
 failure mode is an agent reconstructing the command from memory and
 dropping the wrapper, which is why specs render the exact runnable command
@@ -56,11 +56,6 @@ logger = logging.getLogger(__name__)
 #: they can be evicted and refreshed on dsagt upgrade without touching
 #: agent-registered entries.
 CODES_COLLECTION = "codes"
-#: Legacy installed-skills collection.  No longer written or read: installed
-#: skills are natively auto-discovered by every supported agent, so skill
-#: search covers only the *catalog* tier below.  Kept as a name for back-compat
-#: and ``dsagt info`` display of any pre-existing index.
-SKILLS_COLLECTION = "skills"
 
 #: External skill catalogs (fetched from GitHub repos) live in their own
 #: per-source collections named ``skills_catalog__<slug>``.  Keeping each
@@ -73,12 +68,6 @@ CATALOG_COLLECTION_PREFIX = "skills_catalog__"
 def catalog_collection(slug: str) -> str:
     """KB collection name holding the indexed catalog for source *slug*."""
     return f"{CATALOG_COLLECTION_PREFIX}{slug}"
-
-
-#: Backwards-compat aliases — kept so external code that imported the
-#: previous names still resolves.  New code should use the names above.
-TOOL_REGISTRY_COLLECTION = CODES_COLLECTION
-SKILL_REGISTRY_COLLECTION = SKILLS_COLLECTION
 
 
 # ---------------------------------------------------------------------------
@@ -582,8 +571,7 @@ class SkillRegistry:
         Returns "added" or "updated".  Does **not** index into a KB:
         saved skills land in ``<project>/skills/`` where every supported
         agent natively auto-discovers them, so search only covers the
-        not-yet-installed *catalog* tier (see ``SkillRouter``).  The old
-        ``skills`` collection is no longer read by anything.
+        not-yet-installed *catalog* tier (see ``SkillRouter``).
         """
         name = spec.get("name")
         if not name:

@@ -700,11 +700,11 @@ def remove_project(project_name: str, keep_files: bool = False) -> Path:
 def catch_up_extraction(pdir: Path, config: dict) -> dict:
     """Background post-session catch-up — run by the MCP server at startup.
 
-    The MCP server owns the session lifecycle now: each launch, it spawns
-    this against a snapshot taken at startup, so it processes the *previous*
-    session's trailing trace records, never the live one.  This removes the
-    need for a reliable session-*end* trigger (``dsagt start`` no longer runs
-    any extraction) and gives bare-launched agents full parity.
+    The MCP server owns the session lifecycle: each launch, it spawns this
+    against a snapshot taken at startup, so it processes the *previous*
+    session's trailing trace records, never the live one.  This means no
+    reliable session-*end* trigger is required, and bare-launched agents get
+    full parity.
 
     Two phases, both best-effort:
 

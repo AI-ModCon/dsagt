@@ -1,9 +1,8 @@
 """
-Knowledge-base asset builder — the engine behind ``dsagt init``'s KB
-provisioning.  No longer a standalone command (``dsagt setup-kb`` was
-retired); ``session._provision_kb`` calls :func:`resolve_assets` +
-:func:`ensure_assets` to build the requested assets into the shared
-``~/dsagt-projects/kb_index/`` once, then copies them per project.
+Knowledge-base asset builder — the engine behind ``dsagt init``'s KB setup.
+``session._provision_kb`` calls :func:`resolve_assets` + :func:`ensure_assets`
+to build the requested assets into the shared ``~/dsagt-projects/kb_index/``
+once, then copies them per project.
 
 Asset namespace (the ``--include`` / ``--exclude`` selectors on ``dsagt init``):
 - ``tools``                bundled tool specs (cheap, local)

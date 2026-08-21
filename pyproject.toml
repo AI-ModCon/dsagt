@@ -3,7 +3,7 @@ name = "dsagt"
 dynamic = ["version"]
 description = "DataSmith Agent - AI-assisted data pipeline builder"
 readme = "README.md"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
@@ -30,6 +30,7 @@ dependencies = [
     "sentence-transformers==5.4.0",    # local embeddings & reranking
     "transformers==4.47.0",            # pin for sentence-transformers
     "rank-bm25>=0.2.2",                # sparse keyword retrieval
+    "ruyaml>=0.91.0",
 ]
 
 [project.scripts]
@@ -40,8 +41,8 @@ dsagt-server = "dsagt.mcp.server:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "black>=24.0",
-    "ruff>=0.5.0",
+    "black==26.5.1",
+    "ruff==0.15.20",
 ]
 docs = [
     "mkdocs-material>=9.5",
@@ -90,3 +91,16 @@ required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'"
 ]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# E402 (imports not at top) is intentional in these modules: __init__.py sets
+# OpenMP/SSL env vars that must be in place before heavy libs import;
+# knowledge.py defers embedding-backend imports; the integration tests guard
+# their imports behind a credentials/skip check.
+"src/dsagt/__init__.py" = ["E402"]
+"src/dsagt/knowledge.py" = ["E402"]
+"tests/test_knowledge_integration.py" = ["E402"]
+"tests/test_dependency_integration.py" = ["E402"]

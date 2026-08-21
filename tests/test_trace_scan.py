@@ -351,9 +351,7 @@ def test_catch_up_traces_noop_without_previous_or_transcript(tmp_path):
 
     # Previous session exists but recorded no transcript (SQLite agent / too
     # short) → skip rather than risk reading the new session's transcript.
-    write_state(
-        proj, {"sessions": [{"id": 1}, {"id": 2}], "memory_cursor": {}}
-    )
+    write_state(proj, {"sessions": [{"id": 1}, {"id": 2}], "memory_cursor": {}})
     assert _catch_up_traces(proj, config, MagicMock()) == 0
 
 
@@ -405,9 +403,7 @@ def test_emitted_traces_land_in_the_store(scan_env):
     )
     collector.collect(include_last=True)  # emit both turns
     exp = mlflow.get_experiment_by_name("proj")
-    traces = mlflow.search_traces(
-        locations=[exp.experiment_id], return_type="list"
-    )
+    traces = mlflow.search_traces(locations=[exp.experiment_id], return_type="list")
     sessions = {t.info.trace_metadata.get("mlflow.trace.session") for t in traces}
     assert len(traces) == 2
     assert sessions == {"proj:s"}

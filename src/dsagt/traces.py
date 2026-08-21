@@ -1404,9 +1404,9 @@ class TraceCollector:
                     continue
                 try:
                     consumer.write(trace.subset(emit_ids))
-                    # Persist acks inside the same try: if it raised outside,
-                    # a post-write failure would propagate out of collect() and
-                    # the next pass would re-emit these turns as duplicates.
+                    # Ack within the same per-consumer try as the write, so a
+                    # failure is isolated to this consumer and turns already
+                    # written can't re-emit as duplicates on the next pass.
                     self._save_acks(
                         consumer.name, acks | {key_by_span[s] for s in emit_ids}
                     )

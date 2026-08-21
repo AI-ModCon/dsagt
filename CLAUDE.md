@@ -57,7 +57,7 @@ The codebase separates **commands** (entry points with argparse, launched as CLI
 
 Entry points (`pyproject.toml` `[project.scripts]`): `dsagt` → `dsagt.commands.cli:main`, `dsagt-run` → `dsagt.commands.run_code:main`, `dsagt-server` → `dsagt.mcp.server:main`.
 
-**Bundled assets** (shipped as `package-data`):
+**Built-in assets** (declared as `package-data`):
 - `src/dsagt/codes/` — built-in codes as skill-standard dirs (`<name>/SKILL.md`), served from the package (never copied into projects).
 - `src/dsagt/skills/` — built-in skills (e.g., `skill-creator`) the agent discovers via `search_skills`.
 - `src/dsagt/dsagt_instructions.md` — agent-agnostic system instructions injected into per-agent files at init.
@@ -78,11 +78,15 @@ Distilled from working on this codebase; `knowledge.py` is the reference example
 
 **Comments state the real reason, at the point they explain it.** A lazy import is justified *at the import site* with its actual cause, not as an "this is absent" note in the import block citing a stale rationale. If the reason changes, fix the comment.
 
+**No change-narration in comments.** A comment describes what the code does and why it exists *now* — never how it used to work, what changed, or paradigms no longer in the tree. Ban breadcrumbs like "previously…", "was formerly…", "no longer uses…", "moved from…", "(not a `.get` default)", "instead of the old…". Git carries the history; the comment describes the present. State the hazard/intent directly ("session_id is null outside a minted session, and ChromaDB rejects null metadata") rather than contrasting with a prior version ("… beats coercing to `[]` like before").
+
 **Import hygiene on hot paths.** Modules on frequently-invoked paths (`dsagt-run` runs per tool call) must not transitively drag heavy modules in for *annotation-only* type hints. Use `from __future__ import annotations` + a `TYPE_CHECKING`-guarded import (verify the module doesn't introspect annotations at runtime first). Keep cold start lean; lazy-import the heavy leaf (llama_index) at its single use site.
 
 **Naming.** Prefer concise domain names (`APIEmbedder`/`LocalEmbedder`, not `…EmbeddingClient`).
 
 **Module docstrings (major modules).** Open with a title line + 3–5 sentences: what the module does, the capabilities it backs, the design motivations. Follow with an **ASCII-art UML class map** — one consistent notation throughout (`knowledge.py` uses `◇` holds · `◆` owns · `▷` inherits). Treat the class-map diagram as a deliverable of any **major module refactor** — refresh it whenever the class structure changes substantially.
+
+**Prose register (docs, comments, changelog, commit messages).** Plain, accurate, direct — no anthropomorphism, no code-jockey slang, no advertising gloss. Concretely: files/modules are *located in* / *defined in* / *stored in*, never "live in"; DSAgt *provides* / *includes* things, it does not "ship" or "provision" them; use *built-in*, not "bundled"; drop marketing gloss ("out of the box", "seamless", "with nothing to remember", "blazing"). State what a thing does, not how nice it is. Changelogs and commit messages record real behavior changes — pure renames and doc-only churn are noise, keep them out. This applies to this file too.
 
 ## BYOA artifacts
 

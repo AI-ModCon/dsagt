@@ -553,8 +553,8 @@ class TestToolIndexing:
     """Tests for KB-backed tool registration and search."""
 
     def test_save_tool_indexes_into_kb(self, tmp_path):
-        """Saving a tool indexes it into the registered_tools collection."""
-        from dsagt.registry import TOOL_REGISTRY_COLLECTION
+        """Saving a code indexes it into the codes collection."""
+        from dsagt.registry import CODES_COLLECTION
 
         server, reg, kb = _make_server_with_kb(tmp_path)
 
@@ -569,7 +569,7 @@ class TestToolIndexing:
             },
         )
 
-        results = kb.search("filter", collection=TOOL_REGISTRY_COLLECTION)
+        results = kb.search("filter", collection=CODES_COLLECTION)
         assert len(results) > 0
         assert any("csv-filter" in r["chunk"].get("text", "") for r in results)
 

@@ -2,6 +2,8 @@
 
 The knowledge base is DSAgt's catalog of **domain knowledge** — reference corpora and your own documents — that the agent searches to ground its work on scientific data-processing and AI-readiness evaluation.
 
+![DSAgt knowledge base](assets/knowledge-base.png)
+
 ## Domain-knowledge collections
 
 | Collection | Source | Populated by |

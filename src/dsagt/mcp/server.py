@@ -1,19 +1,17 @@
-"""DSAGT MCP Server — the single merged registry + knowledge server.
+"""DSAGT MCP Server — the single ``dsagt-server`` (registry + knowledge).
 
-Supersedes the two former servers (``dsagt-registry-server`` +
-``dsagt-knowledge-server``).  Both previously constructed their own
-:class:`~dsagt.knowledge.KnowledgeBase` — two embedders, two Chroma accesses,
-and a write-here/read-there hazard on the ``skills_catalog__*`` collections
-(synced by knowledge, searched by registry).  Merging into one process gives one
-embedder, one Chroma owner, one ``init_tracing``, and one MCP server per agent.
+One process, one :class:`~dsagt.knowledge.KnowledgeBase`, one ``init_tracing``,
+one MCP server per agent — a single embedder and a single Chroma owner back
+every concern.  Single ownership matters for the ``skills_catalog__*``
+collections, which are written under the skill concern and read under the
+registry concern: one owner removes any write-here/read-there hazard across
+them.  Heavy/risky work runs off the event loop (``run_command`` →
+``dsagt-run`` subprocess; ``kb_ingest`` → background job thread), so one process
+costs little isolation.
 
-The heavy/risky work is already offloaded out of the event loop (``run_command``
-→ ``dsagt-run`` subprocess; ``kb_ingest`` → background job thread), so collapsing
-the two processes costs little isolation.
-
-Tool *definitions* and *handlers* live in their concern modules
+Tool *definitions* and *handlers* are defined in their concern modules
 (:mod:`~dsagt.mcp.registry_tools` / :mod:`~dsagt.mcp.knowledge_tools` /
-:mod:`~dsagt.mcp.memory_tools` / :mod:`~dsagt.mcp.skill_tools`); this module only
+:mod:`~dsagt.mcp.memory_tools` / :mod:`~dsagt.mcp.skill_tools`); this module
 composes their ``(tools, handlers)`` under one dispatch shell
 (:func:`build_dispatch_server`) and owns the shared-KB startup.  The factory
 imports are *lazy* (inside :func:`create_dsagt_server` / :func:`main`) so the
@@ -21,11 +19,6 @@ concern modules can import :func:`build_dispatch_server` from here without a
 cycle.
 
 See ``design-notes/skills-catalog-server-merge.md`` §2.
-
-Backward compatibility is **rebuild-not-migrate**: a project created against the
-old two-server layout adopts this by re-running ``dsagt start`` (which
-regenerates the per-agent MCP config to a single ``dsagt`` server).  See the
-upgrade note in the README.
 """
 
 import os

@@ -222,7 +222,9 @@ class TestListCollectionsIntegration:
 
 class TestSetupRuntimeKB:
 
-    def test_runtime_search_after_setup(self, tmp_path, smoke_test_dir, embedding_config):
+    def test_runtime_search_after_setup(
+        self, tmp_path, smoke_test_dir, embedding_config
+    ):
         """End-to-end: a KB pointed at a runtime dir provisioned by
         setup_runtime_kb can search the copied collections with real embeddings.
 

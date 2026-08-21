@@ -760,7 +760,7 @@ class TestKnowledgeBaseIngest:
 
     def test_ingest_custom_file_types(self, kb, source_folder):
         """Custom file_types filters which files are processed."""
-        result = kb.ingest(source_folder, file_types=["txt"])
+        kb.ingest(source_folder, file_types=["txt"])
 
         # Only .txt files should be processed
         chunks_path = kb.index_dir / "test_docs" / "chunks.jsonl"
@@ -849,7 +849,6 @@ class TestKnowledgeBaseSearch:
 
         mock_st = MagicMock()
         mock_st.CrossEncoder.return_value = mock_reranker
-
 
         with patch.dict(sys.modules, {"sentence_transformers": mock_st}):
             # Ensure the lazy import triggers

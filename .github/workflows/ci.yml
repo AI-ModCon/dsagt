@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install dev tools
+        run: uv sync --group dev
+      - name: Ruff
+        run: uv run ruff check src tests
+      - name: Black
+        run: uv run black --check src tests
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (all groups)
+        run: uv sync --all-groups
+      # `python -m pytest`, not bare `pytest`, per CLAUDE.md.  Integration tests
+      # need real EMBEDDING_*/LLM_* credentials and are excluded here.
+      - name: Tests (non-integration)
+        run: uv run --no-sync python -m pytest -m "not integration" -q
