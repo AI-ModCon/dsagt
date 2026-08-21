@@ -1308,8 +1308,10 @@
 
 <h1 id="provenance">Provenance<a class="headerlink" href="#provenance" title="Permanent link">&para;</a></h1>
 <p>DSAgt makes every data operation a reproducible, auditable step. The agent registers a <strong>code</strong> — a CLI executable — and every run of that code is wrapped for provenance capture, so the whole pipeline can later be reconstructed from the record.</p>
+<p><img alt="DSAgt provenance" src="../assets/provenance.png" /></p>
 <h2 id="codes">Codes<a class="headerlink" href="#codes" title="Permanent link">&para;</a></h2>
 <p>Codes are CLI executables defined as markdown files with YAML frontmatter under <code>&lt;project&gt;/codes/</code>. The agent registers new codes via the MCP server's <code>save_code_spec</code> tool and finds existing ones via <code>search_registry</code>.</p>
+<p><img alt="DSAgt code registry" src="../assets/code-registry.png" /></p>
 <p>A code spec includes:</p>
 <ul>
 <li>A YAML frontmatter block describing the executable, parameters, dependencies, and tags.</li>

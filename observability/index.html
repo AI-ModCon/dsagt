@@ -1319,7 +1319,9 @@
 
 
 <h1 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h1>
-<p>DSAgt logs traces to a <strong>MLflow</strong> via an SQLite file at <code>~/dsagt-projects/&lt;project&gt;/mlflow.db</code>. To view in the MLflow UI:</p>
+<p>DSAgt logs traces to a <strong>MLflow</strong> via an SQLite file at <code>~/dsagt-projects/&lt;project&gt;/mlflow.db</code>.</p>
+<p><img alt="DSAgt observability" src="../assets/observability.png" /></p>
+<p>To view in the MLflow UI:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;project&gt;<span class="w"> </span><span class="c1"># rund dsagt mlflow ui --backend-store-uri sqlite:///&lt;project&gt;/mlflow.db</span>
 </code></pre></div>
 <p><code>dsagt info &lt;name&gt;</code> prints the resolved tracking URI and a session/trace summary. The tracking URI resolves as <code>MLFLOW_TRACKING_URI</code> env → project config → the <code>sqlite:///&lt;project&gt;/mlflow.db</code> default.</p>

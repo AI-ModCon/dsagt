@@ -1158,10 +1158,54 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tests" class="md-nav__link">
     <span class="md-ellipsis">
       
         Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lint-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lint &amp; format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#codebase-orientation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Codebase orientation
       
     </span>
   </a>
@@ -1214,10 +1258,54 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tests" class="md-nav__link">
     <span class="md-ellipsis">
       
         Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lint-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lint &amp; format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#codebase-orientation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Codebase orientation
       
     </span>
   </a>
@@ -1256,18 +1344,53 @@
 
 
 <h1 id="developer-guide">Developer Guide<a class="headerlink" href="#developer-guide" title="Permanent link">&para;</a></h1>
-<p>Material for contributors and developers.</p>
+<p>How the DSAgt codebase is set up and how to work in it. For contribution
+mechanics (branch/PR flow, commit style), see
+<a href="https://github.com/AI-ModCon/dsagt/blob/main/.github/CONTRIBUTING.md">CONTRIBUTING.md</a>.</p>
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<p>DSAgt develops on <a href="https://github.com/astral-sh/uv">uv</a> with Python 3.12 or 3.13:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/AI-ModCon/dsagt.git
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">cd</span><span class="w"> </span>dsagt
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-groups<span class="w">          </span><span class="c1"># runtime + dev + docs dependencies</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nb">source</span><span class="w"> </span>.venv/bin/activate<span class="w">      </span><span class="c1"># so dsagt / dsagt-run / dsagt-server are on PATH</span>
+</code></pre></div>
 <h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span><span class="s2">"not integration"</span><span class="w">     </span><span class="c1"># unit tests, no creds required</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span>integration<span class="w"> </span>-v<span class="w">        </span><span class="c1"># integration tests (require real credentials / models)</span>
+<p>Use <code>python -m pytest</code>, not bare <code>pytest</code> (the bare binary can resolve the wrong
+interpreter):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span><span class="s2">"not integration"</span><span class="w"> </span>-q<span class="w">   </span><span class="c1"># unit suite (~640 tests)</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/test_config.py<span class="w"> </span>-q<span class="w">   </span><span class="c1"># a single file</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span>integration<span class="w"> </span>-v<span class="w">         </span><span class="c1"># integration (needs creds)</span>
 </code></pre></div>
-<p>For per-flow hand-tests (CLI, VS Code extensions), see the scripts under <a href="https://github.com/AI-ModCon/dsagt/tree/main/tests/manual_walkthroughs/"><code>tests/manual_walkthroughs/</code></a>.</p>
+<p>Integration tests hit real embedding/LLM providers and need <code>EMBEDDING_*</code> /
+<code>LLM_*</code> credentials in the environment; they're excluded from CI and the default
+local run.</p>
+<h2 id="lint-format">Lint &amp; format<a class="headerlink" href="#lint-format" title="Permanent link">&para;</a></h2>
+<p>CI enforces both on <code>src/</code> and <code>tests/</code> (scientific scripts under <code>use_cases/</code>
+are exempt):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>check<span class="w"> </span>src<span class="w"> </span>tests
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>uv<span class="w"> </span>run<span class="w"> </span>black<span class="w"> </span>src<span class="w"> </span>tests<span class="w">          </span><span class="c1"># omit the paths to format everything you touched</span>
+</code></pre></div>
+<h2 id="docs">Docs<a class="headerlink" href="#docs" title="Permanent link">&para;</a></h2>
+<p>The site is MkDocs (Material). <code>mkdocs.yml</code> at the repo root is the site config;
+<code>docs/</code> holds the pages. The <code>.github/workflows/docs.yml</code> workflow builds the
+site with <code>--strict</code> on every PR and deploys it to GitHub Pages from <code>main</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>serve<span class="w">             </span><span class="c1"># live preview at http://127.0.0.1:8000</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--strict<span class="w">    </span><span class="c1"># what CI runs</span>
+</code></pre></div>
+<h2 id="codebase-orientation">Codebase orientation<a class="headerlink" href="#codebase-orientation" title="Permanent link">&para;</a></h2>
+<p>The <a href="../architecture/">Architecture</a> page is the map of the system — the
+capabilities, the single <code>dsagt-server</code> MCP layout, and the observability and
+memory design. <code>CLAUDE.md</code> at the repo root records the house coding and prose
+conventions (it doubles as instructions for AI coding agents working in the
+repo); read it before a substantial change.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
-<p><strong>Agent command not found.</strong> The agent CLI is not installed or is not on PATH. See the <a href="../#supported-agents">supported agents table</a>.</p>
-<p><strong>MCP server not connecting.</strong> Verify the server command resolves:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>which<span class="w"> </span>dsagt-server
+<p><strong>Agent command not found.</strong> The agent CLI isn't installed or isn't on PATH —
+see the <a href="../#supported-agents">supported agents</a>.</p>
+<p><strong>MCP server not connecting.</strong> Confirm the entry point resolves:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>which<span class="w"> </span>dsagt-server
 </code></pre></div>
-<p>If missing, reinstall: <code>pip install --force-reinstall "git+https://github.com/AI-ModCon/dsagt.git"</code>.</p>
+<p>If it's missing, reinstall:
+<code>pip install --force-reinstall "git+https://github.com/AI-ModCon/dsagt.git"</code>.</p>
 
 
 
