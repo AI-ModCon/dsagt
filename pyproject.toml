@@ -41,8 +41,8 @@ dsagt-server = "dsagt.mcp.server:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "black>=24.0",
-    "ruff>=0.5.0",
+    "black==26.5.1",
+    "ruff==0.15.20",
 ]
 docs = [
     "mkdocs-material>=9.5",
