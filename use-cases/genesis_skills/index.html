@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/aidrin_readiness_gate/">
+        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/genesis_skills/">
       
       
-        <link rel="prev" href="../isaac_vasp/">
+        <link rel="prev" href="../aidrin_full_tour/">
       
       
-        <link rel="next" href="../aidrin_full_tour/">
+        <link rel="next" href="../isaac_skills_demo/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>AIDRIN Readiness Gate (Cryo-EM) - DSAgt</title>
+        <title>Genesis Skills for Data Curation - DSAgt</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#aidrin-readiness-gate-cryo-em" class="md-skip">
+        <a href="#genesis-skills-for-data-curation" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              AIDRIN Readiness Gate (Cryo-EM)
+              Genesis Skills for Data Curation
             
           </span>
         </div>
@@ -927,37 +927,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AIDRIN Readiness Gate (Cryo-EM)
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../aidrin_readiness_gate/" class="md-nav__link">
         
   
   
@@ -973,203 +946,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#which-metrics-apply-to-cryo-em-data" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Which metrics apply to cryo-EM data
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prerequisites
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Setup">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-install-aidrin-develop-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Install AIDRIN (develop branch)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-download-the-cryo-em-data-and-build-beforeafter-tables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Download the cryo-EM data and build before/after tables
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-initialize-and-start-a-dsagt-project" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Initialize and start a DSAgt project
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#execution" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execution
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Execution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-register-the-aidrin-cli" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Register the AIDRIN CLI
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-readiness-assessment-before-curation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Readiness assessment BEFORE curation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-readiness-assessment-after-curation-and-compare" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Readiness assessment AFTER curation, and compare
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-generate-a-datacard-for-the-curated-dataset" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Generate a datacard for the curated dataset
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#5-reconstruct-the-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Reconstruct the pipeline
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#post-conditions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Post-Conditions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What This Tests
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cleanup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cleanup
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1207,10 +983,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../genesis_skills/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Genesis Skills for Data Curation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1226,6 +1029,142 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-demonstrates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this demonstrates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#walkthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Walkthrough
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Walkthrough">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-enable-the-genesis-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1 — Enable the Genesis source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-find-and-install-the-curation-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2 — Find and install the curation skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-ingest-the-domain-docs-into-the-kb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3 — Ingest the domain docs into the KB
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-retrieve-domain-grounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4 — Retrieve domain grounding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-generate-the-datacard-for-the-finished-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5 — Generate the datacard for the finished dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-validate-the-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6 — Validate the metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1376,21 +1315,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#which-metrics-apply-to-cryo-em-data" class="md-nav__link">
+  <a href="#what-this-demonstrates" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Which metrics apply to cryo-EM data
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prerequisites
+        What this demonstrates
       
     </span>
   </a>
@@ -1406,64 +1334,25 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Setup">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-install-aidrin-develop-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Install AIDRIN (develop branch)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-download-the-cryo-em-data-and-build-beforeafter-tables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Download the cryo-EM data and build before/after tables
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-initialize-and-start-a-dsagt-project" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Initialize and start a DSAgt project
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
-  <a href="#execution" class="md-nav__link">
+  <a href="#walkthrough" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Execution
+        Walkthrough
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Execution">
+    <nav class="md-nav" aria-label="Walkthrough">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-register-the-aidrin-cli" class="md-nav__link">
+  <a href="#1-enable-the-genesis-source" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Register the AIDRIN CLI
+        1 — Enable the Genesis source
       
     </span>
   </a>
@@ -1471,10 +1360,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-readiness-assessment-before-curation" class="md-nav__link">
+  <a href="#2-find-and-install-the-curation-skills" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Readiness assessment BEFORE curation
+        2 — Find and install the curation skills
       
     </span>
   </a>
@@ -1482,10 +1371,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-readiness-assessment-after-curation-and-compare" class="md-nav__link">
+  <a href="#3-ingest-the-domain-docs-into-the-kb" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Readiness assessment AFTER curation, and compare
+        3 — Ingest the domain docs into the KB
       
     </span>
   </a>
@@ -1493,10 +1382,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-generate-a-datacard-for-the-curated-dataset" class="md-nav__link">
+  <a href="#4-retrieve-domain-grounding" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Generate a datacard for the curated dataset
+        4 — Retrieve domain grounding
       
     </span>
   </a>
@@ -1504,10 +1393,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#5-reconstruct-the-pipeline" class="md-nav__link">
+  <a href="#5-generate-the-datacard-for-the-finished-dataset" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Reconstruct the pipeline
+        5 — Generate the datacard for the finished dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-validate-the-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6 — Validate the metadata
       
     </span>
   </a>
@@ -1523,29 +1423,7 @@
   <a href="#post-conditions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Post-Conditions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What This Tests
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cleanup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cleanup
+        Post-conditions
       
     </span>
   </a>
@@ -1569,226 +1447,115 @@
 
 
 
-<h1 id="aidrin-readiness-gate-cryo-em">AIDRIN Readiness Gate (Cryo-EM)<a class="headerlink" href="#aidrin-readiness-gate-cryo-em" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> AI data readiness — <code>aidrin</code> quality metrics before/after cryo-EM curation</p>
-<p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/aidrin_readiness_gate/"><code>use_cases/aidrin_readiness_gate/</code></a></p>
-<p><strong>Demo bundle:</strong> <a href="https://drive.google.com/uc?export=download&amp;id=1QxNup8WG0x1r7VNIB8NplnHrYX0ISv2J">Download <code>.tar.gz</code></a></p>
-<p>Use AIDRIN as a readiness gate around a cryo-EM curation step — run the applicable data-quality and class-balance metrics before and after particle curation, with full provenance, to measure how much the pipeline improved AI-readiness.</p>
+<h1 id="genesis-skills-for-data-curation">Genesis Skills for Data Curation<a class="headerlink" href="#genesis-skills-for-data-curation" title="Permanent link">&para;</a></h1>
+<p><strong>Domain:</strong> Skill management — external skill catalog (Genesis / OSTI GitLab) driving a data-curation pipeline</p>
+<p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/genesis_skills/"><code>use_cases/genesis_skills/</code></a></p>
+<p><strong>Demo bundle:</strong> <a href="https://drive.google.com/uc?export=download&amp;id=1nji0Avc-n952isq5aKGLoZgTkYHe0jzR">Download <code>.tar.gz</code></a></p>
+<p>Sync the Genesis skill catalog, install data-curation skills (datacard generation, Croissant validation), ground them in KB-ingested domain docs, and produce a datacard for a small curated dataset.</p>
 <blockquote>
-<p><strong>Estimated time:</strong> ~30 minutes, dominated by a <strong>~2 GB EMPIAR-10017
-download</strong> (from <code>calla.rnet.missouri.edu</code>) plus the one-time AIDRIN build.
-The agent portion (register + before/after assessment + datacard) is ~10
-minutes once the data is staged.</p>
+<p><strong>Estimated time:</strong> ~10 minutes (all data is bundled and tiny; the one
+external dependency is a shallow clone of the Genesis catalog from OSTI
+GitLab — needs network access to <code>gitlab.osti.gov</code>).</p>
 </blockquote>
-<p>This guide demonstrates DSAgt using <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness
-Inspector) as a <strong>readiness gate</strong> around a cryo-EM data-curation step. The agent registers the
-AIDRIN CLI, then runs the applicable readiness metrics <strong>before and after</strong> particle curation to
-<em>measure</em> how much the pipeline improved the data — every call recorded through <code>dsagt-run</code>.</p>
-<p>This use case is self-contained: it downloads its own cryo-EM data. It pairs naturally with the
-<a href="../cryoem/">Cryo-EM curation demo</a>, which builds the curation pipeline itself, but
-does not require it.</p>
-<h2 id="which-metrics-apply-to-cryo-em-data">Which metrics apply to cryo-EM data<a class="headerlink" href="#which-metrics-apply-to-cryo-em-data" title="Permanent link">&para;</a></h2>
-<p>Cryo-EM particle tables are physical measurements (defocus, CTF, coordinates, class assignments) —
-there are no people in them. So this demo runs AIDRIN's <strong>data-quality</strong> and
-<strong>impact-of-data-on-AI</strong> metrics, plus <strong>class-imbalance</strong> applied to the particle class label —
-the metrics that make scientific sense here:</p>
-<table>
-<thead>
-<tr>
-<th>Category</th>
-<th>Metrics used</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>data-quality</td>
-<td><code>completeness</code>, <code>duplicity</code>, <code>outliers</code></td>
-</tr>
-<tr>
-<td>impact-of-data-on-AI</td>
-<td><code>correlations</code>, <code>feature-relevance</code></td>
-</tr>
-<tr>
-<td>fairness-and-bias</td>
-<td><code>class-imbalance</code> (on the particle class / selection label)</td>
-</tr>
-</tbody>
-</table>
-<p>AIDRIN's <strong>fairness rate</strong> metrics (<code>statistical-rates</code>, <code>representation-rate</code>) and <strong>all
-data-governance / privacy</strong> metrics (<code>k-anonymity</code>, <code>l-diversity</code>, <code>t-closeness</code>, <code>entropy-risk</code>,
-<code>single</code>/<code>multiple-attribute-risk</code>, <code>differential-privacy</code>) are <strong>deliberately excluded</strong> — they
-assume sensitive attributes or personally-identifying quasi-identifiers, which cryo-EM particle
-data does not contain. The <a href="../aidrin_full_tour/">full AIDRIN tour</a> exercises those on a
-tabular dataset where they do apply.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
-<ul>
-<li>DSAgt installed (<code>uv sync --all-groups</code>) and an agent platform installed and <strong>already
-  authenticated</strong> (BYOA — dsagt writes no credentials). The default local embedder needs no
-  API key.</li>
-<li><strong>AIDRIN</strong> installed from its <code>develop</code> branch in its own Python 3.10 virtual environment
-  (see Setup).</li>
-<li>~2 GB disk for the EMPIAR-10017 cryo-EM data.</li>
-<li>Git installed.</li>
-</ul>
-<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<h3 id="1-install-aidrin-develop-branch">1. Install AIDRIN (develop branch)<a class="headerlink" href="#1-install-aidrin-develop-branch" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>-b<span class="w"> </span>develop<span class="w"> </span>https://github.com/idtlab/AIDRIN.git
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python3.10<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>aidrin-venv
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">source</span><span class="w"> </span>aidrin-venv/bin/activate
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>./AIDRIN
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>aidrin<span class="w"> </span>list<span class="w">          </span><span class="c1"># sanity check: prints 15 metrics in 4 categories</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nv">AIDRIN_BIN</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/aidrin-venv/bin/aidrin"</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$AIDRIN_BIN</span><span class="s2">"</span>
-</code></pre></div>
-<h3 id="2-download-the-cryo-em-data-and-build-beforeafter-tables">2. Download the cryo-EM data and build before/after tables<a class="headerlink" href="#2-download-the-cryo-em-data-and-build-beforeafter-tables" title="Permanent link">&para;</a></h3>
-<p>Download the EMPIAR-10017 (β-galactosidase) subset from CryoPPP — it ships ground-truth particle
-tables with real CTF/defocus columns and a selected-vs-excluded curation split:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>demo_data/cryoem<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>demo_data/cryoem
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-L<span class="w"> </span>https://calla.rnet.missouri.edu/cryoppp/10017.tar.gz<span class="w"> </span>-o<span class="w"> </span><span class="m">10017</span>.tar.gz
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>tar<span class="w"> </span>xzf<span class="w"> </span><span class="m">10017</span>.tar.gz
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nb">cd</span><span class="w"> </span>../..
-</code></pre></div>
-<p>Build a <strong>before</strong> table (all picked particles + a <code>selected</code> flag) and an <strong>after</strong> table (the
-curated, selected-only particles):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;'PY'</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="s">import pandas as pd</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s">gt = "demo_data/cryoem/10017/ground_truth"</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s">sel = pd.read_csv(f"{gt}/empiar-10017_particles_selected.csv")</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="s">exc = pd.read_csv(f"{gt}/empiar-10017_particles_excluded.csv")</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="s">sel["selected"] = 1; exc["selected"] = 0</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="s">pd.concat([sel, exc], ignore_index=True).to_csv("demo_data/cryoem/cryoem_before.csv", index=False)</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s">sel.drop(columns=["selected"]).to_csv("demo_data/cryoem/cryoem_after.csv", index=False)</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s">print("before:", len(sel) + len(exc), "particles   after:", len(sel), "particles")</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s">PY</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>deactivate
-</code></pre></div>
-<h3 id="3-initialize-and-start-a-dsagt-project">3. Initialize and start a DSAgt project<a class="headerlink" href="#3-initialize-and-start-a-dsagt-project" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>dsagt<span class="w"> </span>init<span class="w"> </span>cryoem-readiness<span class="w"> </span>--agent<span class="w"> </span>claude
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/cryoem-readiness
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/data"</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>cp<span class="w"> </span>demo_data/cryoem/cryoem_before.csv<span class="w"> </span>demo_data/cryoem/cryoem_after.csv<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/data/"</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>dsagt<span class="w"> </span>start<span class="w"> </span>cryoem-readiness
-</code></pre></div>
-<h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
-<p>Paste these prompts into the agent one at a time (substitute the absolute <code>$AIDRIN_BIN</code> path).</p>
-<h3 id="1-register-the-aidrin-cli">1. Register the AIDRIN CLI<a class="headerlink" href="#1-register-the-aidrin-cli" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Register a data-readiness CLI named aidrin into the code registry. The executable is at
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>&lt;AIDRIN_BIN&gt;. Run "&lt;AIDRIN_BIN&gt; --help" and "&lt;AIDRIN_BIN&gt; list" to discover its subcommands and the
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>15 metrics, then save a code spec named aidrin describing the run/batch/data-quality subcommands
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>and their positional arguments.
-</code></pre></div>
-<p><strong>Verify:</strong> <code>Search the registry for the aidrin data-readiness code.</code> →
-<code>~/dsagt-projects/cryoem-readiness/codes/aidrin/SKILL.md</code> should exist.</p>
-<h3 id="2-readiness-assessment-before-curation">2. Readiness assessment BEFORE curation<a class="headerlink" href="#2-readiness-assessment-before-curation" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Using the registry aidrin code, assess the AI data readiness of data/cryoem_before.csv. Run these
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>metrics through dsagt-run: completeness; duplicity; outliers; correlations on the columns
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>"Defocus U,Defocus V,Defocus Angle,CTF B Factor,Origin X (Ang),Origin Y (Ang)"; class-imbalance on
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>the Class Number column; and feature-relevance with no categorical columns, those same numerical
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>columns, and target column selected. Summarize the data-quality and class-balance state.
-</code></pre></div>
-<h3 id="3-readiness-assessment-after-curation-and-compare">3. Readiness assessment AFTER curation, and compare<a class="headerlink" href="#3-readiness-assessment-after-curation-and-compare" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Now run the same data-quality metrics (completeness, duplicity, outliers) and class-imbalance on
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Class Number for data/cryoem_after.csv, through dsagt-run. Then compare before vs after and tell me
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>whether curation improved AI-readiness, citing the specific scores that changed.
-</code></pre></div>
-<p><strong>Expect</strong> (positional args, JSON to stdout):</p>
-<table>
-<thead>
-<tr>
-<th>Metric</th>
-<th>before → after</th>
-<th>Reading</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>completeness</code> (overall)</td>
-<td>1.0 → 1.0</td>
-<td>already complete</td>
-</tr>
-<tr>
-<td><code>duplicity</code></td>
-<td>0.0 → 0.0</td>
-<td>no duplicate particles</td>
-</tr>
-<tr>
-<td><code>outliers</code> (overall)</td>
-<td><strong>0.041 → 0.029</strong></td>
-<td>curation removed ~30% of outliers</td>
-</tr>
-<tr>
-<td><code>class-imbalance</code> (Class Number)</td>
-<td><strong>22.2 → 11.1</strong></td>
-<td>class distribution markedly more balanced</td>
-</tr>
-</tbody>
-</table>
-<p>Curation produced a cleaner, more balanced particle set — a <strong>measurable</strong> AI-readiness gain, with
-<code>outliers</code> and <code>class-imbalance</code> as the headline indicators and <code>completeness</code>/<code>duplicity</code>
-confirming the data was already structurally sound.</p>
-<h3 id="4-generate-a-datacard-for-the-curated-dataset">4. Generate a datacard for the curated dataset<a class="headerlink" href="#4-generate-a-datacard-for-the-curated-dataset" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Search for a skill that can generate a datacard for the curated cryo-EM dataset at
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>data/cryoem_after.csv, then use it to produce the datacard.
-</code></pre></div>
-<p>The agent discovers the <code>datacard-generator</code> skill and writes a Genesis Datacard (e.g.
-<code>data/genesis_datacard_*.md</code>) documenting the curated dataset.</p>
-<h3 id="5-reconstruct-the-pipeline">5. Reconstruct the pipeline<a class="headerlink" href="#5-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Reconstruct the readiness assessment you just ran from the execution records as a bash script.
-</code></pre></div>
-<h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
+<p>An end-to-end <strong>data-preparation</strong> walkthrough that flexes the skill catalog
+against the <strong>Genesis</strong> source (OSTI GitLab). The agent pulls in the
+BASE-Data/ModCon curation skills, grounds itself in domain context loaded into
+the <strong>knowledge base</strong>, then prepares and <strong>datacards a finished dataset</strong>.</p>
+<p>The "finished product" is a small curated dataset — a CO2-methanation <strong>catalyst
+screen</strong> (<code>mock_data/dataset/catalyst_screening.csv</code>, 8 rows) — plus the domain
+docs that describe how it was produced. Everything is tiny, so the whole thing
+runs in seconds with no real instruments or HPC.</p>
+<h2 id="what-this-demonstrates">What this demonstrates<a class="headerlink" href="#what-this-demonstrates" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Code registry contains the <code>aidrin</code> spec (<code>codes/aidrin/SKILL.md</code>).</li>
-<li><code>trace_archive/</code> holds one provenance record per metric run (before and after).</li>
-<li>Before/after scores show curation reduced outliers (~0.041 → ~0.029) and class imbalance
-   (~22.2 → ~11.1) while completeness and duplicity stayed clean.</li>
-<li>A datacard for the curated dataset exists (<code>data/genesis_datacard_*.md</code>).</li>
-<li>A reconstructed pipeline script replays the readiness checks in order.</li>
-<li>MLflow traces capture token usage, latency, and the <code>dsagt-run</code> / MCP spans.</li>
+<li><strong>Genesis skills, agent-facing.</strong> <code>add_skill_source genesis</code> syncs the OSTI
+   GitLab catalog; <code>search_skills</code> finds the ModCon curation skills
+   (<code>generating-datacards</code>, <code>croissant-validator</code>); <code>install_skill</code> draws them
+   into the project where the agent <strong>natively</strong> auto-discovers them.</li>
+<li><strong>Domain → knowledge base.</strong> <code>kb_ingest</code> indexes the data dictionary +
+   measurement protocol into a project collection, so the agent describes
+   methods and provenance accurately (via <code>kb_search</code>) instead of guessing.</li>
+<li><strong>Datacard for a finished product.</strong> The installed <code>generating-datacards</code>
+   skill runs over the dataset — pulling field definitions, methodology, and
+   license from the KB-ingested domain docs — and emits a datacard, then
+   <code>croissant-validator</code> checks the Croissant metadata.</li>
 </ol>
-<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>DSAgt Capability</th>
-<th>Steps</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>External-CLI registration (<code>save_code_spec</code>)</td>
-<td>1</td>
-</tr>
-<tr>
-<td>Registry search</td>
-<td>1 (Verify)</td>
-</tr>
-<tr>
-<td>Code execution with provenance (<code>dsagt-run</code> → <code>trace_archive/</code>)</td>
-<td>2, 3</td>
-</tr>
-<tr>
-<td>Before/after comparison driven by the agent</td>
-<td>3</td>
-</tr>
-<tr>
-<td>Skill discovery and use (datacard generation)</td>
-<td>4</td>
-</tr>
-<tr>
-<td>Pipeline reconstruction from execution records</td>
-<td>5</td>
-</tr>
-<tr>
-<td>Observability (MLflow spans in the serverless <code>mlflow.db</code> store)</td>
-<td>all</td>
-</tr>
-</tbody>
-</table>
-<p>View the traces any time with
-<code>mlflow ui --backend-store-uri sqlite:///$PROJ/mlflow.db</code>.</p>
-<h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>cryoem-readiness<span class="w"> </span>-y
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>rm<span class="w"> </span>-rf<span class="w"> </span>demo_data/cryoem<span class="w"> </span>AIDRIN<span class="w"> </span>aidrin-venv
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<p>Assumes DSAgt (<code>uv sync --all-groups</code>) and Claude Code
+(<code>npm i -g @anthropic-ai/claude-code</code>) are installed, plus git <strong>with network
+access to <code>gitlab.osti.gov</code></strong> (the Genesis catalog clones from OSTI GitLab, not
+GitHub). Embedding credentials are optional — <code>search_skills</code> / <code>kb_search</code> use
+semantic search when <code>EMBEDDING_*</code> is set and fall back to a keyword scorer
+otherwise (configure it for sharper relevance over the domain docs).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init<span class="w"> </span>genesis-skills<span class="w"> </span>--agent<span class="w"> </span>claude<span class="w">          </span><span class="c1"># provisions the bundled codes/skills + core KB</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/genesis_skills/mock_data<span class="w"> </span>~/dsagt-projects/genesis-skills/mock_data
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>dsagt<span class="w"> </span>start<span class="w"> </span>genesis-skills
 </code></pre></div>
+<p>The Genesis catalog is not synced at <code>init</code> — the agent enables it in step 1.</p>
+<h2 id="walkthrough">Walkthrough<a class="headerlink" href="#walkthrough" title="Permanent link">&para;</a></h2>
+<p>Paste each prompt into Claude Code (running inside the project), one at a time.
+Confirmation checks are consolidated in <strong>Post-conditions</strong> below.</p>
+<h3 id="1-enable-the-genesis-source">1 — Enable the Genesis source<a class="headerlink" href="#1-enable-the-genesis-source" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Enable the "genesis" skill source so we have the GENESIS / ModCon data-curation skills available. Then tell me how many skills it indexed.</p>
+</blockquote>
+<p><em>Expect:</em> <code>add_skill_source(source="genesis")</code> → a shallow clone of OSTI GitLab,
+<strong>74</strong> skills indexed, source written to <code>.dsagt/config.yaml</code>.</p>
+<h3 id="2-find-and-install-the-curation-skills">2 — Find and install the curation skills<a class="headerlink" href="#2-find-and-install-the-curation-skills" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Search the catalog for two skills — one that creates a datacard / dataset documentation for a dataset, and one that validates Croissant / JSON-LD dataset metadata — and install the best match for each into this project.</p>
+</blockquote>
+<p><em>Expect:</em> <code>search_skills</code> surfaces <strong><code>generating-datacards</code></strong> and
+<strong><code>croissant-validator</code></strong> → <code>install_skill</code> for each. The reply presents both
+as installed and immediately usable (no restart caveat), each with a
+<code>PROVENANCE.txt</code> crediting the Genesis source.</p>
+<h3 id="3-ingest-the-domain-docs-into-the-kb">3 — Ingest the domain docs into the KB<a class="headerlink" href="#3-ingest-the-domain-docs-into-the-kb" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Ingest the domain docs under mock_data/domain/ into a new knowledge-base collection called "methanation_domain". Poll until it finishes, then tell me what's in it.</p>
+</blockquote>
+<p><em>Expect:</em> <code>kb_ingest(folder_path="mock_data/domain", collection_name="methanation_domain")</code>
+returns a <code>job_id</code>; the agent polls <code>kb_job_status</code> to completion, then
+<code>kb_list_collections</code> shows <code>methanation_domain</code> (2 docs).</p>
+<h3 id="4-retrieve-domain-grounding">4 — Retrieve domain grounding<a class="headerlink" href="#4-retrieve-domain-grounding" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Using the knowledge base, what reactor conditions were used for the CO2 conversion measurement, and what license applies to this dataset?</p>
+</blockquote>
+<p><em>Expect:</em> <code>kb_search</code> over <code>methanation_domain</code> → <strong>250 °C, 1 atm, H2:CO2 = 4:1,
+GHSV 12,000</strong>; license <strong>CC-BY-4.0</strong>.</p>
+<h3 id="5-generate-the-datacard-for-the-finished-dataset">5 — Generate the datacard for the finished dataset<a class="headerlink" href="#5-generate-the-datacard-for-the-finished-dataset" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Use the generating-datacards skill to write a datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the methanation_domain knowledge-base collection — don't invent them. Save it to audit/catalyst_screening_datacard.md. Then compare your sections against mock_data/expected_datacard.md and report anything missing.</p>
+</blockquote>
+<p><em>Expect:</em> the agent reads the installed skill's <code>SKILL.md</code>, queries the KB,
+computes basic stats from the 8-row CSV, and writes
+<code>audit/catalyst_screening_datacard.md</code> covering summary / provenance / schema /
+methodology / stats / limitations / license.</p>
+<h3 id="6-validate-the-metadata">6 — Validate the metadata<a class="headerlink" href="#6-validate-the-metadata" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Use the croissant-validator skill to check the Croissant/JSON-LD metadata for this dataset (generate it from the datacard if needed), and report any schema errors.</p>
+</blockquote>
+<p><em>Expect:</em> the validator skill runs and reports a clean pass or names specific
+schema issues.</p>
+<h2 id="post-conditions">Post-conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
+<p>Confirm from a shell:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>genesis-skills<span class="w">                           </span><span class="c1"># KB lists skills_catalog__genesis-genesis-skills + methanation_domain</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>ls<span class="w"> </span>~/dsagt-projects/genesis-skills/skills/<span class="w">          </span><span class="c1"># generating-datacards  croissant-validator</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>ls<span class="w"> </span>~/dsagt-projects/genesis-skills/.claude/skills/<span class="w">  </span><span class="c1"># both mirrored here at install time</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>cat<span class="w"> </span>~/dsagt-projects/genesis-skills/skills/generating-datacards/PROVENANCE.txt
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>ls<span class="w"> </span>~/dsagt-projects/genesis-skills/audit/<span class="w">           </span><span class="c1"># catalyst_screening_datacard.md</span>
+</code></pre></div>
+<ol>
+<li>The KB holds a <code>skills_catalog__genesis-genesis-skills</code> collection
+   (searchable via <code>search_skills</code>) <strong>and</strong> a <code>methanation_domain</code> document
+   collection (retrievable via <code>kb_search</code>).</li>
+<li><code>generating-datacards</code> and <code>croissant-validator</code> are installed into
+   <code>&lt;project&gt;/skills/</code> and mirrored into <code>.claude/skills/</code>, each with a
+   <code>PROVENANCE.txt</code> crediting the Genesis source. The next Claude session
+   auto-invokes them natively; this session used them by reading their
+   <code>SKILL.md</code>.</li>
+<li><code>audit/catalyst_screening_datacard.md</code> was produced for the finished dataset,
+   grounded in the KB-ingested domain docs, covering the sections in
+   <code>mock_data/expected_datacard.md</code>.</li>
+</ol>
 
 
 
