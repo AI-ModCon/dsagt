@@ -16,7 +16,7 @@
         <link rel="prev" href="../aidrin_readiness_gate/">
       
       
-        <link rel="next" href="../fusion-fm/">
+        <link rel="next" href="../isaac_skills_demo/">
       
       
         
@@ -1171,6 +1171,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../isaac_skills_demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../fusion-fm/" class="md-nav__link">
         
   
@@ -1496,38 +1524,38 @@ prediction <strong>target</strong> (<code>income</code>).</p>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">source</span><span class="w"> </span>aidrin-venv/bin/activate
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>./AIDRIN
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>aidrin<span class="w"> </span>list<span class="w">          </span><span class="c1"># sanity check: 15 metrics in 4 categories</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nv">AIDRIN_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/aidrin-venv/bin/aidrin&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AIDRIN_BIN</span><span class="s2">&quot;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nv">AIDRIN_BIN</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/aidrin-venv/bin/aidrin"</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$AIDRIN_BIN</span><span class="s2">"</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>deactivate
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>dsagt<span class="w"> </span>init<span class="w"> </span>aidrin-tour<span class="w"> </span>--agent<span class="w"> </span>claude
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/aidrin-tour
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data&quot;</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>cp<span class="w"> </span>AIDRIN/examples/sample_data/csv/adult.csv<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data/&quot;</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/data"</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>cp<span class="w"> </span>AIDRIN/examples/sample_data/csv/adult.csv<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/data/"</span>
 <a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>dsagt<span class="w"> </span>start<span class="w"> </span>aidrin-tour
 </code></pre></div>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
 <p>Paste these prompts one at a time (substitute the absolute <code>$AIDRIN_BIN</code> path).</p>
 <h3 id="1-register-the-aidrin-cli">1. Register the AIDRIN CLI<a class="headerlink" href="#1-register-the-aidrin-cli" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Register a data-readiness CLI named aidrin into the code registry. The executable is at
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>&lt;AIDRIN_BIN&gt;. Run &quot;&lt;AIDRIN_BIN&gt; --help&quot; and &quot;&lt;AIDRIN_BIN&gt; list&quot; to discover its subcommands and the
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>&lt;AIDRIN_BIN&gt;. Run "&lt;AIDRIN_BIN&gt; --help" and "&lt;AIDRIN_BIN&gt; list" to discover its subcommands and the
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>15 metrics, then save a code spec named aidrin describing the run/batch/data-quality subcommands
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>and their positional arguments.
 </code></pre></div>
 <p><strong>Verify:</strong> <code>Search the registry for the aidrin data-readiness code.</code></p>
 <h3 id="2-run-all-15-metrics-through-dsagt-run">2. Run all 15 metrics through <code>dsagt-run</code><a class="headerlink" href="#2-run-all-15-metrics-through-dsagt-run" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Using the registry aidrin code, run AIDRIN&#39;s full readiness assessment on data/adult.csv, executing
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Using the registry aidrin code, run AIDRIN's full readiness assessment on data/adult.csv, executing
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>every metric through dsagt-run so each is recorded. Cover all four categories:
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>(1) data-quality: completeness, duplicity, outliers;
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>(2) impact-of-data-on-AI: correlations on &quot;age,education.num,sex,race&quot;, and feature-relevance with
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    categorical columns &quot;workclass,education,sex,race&quot;, numerical columns
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    &quot;age,education.num,hours.per.week&quot;, target income;
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>(2) impact-of-data-on-AI: correlations on "age,education.num,sex,race", and feature-relevance with
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    categorical columns "workclass,education,sex,race", numerical columns
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    "age,education.num,hours.per.week", target income;
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>(3) fairness-and-bias: class-imbalance on income, statistical-rates on income with sensitive
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    attribute sex, representation-rate on &quot;sex,race&quot;;
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>(4) data-governance: k-anonymity on &quot;age,sex,race&quot;, l-diversity on &quot;age,sex,race&quot; with sensitive
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    column income, t-closeness on &quot;age,sex,race&quot; with sensitive column income, entropy-risk on
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    &quot;age,sex,race&quot;, single-attribute-risk with id-column ID and eval-columns &quot;age,sex,race&quot;,
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    multiple-attribute-risk with id-column ID and eval-columns &quot;age,sex,race&quot;, and
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    differential-privacy on &quot;age,hours.per.week&quot; with epsilon 1.0.
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    attribute sex, representation-rate on "sex,race";
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>(4) data-governance: k-anonymity on "age,sex,race", l-diversity on "age,sex,race" with sensitive
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    column income, t-closeness on "age,sex,race" with sensitive column income, entropy-risk on
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    "age,sex,race", single-attribute-risk with id-column ID and eval-columns "age,sex,race",
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    multiple-attribute-risk with id-column ID and eval-columns "age,sex,race", and
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    differential-privacy on "age,hours.per.week" with epsilon 1.0.
 <a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>Then give me a readiness verdict organized by the four categories.
 </code></pre></div>
 <p><strong>Expect</strong> — the exact commands and representative results (positional args; JSON to stdout):</p>

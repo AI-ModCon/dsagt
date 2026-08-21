@@ -1227,6 +1227,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../isaac_skills_demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../fusion-fm/" class="md-nav__link">
         
   
@@ -1598,7 +1626,7 @@ and export <code>EMBEDDING_API_KEY</code> in your shell — never written to dis
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
 <p>Use these prompts in the agent session. Replace <code>&lt;CONDA_PREFIX&gt;</code> with your conda env bin path (e.g., <code>~/miniconda3/envs/isolate/bin</code>) and <code>&lt;DEMO_DATA&gt;</code> / <code>&lt;DEMO_REPOS&gt;</code> with your local paths.</p>
 <h3 id="1-build-knowledge-base">1. Build knowledge base<a class="headerlink" href="#1-build-knowledge-base" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>I&#39;d like to create a new collection in the knowledge base: microbial_isolates.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>I'd like to create a new collection in the knowledge base: microbial_isolates.
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>The collection will contain:
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>1) the code package files for fastp: &lt;DEMO_REPOS&gt;/fastp/
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>2) the code package files for megahit: &lt;DEMO_REPOS&gt;/megahit/
@@ -1606,18 +1634,18 @@ and export <code>EMBEDDING_API_KEY</code> in your shell — never written to dis
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>4) best practices for fastp and megahit: use_cases/microbial_isolates/fastp_megahit_best_practices.md
 </code></pre></div>
 <h3 id="2-register-codes">2. Register codes<a class="headerlink" href="#2-register-codes" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Let&#39;s add &lt;CONDA_PREFIX&gt;/fastp to the registry
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Let&#39;s add &lt;CONDA_PREFIX&gt;/megahit to the registry
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Let's add &lt;CONDA_PREFIX&gt;/fastp to the registry
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Let's add &lt;CONDA_PREFIX&gt;/megahit to the registry
 </code></pre></div>
 <h3 id="3-process-one-sample">3. Process one sample<a class="headerlink" href="#3-process-one-sample" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>I have an isolate file at &lt;DEMO_DATA&gt;/microbial_isolate/53162.2.609630.AAAGGCTAGA-GATTCAGTTA.filter-ISO.fastq.gz
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>Information about the dataset is in the README in that directory. I need to preprocess this file and assemble it.
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>fastp and megahit both have data assessment capability so we don&#39;t need to create additional tools.
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>fastp and megahit both have data assessment capability so we don't need to create additional tools.
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>megahit should be run with kmax=21 and memory=0.3 to avoid OOM on this laptop.
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>Tell me your plan before proceeding.
 </code></pre></div>
 <h3 id="4-process-remaining-samples">4. Process remaining samples<a class="headerlink" href="#4-process-remaining-samples" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Let&#39;s run this same pipeline on the rest of the fastq files at &lt;DEMO_DATA&gt;/microbial_isolate/
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Let's run this same pipeline on the rest of the fastq files at &lt;DEMO_DATA&gt;/microbial_isolate/
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>We can process them one at a time.
 </code></pre></div>
 <h3 id="5-generate-datacard">5. Generate datacard<a class="headerlink" href="#5-generate-datacard" title="Permanent link">&para;</a></h3>

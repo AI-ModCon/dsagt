@@ -1210,6 +1210,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../isaac_skills_demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../fusion-fm/" class="md-nav__link">
         
   
@@ -1581,7 +1609,7 @@ tabular dataset where they do apply.</p>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">source</span><span class="w"> </span>aidrin-venv/bin/activate
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>./AIDRIN
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>aidrin<span class="w"> </span>list<span class="w">          </span><span class="c1"># sanity check: prints 15 metrics in 4 categories</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nv">AIDRIN_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/aidrin-venv/bin/aidrin&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AIDRIN_BIN</span><span class="s2">&quot;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nv">AIDRIN_BIN</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">/aidrin-venv/bin/aidrin"</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$AIDRIN_BIN</span><span class="s2">"</span>
 </code></pre></div>
 <h3 id="2-download-the-cryo-em-data-and-build-beforeafter-tables">2. Download the cryo-EM data and build before/after tables<a class="headerlink" href="#2-download-the-cryo-em-data-and-build-beforeafter-tables" title="Permanent link">&para;</a></h3>
 <p>Download the EMPIAR-10017 (β-galactosidase) subset from CryoPPP — it ships ground-truth particle
@@ -1593,30 +1621,30 @@ tables with real CTF/defocus columns and a selected-vs-excluded curation split:<
 </code></pre></div>
 <p>Build a <strong>before</strong> table (all picked particles + a <code>selected</code> flag) and an <strong>after</strong> table (the
 curated, selected-only particles):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;'PY'</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="s">import pandas as pd</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s">gt = &quot;demo_data/cryoem/10017/ground_truth&quot;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s">sel = pd.read_csv(f&quot;{gt}/empiar-10017_particles_selected.csv&quot;)</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="s">exc = pd.read_csv(f&quot;{gt}/empiar-10017_particles_excluded.csv&quot;)</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="s">sel[&quot;selected&quot;] = 1; exc[&quot;selected&quot;] = 0</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="s">pd.concat([sel, exc], ignore_index=True).to_csv(&quot;demo_data/cryoem/cryoem_before.csv&quot;, index=False)</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s">sel.drop(columns=[&quot;selected&quot;]).to_csv(&quot;demo_data/cryoem/cryoem_after.csv&quot;, index=False)</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s">print(&quot;before:&quot;, len(sel) + len(exc), &quot;particles   after:&quot;, len(sel), &quot;particles&quot;)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s">gt = "demo_data/cryoem/10017/ground_truth"</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s">sel = pd.read_csv(f"{gt}/empiar-10017_particles_selected.csv")</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="s">exc = pd.read_csv(f"{gt}/empiar-10017_particles_excluded.csv")</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="s">sel["selected"] = 1; exc["selected"] = 0</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="s">pd.concat([sel, exc], ignore_index=True).to_csv("demo_data/cryoem/cryoem_before.csv", index=False)</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s">sel.drop(columns=["selected"]).to_csv("demo_data/cryoem/cryoem_after.csv", index=False)</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s">print("before:", len(sel) + len(exc), "particles   after:", len(sel), "particles")</span>
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s">PY</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>deactivate
 </code></pre></div>
 <h3 id="3-initialize-and-start-a-dsagt-project">3. Initialize and start a DSAgt project<a class="headerlink" href="#3-initialize-and-start-a-dsagt-project" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>dsagt<span class="w"> </span>init<span class="w"> </span>cryoem-readiness<span class="w"> </span>--agent<span class="w"> </span>claude
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/cryoem-readiness
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data&quot;</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>cp<span class="w"> </span>demo_data/cryoem/cryoem_before.csv<span class="w"> </span>demo_data/cryoem/cryoem_after.csv<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data/&quot;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/data"</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>cp<span class="w"> </span>demo_data/cryoem/cryoem_before.csv<span class="w"> </span>demo_data/cryoem/cryoem_after.csv<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/data/"</span>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>dsagt<span class="w"> </span>start<span class="w"> </span>cryoem-readiness
 </code></pre></div>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
 <p>Paste these prompts into the agent one at a time (substitute the absolute <code>$AIDRIN_BIN</code> path).</p>
 <h3 id="1-register-the-aidrin-cli">1. Register the AIDRIN CLI<a class="headerlink" href="#1-register-the-aidrin-cli" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Register a data-readiness CLI named aidrin into the code registry. The executable is at
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>&lt;AIDRIN_BIN&gt;. Run &quot;&lt;AIDRIN_BIN&gt; --help&quot; and &quot;&lt;AIDRIN_BIN&gt; list&quot; to discover its subcommands and the
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>&lt;AIDRIN_BIN&gt;. Run "&lt;AIDRIN_BIN&gt; --help" and "&lt;AIDRIN_BIN&gt; list" to discover its subcommands and the
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>15 metrics, then save a code spec named aidrin describing the run/batch/data-quality subcommands
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>and their positional arguments.
 </code></pre></div>
@@ -1625,7 +1653,7 @@ curated, selected-only particles):</p>
 <h3 id="2-readiness-assessment-before-curation">2. Readiness assessment BEFORE curation<a class="headerlink" href="#2-readiness-assessment-before-curation" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Using the registry aidrin code, assess the AI data readiness of data/cryoem_before.csv. Run these
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>metrics through dsagt-run: completeness; duplicity; outliers; correlations on the columns
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>&quot;Defocus U,Defocus V,Defocus Angle,CTF B Factor,Origin X (Ang),Origin Y (Ang)&quot;; class-imbalance on
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>"Defocus U,Defocus V,Defocus Angle,CTF B Factor,Origin X (Ang),Origin Y (Ang)"; class-imbalance on
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>the Class Number column; and feature-relevance with no categorical columns, those same numerical
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>columns, and target column selected. Summarize the data-quality and class-balance state.
 </code></pre></div>

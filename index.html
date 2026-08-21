@@ -1098,6 +1098,34 @@
   
   
     <li class="md-nav__item">
+      <a href="use-cases/isaac_skills_demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="use-cases/fusion-fm/" class="md-nav__link">
         
   
@@ -1353,7 +1381,7 @@
 
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python3.12<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>~/.venvs/dsagt<span class="w">          </span><span class="c1"># or: conda create -n dsagt python=3.12 &amp;&amp; conda activate dsagt</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">source</span><span class="w"> </span>~/.venvs/dsagt/bin/activate<span class="w">         </span><span class="c1"># (Windows venv: ~\.venvs\dsagt\Scripts\activate)</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;git+https://github.com/AI-ModCon/dsagt.git&quot;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"git+https://github.com/AI-ModCon/dsagt.git"</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>dsagt<span class="w"> </span>--version<span class="w">                            </span><span class="c1"># 0.2.0</span>
 </code></pre></div>
 <p>This puts the <code>dsagt</code> CLI on your PATH. Create your first project — <code>dsagt init</code> is interactive (it walks you through the agent platform, project location, packaged knowledge collections, and skill sources) and sets up the knowledge base on first run:</p>
@@ -1364,7 +1392,7 @@
 </code></pre></div>
 <p>Or, if you use a VS Code agent extension, just open the folder as a project in VS Code and start the agent — <code>dsagt init</code> already made the dsagt MCP server available via the native interface (e.g. for Claude, exposed in the project's <code>.mcp.json</code>).</p>
 <p>To upgrade later, reinstall — re-running <code>dsagt init</code> reconfigures an existing project in place:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span><span class="s2">&quot;git+https://github.com/AI-ModCon/dsagt.git&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span><span class="s2">"git+https://github.com/AI-ModCon/dsagt.git"</span>
 </code></pre></div>
 <blockquote>
 <p>Pin to a specific release: e.g. <code>pip install "git+https://github.com/AI-ModCon/dsagt.git@0.2.0"</code>.</p>

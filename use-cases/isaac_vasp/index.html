@@ -1138,6 +1138,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../isaac_skills_demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../fusion-fm/" class="md-nav__link">
         
   
@@ -1392,7 +1420,7 @@ with the execution captured in <code>trace_archive/</code>.</p>
 </ul>
 <p>For the <strong>skill-management</strong> counterpart of this workflow (the agent discovers,
 installs, and authors the converter as a skill on tiny mock data), see the
-sister demo <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/isaac_skills_demo"><code>isaac_skills_demo</code></a>.</p>
+sister demo <a href="../isaac_skills_demo/"><code>isaac_skills_demo</code></a>.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
 <li>DSAgt installed (<code>uv sync --all-groups</code>) and an agent platform installed and
@@ -1402,12 +1430,12 @@ sister demo <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/isaa
   (<code>uv pip install pymatgen</code>) — the converter uses <code>pymatgen.io.vasp</code>.</li>
 </ul>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pymatgen<span class="w">                 </span><span class="c1"># the converter&#39;s one real dependency</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pymatgen<span class="w">                 </span><span class="c1"># the converter's one real dependency</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dsagt<span class="w"> </span>init<span class="w"> </span>isaac-vasp<span class="w"> </span>--agent<span class="w"> </span>claude
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/isaac-vasp
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts&quot;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>cp<span class="w"> </span>use_cases/isaac_vasp/vasp_neb_to_isaac.py<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts/&quot;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/isaac_vasp/neb<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data_neb&quot;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts"</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>cp<span class="w"> </span>use_cases/isaac_vasp/vasp_neb_to_isaac.py<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts/"</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/isaac_vasp/neb<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/data_neb"</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isaac-vasp
 </code></pre></div>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
@@ -1425,7 +1453,7 @@ sister demo <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/isaa
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Using the registered vasp-neb-to-isaac code, convert the NEB calculation in
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>data_neb/ and write the ISAAC record to data_neb/isaac_neb_record.json. Use the
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>exact dsagt-run command from the spec so the execution is recorded. Then tell me
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>the record&#39;s reaction-energy / barrier fields and how many images it summarized.
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>the record's reaction-energy / barrier fields and how many images it summarized.
 </code></pre></div>
 <p><strong>Expect:</strong> the agent runs <code>dsagt-run --code vasp-neb-to-isaac -- python
 codes/scripts/vasp_neb_to_isaac.py data_neb/ --output data_neb/isaac_neb_record.json</code>,

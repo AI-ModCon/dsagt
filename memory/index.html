@@ -1066,6 +1066,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../use-cases/isaac_skills_demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../use-cases/fusion-fm/" class="md-nav__link">
         
   
@@ -1236,7 +1264,7 @@
 <p>When episodic memory is enabled, DSAgt reads the agent's transcript as the session runs and captures each completed turn into the <code>session_memory</code> collection — a fast, local chunk-and-embed pass that reuses the same embedder as the rest of the <a href="../knowledge-base/">knowledge base</a>.</p>
 <p>Retrieval over <code>session_memory</code> filters first to a session, then by regex over the query's key terms, before a final <strong>recency-weighted</strong> semantic ranking: a newer turn edges out a stale one as a bounded boost, so a corrected fact wins by recency while a strongly-relevant old turn is never buried.</p>
 <h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># name it `demo`; answer &quot;yes&quot; to &quot;Enable episodic memory?&quot; to also capture turns</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># name it `demo`; answer "yes" to "Enable episodic memory?" to also capture turns</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dsagt<span class="w"> </span>start<span class="w"> </span>demo
 </code></pre></div>
 <p>Then, in the agent — <strong>explicit</strong> memory (you confirm a fact to store):</p>

@@ -1243,6 +1243,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../isaac_skills_demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../fusion-fm/" class="md-nav__link">
         
   
@@ -1628,7 +1656,7 @@ and export <code>EMBEDDING_API_KEY</code> in your shell — never written to dis
 </code></pre></div>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
 <h3 id="1-create-a-cryo-em-knowledge-collection">1. Create a cryo-EM knowledge collection<a class="headerlink" href="#1-create-a-cryo-em-knowledge-collection" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Ingest the folder demo_repos/cryoppp/ into the knowledge base as a collection called &quot;cryoppp&quot;.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Ingest the folder demo_repos/cryoppp/ into the knowledge base as a collection called "cryoppp".
 </code></pre></div>
 <p>Wait for the ingest job to complete, then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Append the file demo_data/cryoem/papers/cryoppp_paper.pdf to the cryoppp collection.
@@ -1659,7 +1687,7 @@ and export <code>EMBEDDING_API_KEY</code> in your shell — never written to dis
 <p>The agent should search the knowledge base, write the script, and register it via <code>save_code_spec</code>.</p>
 <h3 id="5-run-the-pipeline">5. Run the pipeline<a class="headerlink" href="#5-run-the-pipeline" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Run the pipeline on the EMPIAR-10017 dataset in demo_data/cryoem/10017/:
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>1. Scan the directory to understand what&#39;s there
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>1. Scan the directory to understand what's there
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>2. Profile the micrograph metadata
 <a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>3. Run the quality scoring tool on the metadata
 <a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>4. Summarize: how many micrographs fall into each quality tier?

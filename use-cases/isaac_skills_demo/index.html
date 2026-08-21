@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/cryoem/">
+        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/isaac_skills_demo/">
       
       
-        <link rel="prev" href="../microbial_isolates/">
+        <link rel="prev" href="../aidrin_full_tour/">
       
       
-        <link rel="next" href="../isaac_vasp/">
+        <link rel="next" href="../fusion-fm/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Cryo-EM - DSAgt</title>
+        <title>Skill-Driven VASP → ISAAC Conversion - DSAgt</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#cryo-em" class="md-skip">
+        <a href="#skill-driven-vasp-isaac-conversion" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Cryo-EM
+              Skill-Driven VASP → ISAAC Conversion
             
           </span>
         </div>
@@ -871,37 +871,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cryo-EM
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../cryoem/" class="md-nav__link">
         
   
   
@@ -917,236 +890,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prerequisites
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Setup">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-download-cryo-em-dataset" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Download cryo-EM dataset
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-download-the-cryoppp-paper" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Download the CryoPPP paper
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-clone-the-cryoppp-repository" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Clone the CryoPPP repository
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-initialize-a-dsagt-project" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Initialize a DSAgt project
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#5-start-the-session" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Start the session
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#execution" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execution
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Execution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-create-a-cryo-em-knowledge-collection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Create a cryo-EM knowledge collection
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-query-the-knowledge-base-for-pipeline-design" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Query the knowledge base for pipeline design
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-register-cryoppp-processing-codes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Register CryoPPP processing codes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-create-a-quality-scoring-code" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Create a quality scoring code
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#5-run-the-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Run the pipeline
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#6-generate-a-datacard" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        6. Generate a datacard
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#7-reconstruct-the-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        7. Reconstruct the pipeline
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#post-conditions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Post-Conditions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What This Tests
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cleanup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cleanup
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1231,6 +974,230 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill-Driven VASP → ISAAC Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-demonstrates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this demonstrates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#walkthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Walkthrough
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Walkthrough">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-what-do-we-have-native-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1 — What do we have? (native discovery)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-where-can-we-find-more-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2 — Where can we find more skills?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-sync-skills-from-an-external-repo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3 — Sync skills from an external repo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-add-the-relevant-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4 — Add the relevant skill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-create-the-converter-skill-with-skill-creator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5 — Create the converter skill with skill-creator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-run-the-converter-on-the-mock-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6 — Run the converter on the mock data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-inspect-the-tiers-run-in-a-shell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7 — Inspect the tiers (run in a shell)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1353,10 +1320,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#what-this-demonstrates" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Prerequisites
+        What this demonstrates
       
     </span>
   </a>
@@ -1372,86 +1339,25 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Setup">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-download-cryo-em-dataset" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Download cryo-EM dataset
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-download-the-cryoppp-paper" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Download the CryoPPP paper
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-clone-the-cryoppp-repository" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Clone the CryoPPP repository
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-initialize-a-dsagt-project" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Initialize a DSAgt project
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#5-start-the-session" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Start the session
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
-  <a href="#execution" class="md-nav__link">
+  <a href="#walkthrough" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Execution
+        Walkthrough
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Execution">
+    <nav class="md-nav" aria-label="Walkthrough">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-create-a-cryo-em-knowledge-collection" class="md-nav__link">
+  <a href="#1-what-do-we-have-native-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Create a cryo-EM knowledge collection
+        1 — What do we have? (native discovery)
       
     </span>
   </a>
@@ -1459,10 +1365,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-query-the-knowledge-base-for-pipeline-design" class="md-nav__link">
+  <a href="#2-where-can-we-find-more-skills" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Query the knowledge base for pipeline design
+        2 — Where can we find more skills?
       
     </span>
   </a>
@@ -1470,10 +1376,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-register-cryoppp-processing-codes" class="md-nav__link">
+  <a href="#3-sync-skills-from-an-external-repo" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Register CryoPPP processing codes
+        3 — Sync skills from an external repo
       
     </span>
   </a>
@@ -1481,10 +1387,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-create-a-quality-scoring-code" class="md-nav__link">
+  <a href="#4-add-the-relevant-skill" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Create a quality scoring code
+        4 — Add the relevant skill
       
     </span>
   </a>
@@ -1492,10 +1398,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#5-run-the-pipeline" class="md-nav__link">
+  <a href="#5-create-the-converter-skill-with-skill-creator" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Run the pipeline
+        5 — Create the converter skill with skill-creator
       
     </span>
   </a>
@@ -1503,10 +1409,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-generate-a-datacard" class="md-nav__link">
+  <a href="#6-run-the-converter-on-the-mock-data" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Generate a datacard
+        6 — Run the converter on the mock data
       
     </span>
   </a>
@@ -1514,10 +1420,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#7-reconstruct-the-pipeline" class="md-nav__link">
+  <a href="#7-inspect-the-tiers-run-in-a-shell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Reconstruct the pipeline
+        7 — Inspect the tiers (run in a shell)
       
     </span>
   </a>
@@ -1541,10 +1447,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#cleanup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Cleanup
       
     </span>
   </a>
@@ -1552,10 +1458,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cleanup" class="md-nav__link">
+  <a href="#notes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cleanup
+        Notes
       
     </span>
   </a>
@@ -1579,158 +1485,182 @@
 
 
 
-<h1 id="cryo-em">Cryo-EM<a class="headerlink" href="#cryo-em" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP</p>
-<p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/cryoem/"><code>use_cases/cryoem/</code></a></p>
-<p><strong>Demo bundle:</strong> <a href="https://drive.google.com/uc?export=download&amp;id=1xNTL9vqSD4HnWMnpmgwihq-viU0Cus7V">Download <code>.tar.gz</code></a></p>
-<p>DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive (EMPIAR-10017 β-galactosidase micrographs via CryoPPP) — register curation tools, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing pipeline.</p>
+<h1 id="skill-driven-vasp-isaac-conversion">Skill-Driven VASP → ISAAC Conversion<a class="headerlink" href="#skill-driven-vasp-isaac-conversion" title="Permanent link">&para;</a></h1>
+<p><strong>Domain:</strong> Skill management — external skill catalog (K-Dense) authoring a VASP → ISAAC converter</p>
+<p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/isaac_skills_demo/"><code>use_cases/isaac_skills_demo/</code></a></p>
+<p><strong>Demo bundle:</strong> <a href="https://drive.google.com/uc?export=download&amp;id=19PNObF-FZkGITNJ_VIZH8j9BHWSqRPrH">Download <code>.tar.gz</code></a></p>
+<p>A lightweight mock of the isaac_vasp workflow where the agent itself discovers, syncs, installs, and authors skills (pymatgen, skill-creator) to convert mock VASP output into an ISAAC record, vetting the skill-management feature end-to-end.</p>
 <blockquote>
-<p><strong>Estimated time:</strong> ~40 minutes — this is the broadest demo (7 stages) and
-the least quick. It pulls a <strong>~2 GB EMPIAR-10017 download</strong>, an arXiv PDF,
-and a full CryoPPP repo clone, then KB-ingests the whole repo (minutes on the
-local embedder) before any pipeline work. Best treated as an advanced,
-bring-time walkthrough rather than a 10-minute demo.</p>
+<p><strong>Estimated time:</strong> ~15 minutes — the agent flow runs in seconds on the
+bundled few-KB mock data; the one real cost is a one-time
+<code>pip install pymatgen</code> (needed for step 6) plus a shallow clone of the
+K-Dense catalog from GitHub.</p>
 </blockquote>
-<p>This guide documents a comprehensive DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, cross-collection knowledge synthesis, and multi-stage pipeline execution with domain-specific evaluation.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<p>A lightweight mock of the <a href="../isaac_vasp/"><code>isaac_vasp</code></a> workflow, built to <strong>vet
+the skill-management feature</strong>. It follows the same arc as <code>isaac_vasp</code> — install
+the <strong>pymatgen</strong> skill, author a <code>vasp-to-isaac</code> converter that parses VASP output
+<strong>with pymatgen</strong>, and emit an ISAAC record — but the agent <strong>discovers, syncs,
+installs, and authors</strong> those skills itself, surfaced through Claude Code's
+<em>native</em> skill discovery. It uses tiny <strong>mock VASP outputs</strong> (<code>mock_data/</code>, a few
+KB), so the whole thing runs in seconds with no DFT, no NERSC, and no 32 MB
+OUTCAR files — yet the parsing is the real <code>pymatgen.io.vasp</code>, not a hand-rolled
+stand-in.</p>
+<h2 id="what-this-demonstrates">What this demonstrates<a class="headerlink" href="#what-this-demonstrates" title="Permanent link">&para;</a></h2>
 <ul>
-<li>DSAgt installed (<code>uv sync --all-groups</code>)</li>
-<li>An agent platform installed and <strong>already authenticated</strong> (e.g., <code>claude</code> for Claude Code)
-  — BYOA: dsagt writes no credentials. The default local embedder needs no API key.</li>
-<li>~2 GB disk space for the cryo-EM test data</li>
-<li>Git installed</li>
+<li><strong><code>list_skill_sources</code></strong> — the agent discovers what external sources it can
+  pull from (curated names + arbitrary git URLs) and which are synced.</li>
+<li><strong><code>add_skill_source</code></strong> — the agent syncs a source (here: K-Dense
+  <code>k-dense-ai</code>, 140+ skills) into a searchable catalog that is
+  <strong>not</strong> loaded into context; with the single <code>dsagt-server</code> it's searchable
+  immediately, no restart.</li>
+<li><strong><code>search_skills</code></strong> + <strong><code>install_skill</code></strong> — find a catalog skill (hits marked
+  <code>[catalog]</code>) and draw it into the project + Claude's native <code>.claude/skills/</code>.</li>
+<li><strong><code>skill-creator</code></strong> — the bundled meta-skill scaffolds a new <code>vasp-to-isaac</code>
+  skill (from the Anthropic template) whose converter <em>uses the installed
+  pymatgen skill</em> to parse the VASP output — install-then-build, not install-and-ignore.</li>
+<li><strong>Native mirror</strong> — installed + bundled skills appear under
+  <code>.claude/skills/&lt;name&gt;/</code> (tracked by <code>.dsagt-managed.json</code>), so Claude
+  auto-invokes them with no MCP round-trip.</li>
 </ul>
+<p>The two tiers in one sentence: <strong>catalog = searchable but not in context;
+installed = native and auto-invoked.</strong></p>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<h3 id="1-download-cryo-em-dataset">1. Download cryo-EM dataset<a class="headerlink" href="#1-download-cryo-em-dataset" title="Permanent link">&para;</a></h3>
-<p>Download the EMPIAR-10017 (β-galactosidase) subset from the CryoPPP dataset — 84 micrographs.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>demo_data/cryoem
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">cd</span><span class="w"> </span>demo_data/cryoem
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>curl<span class="w"> </span>-L<span class="w"> </span>https://calla.rnet.missouri.edu/cryoppp/10017.tar.gz<span class="w"> </span>-o<span class="w"> </span><span class="m">10017</span>.tar.gz
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>tar<span class="w"> </span>xzf<span class="w"> </span><span class="m">10017</span>.tar.gz
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nb">cd</span><span class="w"> </span>../..
+<p>Assumes DSAgt (<code>uv sync --all-groups</code>) and Claude Code
+(<code>npm i -g @anthropic-ai/claude-code</code>) are installed, plus git. Embedding
+credentials are optional — <code>search_skills</code> uses semantic search when
+<code>EMBEDDING_*</code> is set and falls back to a keyword scorer otherwise (configure it
+for sharper relevance).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init<span class="w"> </span>isaac-skills-demo<span class="w"> </span>--agent<span class="w"> </span>claude<span class="w"> </span>--exclude<span class="w"> </span>genesis<span class="w">   </span><span class="c1"># core KB + bundled codes/skills, but NO catalog synced</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/isaac_skills_demo/mock_data<span class="w"> </span>~/dsagt-projects/isaac-skills-demo/mock_data
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isaac-skills-demo<span class="w">                     </span><span class="c1"># mirrors the bundled skill-creator into .claude/skills/ before launch</span>
 </code></pre></div>
-<h3 id="2-download-the-cryoppp-paper">2. Download the CryoPPP paper<a class="headerlink" href="#2-download-the-cryoppp-paper" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>demo_data/cryoem/papers
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-L<span class="w"> </span>https://arxiv.org/pdf/2304.02011<span class="w"> </span>-o<span class="w"> </span>demo_data/cryoem/papers/cryoppp_paper.pdf
+<p>The project starts with <strong>no external catalog synced</strong> — that's deliberate (the
+<code>--exclude genesis</code> drops the default catalog): the walkthrough has the agent
+<em>discover, sync, and search</em> it from inside the session. The single
+<code>dsagt-server</code> owns the KB, so a source the agent syncs mid-session is
+<strong>immediately searchable, no restart</strong>.</p>
+<blockquote>
+<p>To instead pre-sync a source at init, pass <code>--include</code> with a source name
+(e.g. <code>dsagt init … --include k-dense-ai</code>); <code>init</code> provisions it into the KB
+and step 3 below becomes an idempotent refresh.</p>
+</blockquote>
+<h2 id="walkthrough">Walkthrough<a class="headerlink" href="#walkthrough" title="Permanent link">&para;</a></h2>
+<p>Paste each prompt into Claude Code (running inside the project), one at a time.
+The arc: <strong>see what you have → find more → sync a source → install the relevant
+skill → author a new one → run it.</strong></p>
+<h3 id="1-what-do-we-have-native-discovery">1 — What do we have? (native discovery)<a class="headerlink" href="#1-what-do-we-have-native-discovery" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Do you have a skill available for scaffolding new skills? Name it and give me a one-line summary of what it does.</p>
+</blockquote>
+<p><em>Expect:</em> Claude names <strong><code>skill-creator</code></strong> and summarizes it — discovered
+<strong>natively, with no MCP call</strong> and no file digging. That's the mirror working:
+<code>dsagt start</code> copied the bundled <code>skill-creator</code> into <code>.claude/skills/</code>, so Claude
+sees its name + description like any native skill (and loads the full <code>SKILL.md</code>
+only when the skill is invoked — progressive disclosure). <code>search_skills</code> is for
+the not-yet-installed <em>catalog</em> only, so it should not fire here. You confirm
+<em>which</em> skills dsagt placed from a shell in step 7 (<code>cat .dsagt-managed.json</code>) —
+that manifest is dsagt's internal mirror bookkeeping, not something the agent
+reads.</p>
+<h3 id="2-where-can-we-find-more-skills">2 — Where can we find more skills?<a class="headerlink" href="#2-where-can-we-find-more-skills" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Where can I get more skills from? List the skill sources you can pull from and which are already synced.</p>
+</blockquote>
+<p><em>Expect:</em> <code>list_skill_sources</code> → the known sources (<code>k-dense-ai</code>, <code>anthropic</code>,
+<code>antigravity</code>, <code>composio</code>, <code>genesis</code>) with URLs, each flagged <strong>available, not
+synced</strong> (nothing is synced yet on an <code>--exclude genesis</code> setup).</p>
+<h3 id="3-sync-skills-from-an-external-repo">3 — Sync skills from an external repo<a class="headerlink" href="#3-sync-skills-from-an-external-repo" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Sync the "k-dense-ai" source so we can search its catalog.</p>
+</blockquote>
+<p><em>Expect:</em> <code>add_skill_source(source="k-dense-ai")</code> → a shallow clone of K-Dense
+<code>scientific-agent-skills</code>, ~140 skills indexed into
+<code>skills_catalog__k-dense-ai-scientific-agent-skills</code>, source persisted to
+<code>.dsagt/config.yaml</code>. Because it's one <code>dsagt-server</code>, the catalog is searchable
+<strong>immediately</strong> — the next prompt can hit it with no restart.</p>
+<h3 id="4-add-the-relevant-skill">4 — Add the relevant skill<a class="headerlink" href="#4-add-the-relevant-skill" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Search the catalog for a skill that helps parse VASP output with pymatgen, then install the most relevant one into this project.</p>
+</blockquote>
+<p><em>Expect:</em> <code>search_skills</code> (catalog hits tagged <code>[catalog · install_skill to add]</code>,
+<code>pymatgen</code> at/near the top) → <code>install_skill(skill_name="pymatgen")</code>; the reply
+notes it'll be native after the next start. The installed <code>pymatgen</code> skill carries
+the reference docs (<code>pymatgen.io.vasp.Incar</code> / <code>Poscar</code> / <code>Outcar</code>) the converter
+uses next. <strong>Verify</strong> the skill dir (with any <code>scripts/</code>/<code>references/</code>) landed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ls<span class="w"> </span>~/dsagt-projects/isaac-skills-demo/skills/
 </code></pre></div>
-<h3 id="3-clone-the-cryoppp-repository">3. Clone the CryoPPP repository<a class="headerlink" href="#3-clone-the-cryoppp-repository" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>demo_repos
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/BioinfoMachineLearning/cryoppp.git<span class="w"> </span>demo_repos/cryoppp
+<h3 id="5-create-the-converter-skill-with-skill-creator">5 — Create the converter skill with skill-creator<a class="headerlink" href="#5-create-the-converter-skill-with-skill-creator" title="Permanent link">&para;</a></h3>
+<p>This mirrors <code>isaac_vasp</code>'s <code>vasp-to-isaac</code> skill — the lightweight version reads
+the small mock directory, but does the parsing with <strong>real pymatgen</strong>, the same
+way the full workflow does (just without the heavy <code>vasprun.xml</code>).</p>
+<blockquote>
+<p>Use the skill-creator skill to author a new project skill named "vasp-to-isaac". Following the pymatgen skill you just installed, its converter should use <code>pymatgen.io.vasp</code> — <code>Incar.from_file</code> (ENCUT, NSW, ISPIN, LDAUU), <code>Poscar.from_file</code> (formula, atom counts), and <code>Outcar</code> (final energy, energy(sigma-&gt;0), total magnetization, max force) — to read a VASP slab calc directory and emit an ISAAC-style JSON record. The mock has no vasprun.xml, so take energy/forces from the OUTCAR. Target the shape in mock_data/expected_isaac_record.json. Save it with save_skill.</p>
+</blockquote>
+<p><em>Expect:</em> the agent reads <code>skill-creator</code>'s template + the <code>pymatgen</code> skill's IO
+docs, then <code>save_skill</code> writes <code>&lt;project&gt;/skills/vasp-to-isaac/</code> whose script
+imports <code>pymatgen.io.vasp</code> (not a hand-rolled regex parser).</p>
+<h3 id="6-run-the-converter-on-the-mock-data">6 — Run the converter on the mock data<a class="headerlink" href="#6-run-the-converter-on-the-mock-data" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Invoke the vasp-to-isaac skill on mock_data/mock_slab/ and write the result to audit/mock_slab_isaac.json. Then diff its structure and values against mock_data/expected_isaac_record.json and report any differences.</p>
+</blockquote>
+<p><em>Expect:</em> pymatgen parses the mock dir and the agent writes
+<code>audit/mock_slab_isaac.json</code> with the key fields <strong>pymatgen extracted</strong> — final
+energy ≈ -132.8421 eV (<code>Outcar.final_energy</code>), 12 atoms (<code>Poscar</code>), ENCUT 520 /
+NSW 50 (<code>Incar</code>), total mag ≈ 8.0123 (<code>Outcar.total_mag</code>) — matching the
+reference. (<code>pymatgen</code> must be importable in the project env — see Notes.)</p>
+<h3 id="7-inspect-the-tiers-run-in-a-shell">7 — Inspect the tiers (run in a shell)<a class="headerlink" href="#7-inspect-the-tiers-run-in-a-shell" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>isaac-skills-demo<span class="w">                      </span><span class="c1"># KB shows the k-dense-ai catalog collection</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ls<span class="w"> </span>~/dsagt-projects/isaac-skills-demo/skills/<span class="w">     </span><span class="c1"># installed: pymatgen + vasp-to-isaac</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>ls<span class="w"> </span>~/dsagt-projects/isaac-skills-demo/.claude/skills/
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>cat<span class="w"> </span>~/dsagt-projects/isaac-skills-demo/.claude/skills/.dsagt-managed.json
 </code></pre></div>
-<h3 id="4-initialize-a-dsagt-project">4. Initialize a DSAgt project<a class="headerlink" href="#4-initialize-a-dsagt-project" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>dsagt<span class="w"> </span>init<span class="w"> </span>cryoem-pipeline<span class="w"> </span>--agent<span class="w"> </span>claude
-</code></pre></div>
-<p>(The default local embedder needs no key. To use a hosted embedder instead, set
-<code>embedding.backend: api</code> in <code>~/dsagt-projects/cryoem-pipeline/.dsagt/config.yaml</code>
-and export <code>EMBEDDING_API_KEY</code> in your shell — never written to disk.)</p>
-<h3 id="5-start-the-session">5. Start the session<a class="headerlink" href="#5-start-the-session" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>dsagt<span class="w"> </span>start<span class="w"> </span>cryoem-pipeline
-</code></pre></div>
-<h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
-<h3 id="1-create-a-cryo-em-knowledge-collection">1. Create a cryo-EM knowledge collection<a class="headerlink" href="#1-create-a-cryo-em-knowledge-collection" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Ingest the folder demo_repos/cryoppp/ into the knowledge base as a collection called "cryoppp".
-</code></pre></div>
-<p>Wait for the ingest job to complete, then:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Append the file demo_data/cryoem/papers/cryoppp_paper.pdf to the cryoppp collection.
-</code></pre></div>
-<p><strong>Verify:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>List all knowledge base collections.
-</code></pre></div>
-<p>Should show <code>cryoppp</code>.</p>
-<h3 id="2-query-the-knowledge-base-for-pipeline-design">2. Query the knowledge base for pipeline design<a class="headerlink" href="#2-query-the-knowledge-base-for-pipeline-design" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Search the cryoppp collection for guidance on creating an AI-ready data processing pipeline for cryo-EM micrographs. What quality parameters should I filter on, and what thresholds are recommended?
-</code></pre></div>
-<p>The agent should return chunks describing quality metrics: CTF resolution, defocus ranges, ice thickness thresholds, and motion statistics.</p>
-<h3 id="3-register-cryoppp-processing-codes">3. Register CryoPPP processing codes<a class="headerlink" href="#3-register-cryoppp-processing-codes" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Look at the scripts in demo_repos/cryoppp/ and register any data-processing or evaluation codes you find. Run --help on each script to discover its interface.
-</code></pre></div>
-<p><strong>Verify:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Search the registry for cryo-EM codes.
-</code></pre></div>
-<h3 id="4-create-a-quality-scoring-code">4. Create a quality scoring code<a class="headerlink" href="#4-create-a-quality-scoring-code" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Write a Python script that scores cryo-EM micrographs based on:
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>- CTF fit resolution (CTFMaxRes)
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>- Defocus range
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>- Ice thickness
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>- Motion statistics
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>Use the CryoCRAB 0-7 scoring scheme described in the cryoppp collection. The script should read a metadata CSV and output a scored CSV with quality_score and quality_tier (high/medium/low) columns. Save the script under codes/&lt;name&gt;/scripts/ and register it as a code.
-</code></pre></div>
-<p>The agent should search the knowledge base, write the script, and register it via <code>save_code_spec</code>.</p>
-<h3 id="5-run-the-pipeline">5. Run the pipeline<a class="headerlink" href="#5-run-the-pipeline" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Run the pipeline on the EMPIAR-10017 dataset in demo_data/cryoem/10017/:
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>1. Scan the directory to understand what's there
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>2. Profile the micrograph metadata
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>3. Run the quality scoring tool on the metadata
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>4. Summarize: how many micrographs fall into each quality tier?
-</code></pre></div>
-<h3 id="6-generate-a-datacard">6. Generate a datacard<a class="headerlink" href="#6-generate-a-datacard" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Search for a skill that can generate a datacard for the processed cryo-EM data, then use it.
-</code></pre></div>
-<h3 id="7-reconstruct-the-pipeline">7. Reconstruct the pipeline<a class="headerlink" href="#7-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Reconstruct the pipeline from the execution records as a bash script.
-</code></pre></div>
+<p>The manifest lists only the skills <strong>dsagt</strong> placed; any skill you hand-create
+under <code>.claude/skills/</code> is never touched. Restart Claude
+(<code>dsagt start isaac-skills-demo</code> again) to pick up newly-mirrored skills as
+native auto-invoked skills.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Knowledge base contains <code>cryoppp</code> collection with repo code, docs, and appended paper.</li>
-<li>Code registry includes the CryoPPP processing codes and the quality-scoring code.</li>
-<li>Quality-scored CSV exists with tier distribution.</li>
-<li>A datacard exists for the processed dataset.</li>
-<li>A reconstructed pipeline script is available.</li>
-<li>Code execution records in <code>trace_archive/</code> document the full provenance chain.</li>
-<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture token usage, latency, and full request/response history.</li>
+<li>The KB holds the <code>skills_catalog__k-dense-ai-scientific-agent-skills</code>
+   collection, <strong>synced in-session by the agent</strong> (step 3), searchable via
+   <code>search_skills</code> but absent from Claude's context.</li>
+<li>The <code>pymatgen</code> catalog skill was installed into <code>&lt;project&gt;/skills/</code> and
+   mirrored into <code>.claude/skills/</code>.</li>
+<li>A new <code>vasp-to-isaac</code> skill, authored via <code>skill-creator</code> and parsing with
+   <strong>pymatgen</strong> (<code>pymatgen.io.vasp</code>), exists and is native-discoverable.</li>
+<li><code>audit/mock_slab_isaac.json</code> was produced from the mock VASP directory by
+   pymatgen and matches the ISAAC shape + values.</li>
+<li><code>.claude/skills/.dsagt-managed.json</code> tracks exactly the dsagt-placed skills.</li>
 </ol>
-<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>DSAgt Capability</th>
-<th>Steps</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Knowledge ingestion (folder)</td>
-<td>1</td>
-</tr>
-<tr>
-<td>Knowledge append (single file)</td>
-<td>1</td>
-</tr>
-<tr>
-<td>Semantic search</td>
-<td>2</td>
-</tr>
-<tr>
-<td>Code discovery via registry</td>
-<td>3</td>
-</tr>
-<tr>
-<td>Code registration</td>
-<td>3, 4</td>
-</tr>
-<tr>
-<td>KB-guided code generation</td>
-<td>4</td>
-</tr>
-<tr>
-<td>Code execution with provenance</td>
-<td>5</td>
-</tr>
-<tr>
-<td>Skill discovery and use</td>
-<td>6</td>
-</tr>
-<tr>
-<td>Pipeline reconstruction</td>
-<td>7</td>
-</tr>
-</tbody>
-</table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>cryoem-pipeline<span class="w"> </span>-y<span class="w">          </span><span class="c1"># unregisters the project and removes its dir</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>rm<span class="w"> </span>-rf<span class="w"> </span>demo_data/cryoem<span class="w"> </span>demo_repos/cryoppp
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>isaac-skills-demo<span class="w">            </span><span class="c1"># add -y to skip the prompt</span>
 </code></pre></div>
+<p>The shared catalog cache lives at <code>~/dsagt-projects/.skill_sources/</code> and is
+reused across projects; delete it to force a fresh clone.</p>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>pymatgen must be importable</strong> in the project env to run step 6 (the converter
+  uses <code>pymatgen.io.vasp</code>, exactly as <code>isaac_vasp</code> does). Install it once —
+  <code>pip install pymatgen</code> (or <code>uv pip install pymatgen</code>) into the same environment
+  <code>dsagt</code> runs in; the installed <code>pymatgen</code> skill's <code>references/</code> document this.
+  This is the demo's one real dependency — "lightweight" is about the data, not
+  avoiding pymatgen.</li>
+<li><code>mock_data/</code> is intentionally tiny and <strong>not</strong> real DFT output, but it is <em>valid
+  VASP format</em>: the INCAR/POSCAR parse cleanly, and the OUTCAR stub keeps exactly
+  the lines pymatgen's <code>Outcar</code> reads (TOTEN, <code>energy(sigma-&gt;0)</code>, magnetization,
+  the force block) while omitting the ~250k-line SCF/eigenvalue blocks. No
+  <code>vasprun.xml</code> (it'd be large), so the converter takes energy/forces from OUTCAR.</li>
+<li>With the default <strong>local</strong> embedder (<code>bge-small</code>), absolute search scores are
+  low (~0.03) because short queries under-score long SKILL.md text — <em>ranking</em> is
+  still correct (pymatgen #1). Switch <code>embedding.backend</code> to <code>api</code> for sharper
+  relevance. With no embedder at all, <code>search_skills</code> falls back to keyword
+  scoring; <code>install_skill</code> and the native mirror are pure filesystem ops.</li>
+<li>Add <strong>more</strong> sources the same way — ask the agent to "enable the anthropic
+  source" (or <code>antigravity</code>, <code>composio</code>, <code>genesis</code>, or any
+  <code>https://github.com/owner/repo</code>), which fires <code>add_skill_source</code>. Each lands
+  in its own <code>skills_catalog__*</code> collection.</li>
+<li>Sister demo: <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/genesis_skills"><code>genesis_skills</code></a> flexes the same catalog →
+  install → native loop plus KB domain ingest and datacard generation, against
+  the Genesis (OSTI GitLab) source.</li>
+</ul>
 
 
 
