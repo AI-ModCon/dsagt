@@ -35,6 +35,7 @@ import logging  # noqa: E402
 import threading  # noqa: E402
 from pathlib import Path  # noqa: E402
 
+import jsonschema  # noqa: E402
 import yaml  # noqa: E402
 
 import mcp.server.stdio  # noqa: E402
@@ -76,6 +77,7 @@ def build_dispatch_server(
     in the single-concern test servers / one-shot tools.
     """
     tool_category = tool_category or {}
+    schemas = {tool.name: tool.input_schema for tool in tools}
 
     async def on_list_tools(ctx, params) -> types.ListToolsResult:
         return types.ListToolsResult(tools=tools)
@@ -84,8 +86,18 @@ def build_dispatch_server(
         ctx, params: types.CallToolRequestParams
     ) -> types.CallToolResult:
         tool_name = params.name
-        arguments = params.arguments
+        # ``arguments`` is optional in the protocol (None when omitted), and the
+        # mcp server does not validate against input_schema before dispatch —
+        # reject malformed calls here so handlers can assume valid input.
+        arguments = params.arguments or {}
         handler = handlers[tool_name]  # KeyError = bug in list_tools schema
+        try:
+            jsonschema.validate(instance=arguments, schema=schemas[tool_name])
+        except jsonschema.ValidationError as e:
+            error = {"status": "error", "error": f"Input validation error: {e.message}"}
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=json.dumps(error))]
+            )
         with open_span(tool_name, source=tool_category.get(tool_name)) as span:
             try:
                 result = await handler(arguments)

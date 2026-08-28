@@ -130,6 +130,58 @@ def test_dict_returning_handler_is_json_encoded(tmp_path):
     assert "sources" in parsed
 
 
+class TestInputValidation:
+    """The dispatch shell validates arguments against the tool's input schema.
+
+    The mcp 2.x server invokes ``on_call_tool`` without validating arguments
+    (and ``params.arguments`` is None when omitted), so the shell must reject
+    malformed calls before they reach a handler.
+    """
+
+    def _server(self):
+        from dsagt.mcp.server import build_dispatch_server
+
+        async def echo(args):
+            return {"echoed": args["q"]}
+
+        tools = [
+            types.Tool(
+                name="demo",
+                description="d",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                    "required": ["q"],
+                },
+            )
+        ]
+        return build_dispatch_server("test", tools, {"demo": echo})
+
+    def test_missing_required_argument_rejected(self):
+        out = json.loads(_call(self._server(), "demo", {}))
+        assert out["status"] == "error"
+        assert "Input validation error" in out["error"]
+        assert "'q' is a required property" in out["error"]
+
+    def test_omitted_arguments_rejected(self):
+        server = self._server()
+        handler = server.get_request_handler("tools/call").handler
+        params = types.CallToolRequestParams(name="demo")  # arguments is None
+        res = asyncio.run(handler(None, params))
+        out = json.loads(res.content[0].text)
+        assert out["status"] == "error"
+        assert "'q' is a required property" in out["error"]
+
+    def test_wrong_type_rejected(self):
+        out = json.loads(_call(self._server(), "demo", {"q": 7}))
+        assert out["status"] == "error"
+        assert "Input validation error" in out["error"]
+
+    def test_valid_arguments_dispatch(self):
+        out = json.loads(_call(self._server(), "demo", {"q": "hello"}))
+        assert out == {"echoed": "hello"}
+
+
 class TestBuildKbFromConfig:
     """``_build_kb_from_config`` validates embedding config before building a KB.
 
