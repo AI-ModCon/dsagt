@@ -8,9 +8,11 @@ from pathlib import Path
 
 from dsagt.provenance import (
     build_dependency_graph,
+    compute_terminal_outputs,
     load_pipeline_records,
     reconstruct_pipeline,
     render_bash,
+    render_json,
     render_snakemake,
 )
 
@@ -270,6 +272,97 @@ class TestRenderSnakemake:
 
 
 # ---------------------------------------------------------------------------
+# compute_terminal_outputs
+# ---------------------------------------------------------------------------
+
+
+class TestComputeTerminalOutputs:
+
+    def test_diamond_dependency(self):
+        """A produces two files; B and C each consume one; D combines them into
+        a final output that nothing downstream consumes."""
+        records = [
+            _make_record("a", ["a"], output_files=["x.fq", "y.fq"]),
+            _make_record("b", ["b"], input_files=["x.fq"], output_files=["bx.txt"]),
+            _make_record("c", ["c"], input_files=["y.fq"], output_files=["cy.txt"]),
+            _make_record(
+                "d",
+                ["d"],
+                input_files=["bx.txt", "cy.txt"],
+                output_files=["final.txt"],
+            ),
+        ]
+        assert compute_terminal_outputs(records) == ["final.txt"]
+
+    def test_independent_leaves(self):
+        """Several unrelated single-step branches: every output is terminal."""
+        records = [
+            _make_record("a", ["a"], output_files=["a.out"]),
+            _make_record("b", ["b"], output_files=["b.out"]),
+            _make_record("c", ["c"], output_files=["c.out"]),
+        ]
+        assert compute_terminal_outputs(records) == ["a.out", "b.out", "c.out"]
+
+    def test_linear_pipeline_only_last_output_terminal(self):
+        records = [
+            _make_record("a", ["a"], output_files=["x.txt"]),
+            _make_record("b", ["b"], input_files=["x.txt"], output_files=["y.txt"]),
+        ]
+        assert compute_terminal_outputs(records) == ["y.txt"]
+
+    def test_no_outputs(self):
+        records = [_make_record("a", ["a"])]
+        assert compute_terminal_outputs(records) == []
+
+    def test_duplicate_output_deduplicated(self):
+        """The same terminal file produced twice only appears once."""
+        records = [
+            _make_record("a", ["a"], output_files=["x.txt"], record_id="r1"),
+            _make_record("b", ["b"], output_files=["x.txt"], record_id="r2"),
+        ]
+        assert compute_terminal_outputs(records) == ["x.txt"]
+
+
+# ---------------------------------------------------------------------------
+# render_json
+# ---------------------------------------------------------------------------
+
+
+class TestRenderJson:
+
+    def test_structure(self):
+        records = [
+            _make_record(
+                "fastp", ["fastp"], input_files=["raw.fq"], output_files=["clean.fq"]
+            ),
+        ]
+        deps = build_dependency_graph(records)
+        result = json.loads(render_json(records, deps))
+
+        assert result["records"] == records
+        assert result["dependency_graph"] == {"0": []}
+        assert result["terminal_outputs"] == ["clean.fq"]
+
+    def test_diamond_terminal_outputs(self):
+        records = [
+            _make_record("a", ["a"], output_files=["x.fq", "y.fq"]),
+            _make_record("b", ["b"], input_files=["x.fq"], output_files=["bx.txt"]),
+            _make_record("c", ["c"], input_files=["y.fq"], output_files=["cy.txt"]),
+            _make_record(
+                "d",
+                ["d"],
+                input_files=["bx.txt", "cy.txt"],
+                output_files=["final.txt"],
+            ),
+        ]
+        deps = build_dependency_graph(records)
+        result = json.loads(render_json(records, deps))
+
+        assert result["dependency_graph"] == {"0": [], "1": [0], "2": [0], "3": [1, 2]}
+        assert result["terminal_outputs"] == ["final.txt"]
+
+
+# ---------------------------------------------------------------------------
 # reconstruct_pipeline (end-to-end)
 # ---------------------------------------------------------------------------
 
@@ -300,10 +393,33 @@ class TestReconstructPipeline:
 
         assert "rule fastp_1:" in workflow
 
+    def test_json_format(self, tmp_path):
+        _write_record(
+            tmp_path,
+            _make_record(
+                "fastp",
+                ["fastp"],
+                input_files=["raw.fq"],
+                output_files=["clean.fq"],
+                record_id="r1",
+            ),
+        )
+        result = json.loads(reconstruct_pipeline(tmp_path, fmt="json"))
+
+        assert len(result["records"]) == 1
+        assert result["records"][0]["code_name"] == "fastp"
+        assert result["dependency_graph"] == {"0": []}
+        assert result["terminal_outputs"] == ["clean.fq"]
+
     def test_empty_returns_comment(self, tmp_path):
         tmp_path.mkdir(exist_ok=True)
         result = reconstruct_pipeline(tmp_path)
         assert "No execution records found" in result
+
+    def test_empty_json_format(self, tmp_path):
+        tmp_path.mkdir(exist_ok=True)
+        result = json.loads(reconstruct_pipeline(tmp_path, fmt="json"))
+        assert result == {"records": [], "dependency_graph": {}, "terminal_outputs": []}
 
     def test_session_filter(self, tmp_path):
         _write_record(
