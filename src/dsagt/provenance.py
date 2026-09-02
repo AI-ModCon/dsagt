@@ -12,12 +12,17 @@ Provenance for code executions.
 
 **Pipeline reconstruction**:
     Reads execution records, builds a dependency graph from input/output
-    file overlap, and renders as a bash script or Snakemake workflow.
+    file overlap, and renders as a bash script, a Snakemake workflow, or
+    structured JSON (records, dependency graph, terminal outputs).
+    ``compute_pipeline_fingerprint`` hashes the JSON output's dependency
+    graph and terminal outputs into the pipeline fingerprint a dataset
+    contract (``contract.py``) uses for its staleness check.
 """
 
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import logging
 import subprocess
@@ -606,6 +611,26 @@ def render_json(records: list[dict], deps: dict[int, list[int]]) -> str:
         "terminal_outputs": compute_terminal_outputs(records),
     }
     return json.dumps(payload, indent=2)
+
+
+def compute_pipeline_fingerprint(structured_output: dict) -> str:
+    """Hash a pipeline's structural shape from a ``reconstruct_pipeline`` JSON payload.
+
+    Hashes only ``dependency_graph`` and ``terminal_outputs`` — never
+    ``records``, whose ``stdout``/``stderr``/timestamps vary rerun to rerun
+    even when the pipeline itself hasn't changed. Consumed by the dataset
+    contract's staleness check: stable across reruns of an unchanged
+    pipeline, and changes when a step is added, removed, or has its output
+    paths altered.
+    """
+    payload = {
+        "dependency_graph": structured_output.get("dependency_graph", {}),
+        "terminal_outputs": structured_output.get("terminal_outputs", []),
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return f"sha256:{digest}"
 
 
 def _shell_quote(s: str) -> str:
