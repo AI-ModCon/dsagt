@@ -165,3 +165,5 @@ cline_mcp.json
 
 # Local scratch for removed/parked code (not tracked)
 scratch/
+
+use_cases/*.tar.gz
