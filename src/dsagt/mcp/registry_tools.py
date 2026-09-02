@@ -524,7 +524,7 @@ def _registry_tools_and_handlers(
                 "properties": {
                     "format": {
                         "type": "string",
-                        "enum": ["bash", "snakemake"],
+                        "enum": ["bash", "snakemake", "json"],
                         "default": "bash",
                     },
                 },

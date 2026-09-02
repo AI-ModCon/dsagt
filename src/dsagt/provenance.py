@@ -577,6 +577,37 @@ def render_snakemake(records: list[dict], deps: dict[int, list[int]]) -> str:
     return "\n".join(lines)
 
 
+def compute_terminal_outputs(records: list[dict]) -> list[str]:
+    """Derive terminal outputs: output files consumed as input by no record.
+
+    Order follows first appearance across ``records`` (already sorted by
+    execution start time), with duplicates removed.
+    """
+    all_inputs: set[str] = set()
+    for record in records:
+        all_inputs.update(record["execution"].get("input_files", []))
+
+    terminal: list[str] = []
+    seen: set[str] = set()
+    for record in records:
+        for f in record["execution"].get("output_files", []):
+            if f not in all_inputs and f not in seen:
+                terminal.append(f)
+                seen.add(f)
+
+    return terminal
+
+
+def render_json(records: list[dict], deps: dict[int, list[int]]) -> str:
+    """Render the pipeline as structured JSON: records, dependency graph, and terminal outputs."""
+    payload = {
+        "records": records,
+        "dependency_graph": deps,
+        "terminal_outputs": compute_terminal_outputs(records),
+    }
+    return json.dumps(payload, indent=2)
+
+
 def _shell_quote(s: str) -> str:
     """Quote a string for shell if it contains special characters."""
     if not s:
@@ -601,19 +632,25 @@ def reconstruct_pipeline(
     session_id : str, optional
         Filter records to a specific session.
     fmt : str
-        Output format: "bash" or "snakemake".
+        Output format: "bash", "snakemake", or "json".
 
     Returns
     -------
     str
-        The rendered pipeline script.
+        The rendered pipeline script, or (for "json") a JSON document.
     """
     records = load_pipeline_records(trace_dir, session_id)
     if not records:
+        if fmt == "json":
+            return json.dumps(
+                {"records": [], "dependency_graph": {}, "terminal_outputs": []}
+            )
         return f"# No execution records found{' for session ' + session_id if session_id else ''}\n"
 
     deps = build_dependency_graph(records)
 
     if fmt == "snakemake":
         return render_snakemake(records, deps)
+    if fmt == "json":
+        return render_json(records, deps)
     return render_bash(records, deps)
