@@ -11,11 +11,10 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-import mcp.types as types
+from mcp_helpers import call_tool_json as call_tool
 
 from dsagt.mcp.memory_tools import create_memory_server
 from dsagt.memory import ExplicitMemory
-from mcp_helpers import call_tool_json as call_tool
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -164,10 +163,9 @@ class TestKbGetMemories:
 class TestToolSchemas:
 
     def _get_tool(self, server, name):
-        req = types.ListToolsRequest(method="tools/list")
-        handler = server.request_handlers[types.ListToolsRequest]
-        result = asyncio.run(handler(req))
-        for tool in result.root.tools:
+        handler = server.get_request_handler("tools/list").handler
+        result = asyncio.run(handler(None, None))
+        for tool in result.tools:
             if tool.name == name:
                 return tool
         return None
@@ -175,13 +173,13 @@ class TestToolSchemas:
     def test_kb_remember_exists(self, server):
         tool = self._get_tool(server, "kb_remember")
         assert tool is not None
-        assert "text" in tool.inputSchema["properties"]
-        assert tool.inputSchema["required"] == ["text"]
+        assert "text" in tool.input_schema["properties"]
+        assert tool.input_schema["required"] == ["text"]
 
     def test_kb_remember_has_optional_params(self, server):
         tool = self._get_tool(server, "kb_remember")
         for param in ("category", "session_id", "supersedes"):
-            assert param in tool.inputSchema["properties"]
+            assert param in tool.input_schema["properties"]
 
     def test_kb_get_memories_exists(self, server):
         tool = self._get_tool(server, "kb_get_memories")

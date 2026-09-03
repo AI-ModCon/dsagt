@@ -16,9 +16,10 @@ from unittest.mock import MagicMock
 
 import mcp.types as types
 import pytest
+from mcp_helpers import call_tool_sync
 
 from dsagt.mcp.server import _build_kb_from_config, create_dsagt_server
-from dsagt.registry import SkillRegistry, CodeRegistry
+from dsagt.registry import CodeRegistry, SkillRegistry
 
 
 def _make_merged_server(tmp_path: Path):
@@ -35,19 +36,13 @@ def _make_merged_server(tmp_path: Path):
 
 
 def _list_tools(server) -> list[str]:
-    handler = server.request_handlers[types.ListToolsRequest]
-    res = asyncio.run(handler(types.ListToolsRequest(method="tools/list")))
-    return sorted(t.name for t in res.root.tools)
+    handler = server.get_request_handler("tools/list").handler
+    res = asyncio.run(handler(None, None))
+    return sorted(t.name for t in res.tools)
 
 
 def _call(server, name: str, arguments: dict) -> str:
-    handler = server.request_handlers[types.CallToolRequest]
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    res = asyncio.run(handler(req))
-    return res.root.content[0].text
+    return call_tool_sync(server, name, arguments)
 
 
 def test_merged_server_exposes_all_tools(tmp_path):
@@ -133,6 +128,103 @@ def test_dict_returning_handler_is_json_encoded(tmp_path):
     out = _call(server, "list_skill_sources", {})
     parsed = json.loads(out)
     assert "sources" in parsed
+
+
+class TestInputValidation:
+    """The dispatch shell validates arguments against the tool's input schema.
+
+    The mcp 2.x server invokes ``on_call_tool`` without validating arguments
+    (and ``params.arguments`` is None when omitted), so the shell must reject
+    malformed calls before they reach a handler.
+    """
+
+    def _server(self):
+        from dsagt.mcp.server import build_dispatch_server
+
+        async def echo(args):
+            return {"echoed": args["q"]}
+
+        tools = [
+            types.Tool(
+                name="demo",
+                description="d",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                    "required": ["q"],
+                },
+            )
+        ]
+        return build_dispatch_server("test", tools, {"demo": echo})
+
+    def test_missing_required_argument_rejected(self):
+        out = json.loads(_call(self._server(), "demo", {}))
+        assert out["status"] == "error"
+        assert "Input validation error" in out["error"]
+        assert "'q' is a required property" in out["error"]
+
+    def test_omitted_arguments_rejected(self):
+        server = self._server()
+        handler = server.get_request_handler("tools/call").handler
+        params = types.CallToolRequestParams(name="demo")  # arguments is None
+        res = asyncio.run(handler(None, params))
+        out = json.loads(res.content[0].text)
+        assert out["status"] == "error"
+        assert "'q' is a required property" in out["error"]
+
+    def test_wrong_type_rejected(self):
+        out = json.loads(_call(self._server(), "demo", {"q": 7}))
+        assert out["status"] == "error"
+        assert "Input validation error" in out["error"]
+
+    def test_valid_arguments_dispatch(self):
+        out = json.loads(_call(self._server(), "demo", {"q": "hello"}))
+        assert out == {"echoed": "hello"}
+
+    def _call_raw(self, server, name, arguments):
+        handler = server.get_request_handler("tools/call").handler
+        params = types.CallToolRequestParams(name=name, arguments=arguments)
+        return asyncio.run(handler(None, params))
+
+    def test_rejection_is_flagged_is_error(self):
+        """``is_error`` is the only signal a client has that a call failed.
+
+        Without it a rejected call renders as a successful tool result and the
+        agent has nothing to correct itself from.
+        """
+        res = self._call_raw(self._server(), "demo", {})
+        assert res.is_error is True
+
+    def test_successful_call_is_not_flagged(self):
+        res = self._call_raw(self._server(), "demo", {"q": "hello"})
+        assert res.is_error is False
+
+    def test_unknown_tool_is_rejected_not_raised(self):
+        """The tool name is client-controlled, so an unknown one must come back
+        as a readable rejection — an escaping KeyError becomes a JSON-RPC
+        protocol error that tears down the request instead."""
+        res = self._call_raw(self._server(), "no_such_tool", {})
+        assert res.is_error is True
+        out = json.loads(res.content[0].text)
+        assert out["status"] == "error"
+        assert "Unknown tool: no_such_tool" in out["error"]
+
+    def test_unserializable_result_is_rejected_not_raised(self):
+        """A handler returning non-JSON data must not escape as a protocol
+        error either — ``json.dumps`` runs after the handler's own guard."""
+        from dsagt.mcp.server import build_dispatch_server
+
+        tools = [
+            types.Tool(name="bad", description="d", inputSchema={"type": "object"})
+        ]
+
+        async def bad(args):
+            return {"obj": object()}
+
+        server = build_dispatch_server("test", tools, {"bad": bad})
+        res = self._call_raw(server, "bad", {})
+        assert res.is_error is True
+        assert "Unserializable result" in json.loads(res.content[0].text)["error"]
 
 
 class TestBuildKbFromConfig:

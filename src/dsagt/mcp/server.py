@@ -35,6 +35,7 @@ import logging  # noqa: E402
 import threading  # noqa: E402
 from pathlib import Path  # noqa: E402
 
+import jsonschema  # noqa: E402
 import yaml  # noqa: E402
 
 import mcp.server.stdio  # noqa: E402
@@ -60,12 +61,23 @@ def build_dispatch_server(
 ) -> Server:
     """Wrap a ``(tools, handlers)`` pair in a configured MCP ``Server``.
 
-    One dispatch contract for every concern module: catch + wrap errors, then
-    format by return type — a handler that returns ``str`` passes through, one
-    that returns ``dict`` is JSON-encoded.  This is a superset of the old
-    per-server behavior (registry handlers returned ``str`` and never raised;
-    knowledge handlers returned ``dict`` and raised ``ValueError`` on bad
-    input), so it is behavior-preserving for both.
+    One dispatch contract for every concern module: reject what the tool's own
+    ``input_schema`` does not admit, run the handler, catch + wrap what it
+    raises, then format by return type — a handler that returns ``str`` passes
+    through, one that returns ``dict`` is JSON-encoded.  Registry handlers
+    return ``str`` and never raise; knowledge handlers return ``dict`` and raise
+    ``ValueError`` on bad input; both are covered.
+
+    Argument validation and the outer error boundary live here because the SDK
+    stopped providing them: through mcp 1.x the ``@server.call_tool()`` decorator
+    validated against ``inputSchema`` and turned any escaping exception into an
+    error result, and the v2 lowlevel server does neither.  Two consequences
+    shape the code below.  Nothing may escape this function — the v2 runner
+    converts an exception into a JSON-RPC protocol error, which tears down the
+    request instead of handing the agent something it can read and retry — and
+    every rejection carries ``is_error``, the only signal on the wire that a
+    call failed.  The tool name is client-controlled, so an unknown one is a
+    rejection, not a bug.
 
     ``tool_category`` maps tool name → concern (``memory`` / ``skill`` /
     ``knowledge`` / ``registry``).  Each call opens one categorization-root span
@@ -76,15 +88,47 @@ def build_dispatch_server(
     in the single-concern test servers / one-shot tools.
     """
     tool_category = tool_category or {}
-    server = Server(name)
+    schemas = {tool.name: tool.input_schema for tool in tools}
 
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return tools
+    async def on_list_tools(ctx, params) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=tools)
 
-    @server.call_tool()
-    async def call_tool(tool_name: str, arguments: dict) -> list[types.TextContent]:
-        handler = handlers[tool_name]  # KeyError = bug in list_tools schema
+    def rejected(message: str) -> types.CallToolResult:
+        """A rejection the agent can read and retry from.
+
+        ``is_error`` is what marks a result as failed on the wire; without it a
+        client renders a rejection as a successful call and the agent has no
+        signal to correct itself.
+        """
+        error = {"status": "error", "error": message}
+        return types.CallToolResult(
+            content=[
+                types.TextContent(
+                    type="text", text=json.dumps(error, ensure_ascii=False)
+                )
+            ],
+            is_error=True,
+        )
+
+    async def on_call_tool(
+        ctx, params: types.CallToolRequestParams
+    ) -> types.CallToolResult:
+        tool_name = params.name
+        # ``arguments`` is optional in the protocol (None when omitted), and the
+        # mcp server does not validate against input_schema before dispatch —
+        # reject malformed calls here so handlers can assume valid input.
+        arguments = params.arguments or {}
+        # The tool name is client-controlled — an agent inventing one, or holding
+        # a stale name across a restart, must get a rejection back rather than an
+        # escaping KeyError, which the runner turns into a JSON-RPC protocol
+        # error that tears down the request instead of informing the agent.
+        if tool_name not in handlers:
+            return rejected(f"Unknown tool: {tool_name}")
+        handler = handlers[tool_name]
+        try:
+            jsonschema.validate(instance=arguments, schema=schemas[tool_name])
+        except jsonschema.ValidationError as e:
+            return rejected(f"Input validation error: {e.message}")
         with open_span(tool_name, source=tool_category.get(tool_name)) as span:
             try:
                 result = await handler(arguments)
@@ -99,14 +143,18 @@ def build_dispatch_server(
                 # the MLflow UI shows them instead of a null request.
                 span.set_inputs(arguments)
                 span.set_outputs(result)
-        text = (
-            result
-            if isinstance(result, str)
-            else json.dumps(result, ensure_ascii=False)
-        )
-        return [types.TextContent(type="text", text=text)]
+        try:
+            text = (
+                result
+                if isinstance(result, str)
+                else json.dumps(result, ensure_ascii=False)
+            )
+        except (TypeError, ValueError) as e:
+            logger.exception("Tool '%s' returned an unserializable result", tool_name)
+            return rejected(f"Unserializable result from {tool_name}: {e}")
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
 
-    return server
+    return Server(name, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
 HEARTBEAT_INTERVAL_S = 45.0
