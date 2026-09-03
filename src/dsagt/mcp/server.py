@@ -82,6 +82,23 @@ def build_dispatch_server(
     async def on_list_tools(ctx, params) -> types.ListToolsResult:
         return types.ListToolsResult(tools=tools)
 
+    def rejected(message: str) -> types.CallToolResult:
+        """A rejection the agent can read and retry from.
+
+        ``is_error`` is what marks a result as failed on the wire; without it a
+        client renders a rejection as a successful call and the agent has no
+        signal to correct itself.
+        """
+        error = {"status": "error", "error": message}
+        return types.CallToolResult(
+            content=[
+                types.TextContent(
+                    type="text", text=json.dumps(error, ensure_ascii=False)
+                )
+            ],
+            is_error=True,
+        )
+
     async def on_call_tool(
         ctx, params: types.CallToolRequestParams
     ) -> types.CallToolResult:
@@ -90,14 +107,17 @@ def build_dispatch_server(
         # mcp server does not validate against input_schema before dispatch —
         # reject malformed calls here so handlers can assume valid input.
         arguments = params.arguments or {}
-        handler = handlers[tool_name]  # KeyError = bug in list_tools schema
+        # The tool name is client-controlled — an agent inventing one, or holding
+        # a stale name across a restart, must get a rejection back rather than an
+        # escaping KeyError, which the runner turns into a JSON-RPC protocol
+        # error that tears down the request instead of informing the agent.
+        if tool_name not in handlers:
+            return rejected(f"Unknown tool: {tool_name}")
+        handler = handlers[tool_name]
         try:
             jsonschema.validate(instance=arguments, schema=schemas[tool_name])
         except jsonschema.ValidationError as e:
-            error = {"status": "error", "error": f"Input validation error: {e.message}"}
-            return types.CallToolResult(
-                content=[types.TextContent(type="text", text=json.dumps(error))]
-            )
+            return rejected(f"Input validation error: {e.message}")
         with open_span(tool_name, source=tool_category.get(tool_name)) as span:
             try:
                 result = await handler(arguments)
@@ -112,11 +132,15 @@ def build_dispatch_server(
                 # the MLflow UI shows them instead of a null request.
                 span.set_inputs(arguments)
                 span.set_outputs(result)
-        text = (
-            result
-            if isinstance(result, str)
-            else json.dumps(result, ensure_ascii=False)
-        )
+        try:
+            text = (
+                result
+                if isinstance(result, str)
+                else json.dumps(result, ensure_ascii=False)
+            )
+        except (TypeError, ValueError) as e:
+            logger.exception("Tool '%s' returned an unserializable result", tool_name)
+            return rejected(f"Unserializable result from {tool_name}: {e}")
         return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
 
     return Server(name, on_list_tools=on_list_tools, on_call_tool=on_call_tool)

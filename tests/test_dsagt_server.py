@@ -181,6 +181,51 @@ class TestInputValidation:
         out = json.loads(_call(self._server(), "demo", {"q": "hello"}))
         assert out == {"echoed": "hello"}
 
+    def _call_raw(self, server, name, arguments):
+        handler = server.get_request_handler("tools/call").handler
+        params = types.CallToolRequestParams(name=name, arguments=arguments)
+        return asyncio.run(handler(None, params))
+
+    def test_rejection_is_flagged_is_error(self):
+        """``is_error`` is the only signal a client has that a call failed.
+
+        Without it a rejected call renders as a successful tool result and the
+        agent has nothing to correct itself from.
+        """
+        res = self._call_raw(self._server(), "demo", {})
+        assert res.is_error is True
+
+    def test_successful_call_is_not_flagged(self):
+        res = self._call_raw(self._server(), "demo", {"q": "hello"})
+        assert res.is_error is False
+
+    def test_unknown_tool_is_rejected_not_raised(self):
+        """The tool name is client-controlled, so an unknown one must come back
+        as a readable rejection — an escaping KeyError becomes a JSON-RPC
+        protocol error that tears down the request instead."""
+        res = self._call_raw(self._server(), "no_such_tool", {})
+        assert res.is_error is True
+        out = json.loads(res.content[0].text)
+        assert out["status"] == "error"
+        assert "Unknown tool: no_such_tool" in out["error"]
+
+    def test_unserializable_result_is_rejected_not_raised(self):
+        """A handler returning non-JSON data must not escape as a protocol
+        error either — ``json.dumps`` runs after the handler's own guard."""
+        from dsagt.mcp.server import build_dispatch_server
+
+        tools = [
+            types.Tool(name="bad", description="d", inputSchema={"type": "object"})
+        ]
+
+        async def bad(args):
+            return {"obj": object()}
+
+        server = build_dispatch_server("test", tools, {"bad": bad})
+        res = self._call_raw(server, "bad", {})
+        assert res.is_error is True
+        assert "Unserializable result" in json.loads(res.content[0].text)["error"]
+
 
 class TestBuildKbFromConfig:
     """``_build_kb_from_config`` validates embedding config before building a KB.
