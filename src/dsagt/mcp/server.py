@@ -61,12 +61,23 @@ def build_dispatch_server(
 ) -> Server:
     """Wrap a ``(tools, handlers)`` pair in a configured MCP ``Server``.
 
-    One dispatch contract for every concern module: catch + wrap errors, then
-    format by return type — a handler that returns ``str`` passes through, one
-    that returns ``dict`` is JSON-encoded.  This is a superset of the old
-    per-server behavior (registry handlers returned ``str`` and never raised;
-    knowledge handlers returned ``dict`` and raised ``ValueError`` on bad
-    input), so it is behavior-preserving for both.
+    One dispatch contract for every concern module: reject what the tool's own
+    ``input_schema`` does not admit, run the handler, catch + wrap what it
+    raises, then format by return type — a handler that returns ``str`` passes
+    through, one that returns ``dict`` is JSON-encoded.  Registry handlers
+    return ``str`` and never raise; knowledge handlers return ``dict`` and raise
+    ``ValueError`` on bad input; both are covered.
+
+    Argument validation and the outer error boundary live here because the SDK
+    stopped providing them: through mcp 1.x the ``@server.call_tool()`` decorator
+    validated against ``inputSchema`` and turned any escaping exception into an
+    error result, and the v2 lowlevel server does neither.  Two consequences
+    shape the code below.  Nothing may escape this function — the v2 runner
+    converts an exception into a JSON-RPC protocol error, which tears down the
+    request instead of handing the agent something it can read and retry — and
+    every rejection carries ``is_error``, the only signal on the wire that a
+    call failed.  The tool name is client-controlled, so an unknown one is a
+    rejection, not a bug.
 
     ``tool_category`` maps tool name → concern (``memory`` / ``skill`` /
     ``knowledge`` / ``registry``).  Each call opens one categorization-root span
