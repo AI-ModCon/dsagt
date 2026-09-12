@@ -5,7 +5,7 @@ summary: >-
   DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive
   (EMPIAR-10017 β-galactosidase micrographs via CryoPPP) — register curation
   codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing
-  pipeline, with the AIDRIN readiness gate measuring the curation step
+  pipeline, with the AIDRIN readiness assessment measuring the curation step
   before/after.
 status: published
 order: 20
@@ -20,13 +20,13 @@ order: 20
 > embedder) before any pipeline work. The one-time AIDRIN install at
 > `dsagt init` adds a few minutes on first use.
 
-This guide documents a comprehensive DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, multi-stage pipeline execution with domain-specific evaluation, and the [readiness gate](../../docs/readiness.md): with the gate enabled at init, the agent runs AIDRIN readiness metrics before and after the tabular curation step on its own, so the pipeline's AI-readiness gain is *measured*. The walkthrough has been run end to end with Claude Code on Sonnet 4.5.
+This guide documents a comprehensive DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, multi-stage pipeline execution with domain-specific evaluation, and the [readiness assessment](../../docs/readiness.md): with the assessment enabled at init, the agent runs AIDRIN readiness metrics before and after the tabular curation step on its own, so the pipeline's AI-readiness gain is *measured*. The walkthrough has been run end to end with Claude Code on Sonnet 4.5.
 
 ## Prerequisites
 
 - DSAgt installed (`uv sync --all-groups`)
 - An agent platform installed and **already authenticated** (e.g., `claude` for Claude Code)
-- `uv` installed. Enabling the readiness gate at `dsagt init` installs AIDRIN itself
+- `uv` installed. Enabling the readiness assessment at `dsagt init` installs AIDRIN itself
   (one-time, shared across projects, Python 3.10-3.12)
 - ~22 GB disk space for the cryo-EM test data
 - Git installed
@@ -40,7 +40,7 @@ dsagt init
 ```
 
 At the menu, name the project `cryoem-pipeline`, pick your agent, and answer **yes** to
-"Enable the AIDRIN readiness gate?". Init installs AIDRIN on first use (one-time, shared
+"Enable the AIDRIN AI-readiness assessment?". Init installs AIDRIN on first use (one-time, shared
 across projects, into `~/dsagt-projects/.tools/`). The defaults are fine for the rest. Then:
 
 ```bash
@@ -76,8 +76,8 @@ dsagt start cryoem-pipeline
 ## Execution
 
 Paste these prompts one at a time. Init installed the `aidrin` skill at
-`skills/aidrin/SKILL.md` and the readiness gate put its rules in the instructions file, so the agent runs the gate around
-the tabular steps without being told to; the micrograph (image) steps are not gated.
+`skills/aidrin/SKILL.md` and the readiness assessment put its rules in the instructions file, so the agent runs the assessment around
+the tabular steps without being told to; the micrograph (image) steps are not assessed.
 
 ### 1. Create a cryo-EM knowledge collection
 
@@ -153,7 +153,7 @@ Run the pipeline on the EMPIAR-10017 dataset in data/cryoem/10017/:
    the particle data?
 ```
 
-Steps 4 and 5 are where the gate shows: without any AIDRIN prompt, the agent runs the readiness
+Steps 4 and 5 are where the assessment shows: without any AIDRIN prompt, the agent runs the readiness
 metrics around each tabular operation — the merge (a no-op delta, which is itself informative)
 and the curation filter, where `particles.csv` before and `particles_curated.csv` after differ.
 Both reports land in `audit/`. Expected across the curation step:
@@ -186,10 +186,10 @@ Reconstruct the pipeline from the execution records as a bash script.
 1. Knowledge base contains `cryoppp` collection with repo code, docs, and appended papers.
 2. `skills/aidrin/` is present (installed at init); the code registry includes the CryoPPP processing codes and the quality-scoring code.
 3. Quality-scored CSV exists with tier distribution; `particles.csv` (merged) and `particles_curated.csv` (curated) exist with `trace_archive/` records for both operations.
-4. `audit/` holds the gate's pre/post AIDRIN reports for the merge and curation steps, and the scores show curation reduced outliers (~0.041 → ~0.029).
+4. `audit/` holds the assessment's pre/post AIDRIN reports for the merge and curation steps, and the scores show curation reduced outliers (~0.041 → ~0.029).
 5. A datacard exists for the processed dataset.
 6. A reconstructed pipeline script is available.
-7. Code execution records in `trace_archive/` document the full provenance chain, including one record per metric of each gate run.
+7. Code execution records in `trace_archive/` document the full provenance chain, including one record per metric of each assessment run.
 8. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history.
 
 ## What This Tests
@@ -203,7 +203,7 @@ Reconstruct the pipeline from the execution records as a bash script.
 | Code registration | 3, 4 |
 | KB-guided code generation | 4 |
 | Code execution with provenance | 5 |
-| Readiness gate run unprompted (before/after AIDRIN on the tabular step) | 5 |
+| Readiness assessment run unprompted (before/after AIDRIN on the tabular step) | 5 |
 | Skill discovery and use | 6 |
 | Pipeline reconstruction | 7 |
 

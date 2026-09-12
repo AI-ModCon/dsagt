@@ -223,10 +223,10 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
         )
         episodic = _episodic_block(enable_epi)
 
-        # Readiness gate (opt-in): AIDRIN as the per-stage check code.
+        # Readiness assessment (opt-in): AIDRIN as the per-stage check code.
         cur_ready = existing.get("readiness", {}) or {}
         enable_ready = _confirm(
-            "Enable the AIDRIN readiness gate? (installs AIDRIN once; the agent "
+            "Enable the AIDRIN AI-readiness assessment? (installs AIDRIN once; the agent "
             "runs readiness metrics before/after each pipeline stage)",
             default=bool(cur_ready.get("tool")),
         )
@@ -407,7 +407,7 @@ def _cmd_init(args):
     print(f"Trace store:        sqlite:///{pdir}/mlflow.db")
     if config.get("readiness"):
         print(
-            f"Readiness gate:     {config['readiness']['tool']} "
+            f"Readiness:          {config['readiness']['tool']} "
             f"({config['readiness']['executable']})"
         )
 
@@ -730,7 +730,7 @@ def main(argv=None):
         "--readiness",
         choices=("aidrin",),
         default=None,
-        help="Enable the readiness gate: install the tool once and have the "
+        help="Enable the readiness assessment: install the tool once and have the "
         "agent run its metrics before/after each pipeline stage.  Off by default.",
     )
     p_init.add_argument(

@@ -127,7 +127,7 @@ See https://github.com/AI-ModCon/dsagt/graphs/contributors for full list.
 
 ## Agent Changelog
 
-+ **2026-09-11** v0.2.1 — base skills (`skill-creator`, `aidrin`) installed from their upstream repositories at init; the readiness gate wraps every `aidrin` call with `dsagt-run`; the server opens only the project KB; every dependency a range; Intel Mac support dropped
++ **2026-09-11** v0.2.1 — base skills (`skill-creator`, `aidrin`) installed from their upstream repositories at init; the readiness assessment wraps every `aidrin` call with `dsagt-run`; the server opens only the project KB; every dependency a range; Intel Mac support dropped
 + **2026-07-08** v0.2.0 — single merged `dsagt-server` (20 tools); serverless SQLite MLflow store (no ports, no OTel, no proxy); external skill catalogs; proxy-free agent-transcript trace pipeline + opt-in episodic memory; registered executables are **codes** (skill-standard dirs), natively discoverable as soon as they are added; `dsagt traces` viewer
 + **2026-06-30** initial public version (v0.1.0)
 

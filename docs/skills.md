@@ -41,7 +41,7 @@ DSAgt holds no skills of its own. Every `dsagt init` installs two base skills in
 | Skill | Source |
 |---|---|
 | `skill-creator` | `genesis`, `skills/basedata-skills/skill-creator/` |
-| `aidrin` | `github.com/idtlab/AIDRIN`, `.claude/skills/aidrin/` (branch `develop`). Running it requires the AIDRIN package; the [readiness gate](readiness.md) installs it, and the skill's `reference/installation.md` covers a manual setup. |
+| `aidrin` | `github.com/idtlab/AIDRIN`, `.claude/skills/aidrin/` (branch `develop`). Running it requires the AIDRIN package; the [readiness assessment](readiness.md) installs it, and the skill's `reference/installation.md` covers a manual setup. |
 
 Installed skills are **not** indexed for search — the agent auto-discovers `SKILL.md` folders natively — so `search_skills` is reserved for the corpus. Domain skills, including the BaseData `datacard-generator`, are installed from the corpus rather than built in, so they stay current upstream.
 

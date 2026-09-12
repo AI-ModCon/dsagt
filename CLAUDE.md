@@ -32,7 +32,7 @@ uv run mkdocs build --strict                                # docs, what CI runs
 - **execution record**: the JSON `dsagt-run` writes to `trace_archive/` (`provenance.run_and_record`), indexed into `code_use` by `provenance.CodeUseIndexer`.
 - **explicit memory**, **episodic memory**: `memory.ExplicitMemory`, `memory.MemoryExtractor`.
 - **trace**: one session's spans as plain data (`traces.Trace`). The **periodic pass** (`mcp.server._periodic_pass`, every 45 seconds) runs `traces.TraceCollector`; the **deferred final turn** is the open last turn a periodic pass withholds; **catch-up** re-collects the previous session at startup (`session.catch_up_extraction`).
-- **readiness gate**: the opt-in AIDRIN check around every tabular stage (`readiness.instructions_block`).
+- **readiness assessment**: the opt-in AIDRIN check around every tabular stage (`readiness.instructions_block`).
 - **store**: the project's MLflow sqlite file (`observability.resolve_tracking_uri`).
 
 ## Invariants

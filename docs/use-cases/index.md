@@ -19,7 +19,7 @@ needs are in the `use-cases` dependency group in `pyproject.toml`, so
 `uv sync --all-groups` installs them. Anything else (conda-only tools, libraries built
 from source) is installed by the use case's `scripts/setup_env.sh` into
 `~/dsagt-projects/.tools/<use-case>/`, the same shared tools directory the readiness
-gate uses; the README's Prerequisites list what the script installs and what it needs
+assessment uses; the README's Prerequisites list what the script installs and what it needs
 already present. Data comes from the Google Drive folder linked above.
 
 !!! note "Adding a use case"

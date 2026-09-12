@@ -460,7 +460,7 @@ class TestInitProject:
         assert not (pdir / "mlflow").exists()
 
     def test_readiness_opt_in_writes_block_only(self, tmp_path):
-        """The gate is a config block, not a code: no ``codes/aidrin`` is
+        """The assessment is a config block, not a code: no ``codes/aidrin`` is
         created either way.  A user-supplied executable skips provisioning."""
         from dsagt.readiness import readiness_block
 
@@ -469,9 +469,9 @@ class TestInitProject:
         assert "readiness" not in load_config("plain")
 
         block = readiness_block("aidrin", executable=tmp_path / "aidrin")
-        pdir = init_project("gated", "claude", exclude=["all"], readiness=block)
+        pdir = init_project("assessed", "claude", exclude=["all"], readiness=block)
         assert not (pdir / "codes" / "aidrin").exists()
-        assert load_config("gated")["readiness"] == block
+        assert load_config("assessed")["readiness"] == block
 
     def test_init_installs_base_skills(self, tmp_path, capsys):
         """Every init fetches the base skills into ``<project>/skills/``;
@@ -512,9 +512,9 @@ class TestInitProject:
         )
         monkeypatch.setattr(rd, "ensure_aidrin", boom)
         block = rd.readiness_block("aidrin")
-        init_project("gated", "claude", exclude=["all"], readiness=block)
+        init_project("assessed", "claude", exclude=["all"], readiness=block)
         assert "no network" in capsys.readouterr().out
-        assert load_config("gated")["readiness"]["executable"] == str(
+        assert load_config("assessed")["readiness"]["executable"] == str(
             rd.AIDRIN_EXECUTABLE
         )
 
@@ -705,7 +705,7 @@ class TestAgentRecord:
         assert not (working_dir / ".dsagt_env").exists()
 
     def test_readiness_block_appended_once(self, tmp_path):
-        """With the gate enabled, the instructions file carries the readiness
+        """With the assessment enabled, the instructions file carries the readiness
         block after the master instructions; re-running appends nothing."""
         from dsagt.readiness import READINESS_MARKER, readiness_block
 

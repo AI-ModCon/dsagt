@@ -1,4 +1,4 @@
-"""Readiness gate: config block, install, and the instructions block."""
+"""Readiness assessment: config block, install, and the instructions block."""
 
 import subprocess
 
