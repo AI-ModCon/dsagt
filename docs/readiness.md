@@ -1,4 +1,4 @@
-# Readiness Gate
+# AI-Readiness Assessment
 
 DSAgt can run [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) as the check before and after every pipeline stage. The `aidrin` skill is installed in every project from the AIDRIN repository whether or not the gate is on; the gate makes the agent apply it at every tabular stage. The gate is an opt-in at `dsagt init`; off by default.
 

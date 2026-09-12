@@ -7,17 +7,17 @@ DSAgt logs traces to a serverless **MLflow** store, an SQLite file at `~/dsagt-p
 To view in the MLflow UI:
 
 ```bash
-dsagt traces <project> # runs mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
+dsagt traces <project> # mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
 ```
 
-`dsagt info <name>` prints the resolved tracking URI and a session/trace summary. The tracking URI is always `sqlite:///<project>/mlflow.db`, computed from the project directory.
+`dsagt info <project>` prints the resolved tracking URI and a session/trace summary. 
 
-## Two feeds
+## Trace sources
 
-DSAgt reconstructs traces from what the agent writes to disk. Traces come from two places:
+DSAgt reconstructs traces from what the agent writes to disk.
 
-1. **DSAgt spans (live).** DSAgt instruments its own code and emits spans directly to the store as it runs.
-2. **Agent traces (post-hoc).** The MCP server's in-session heartbeat reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — recovering prompts, responses, and tool calls.
+1. **DSAgt spans (live).** DSAgt instruments its own code and emits spans directly to mlflow as it runs.
+2. **Agent traces (post-hoc).** The MCP server periodically reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — recovering prompts, responses, and tool calls.
 
 ## Trace Coverage
 

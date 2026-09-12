@@ -1,12 +1,12 @@
 # Provenance
 
-DSAgt makes every data operation a reproducible, auditable step. The agent registers a **code** — a CLI executable — and every run of that code is wrapped for provenance capture, so the whole pipeline can later be reconstructed from the record.
+DSAgt records data operations as reproducible, auditable step. The agent registers a **code** — a CLI executable — and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.
 
 ![DSAgt provenance](assets/provenance.png)
 
 ## Codes
 
-Codes are CLI executables defined as markdown files with YAML frontmatter under `<project>/codes/`. The agent registers new codes via the MCP server's `save_code_spec` tool and finds existing ones via `search_registry`.
+Registered codes are CLI executables defined as skills. The agent registers new codes via the MCP server's `save_code_spec` tool and finds existing ones via `search_registry`.
 
 ![DSAgt code registry](assets/code-registry.png)
 
@@ -37,7 +37,7 @@ Run this registered code with the exact shell command below…
 
 DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. It provides one built-in code, `scan-directory`, indexed for search by `dsagt init`.
 
-## Execution capture
+## Execution record
 
 Every registered code runs through the `dsagt-run` wrapper. For each call it records the command, arguments, exit code, duration, input/output file counts, and truncated stderr to `<project>/trace_archive/<record_id>.json`, and emits a `code.execute` span to the [trace store](observability.md). The MCP server incrementally indexes those records into the `code_use` collection, so past executions are searchable.
 
