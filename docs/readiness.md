@@ -1,4 +1,4 @@
-# Readiness Gate
+# AI-Readiness Assessment
 
 DSAgt can run [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) as the check before and after every pipeline stage. The `aidrin` skill is installed in every project from the AIDRIN repository whether or not the gate is on; the gate makes the agent apply it at every tabular stage. The gate is an opt-in at `dsagt init`; off by default.
 
@@ -24,7 +24,7 @@ readiness:
 
 ## Rules the agent follows
 
-Every `aidrin` command in the project, gate run or not, goes through `dsagt-run --code aidrin` so it is recorded; the AIDRIN MCP tools are not wired in, so the agent uses the CLI path.
+Every `aidrin` command in the project, gate run or not, goes through `dsagt-run --code aidrin` so it is recorded; the agent uses the AIDRIN CLI.
 
 1. Before and after each operation on a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz), run every metric of the project profile on that file, one `aidrin run <metric> <file>` per metric, each wrapped by `dsagt-run --code aidrin` so it is recorded. Collected reports go to `audit/step_N_pre.aidrin.json` and `audit/step_N_post.aidrin.json`.
 2. The gate is fixed: gate runs skip the skill's intent-elicitation and plan-confirmation steps. The skill's full workflow is for readiness assessments the user asks for beyond the profile.

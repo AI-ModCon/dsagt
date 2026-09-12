@@ -17,8 +17,6 @@ composes their ``(tools, handlers)`` under one dispatch shell
 imports are *lazy* (inside :func:`create_dsagt_server` / :func:`main`) so the
 concern modules can import :func:`build_dispatch_server` from here without a
 cycle.
-
-See ``design-notes/skills-catalog-server-merge.md`` §2.
 """
 
 import os
@@ -462,8 +460,7 @@ def main():
     )
 
     # Own the session lifecycle: mint this session's id into state.yaml and
-    # tag traces with it (replaces the DSAGT_SESSION_ID env minted by the old
-    # ``dsagt start``).  Best-effort — never block startup on state I/O.
+    # tag traces with it.  Best-effort: never block startup on state I/O.
     session_id = None
     try:
         entry = append_session(project_dir)

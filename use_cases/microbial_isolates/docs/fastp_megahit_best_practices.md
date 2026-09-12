@@ -114,6 +114,8 @@ Recommended Command
 >
 > -m 3000000000 \\
 >
+> \--no-hw-accel \\
+>
 > \--min-count 3 \\
 >
 > \--min-contig-len 500 \\
@@ -133,6 +135,14 @@ Key Parameters
                         value is more reliable than the fractional flag
                         (-m 0.5), which can misread available RAM and
                         cause segfaults. See memory guidance below.
+
+  \--no-hw-accel        Runs the plain MEGAHIT core. On Apple Silicon
+                        the Bioconda osx-arm64 build segfaults during
+                        k-mer counting when it runs with four threads,
+                        with either core; one or two threads complete
+                        every run. Use -t 1 with this flag on Apple
+                        Silicon; an isolate assembles in one to two
+                        minutes.
 
   \--min-count 3        Filters k-mers appearing fewer than 3 times. The
                         default is 2 (tuned for metagenomes). For isolate
@@ -179,7 +189,10 @@ Reference values for the -m flag:
 running macOS, which typically has most RAM in use. For a single
 microbial isolate (2-6 Mb genome), 3 GB is sufficient for graph
 construction. If MEGAHIT fails with a graph-building error (not a
-segfault), increase the value. If it segfaults, decrease it.
+segfault), increase the value. If it segfaults, decrease it. A segfault
+at the "Lv1 scanning done" line of the log, at every memory value, is
+the thread count: on Apple Silicon the Bioconda build fails with -t 4
+and completes with -t 1 or -t 2. Use -t 1 --no-hw-accel there.
 
 Checking Available RAM on macOS
 

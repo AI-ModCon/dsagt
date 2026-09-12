@@ -11,9 +11,9 @@ All commands are available after [installation](index.md#installation) and activ
    end="<!-- md-shared:cli:end -->"
 %}
 
-### Deprecated `dsagt init` flags (backcompat)
+### Non-interactive `dsagt init` flags
 
-The pre-menu flags still work — the automation/CI path — but are **deprecated** in favor of the interactive menu. Each one skips its corresponding prompt:
+Each flag skips its prompt in the menu; together they are the automation path (CI, the smoke test, headless runs):
 
 | Flag | Prompt it replaces |
 |------|--------------------|
@@ -24,7 +24,7 @@ The pre-menu flags still work — the automation/CI path — but are **deprecate
 | `--episodic` | "Enable episodic memory?" |
 | `--readiness aidrin [--readiness-executable PATH]` | "Enable the AIDRIN readiness gate?" |
 
-New usage should prefer bare `dsagt init` and the menu.
+Interactive use is bare `dsagt init` and the menu.
 
 ## Project Location
 

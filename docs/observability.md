@@ -1,23 +1,23 @@
 # Observability
 
-DSAgt logs traces to a **MLflow** via an SQLite file at `~/dsagt-projects/<project>/mlflow.db`.
+DSAgt logs traces to a serverless **MLflow** store, an SQLite file at `~/dsagt-projects/<project>/mlflow.db`.
 
 ![DSAgt observability](assets/observability.png)
 
 To view in the MLflow UI:
 
 ```bash
-dsagt traces <project> # rund dsagt mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
+dsagt traces <project> # mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
 ```
 
-`dsagt info <name>` prints the resolved tracking URI and a session/trace summary. The tracking URI resolves as `MLFLOW_TRACKING_URI` env → project config → the `sqlite:///<project>/mlflow.db` default.
+`dsagt info <project>` prints the resolved tracking URI and a session/trace summary. 
 
-## Two feeds
+## Trace sources
 
-DSAgt reconstructs traces from what the agent writes to disk. Traces come from two places:
+DSAgt reconstructs traces from what the agent writes to disk.
 
-1. **DSAgt spans (live).** DSAgt instruments its own code and emits spans directly to the store as it runs.
-2. **Agent traces (post-hoc).** The MCP server's in-session heartbeat reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — recovering prompts, responses, and tool calls.
+1. **DSAgt spans (live).** DSAgt instruments its own code and emits spans directly to mlflow as it runs.
+2. **Agent traces (post-hoc).** The MCP server periodically reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — recovering prompts, responses, and tool calls.
 
 ## Trace Coverage
 
@@ -25,16 +25,16 @@ DSAgt reconstructs traces from what the agent writes to disk. Traces come from t
 |--------|-----------|----------|
 | Knowledge base | `kb.search`, `kb.embed`, `kb.index_search`, `kb.rerank` | Per-phase timing trees |
 | Code executions | `code.execute` | Exit code, duration, file counts, truncated stderr. Full payload in `trace_archive/<record_id>.json` |
-| Registry events | `save_code_spec`, `install_dependencies`, `reconstruct_pipeline` | Span metadata |
+| Registry events | `registry.save_code_spec`, `registry.install_dependencies`, `registry.reconstruct_pipeline` | Span metadata |
 | Agent traces | one AGENT subtree per turn (`llm` / `tool_<name>` children) | Prompts, responses, tool calls, and token usage where the transcript carries them |
 
 ### Agent trace coverage
 
 Agent traces are reconstructed from each agent's on-disk session record. A per-agent reader + translator runs for every supported agent (claude, codex, goose, opencode, cline), uniformly. Fidelity is capped by what the transcript persisted (e.g. token counts and timing appear where the agent recorded them).
 
-Every span carries the project's session id (minted per launch into `<project>/.dsagt/state.yaml`) for filtering in the MLflow trace view.
+Every span carries the project's session id for filtering in the MLflow trace view.
 
-The trace scan runs at periodic intervals (2m) inside the MCP server — At each interval DSAgt reads new transcript records, translates completed turns, and translates the canonical trace format to episodic memory in the knowledge base, and MLflow records in the MLFlow store. 
+The trace scan runs every 45 seconds inside the MCP server. Each pass reads new transcript records, translates the completed turns to the canonical trace, and hands them to the MLflow sink and, when episodic memory is on, to the memory indexer.
 
 ## Try it
 

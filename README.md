@@ -2,11 +2,11 @@
 
 **D**ata**S**mith **Ag**en**t** — AI-assisted data pipeline builder.
 
-![DSAgt architecture](latex/architecture.png)
+![DSAgt architecture](docs/assets/overview.png)
 
 DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It wraps these capabilities around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …).
 
-**Prerequisites:** Python 3.12 or 3.13, and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
+**Prerequisites:** Python 3.12 or later (CI tests 3.12 and 3.13), and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
 
 <!-- md-shared:agents:start -->
 | Agent | Install | Verify |
@@ -20,15 +20,13 @@ DSAgt connects an MCP-compatible AI coding agent to code registration, a semanti
 
 ## Installation
 
-### For use (no development)
-
 <!-- md-shared:install:start -->
 
 ```bash
 python3.12 -m venv ~/.venvs/dsagt          # or: conda create -n dsagt python=3.12 && conda activate dsagt
 source ~/.venvs/dsagt/bin/activate         # (Windows venv: ~\.venvs\dsagt\Scripts\activate)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
-dsagt --version                            # 0.2.0
+dsagt --version                            # 0.2.1
 ```
 
 This puts the `dsagt` CLI on your PATH. Create your first project — `dsagt init` is interactive (it walks you through the agent platform, project location, packaged knowledge collections, and skill sources) and sets up the knowledge base on first run:
@@ -179,11 +177,11 @@ DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to
 - **Installed** skills are located in `<project>/skills/` (every init installs the base skills `skill-creator` and `aidrin` from their upstream repositories; domain skills like the BaseData datacard generator are installed from the `genesis` source). These are mirrored into the agent's native skills directory (e.g. `.claude/skills/`, `.agents/skills/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the corpus below).
 - **Corpus** skills come from external Git repositories — GitHub *or* GitLab — indexed into a searchable corpus the agent browses with `search_skills` but that is **not** loaded into its context (so the corpus can hold thousands of skills). The agent enables a source with `add_skill_source(...)`, finds skills with `search_skills(...)`, then copies one into the project with `install_skill(...)`.
 
-The corpus is **opt-in**: a source must be synced before its skills are searchable. Curated named sources are provided out of the box — `k-dense-ai`, `anthropic`, `antigravity`, `composio`, and `genesis` (the OSTI GENESIS catalog: HPC, HuggingFace, LangChain, OpenAI, plasma-sim, and more) — and any Git URL or `owner/repo` works too. Manage sources from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
+The corpus is **opt-in**: a source must be synced before its skills are searchable. Curated named sources are provided out of the box — `k-dense-ai`, `anthropic`, `antigravity`, `composio`, and `genesis` (the AI-ModCon GENESIS catalog: HPC sites, BaseData, BaseEval, BaseSAFE, AmSC, plasma simulation) — and any Git URL or `owner/repo` works too. Manage sources from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
 
-![DSAgt skills routing](latex/skills-routing.png)
+![DSAgt skills routing](docs/assets/skills-routing.png)
 
-The diagram traces a skill's lifecycle: **discovery** — browse the corpus with `search_skills` for skills the agent doesn't yet have → **install** — `install_skill` copies one into the project → **use** — the agent auto-discovers installed skills natively and invokes them by relevance (and authors new ones with `skill-creator`). The diagram source is [`latex/skills-routing.tex`](latex/skills-routing.tex).
+The diagram traces a skill's lifecycle: **discovery** — browse the corpus with `search_skills` for skills the agent doesn't yet have → **install** — `install_skill` copies one into the project → **use** — the agent auto-discovers installed skills natively and invokes them by relevance (and authors new ones with `skill-creator`).
 
 ### Knowledge Base
 
@@ -199,7 +197,7 @@ The agent searches these collections semantically:
 | **Readiness Gate** | AIDRIN metrics per stage | **Opt-in** (enabled in the `dsagt init` menu): AIDRIN is installed once and the agent runs a fixed readiness-metric profile before and after every tabular pipeline stage, with reports in `audit/`. |
 | **Episodic Memory** | Captured session turns | **Opt-in** (enabled in the `dsagt init` menu): DSAgt captures each completed turn into `session_memory` during the session (mechanical chunk + embed). Retrieval is recency-weighted. |
 
-The embedding backend is local (sentence-transformers, CPU-side, no API key).
+The default embedding backend is local (sentence-transformers, CPU-side, no API key); `embedding.backend: api` in `.dsagt/config.yaml` selects an OpenAI-compatible hosted embedder instead.
 
 The agent searches via `kb_search` and writes via `kb_ingest` / `kb_remember`. Registered codes have their own `search_registry` route over the same backend. Installed skills are discovered natively by the agent; enabling external skill sources adds one corpus collection per source, which `search_skills` browses for installable skills.
 
@@ -235,7 +233,7 @@ Each launch gets a session id that every span carries, so you can filter the tra
 | `dsagt list` | List all projects with agent and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project (and optionally delete its directory) |
-| `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline]` | End-to-end install verification |
+| `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline] [--all]` | End-to-end install verification; `--all` runs every agent in parallel |
 <!-- md-shared:cli:end -->
 
 For tests, troubleshooting, and other developer-facing material, see [docs/developer.md](docs/developer.md).

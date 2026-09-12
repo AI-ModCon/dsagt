@@ -161,8 +161,7 @@ rebuild-not-migrate, and no project data changes:
   feature (incl. the `kb_get_suggestions` / `kb_dismiss_suggestion` MCP tools
   and the `llama-cpp-python` dependency), plus their `dsagt init` prompts and
   config keys. Episodic memory keeps the mechanical capture path so a Tier-0
-  baseline can be measured first; design notes parked in
-  `design-notes/judge.md`.
+  baseline can be measured first.
 - The built-in `datacard-generator` skill — it lives in the Genesis catalog and
   is now installed on demand via `dsagt skills add <project> genesis`.
 - Dead indexing of installed/built-in skills into the `skills` ChromaDB

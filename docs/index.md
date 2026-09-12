@@ -15,13 +15,11 @@ DSAgt connects an MCP-compatible AI coding agent to code registration, a semanti
 
 ## Prerequisites
 
-- Python 3.12 or 3.13
+- Python 3.12 or later (CI tests 3.12 and 3.13)
 - One of the supported agent platforms above, installed and authenticated against your LLM provider
 - [uv](https://github.com/astral-sh/uv) — only for the development install
 
 ## Installation
-
-### For use (no development)
 
 <!-- Shared with README.md — edit there, not here. -->
 {%

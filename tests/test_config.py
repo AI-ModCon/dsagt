@@ -582,9 +582,9 @@ class TestInitProject:
         settings = cli._collect_settings(
             args, interactive=False, existing=existing, pdir=pdir
         )
-        assert "embedding" not in settings  # the invariant the old code broke
+        assert "embedding" not in settings
 
-        # Must not raise (previously KeyError('embedding')).
+        # Must not raise on settings without an "embedding" key.
         cli._handle_destructive(existing, settings, pdir, interactive=False)
 
     def test_invalid_agent_raises(self):
@@ -701,7 +701,7 @@ class TestAgentRecord:
         assert set(mcp["mcpServers"]) == {"dsagt"}
         assert mcp["mcpServers"]["dsagt"]["args"] == ["run", "dsagt-server"]
         assert (working_dir / "CLAUDE.md").exists()
-        # BYOA: .dsagt_env is no longer written; user manages shell env.
+        # BYOA: the user manages the shell env; init writes no .dsagt_env.
         assert not (working_dir / ".dsagt_env").exists()
 
     def test_readiness_block_appended_once(self, tmp_path):
@@ -847,8 +847,8 @@ class TestAgentRecord:
 
     def test_codex_config_toml_shape(self, tmp_path):
         """``_render_codex_config`` emits only ``[mcp_servers.*]`` sections.
-        No ``[otel]`` block — DSAGT no longer forces codex's native
-        telemetry (nor the ``log_user_prompt`` privacy override).  No
+        No ``[otel]`` block: codex's native telemetry and its
+        ``log_user_prompt`` setting stay the user's own.  No
         top-level keys — those come from the user's ``~/.codex/config.toml``
         which ``write_dynamic`` copies as a base.
         """

@@ -40,7 +40,7 @@ User-confirmed facts that persist across sessions. See [Memory](memory.md).
 | Tool | Description |
 |------|-------------|
 | `kb_remember` | Store a user-confirmed fact as an explicit memory (`supersedes` to replace an outdated one) |
-| `kb_get_memories` | Load active explicit memories for this project (call at session start) |
+| `kb_get_memories` | Retrieve active explicit memories for this project |
 
 ## Skill tools (5)
 
@@ -48,7 +48,7 @@ Discover, install, and author agent skills, and manage external skill sources. S
 
 | Tool | Description |
 |------|-------------|
-| `search_skills` | Search installed skills + the external corpus (corpus hits are tagged `[catalog]` in results) |
+| `search_skills` | Search the external corpus (hits are tagged `[catalog]`); `skill_name` looks up one installed skill |
 | `install_skill` | Copy a skill from the corpus into `<project>/skills/` and mirror it into the agent's native skills dir |
 | `save_skill` | Register an agent-authored skill into `<project>/skills/<name>/SKILL.md` |
 | `add_skill_source` | Enable + index an external skill source (a known name or a Git URL) into the searchable corpus |
