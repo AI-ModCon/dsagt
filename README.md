@@ -2,7 +2,7 @@
 
 **D**ata**S**mith **Ag**en**t** — AI-assisted data pipeline builder.
 
-![DSAgt architecture](latex/architecture.png)
+![DSAgt architecture](docs/assets/overview.png)
 
 DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It wraps these capabilities around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …).
 
@@ -181,9 +181,9 @@ DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to
 
 The corpus is **opt-in**: a source must be synced before its skills are searchable. Curated named sources are provided out of the box — `k-dense-ai`, `anthropic`, `antigravity`, `composio`, and `genesis` (the AI-ModCon GENESIS catalog: HPC sites, BaseData, BaseEval, BaseSAFE, AmSC, plasma simulation) — and any Git URL or `owner/repo` works too. Manage sources from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
 
-![DSAgt skills routing](latex/skills-routing.png)
+![DSAgt skills routing](docs/assets/skills-routing.png)
 
-The diagram traces a skill's lifecycle: **discovery** — browse the corpus with `search_skills` for skills the agent doesn't yet have → **install** — `install_skill` copies one into the project → **use** — the agent auto-discovers installed skills natively and invokes them by relevance (and authors new ones with `skill-creator`). The diagram source is [`latex/skills-routing.tex`](latex/skills-routing.tex).
+The diagram traces a skill's lifecycle: **discovery** — browse the corpus with `search_skills` for skills the agent doesn't yet have → **install** — `install_skill` copies one into the project → **use** — the agent auto-discovers installed skills natively and invokes them by relevance (and authors new ones with `skill-creator`).
 
 ### Knowledge Base
 
