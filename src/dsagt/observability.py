@@ -18,7 +18,7 @@ it, not by accident:
     ``start_time_ns`` param), so replay *must* use ``start_span_no_context``;
     live *should* use ``start_span`` (no_context establishes no active span,
     which would kill the ``obs`` proxy and auto-nesting).  Hence two paths, one
-    store — neither is a historical leftover.
+    store.
 
 Layout (top → bottom)
 ---------------------

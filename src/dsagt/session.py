@@ -471,8 +471,7 @@ def setup_runtime_kb(
     *collections*, when given, is an allowlist of collection-directory
     names to copy — so a project gets exactly its requested asset set even
     when the shared KB holds more (e.g. heavy collections another project
-    installed).  ``None`` copies every populated collection (legacy
-    copy-everything behavior).
+    installed).  ``None`` copies every populated collection.
 
     Why copy instead of symlink: different projects on the same machine
     may run different dsagt versions, and a symlink would let one

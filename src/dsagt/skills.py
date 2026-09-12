@@ -811,7 +811,7 @@ class SkillsCatalog:
 
 
 def _where_label(source: str) -> str:
-    """Human tag for a hit's origin, matching the legacy search output."""
+    """Human tag for a hit's origin in the search output."""
     if source in ("bundled", "registered", "installed"):
         return " [installed]"
     if source.startswith("catalog:"):

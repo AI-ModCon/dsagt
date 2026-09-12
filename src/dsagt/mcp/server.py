@@ -460,8 +460,7 @@ def main():
     )
 
     # Own the session lifecycle: mint this session's id into state.yaml and
-    # tag traces with it (replaces the DSAGT_SESSION_ID env minted by the old
-    # ``dsagt start``).  Best-effort — never block startup on state I/O.
+    # tag traces with it.  Best-effort: never block startup on state I/O.
     session_id = None
     try:
         entry = append_session(project_dir)
