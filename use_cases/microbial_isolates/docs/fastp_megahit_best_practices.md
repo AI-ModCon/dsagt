@@ -136,12 +136,13 @@ Key Parameters
                         (-m 0.5), which can misread available RAM and
                         cause segfaults. See memory guidance below.
 
-  \--no-hw-accel        Runs the plain MEGAHIT core. The Bioconda
-                        osx-arm64 build's hardware-accelerated core
-                        (megahit_core_popcnt) segfaults during k-mer
-                        counting on Apple Silicon at any memory cap;
-                        the plain core assembles an isolate in about
-                        a minute.
+  \--no-hw-accel        Runs the plain MEGAHIT core. On Apple Silicon
+                        the Bioconda osx-arm64 build segfaults during
+                        k-mer counting when it runs with four threads,
+                        with either core; one or two threads complete
+                        every run. Use -t 1 with this flag on Apple
+                        Silicon; an isolate assembles in one to two
+                        minutes.
 
   \--min-count 3        Filters k-mers appearing fewer than 3 times. The
                         default is 2 (tuned for metagenomes). For isolate
@@ -189,9 +190,9 @@ running macOS, which typically has most RAM in use. For a single
 microbial isolate (2-6 Mb genome), 3 GB is sufficient for graph
 construction. If MEGAHIT fails with a graph-building error (not a
 segfault), increase the value. If it segfaults, decrease it. A segfault
-that persists at every memory value, with the log naming
-megahit_core_popcnt, is the hardware-accelerated core on Apple Silicon:
-add --no-hw-accel.
+at the "Lv1 scanning done" line of the log, at every memory value, is
+the thread count: on Apple Silicon the Bioconda build fails with -t 4
+and completes with -t 1 or -t 2. Use -t 1 --no-hw-accel there.
 
 Checking Available RAM on macOS
 
