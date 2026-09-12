@@ -5,7 +5,7 @@ This guide walks through knowledge ingest, code registration, provenance, and ex
 ## Setup
 
 ```bash
-# Install (any Python 3.12/3.13 environment)
+# Install (Python 3.12 or later; CI tests 3.12 and 3.13)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
 
 # Set a convenience variable for the smoke test directory (not a normal dsagt step)

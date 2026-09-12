@@ -1,6 +1,6 @@
 # Provenance
 
-DSAgt records data operations as reproducible, auditable step. The agent registers a **code** — a CLI executable — and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.
+DSAgt records data operations as reproducible, auditable steps. The agent registers a **code** — a CLI executable — and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.
 
 ![DSAgt provenance](assets/provenance.png)
 
