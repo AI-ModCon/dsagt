@@ -155,10 +155,10 @@ def build_dispatch_server(
     return Server(name, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
-HEARTBEAT_INTERVAL_S = 45.0
+PASS_INTERVAL_S = 45.0
 
 
-async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> None:
+async def _periodic_pass(collector, tool_indexer, interval: float, project_dir) -> None:
     """Periodically run the trace collector + tool-use indexer on wall-clock time.
 
     Runs regardless of tool traffic, so a quiet session (the agent thinking,
@@ -178,9 +178,9 @@ async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> N
             try:
                 n = await asyncio.to_thread(collector.collect)
                 if n:
-                    logger.info("Trace heartbeat: logged %d trace(s)", n)
+                    logger.info("Trace pass: logged %d trace(s)", n)
             except Exception as e:  # noqa: BLE001
-                logger.warning("Trace heartbeat collect failed: %s", e)
+                logger.warning("Trace pass failed: %s", e)
             if not recorded:
                 try:
                     source = collector.active_source()
@@ -198,9 +198,9 @@ async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> N
                 # instead of orphaning as untagged top-level traces.
                 n = await asyncio.to_thread(tool_indexer.tick_traced)
                 if n:
-                    logger.info("Tool-use heartbeat: indexed %d record(s)", n)
+                    logger.info("Tool-use pass: indexed %d record(s)", n)
             except Exception as e:  # noqa: BLE001
-                logger.warning("Tool-use heartbeat tick failed: %s", e)
+                logger.warning("Tool-use pass failed: %s", e)
 
 
 async def _run_stdio(
@@ -209,7 +209,7 @@ async def _run_stdio(
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         hb = (
             asyncio.create_task(
-                _heartbeat(collector, tool_indexer, HEARTBEAT_INTERVAL_S, project_dir)
+                _periodic_pass(collector, tool_indexer, PASS_INTERVAL_S, project_dir)
             )
             if (collector is not None or tool_indexer is not None)
             else None
@@ -245,7 +245,7 @@ async def _run_stdio(
                     try:
                         await asyncio.to_thread(collector.collect, include_last=True)
                     except Exception as e:  # noqa: BLE001
-                        logger.warning("Trace heartbeat final flush failed: %s", e)
+                        logger.warning("Final trace pass failed: %s", e)
                 if tool_indexer is not None:
                     try:
                         await asyncio.to_thread(tool_indexer.tick)
@@ -503,7 +503,7 @@ def main():
 
     server = create_dsagt_server(registry, kb, skill_reg, runtime_dir=str(project_dir))
 
-    # The in-session trace heartbeat: read the live transcript → MLflow.  The
+    # The periodic trace pass: read the live transcript → MLflow.  The
     # loop is agent-agnostic; ``make_trace_collector`` returns a collector for any
     # agent with a registered (reader, translator) pair and ``None`` otherwise (so
     # agents whose readers haven't landed yet simply run without it).
@@ -525,10 +525,10 @@ def main():
             extra_consumers=episodic_consumers(config, kb, project_dir, session_id),
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning("Could not start trace heartbeat: %s", e)
+        logger.warning("Could not start the periodic trace pass: %s", e)
 
     # Tool-use indexer: incremental, idempotent embedding of dsagt-run records
-    # into the ``tool_use`` collection on the same heartbeat (no collector
+    # into the ``tool_use`` collection on the same periodic pass (no collector
     # dependency — it reads trace_archive/, not the transcript).
     tool_indexer = None
     try:

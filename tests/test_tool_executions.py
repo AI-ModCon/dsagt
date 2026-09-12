@@ -169,7 +169,7 @@ class TestExecutionMetadata:
 
 
 # ---------------------------------------------------------------------------
-# CodeUseIndexer — idempotent, incremental heartbeat indexing
+# CodeUseIndexer — idempotent, incremental pass indexing
 # ---------------------------------------------------------------------------
 
 
@@ -213,7 +213,7 @@ class TestCodeUseIndexer:
             kb.close()
 
     def test_tick_traced_opens_no_span_when_nothing_to_index(self, tmp_path):
-        """A quiet heartbeat (no new records) must open NO categorization root —
+        """A pass with no new records must open NO categorization root —
         otherwise the MLflow trace list fills with empty, null-request traces."""
         pdir = tmp_path / "proj"
         (pdir / ".dsagt").mkdir(parents=True)

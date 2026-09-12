@@ -12,7 +12,7 @@ Two memory types:
 
 **Episodic memory** (MemoryExtractor):
     A trace-pipeline *consumer* (``MemoryExtractor``) that consumes the
-    in-process ``Trace`` the heartbeat produces and writes per-block chunks into
+    in-process ``Trace`` the periodic pass produces and writes per-block chunks into
     the ``session_memory`` collection (producer/tool/turn_id metadata, no LLM).
 
 Files on disk (in project directory):
@@ -329,7 +329,7 @@ def _epoch_or_now(ts: object) -> float:
 def episodic_consumers(config: dict, kb, runtime_dir, session_id) -> list:
     """Build the episodic-memory consumer list from config (empty when off).
 
-    Shared by the live heartbeat (current session) and the startup catch-up
+    Shared by the periodic pass (current session) and the startup catch-up
     (previous session) so both feed the same :class:`MemoryExtractor` shape.
     Episodic memory is a compute/storage opt-in (``episodic.enabled``).
     Best-effort: a build failure returns ``[]`` rather than raising.
@@ -355,7 +355,7 @@ class MemoryExtractor:
 
     Plugged into :class:`~dsagt.traces.TraceCollector` alongside the MLflow sink;
     each ``write`` receives the (subset of) just-completed turns and indexes them.
-    Idempotency is the heartbeat's job — it only delivers turns this consumer
+    Idempotency is the periodic pass's job — it only delivers turns this consumer
     hasn't acked — so ``write`` just does the work.
 
     Chunks each turn per-block and embeds it — no LLM, nothing lost, the agent
@@ -380,7 +380,7 @@ class MemoryExtractor:
         exchanges = trace.to_exchanges()
         if not exchanges:
             return
-        # Categorization root: this runs on the heartbeat, outside any MCP
+        # Categorization root: this runs on the periodic pass, outside any MCP
         # dispatch, so tag the whole extraction ``dsagt.source=episodic`` — the
         # nested kb.* writes inherit it (otherwise they'd land uncategorized).
         # ``episodic``, NOT ``memory``: this is per-turn internal embedding, and

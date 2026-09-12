@@ -219,12 +219,12 @@ check "explicit memory recorded"     "test -s '${PDIR}/.dsagt/explicit_memories.
 # session 2 never saw samples.csv.
 check "cross-session recall"         "grep -qi 'null' '${SESSION_LOG_2}' && grep -qi 'status' '${SESSION_LOG_2}'"
 # Episodic memory (enabled via --episodic) chunks+embeds every turn into
-# the session_memory collection on the heartbeat.
+# the session_memory collection on the periodic pass.
 check "episodic memory indexed"      "test -f '${PDIR}/kb_index/session_memory/chroma.sqlite3'"
 
 # -- observability + session state -------------------------------------------
 check "mlflow store has traces"      "test -s '${PDIR}/mlflow.db'"
-# The heartbeat indexes trace_archive/ execution records into the code_use
+# The periodic pass indexes trace_archive/ execution records into the code_use
 # collection (plus a startup catch-up in session 2).
 check "code_use collection indexed"  "test -f '${PDIR}/kb_index/code_use/chroma.sqlite3'"
 # state.yaml is the anchor for crash catch-up: both sessions logged, and
@@ -238,7 +238,7 @@ check "dsagt info runs"              "dsagt info '${PROJECT}'"
 
 # ---------------------------------------------------------------------------
 # 6. Agent LLM-call transparency: the trace pipeline recovers every agent's
-#    turns from its on-disk transcript (heartbeat + graceful-shutdown flush,
+#    turns from its on-disk transcript (the periodic pass + graceful-shutdown flush,
 #    backstopped by session 2's startup catch-up), so agent traces in the
 #    store are a hard requirement for all five agents.
 # ---------------------------------------------------------------------------

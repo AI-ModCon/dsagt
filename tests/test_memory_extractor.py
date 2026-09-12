@@ -110,7 +110,7 @@ def test_empty_trace_writes_nothing(tmp_path):
 
 
 def test_extraction_span_tagged_episodic_with_inputs_outputs(tmp_path):
-    """The per-turn embedding runs off the heartbeat, so it must carry
+    """The per-turn embedding runs off the periodic pass, so it must carry
     dsagt.source=episodic — filtering apart from the user-facing memory tools
     (kb_remember / kb_get_memories) that carry dsagt.source=memory — and record
     its turn/chunk counts as inputs/outputs so the trace isn't null-request."""
