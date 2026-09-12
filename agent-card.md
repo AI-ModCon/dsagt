@@ -250,7 +250,7 @@ Runs on any developer workstation or compute node with Python 3.12+. The default
 
 ### Software
 
-Python 3.12 or 3.13, `uv` package manager. Key dependencies:
+Python 3.12 or later (CI tests 3.12 and 3.13), `uv` package manager. Key dependencies:
 
 - `mcp>=2.0,<3.0` — MCP server framework
 - `mlflow>=3.11,<4.0` — trace store and observability, serverless SQLite backend
