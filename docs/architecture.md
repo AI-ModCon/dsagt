@@ -21,8 +21,8 @@ Traces land in a serverless MLflow store — a SQLite file at `<project>/mlflow.
 **[Skills Discovery](skills.md)**
 DSAgt exposes MCP tools to connect to external GitHub skill repositories and search them for skills that enhance scientific workflows. On top of the agent's own progressive disclosure of the skills already installed in its native skills directory, DSAgt maintains an extendable corpus of skills that can be searched and installed on demand — without flooding the agent's context window with skills it isn't using. The agent searches via `search_skills` and installs via `install_skill`.
 
-**[Readiness Gate](readiness.md)** (opt-in)
-AIDRIN as the check code around every tabular pipeline stage. Enabling the gate at `dsagt init` installs AIDRIN once and appends the gate rules to the agent's instructions (the `aidrin` skill is one of the base skills every project carries); the agent runs a fixed metric profile before and after each stage and reports the delta.
+**[AI-Readiness Assessment](readiness.md)** (opt-in)
+AIDRIN as the check code around every tabular pipeline stage. Enabling the assessment at `dsagt init` installs AIDRIN once and appends the assessment rules to the agent's instructions (the `aidrin` skill is one of the base skills every project carries); the agent runs a fixed metric profile before and after each stage and reports the delta.
 
 **[Memory](memory.md)**
 DSAgt adds two memory extensions that complement the host agent's own memory (which distills session facts into a managed set of Markdown files loaded into context). *Explicit memory* records user-confirmed facts as YAML (`kb_remember` / `kb_get_memories`). *Episodic memory* (opt-in) keeps a vector store of semantically chunked turn blocks and searches them by successive filtering — first to a session, then by regex over the query's key themes, then a final vector ranking of what remains — so long, multi-session history can augment agent context without the noisy retrieval that undifferentiated episodic accrual would otherwise produce.

@@ -134,7 +134,7 @@ def static_agent_record(
 
     Idempotent.  If the dsagt marker is already in the instructions file,
     the write is skipped — preserves any user edits made between init
-    and start.  When the project opted into the readiness gate, its
+    and start.  When the project opted into the readiness assessment, its
     instructions block is appended to the same file under its own marker.
     """
     setup = _setup_for(agent)
@@ -151,7 +151,7 @@ def static_agent_record(
             READINESS_MARKER,
         )
         if action:
-            actions.append(action.replace("DSAgt instructions", "readiness gate"))
+            actions.append(action.replace("DSAgt instructions", "readiness assessment"))
     return actions
 
 

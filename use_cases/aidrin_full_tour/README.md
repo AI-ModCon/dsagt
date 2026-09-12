@@ -18,7 +18,7 @@ order: 50
 This guide drives [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector)
 through DSAgt on a single tabular dataset — metrics from all four of AIDRIN's
 categories, with full execution provenance. It is the companion to the
-[cryo-EM curation demo](../cryoem/), where the readiness gate applies the quality
+[cryo-EM curation demo](../cryoem/), where the readiness assessment applies the quality
 subset to scientific data; here we use a dataset rich enough to exercise the fairness and privacy
 metrics too.
 
@@ -41,7 +41,7 @@ Claude Code on Sonnet 4.5.
 - DSAgt installed (`uv sync --all-groups`) and an agent platform installed and **already
   authenticated** (BYOA — your agent talks to its own LLM provider; dsagt writes no
   credentials). The default local embedder needs no API key.
-- `uv` and Git installed. Enabling the readiness gate at `dsagt init` installs AIDRIN itself
+- `uv` and Git installed. Enabling the readiness assessment at `dsagt init` installs AIDRIN itself
   (one-time, shared across projects, Python 3.10-3.12).
 
 ## Setup
@@ -51,7 +51,7 @@ dsagt init
 ```
 
 At the menu, name the project `aidrin-tour`, pick your agent, and answer **yes** to
-"Enable the AIDRIN readiness gate?". Init installs AIDRIN on first use (one-time,
+"Enable the AIDRIN AI-readiness assessment?". Init installs AIDRIN on first use (one-time,
 shared across projects, into `~/dsagt-projects/.tools/`). Then copy the sample dataset
 into the project and start the session:
 
@@ -63,8 +63,8 @@ cp AIDRIN/examples/sample_data/csv/adult.csv "$PROJ/data/"
 dsagt start aidrin-tour
 ```
 
-Every init installs the `aidrin` skill into `$PROJ/skills/aidrin/`; the readiness gate
-records the executable in `.dsagt/config.yaml` and adds the gate rules to the instructions.
+Every init installs the `aidrin` skill into `$PROJ/skills/aidrin/`; the readiness assessment
+records the executable in `.dsagt/config.yaml` and adds the assessment rules to the instructions.
 
 ## Execution
 
@@ -192,7 +192,7 @@ Reconstruct the full readiness assessment you just ran from the execution record
 
 | DSAgt Capability | Steps |
 |------------------|-------|
-| The `aidrin` base skill installed at init; the readiness gate enabled | Setup |
+| The `aidrin` base skill installed at init; the readiness assessment enabled | Setup |
 | Base-skill use: the `aidrin` CLI through `dsagt-run` | 1 |
 | Code execution with provenance (execution records in `trace_archive/`) | 2 |
 | Multi-metric orchestration | 2 |

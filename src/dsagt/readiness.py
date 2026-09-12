@@ -1,4 +1,4 @@
-"""Readiness gate — AIDRIN as the check for every pipeline stage.
+"""Readiness assessment — AIDRIN as the check for every pipeline stage.
 
 The pipeline-builder instructions require a paired check before and after
 every data operation, with reports in ``audit/``.  This module makes that
@@ -8,7 +8,7 @@ appends an instructions block telling the agent that ``check_[X]`` for
 tabular data is an AIDRIN run of a fixed metric profile.  The ``aidrin``
 skill itself is one of the base skills every project carries
 (``skills.BASE_SKILLS``), fetched from the AIDRIN repository at init; the
-gate only makes the agent apply it on every stage.  Metric selection is by
+assessment only makes the agent apply it on every stage.  Metric selection is by
 named profile, not by prompt, so the agent runs the same metric set on every
 stage of a pipeline.
 
@@ -46,9 +46,9 @@ AIDRIN_SPEC = "aidrin[mcp] @ git+https://github.com/idtlab/AIDRIN@develop"
 AIDRIN_PYTHON = ">=3.10,<3.13"
 
 #: Marker line the instructions block carries so the append is idempotent.
-READINESS_MARKER = "DSAgt Readiness Gate"
+READINESS_MARKER = "DSAgt AI-Readiness Assessment"
 
-#: Metric profiles the gate instructions name.  ``quality`` runs on any
+#: Metric profiles the assessment instructions name.  ``quality`` runs on any
 #: tabular file with no column arguments.  ``supervised`` adds the
 #: target-dependent metrics: ``class-imbalance`` takes the target column and
 #: ``feature-relevance`` takes the categorical and numerical column lists
@@ -128,7 +128,7 @@ def ensure_aidrin(install_dir: Path = AIDRIN_DIR) -> Path:
 
 
 def instructions_block(readiness: dict) -> str:
-    """The instructions appended to the agent's file when the gate is enabled.
+    """The instructions appended to the agent's file when the assessment is enabled.
 
     Stated as rules the agent applies at every stage; the ``aidrin`` skill in
     ``skills/aidrin/`` carries the command forms and the argument order of
@@ -145,7 +145,7 @@ input or output is a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz).
 The `aidrin` skill in `skills/aidrin/` documents the CLI; the executable for
 this project is `{executable}`. The AIDRIN MCP tools are not available here:
 use the CLI path. Every `aidrin` command in this project — `list`,
-`summarize`, `run`, `batch`, whether or not it is a gate run — goes through
+`summarize`, `run`, `batch`, whether or not it is an assessment run — goes through
 dsagt-run so it is recorded:
 `dsagt-run --code aidrin -- {executable} <aidrin args>`.
 
@@ -159,7 +159,7 @@ dsagt-run so it is recorded:
    `audit/step_N_pre.aidrin.json` / `audit/step_N_post.aidrin.json`, keyed
    by metric. `aidrin run` exits 0 on failure: a result holding an `Error`
    key is a failed metric — record it as such and continue with the rest.
-2. The gate is fixed: for gate runs skip the skill's intent-elicitation and
+2. The assessment is fixed: for assessment runs skip the skill's intent-elicitation and
    plan-confirmation steps. Use the skill's full workflow only when the
    user asks for a readiness assessment beyond the profile.
 3. After the post-run, report the per-metric change between the pre and

@@ -22,7 +22,7 @@ Each flag skips its prompt in the menu; together they are the automation path (C
 | `--location <path>` | Project location |
 | `--include … \| --exclude …` | Knowledge collections / skill sources |
 | `--episodic` | "Enable episodic memory?" |
-| `--readiness aidrin [--readiness-executable PATH]` | "Enable the AIDRIN readiness gate?" |
+| `--readiness aidrin [--readiness-executable PATH]` | "Enable the AIDRIN AI-readiness assessment?" |
 
 Interactive use is bare `dsagt init` and the menu.
 

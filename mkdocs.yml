@@ -61,7 +61,7 @@ nav:
     - Skills: skills.md
     - Memory: memory.md
     - Observability: observability.md
-    - Readiness Gate: readiness.md
+    - AI-Readiness Assessment: readiness.md
   - MCP Servers: mcp-servers.md
   - CLI Reference: cli.md
   - Use Cases:

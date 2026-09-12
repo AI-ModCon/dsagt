@@ -159,7 +159,7 @@ def build_config(
     - ``episodic`` — written *only when the user opted in* (it's an opt-in, so a
       disabled project stays minimal and backfills ``enabled: false`` on read).
     - ``readiness`` — written only when the user opted into the readiness
-      gate (``tool`` / ``executable`` / ``profile``; see :mod:`dsagt.readiness`).
+      assessment (``tool`` / ``executable`` / ``profile``; see :mod:`dsagt.readiness`).
 
     Everything else (embedding backend, chunk_size, rerank, populate_native)
     is a code default backfilled on read — NOT a written choice.  Credentials
