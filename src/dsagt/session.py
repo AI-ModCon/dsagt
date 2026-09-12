@@ -95,7 +95,7 @@ DEFAULTS = {
             },
         ],
     },
-    # Episodic memory: the heartbeat's MemoryExtractor subscriber.  ``enabled``
+    # Episodic memory: the periodic pass's MemoryExtractor subscriber.  ``enabled``
     # is a compute/storage opt-in that mechanically chunks/tags/embeds each
     # completed turn into session_memory (no credentials).
     "episodic": {
@@ -774,11 +774,11 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
     1. **Code-execution indexing** (always): embed the previous session's
        ``<pdir>/trace_archive/`` records into the ``code_use`` collection via
        the shared :class:`~dsagt.provenance.CodeUseIndexer` — idempotent against
-       the same ``.dsagt/code_use_acks.json`` the live heartbeat uses, so the
-       startup catch-up and the heartbeat never double-index.  No LLM, no
+       the same ``.dsagt/code_use_acks.json`` the periodic pass uses, so the
+       startup catch-up and the periodic pass never double-index.  No LLM, no
        credentials (local-backend default).
     2. **Chat-trace catch-up** (:func:`_catch_up_traces`): re-collect the
-       previous session so any turns the heartbeat missed before an ungraceful
+       previous session so any turns the periodic pass missed before an ungraceful
        shutdown still reach MLflow (and episodic memory).  Pinned to the
        trace-source token recorded in ``state.yaml`` (uniform across agents);
        session-qualified acks dedupe against the live pass, so only dangling
@@ -825,7 +825,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
     session token, not a transcript-file assumption.
 
     Returns 0 (a no-op) when there is no previous session, or it stamped no
-    trace-source (a session too short for the heartbeat to record one), where
+    trace-source (a session too short for the periodic pass to record one), where
     guessing would risk reading the *new* session's records.
     """
     from dsagt.memory import episodic_consumers

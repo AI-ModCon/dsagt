@@ -412,7 +412,7 @@ class JsonlReader(Reader):
             except json.JSONDecodeError:
                 # One corrupt complete line must not drop the whole session's
                 # transcript — it persists on disk and would re-fail every
-                # heartbeat.  Skip it, as we already skip the trailing partial.
+                # pass.  Skip it, as we already skip the trailing partial.
                 logger.warning("skipping unparseable transcript line in %s", f)
         return out
 
@@ -1362,7 +1362,7 @@ class TraceCollector:
         """
         try:
             return self._reader.active_source()
-        except Exception:  # noqa: BLE001 — best-effort; never break the heartbeat
+        except Exception:  # noqa: BLE001 — best-effort; never break the periodic pass
             return None
 
     def _acks_path(self, name: str) -> Path:

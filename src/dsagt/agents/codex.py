@@ -36,7 +36,7 @@ Codex's ``codex-otel`` Rust crate emits OTel spans/logs/metrics, BUT:
 Conversation history is recovered from
 ``$CODEX_HOME/sessions/rollout-<ts>-<uuid>.jsonl`` (full assistant text
 + tool calls + responses) by the trace pipeline's Codex reader/translator
-on the heartbeat — feeding MLflow and episodic memory like every other agent.
+on the periodic pass — feeding MLflow and episodic memory like every other agent.
 
 Open Codex issues tracking richer OTel: openai/codex#12913,
 #10277, #6153, #16248.

@@ -1282,7 +1282,7 @@ class TestNoLaunchShim:
 
 class TestClaudeSetup:
     """`dsagt init --agent claude` writes `.mcp.json` and does NOT wire MLflow's
-    autolog Stop hook — DSAGT's own serverless heartbeat pipeline (ClaudeReader →
+    autolog Stop hook — DSAGT's own serverless periodic pipeline (ClaudeReader →
     ClaudeTranslator → MLflowSink) produces Claude's traces, uniformly with every
     other agent, so wiring autolog too would double-log."""
 

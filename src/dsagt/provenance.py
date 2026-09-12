@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     # the hint is a string).  Importing KnowledgeBase at runtime would drag the
     # whole retrieval module into ``dsagt-run``, which only writes provenance
     # records to disk and never touches a KB — the embedding of those records
-    # happens later, on the MCP-server heartbeat via ``CodeUseIndexer``.
+    # happens later, on the MCP server's periodic pass via ``CodeUseIndexer``.
     from dsagt.knowledge import KnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -267,7 +267,7 @@ def execution_metadata(record: dict) -> dict:
     meta["code_name"] = record.get("code_name") or "unknown"
     # A code run outside a minted session stores session_id: null, and ChromaDB
     # rejects a null metadata value — which would fail the whole batch add and
-    # re-fail every heartbeat.  Coerce null to "unknown".
+    # re-fail every pass.  Coerce null to "unknown".
     meta["session_id"] = record.get("session_id") or "unknown"
 
     if execution and execution.get("return_code") is not None:
@@ -311,7 +311,7 @@ def index_trace_archive(
             record = json.loads(path.read_text())
         except (json.JSONDecodeError, OSError):
             # A truncated/corrupt record must not abort the whole batch — it
-            # persists on disk and would re-fail every heartbeat.  Skip it,
+            # persists on disk and would re-fail every pass.  Skip it,
             # consistent with the missing-execution-layer skip below.
             logger.warning("Skipping %s: unreadable record", path.name)
             errors += 1
@@ -340,7 +340,7 @@ def index_trace_archive(
         from dsagt.observability import open_span
 
         # Open a categorization root only when there is work to index — a quiet
-        # heartbeat produces no child spans, so wrapping it would just emit an
+        # periodic pass produces no child spans, so wrapping it would just emit an
         # empty, null-request trace.  Only the tagged background triggers pass a
         # ``source``; the reconstruct-pipeline caller passes none and lets its
         # kb.* writes inherit the tool's own trace.
@@ -372,7 +372,7 @@ class CodeUseIndexer:
     ``record_id`` in a persisted ack set — so re-ticks and cross-session
     re-reads can never duplicate (the bug the prior cursor-less batch had).
 
-    One primitive, three triggers, all safe to overlap: the MCP-server heartbeat
+    One primitive, three triggers, all safe to overlap: the MCP server's periodic pass
     (current-session freshness), startup catch-up (the previous session's tail),
     and the ``reconstruct_pipeline`` code (index-then-reconstruct, so a pipeline
     review reflects the calls just made).  An OS file lock around
@@ -438,12 +438,12 @@ class CodeUseIndexer:
     def tick_traced(self) -> int:
         """:meth:`tick` under a ``dsagt.source=code_use`` categorization root.
 
-        For the background triggers (heartbeat, startup catch-up) that run off
+        For the background triggers (the periodic pass, startup catch-up) that run off
         any tool-call trace — otherwise the indexer's ``kb.add_entries`` /
         ``kb.embed`` spans start their own untagged top-level traces, landing in
         the ``unknown`` bucket and detached from the executions they index.  The
-        root is opened only when a tick actually indexes records, so a quiet
-        heartbeat emits no empty trace.  Runs on the caller's thread (callers
+        root is opened only when a tick actually indexes records, so a pass with
+        no new records emits no empty trace.  Runs on the caller's thread (callers
         dispatch *this* to the embedding worker), so the span opens there.
         """
         return self.tick(source="code_use")

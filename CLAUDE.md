@@ -31,7 +31,7 @@ uv run mkdocs build --strict                                # docs, what CI runs
 - **collection**: a ChromaDB collection under `<project>/kb_index` (`knowledge.KnowledgeBase`).
 - **execution record**: the JSON `dsagt-run` writes to `trace_archive/` (`provenance.run_and_record`), indexed into `code_use` by `provenance.CodeUseIndexer`.
 - **explicit memory**, **episodic memory**: `memory.ExplicitMemory`, `memory.MemoryExtractor`.
-- **trace**: one session's spans as plain data (`traces.Trace`). The **heartbeat** (`mcp.server._heartbeat`) runs `traces.TraceCollector`; the **deferred final turn** is the open last turn a periodic pass withholds; **catch-up** re-collects the previous session at startup (`session.catch_up_extraction`).
+- **trace**: one session's spans as plain data (`traces.Trace`). The **periodic pass** (`mcp.server._periodic_pass`, every 45 seconds) runs `traces.TraceCollector`; the **deferred final turn** is the open last turn a periodic pass withholds; **catch-up** re-collects the previous session at startup (`session.catch_up_extraction`).
 - **readiness gate**: the opt-in AIDRIN check around every tabular stage (`readiness.instructions_block`).
 - **store**: the project's MLflow sqlite file (`observability.resolve_tracking_uri`).
 
@@ -42,7 +42,7 @@ uv run mkdocs build --strict                                # docs, what CI runs
 - `dsagt init` is the one place collections are provisioned; `dsagt-server` opens only `<project>/kb_index`.
 - A tool is registered on `dsagt-server` only when its handler is complete end to end; internal scaffolding for an unfinished path stays unregistered.
 - `dsagt-server` derives its project from its cwd and behaves the same from a bare launch or `dsagt start`. The MCP-config env block carries routing only; dsagt never reads or writes provider credentials.
-- Agent traces come from the on-disk transcript through the heartbeat, the same way for all five agents.
+- Agent traces come from the on-disk transcript through the periodic pass, the same way for all five agents.
 - Modules on the `dsagt-run` path import no heavy dependency at module scope.
 
 ## Exceptions
