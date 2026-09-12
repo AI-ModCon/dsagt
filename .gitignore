@@ -161,3 +161,8 @@ cline_mcp.json
 
 # Local scratch for removed/parked code (not tracked)
 scratch/
+
+# Local working documents of the agentic workflow (see docs/developer.md); never part of a pull request
+DESIGN.md
+DEVELOPMENT.md
+history/

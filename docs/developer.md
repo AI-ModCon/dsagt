@@ -78,7 +78,9 @@ the rules an agent follows in this repository:
 Install them into the agent's skills directory (for Claude Code,
 `~/.claude/skills/<name>/`) from a clone of the catalog. `CLAUDE.md` at the
 repository root holds what is specific to DSAgt: the document map, the
-commands, the glossary, and the invariants.
+commands, the glossary, and the invariants. (The skills keep their working
+notes in `DESIGN.md`, `DEVELOPMENT.md`, and `history/` at the repository
+root; those are ignored by git and never part of a pull request.)
 
 ## Codebase orientation
 

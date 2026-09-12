@@ -7,10 +7,7 @@ DSAgt (DataSmith Agent) is an MCP server and a CLI that give a user's own agent 
 ## Documents
 
 - `README.md`: what it does, install, usage, rules.
-- `DESIGN.md`: present architecture and the module map.
-- `DEVELOPMENT.md`: open work.
-- `docs/`: the MkDocs site. `docs/developer.md` is the contributor guide (setup, tests, lint, docs build, the trace pipeline from another application).
-- `history/decisions.md`: settled decisions. `history/parked/`: removed uncommitted files. Nothing there describes present state.
+- `docs/`: the MkDocs site. `docs/developer.md` is the contributor guide (setup, tests, lint, docs build, review policy, the agentic workflow).
 - `CHANGELOG.md` and `agent-card.md`: the release log and the Genesis agent card.
 - `use_cases/`: end-to-end walkthroughs, published to the site by `hooks/gen_use_cases.py`; reference material outside the test suite.
 
