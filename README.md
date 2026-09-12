@@ -199,7 +199,7 @@ The agent searches these collections semantically:
 | **Readiness Gate** | AIDRIN metrics per stage | **Opt-in** (enabled in the `dsagt init` menu): AIDRIN is installed once and the agent runs a fixed readiness-metric profile before and after every tabular pipeline stage, with reports in `audit/`. |
 | **Episodic Memory** | Captured session turns | **Opt-in** (enabled in the `dsagt init` menu): DSAgt captures each completed turn into `session_memory` during the session (mechanical chunk + embed). Retrieval is recency-weighted. |
 
-The embedding backend is local (sentence-transformers, CPU-side, no API key).
+The default embedding backend is local (sentence-transformers, CPU-side, no API key); `embedding.backend: api` in `.dsagt/config.yaml` selects an OpenAI-compatible hosted embedder instead.
 
 The agent searches via `kb_search` and writes via `kb_ingest` / `kb_remember`. Registered codes have their own `search_registry` route over the same backend. Installed skills are discovered natively by the agent; enabling external skill sources adds one corpus collection per source, which `search_skills` browses for installable skills.
 
@@ -235,7 +235,7 @@ Each launch gets a session id that every span carries, so you can filter the tra
 | `dsagt list` | List all projects with agent and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project (and optionally delete its directory) |
-| `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline]` | End-to-end install verification |
+| `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline] [--all]` | End-to-end install verification; `--all` runs every agent in parallel |
 <!-- md-shared:cli:end -->
 
 For tests, troubleshooting, and other developer-facing material, see [docs/developer.md](docs/developer.md).

@@ -1,6 +1,6 @@
 # Observability
 
-DSAgt logs traces to a **MLflow** via an SQLite file at `~/dsagt-projects/<project>/mlflow.db`.
+DSAgt logs traces to a serverless **MLflow** store, an SQLite file at `~/dsagt-projects/<project>/mlflow.db`.
 
 ![DSAgt observability](assets/observability.png)
 
@@ -25,16 +25,16 @@ DSAgt reconstructs traces from what the agent writes to disk. Traces come from t
 |--------|-----------|----------|
 | Knowledge base | `kb.search`, `kb.embed`, `kb.index_search`, `kb.rerank` | Per-phase timing trees |
 | Code executions | `code.execute` | Exit code, duration, file counts, truncated stderr. Full payload in `trace_archive/<record_id>.json` |
-| Registry events | `save_code_spec`, `install_dependencies`, `reconstruct_pipeline` | Span metadata |
+| Registry events | `registry.save_code_spec`, `registry.install_dependencies`, `registry.reconstruct_pipeline` | Span metadata |
 | Agent traces | one AGENT subtree per turn (`llm` / `tool_<name>` children) | Prompts, responses, tool calls, and token usage where the transcript carries them |
 
 ### Agent trace coverage
 
 Agent traces are reconstructed from each agent's on-disk session record. A per-agent reader + translator runs for every supported agent (claude, codex, goose, opencode, cline), uniformly. Fidelity is capped by what the transcript persisted (e.g. token counts and timing appear where the agent recorded them).
 
-Every span carries the project's session id (minted per launch into `<project>/.dsagt/state.yaml`) for filtering in the MLflow trace view.
+Every span carries the project's session id for filtering in the MLflow trace view.
 
-The trace scan runs every 45 seconds inside the MCP server. At each interval DSAgt reads new transcript records, translates completed turns, and translates the canonical trace format to episodic memory in the knowledge base, and MLflow records in the MLFlow store. 
+The trace scan runs every 45 seconds inside the MCP server. Each pass reads new transcript records, translates the completed turns to the canonical trace, and hands them to the MLflow sink and, when episodic memory is on, to the memory indexer.
 
 ## Try it
 
