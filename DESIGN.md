@@ -4,8 +4,8 @@ DSAgt is an MCP server plus a CLI that give an agent platform (Claude Code, Goos
 
 ## Run model
 
-- `dsagt init --agent <name>` writes `.dsagt/config.yaml`, the per-agent instructions file (`CLAUDE.md`, `.goosehints`, `AGENTS.md`, or `.clinerules/dsagt_instructions.md`, with `src/dsagt/dsagt_instructions.md` injected), and the per-agent MCP config (`.mcp.json`, `goose.yaml`, `.codex-data/config.toml`, `opencode.json`, or `cline mcp add`). The MCP-config env block carries routing only: `DSAGT_PROJECT`, `DSAGT_PROJECT_DIR`, `DSAGT_SESSION_ID`, `MLFLOW_TRACKING_URI`, `EMBEDDING_*`.
-- The agent starts bare from the project directory or through `dsagt start <project>`, which runs the agent in the foreground and calls `session.catch_up_extraction` on exit. Both flows behave the same because `dsagt-server` derives the project from its cwd.
+- `dsagt init --agent <name>` writes `.dsagt/config.yaml`, the per-agent instructions file (`CLAUDE.md`, `.goosehints`, `AGENTS.md`, or `.clinerules/dsagt_instructions.md`, with `src/dsagt/dsagt_instructions.md` injected), and the per-agent MCP config (`.mcp.json`, `goose.yaml`, `.codex-data/config.toml`, `opencode.json`, or `cline mcp add`). The MCP-config env block carries routing only: `DSAGT_PROJECT`, `DSAGT_PROJECT_DIR`, `DSAGT_AGENT`, `MLFLOW_TRACKING_URI`, `EMBEDDING_*`.
+- The agent starts bare from the project directory or through `dsagt start <project>`, which runs the agent in the foreground. Both flows behave the same because `dsagt-server` derives the project from its cwd and runs `session.catch_up_extraction` itself at startup.
 - Self-logging goes to the serverless store `sqlite:///<pdir>/mlflow.db`. `observability.resolve_tracking_uri` computes that path from the project directory and never raises. `dsagt traces <project>` opens the MLflow viewer over it after a catch-up.
 - Projects are registered in `~/dsagt-projects/projects.yaml`. `.dsagt/state.yaml` holds the session log, the memory cursor, and the previous session's trace-source token; `.dsagt/explicit_memories.yaml` holds explicit memory. The MCP server owns both files.
 
@@ -43,7 +43,7 @@ Commands are entry points with argparse; modules are importable logic.
 
 ## Trace pipeline
 
-- Stages, one module each: a `Reader` locates and reads the platform's session files into raw records; the matching `Translator` maps them to one `Trace`; `TraceCollector` hands completed turns to its consumers (`MLflowSink`, `MemoryExtractor`). Each consumer keeps its own ack set keyed `<session_id>:<span_id>`, so a re-pass or a catch-up never double-logs a turn. `ack_dir` defaults to `.dsagt`.
+- Stages, all in `traces.py`: a `Reader` locates and reads the platform's session files into raw records; the matching `Translator` maps them to one `Trace`; `TraceCollector` hands completed turns to its consumers (`MLflowSink`, `MemoryExtractor`). Each consumer keeps its own ack set keyed `<session_id>:<span_id>`, so a re-pass or a catch-up never double-logs a turn. `ack_dir` defaults to `.dsagt`.
 - A periodic pass emits only completed turns; the open last turn is the deferred final turn, flushed when a later prompt bounds it or at end of session.
 - `MLflowSink` writes backdated spans through `start_span_no_context`, stamping `dsagt.agent` and `dsagt.trace_id`, and carries cache token counts in the token-usage attribute. mlflow is imported inside `write`.
 - At startup `session.catch_up_extraction` indexes execution records and re-collects the previous session, pinned to the `trace_source` token in `state.yaml`, so turns lost to an ungraceful shutdown reach the store.
