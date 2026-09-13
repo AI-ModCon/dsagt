@@ -1,11 +1,6 @@
 # Developer Guide
 
-How the DSAgt codebase is set up, how to work in it, and how a change gets
-reviewed and merged.
-
-## Setup
-
-DSAgt develops on [uv](https://github.com/astral-sh/uv) with Python 3.12 or later; CI tests 3.12 and 3.13:
+We recommend setting up a dsagt virtual environment with [uv](https://github.com/astral-sh/uv) with Python 3.12 or later; CI tests 3.12 and 3.13:
 
 ```bash
 git clone https://github.com/AI-ModCon/dsagt.git
@@ -16,18 +11,11 @@ source .venv/bin/activate      # so dsagt / dsagt-run / dsagt-server are on PATH
 
 ## Tests
 
-Use `python -m pytest`, not bare `pytest` (the bare binary can resolve the wrong
-interpreter):
-
 ```bash
 python -m pytest -m "not integration" -q   # unit suite
 python -m pytest tests/test_config.py -q   # a single file
 python -m pytest -m integration -v         # integration (needs creds)
 ```
-
-Integration tests hit real embedding/LLM providers and need `EMBEDDING_*` /
-`LLM_*` credentials in the environment; they're excluded from CI and the default
-local run.
 
 ## Lint & format
 
@@ -53,8 +41,7 @@ uv run mkdocs build --strict    # what CI runs
 ## Pull requests
 
 - One concern per pull request. A small, focused pull request receives full
-  and timely review; a monolithic refactor receives a cursory one and hides
-  the change that matters.
+  and timely review; a monolithic refactor invites a cursory one and occludes important changes.
 - Code an agent wrote gets a human review before it merges, the same as any
   other code.
 - Work on a branch off `main`. Describe the intent, not the diff. Update
@@ -64,10 +51,9 @@ uv run mkdocs build --strict    # what CI runs
 
 ## Agentic coding
 
-Five skills in the genesis catalog, under `skills/basedata-skills/`, carry
-the rules an agent follows in this repository:
+Five skills are in the genesis catalog, under `skills/basedata-skills/` which steer consistent agentic code development:
 
-| Skill | Load it before |
+| Skill | Purpose |
 |---|---|
 | `coding` | writing or changing code, removing code, committing |
 | `documentation` | writing a docstring, comment, README, or plan; deciding where a fact is recorded |
@@ -75,19 +61,15 @@ the rules an agent follows in this repository:
 | `autodocs` | adding a page or a collection to this site |
 | `write-like-aaron` | any prose: docs, comments, commit messages, pull-request descriptions |
 
-Install them into the agent's skills directory (for Claude Code,
+Install these into the agent's skills directory (for Claude Code,
 `~/.claude/skills/<name>/`) from a clone of the catalog. `CLAUDE.md` at the
-repository root holds what is specific to DSAgt: the document map, the
-commands, the glossary, and the invariants. (The skills keep their working
-notes in `DESIGN.md`, `DEVELOPMENT.md`, and `history/` at the repository
-root; those are ignored by git and never part of a pull request.)
+repository root contains DSAgt specific instructions for agents.
 
 ## Codebase orientation
 
-The [Architecture](architecture.md) page is the map of the system — the
+The [Architecture](architecture.md) page explains in more detail the components of DSAgt — the
 capabilities, the single `dsagt-server` MCP layout, and the observability and
-memory design. `CLAUDE.md` at the repo root records what is specific to this repository;
-read it before a substantial change.
+memory design. `CLAUDE.md` contains helpful information for the human as well as agent developer.
 
 ## Troubleshooting
 
