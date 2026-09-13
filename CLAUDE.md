@@ -47,5 +47,5 @@ uv run mkdocs build --strict                                # docs, what CI runs
 
 ## Exceptions
 
-- Run only the test file relevant to a change; the unit suite takes about 50 s. `test_integration.py`, `test_*_integration.py`, `test_server_startup.py`, and `test_dependency_integration.py` reach the network or spawn subprocesses.
+- Run only the test file relevant to a change; the unit suite takes about 50 s. `test_*_integration.py` and `test_server_startup.py` load the local embedder, spawn subprocesses, or install into the venv.
 - Use `python -m pytest`; the bare `pytest` binary on this machine resolves the wrong interpreter.
