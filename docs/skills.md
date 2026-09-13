@@ -2,7 +2,7 @@
 
 DSAgt enables an agent to discover and install skills from an external corpus during a session.
 
-Installed skills, the two base skills included, are located in `<project>/skills/`. Each is a directory containing a `SKILL.md` file and optional reference documents.
+Installed skills, the three base skills included, are located in `<project>/skills/`. Each is a directory containing a `SKILL.md` file and optional reference documents.
 
 ## Corpus and installed skills
 
@@ -11,7 +11,7 @@ Installed skills, the two base skills included, are located in `<project>/skills
 Skills fall into two sets — the searchable **corpus** and the project's **installed skills** — and one class, `SkillRouter`, routes every skill operation between them:
 
 - **Corpus** — skills that exist in external repositories but are *not yet installed*. DSAgt federates many sources (the known names below, or any git URL); each is cloned and indexed into its own collection. The agent browses the corpus with `search_skills` and manages sources with `add_skill_source` / `list_skill_sources`.
-- **Installed skills** — skills in the project's `<project>/skills/` directory: the base skills every init installs (`skill-creator`, `aidrin`), skills installed from the corpus (`install_skill`), and skills authored in place (with `skill-creator`). These are mirrored into each agent's *native* skills directory (`.claude/`, `.agents/`, `.cline/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them.
+- **Installed skills** — skills in the project's `<project>/skills/` directory: the base skills every init installs (`skill-creator`, `datacard-generator`, `aidrin`), skills installed from the corpus (`install_skill`), and skills authored in place (with `skill-creator`). These are mirrored into each agent's *native* skills directory (`.claude/`, `.agents/`, `.cline/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them.
 
 ## Design motivation
 
@@ -36,14 +36,15 @@ The `genesis` source is the ModCon aggregation point: skills contributed by ModC
 
 ## Base and authored skills
 
-DSAgt holds no skills of its own. Every `dsagt init` installs two base skills into `<project>/skills/` from the repositories that maintain them, re-cloning each so the copy matches upstream:
+DSAgt holds no skills of its own. Every `dsagt init` installs three base skills into `<project>/skills/` from the repositories that maintain them, re-cloning each so the copy matches upstream:
 
 | Skill | Source |
 |---|---|
 | `skill-creator` | `genesis`, `skills/basedata-skills/skill-creator/` |
+| `datacard-generator` | `genesis`, `skills/basedata-skills/datacard-generator/` |
 | `aidrin` | `github.com/idtlab/AIDRIN`, `.claude/skills/aidrin/` (branch `develop`). Running it requires the AIDRIN package; the [readiness gate](readiness.md) installs it, and the skill's `reference/installation.md` covers a manual setup. |
 
-Installed skills are **not** indexed for search — the agent auto-discovers `SKILL.md` folders natively — so `search_skills` is reserved for the corpus. Domain skills, including the BaseData `datacard-generator`, are installed from the corpus rather than built in, so they stay current upstream.
+Installed skills are **not** indexed for search — the agent auto-discovers `SKILL.md` folders natively — so `search_skills` is reserved for the corpus. Other domain skills, such as the BaseData `croissant-validator`, are installed from the corpus and stay current upstream.
 
 To manually add a skill, place a new directory under `<project>/skills/` with a `SKILL.md` describing the workflow; the next `dsagt start` mirrors it into the agent's native skill directory, after which the agent auto-discovers and invokes it — no indexing step.
 

@@ -65,11 +65,13 @@ def test_known_source_genesis_covers_whole_skills_tree():
 
 
 def test_base_skills_name_their_upstream_sources():
-    # ``skill-creator`` is maintained in the genesis catalog; ``aidrin`` is the
-    # AIDRIN repo's own skill under .claude/skills on its develop branch (a
-    # bare URL would clone the whole repo including examples/sample_data).
+    # ``skill-creator`` and ``datacard-generator`` are maintained in the genesis
+    # catalog; ``aidrin`` is the AIDRIN repo's own skill under .claude/skills
+    # on its develop branch (a bare URL would clone the whole repo including
+    # examples/sample_data).
     by_name = {b["name"]: sc.resolve_source(b["source"]) for b in sc.BASE_SKILLS}
     assert by_name["skill-creator"]["url"] == sc.KNOWN_SOURCES["genesis"]["url"]
+    assert by_name["datacard-generator"]["url"] == sc.KNOWN_SOURCES["genesis"]["url"]
     assert by_name["aidrin"]["url"] == "https://github.com/idtlab/AIDRIN"
     assert by_name["aidrin"]["subdir"] == ".claude/skills"
     assert by_name["aidrin"]["branch"] == "develop"
@@ -77,8 +79,9 @@ def test_base_skills_name_their_upstream_sources():
 
 
 def test_install_base_skills_resyncs_each_source_and_installs(tmp_path, monkeypatch):
-    """Each base skill is re-cloned from its source (force) and installed by
-    a source-qualified name, replacing any existing project copy."""
+    """Each base-skill source is re-cloned once (force) and every skill is
+    installed by a source-qualified name, replacing any existing project
+    copy."""
     cache = tmp_path / "cache"
     synced = []
 
@@ -97,9 +100,15 @@ def test_install_base_skills_resyncs_each_source_and_installs(tmp_path, monkeypa
     stale = _mkskill(proj / "skills" / "aidrin", "aidrin", desc="stale")
 
     results = sc.install_base_skills(proj, cache_dir=cache)
-    assert [r["name"] for r in results] == ["skill-creator", "aidrin"]
+    assert [r["name"] for r in results] == [
+        "skill-creator",
+        "datacard-generator",
+        "aidrin",
+    ]
+    # genesis holds two base skills and is cloned once.
     assert synced == [("ai-modcon-genesis-skills", True), ("idtlab-aidrin", True)]
     assert (proj / "skills" / "skill-creator" / "SKILL.md").exists()
+    assert (proj / "skills" / "datacard-generator" / "SKILL.md").exists()
     assert "stale" not in (stale / "SKILL.md").read_text()
     assert (proj / "skills" / "aidrin" / "PROVENANCE.txt").exists()
 

@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `datacard-generator` is a base skill: every `dsagt init` installs it from the
+  genesis catalog (`skills/basedata-skills/`) alongside `skill-creator` and
+  `aidrin`, so the agent invokes it natively without a catalog search. A
+  source that holds several base skills is cloned once per init.
+
 ## [0.2.1] - 2026-09-11
 
 ### Changed

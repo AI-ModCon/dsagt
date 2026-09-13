@@ -2,7 +2,7 @@
 
 ![DSAgt architecture](assets/architecture.png)
 
-DSAgt provides a preconfigured agent platform with augmented capabilities for AI-ready scientific data processing and curation. Its capabilities are designed to complement rather than compete with the fast-moving agent platforms it runs on — Claude Code, Codex, Cline, opencode, and Goose. Most are exposed to the agent through a central [MCP server](mcp-servers.md): skill discovery and installation, data-processing code execution with provenance, knowledge-base extension and retrieval, and explicit and cross-session memory. Others are spawned by the server and run in the background: observability through MLflow traces, episodic memory management, and vector-store indexing. Every project also carries two base skills, `skill-creator` and `aidrin`, installed from their upstream repositories at init.
+DSAgt provides a preconfigured agent platform with augmented capabilities for AI-ready scientific data processing and curation. Its capabilities are designed to complement rather than compete with the fast-moving agent platforms it runs on — Claude Code, Codex, Cline, opencode, and Goose. Most are exposed to the agent through a central [MCP server](mcp-servers.md): skill discovery and installation, data-processing code execution with provenance, knowledge-base extension and retrieval, and explicit and cross-session memory. Others are spawned by the server and run in the background: observability through MLflow traces, episodic memory management, and vector-store indexing. Every project also carries three base skills, `skill-creator`, `datacard-generator`, and `aidrin`, installed from their upstream repositories at init.
 
 ## Capabilities
 

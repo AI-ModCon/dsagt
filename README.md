@@ -122,7 +122,7 @@ The same sequence of project initialization/prompts runs automatically for insta
 `dsagt init` sets up the project's knowledge base with three kinds of collection:
 
 - **Code Specs** — DSAgt's built-in code specs, always set up so the agent finds them via `search_registry` from the first session.
-- **Skill Corpus** — the skill sources you pick at init (default `genesis`) are cloned and indexed so `search_skills` returns installable skills. The base skills every init installs (`skill-creator`, `aidrin`) are discovered natively by the agent.
+- **Skill Corpus** — the skill sources you pick at init (default `genesis`) are cloned and indexed so `search_skills` returns installable skills. The base skills every init installs (`skill-creator`, `datacard-generator`, `aidrin`) are discovered natively by the agent.
 - **Knowledge Collections** — optional reference document sets you pick at init (`nemo_curator`), downloaded and indexed for data-curation domain knowledge.
 
 The default embedder is a local sentence-transformers model (~130 MB of weights downloaded on first run).
@@ -174,7 +174,7 @@ DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to
 
 **Skills** are instruction-based agent workflows — a directory with a `SKILL.md` and optional reference docs. They come in two sets:
 
-- **Installed** skills are located in `<project>/skills/` (every init installs the base skills `skill-creator` and `aidrin` from their upstream repositories; domain skills like the BaseData datacard generator are installed from the `genesis` source). These are mirrored into the agent's native skills directory (e.g. `.claude/skills/`, `.agents/skills/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the corpus below).
+- **Installed** skills are located in `<project>/skills/` (every init installs the base skills `skill-creator`, `datacard-generator`, and `aidrin` from their upstream repositories; other domain skills like the BaseData Croissant validator are installed from the `genesis` source). These are mirrored into the agent's native skills directory (e.g. `.claude/skills/`, `.agents/skills/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the corpus below).
 - **Corpus** skills come from external Git repositories — GitHub *or* GitLab — indexed into a searchable corpus the agent browses with `search_skills` but that is **not** loaded into its context (so the corpus can hold thousands of skills). The agent enables a source with `add_skill_source(...)`, finds skills with `search_skills(...)`, then copies one into the project with `install_skill(...)`.
 
 The corpus is **opt-in**: a source must be synced before its skills are searchable. Curated named sources are provided out of the box — `k-dense-ai`, `anthropic`, `antigravity`, `composio`, and `genesis` (the AI-ModCon GENESIS catalog: HPC sites, BaseData, BaseEval, BaseSAFE, AmSC, plasma simulation) — and any Git URL or `owner/repo` works too. Manage sources from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.

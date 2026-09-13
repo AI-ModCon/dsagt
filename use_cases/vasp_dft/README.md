@@ -214,7 +214,7 @@ Confirm from a shell (the native skills directory is `.claude/skills/` for Claud
 
 ```bash
 dsagt info isaac-vasp                     # KB shows the k-dense-ai catalog collection
-ls "$PROJ/skills/"                        # aidrin  pymatgen  skill-creator  vasp-to-isaac
+ls "$PROJ/skills/"                        # aidrin  datacard-generator  pymatgen  skill-creator  vasp-to-isaac
 ls "$PROJ/codes/"                         # vasp-neb-to-isaac
 ls "$PROJ/audit/" "$PROJ/trace_archive/"
 ```

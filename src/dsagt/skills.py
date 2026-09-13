@@ -553,6 +553,7 @@ def install_into_project(
 #: current upstream version.
 BASE_SKILLS: tuple[dict, ...] = (
     {"name": "skill-creator", "source": "genesis"},
+    {"name": "datacard-generator", "source": "genesis"},
     {
         "name": "aidrin",
         "source": {
@@ -569,15 +570,18 @@ def install_base_skills(
 ) -> list[dict]:
     """Install every :data:`BASE_SKILLS` entry into ``<project>/skills/<name>/``.
 
-    Each source is re-cloned (``force=True``) so the installed copy matches
-    upstream; an existing project copy is replaced.  Nothing is indexed into
-    a KB.  Raises on a failed clone or a skill missing from its source.
+    Each source is re-cloned once (``force=True``) so the installed copies
+    match upstream; an existing project copy is replaced.  Nothing is indexed
+    into a KB.  Raises on a failed clone or a skill missing from its source.
     Returns one :func:`install_into_project` result per skill.
     """
     results: list[dict] = []
+    synced_urls: set[str] = set()
     for entry in BASE_SKILLS:
         spec = resolve_source(entry["source"])
-        sync_source(spec, cache_dir=cache_dir, force=True)
+        if spec["url"] not in synced_urls:
+            sync_source(spec, cache_dir=cache_dir, force=True)
+            synced_urls.add(spec["url"])
         qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
         results.append(
             install_into_project(qualified, project_dir, cache_dir=cache_dir)
