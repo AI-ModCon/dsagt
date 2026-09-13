@@ -10,8 +10,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `datacard-generator` is a base skill: every `dsagt init` installs it from the
   genesis catalog (`skills/basedata-skills/`) alongside `skill-creator` and
-  `aidrin`, so the agent invokes it natively without a catalog search. A
-  source that holds several base skills is cloned once per init.
+  `aidrin`, so the agent invokes it natively without a catalog search.
+- Base skills install from the shared source cache. A source is cloned once,
+  on the first init that needs it, and reused as is by every later init;
+  `add_skill_source` with `force` re-clones it on request. An init with a
+  warm cache needs no network.
 
 ## [0.2.1] - 2026-09-11
 

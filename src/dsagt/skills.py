@@ -549,8 +549,9 @@ def install_into_project(
 #: Skills every project carries, each fetched from the repository that
 #: maintains it.  ``source`` is a :func:`resolve_source` argument; ``name`` is
 #: the skill's frontmatter name inside that source.  DSAgt holds no copy of
-#: these: ``dsagt init`` re-clones each source so the installed skill is the
-#: current upstream version.
+#: these: ``dsagt init`` installs each from the shared source cache, cloned
+#: on first use and refreshed only by an explicit ``add_skill_source``
+#: with ``force``.
 BASE_SKILLS: tuple[dict, ...] = (
     {"name": "skill-creator", "source": "genesis"},
     {"name": "datacard-generator", "source": "genesis"},
@@ -570,18 +571,16 @@ def install_base_skills(
 ) -> list[dict]:
     """Install every :data:`BASE_SKILLS` entry into ``<project>/skills/<name>/``.
 
-    Each source is re-cloned once (``force=True``) so the installed copies
-    match upstream; an existing project copy is replaced.  Nothing is indexed
-    into a KB.  Raises on a failed clone or a skill missing from its source.
-    Returns one :func:`install_into_project` result per skill.
+    A source is cloned into the cache when absent and reused as is when
+    present, so an init with a warm cache needs no network; an existing
+    project copy is replaced.  Nothing is indexed into a KB.  Raises on a
+    failed clone or a skill missing from its source.  Returns one
+    :func:`install_into_project` result per skill.
     """
     results: list[dict] = []
-    synced_urls: set[str] = set()
     for entry in BASE_SKILLS:
         spec = resolve_source(entry["source"])
-        if spec["url"] not in synced_urls:
-            sync_source(spec, cache_dir=cache_dir, force=True)
-            synced_urls.add(spec["url"])
+        sync_source(spec, cache_dir=cache_dir)
         qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
         results.append(
             install_into_project(qualified, project_dir, cache_dir=cache_dir)

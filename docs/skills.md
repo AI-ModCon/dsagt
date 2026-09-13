@@ -36,7 +36,7 @@ The `genesis` source is the ModCon aggregation point: skills contributed by ModC
 
 ## Base and authored skills
 
-DSAgt holds no skills of its own. Every `dsagt init` installs three base skills into `<project>/skills/` from the repositories that maintain them, re-cloning each so the copy matches upstream:
+DSAgt holds no skills of its own. Every `dsagt init` installs three base skills into `<project>/skills/` from the repositories that maintain them. A source is cloned once into the shared cache at `~/dsagt-projects/.skill_sources/` and reused by every later init; `add_skill_source` with `force` re-clones it on request.
 
 | Skill | Source |
 |---|---|
