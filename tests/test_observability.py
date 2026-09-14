@@ -780,3 +780,18 @@ def test_api_key_header_provider_sends_x_api_key_only_when_set(monkeypatch):
     monkeypatch.setenv("MLFLOW_TRACKING_API_KEY", "k-123")
     assert p.in_context() is True
     assert p.request_headers() == {"X-API-Key": "k-123"}
+
+
+def test_bound_masks_credential_shapes_inside_strings():
+    """Key-name redaction cannot see a bearer inside a ``run_command`` argv or
+    an API key in a URL query string — the value shape has to be masked."""
+    from dsagt.observability import bound
+
+    argv = {"command": ["curl", "-H", "Authorization: Bearer sk-live-1", "https://x"]}
+    assert bound(argv)["command"][2] == "Authorization: Bearer [redacted]"
+
+    url = bound({"url": "https://api.x/v1?api_key=sk-live-2&page=2"})["url"]
+    assert url == "https://api.x/v1?api_key=[redacted]&page=2"
+
+    for key in ("X-API-Key", "access_token", "apikey", "auth"):
+        assert bound({key: "sk-live-3"})[key] == "[redacted]"

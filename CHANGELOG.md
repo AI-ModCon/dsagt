@@ -14,9 +14,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   follow the same resolution.
 
 ### Fixed
-- Tool arguments and results recorded on a trace are bounded, and
-  credential-bearing keys (`headers`, `api_key`, `token`, …) redacted, before
-  they reach the store; an `http_request` bearer token or a whole `read_file`
+- Tool arguments and results recorded on a trace are bounded before they
+  reach the store, with credential-bearing keys (`headers`, `api_key`,
+  `token`, …) redacted and common credential shapes inside strings (`Bearer …`,
+  `?api_key=…`) masked; an `http_request` bearer token or a whole `read_file`
   payload was previously written verbatim into `mlflow.db`.
 
 ## [0.2.0] - 2026-07-08

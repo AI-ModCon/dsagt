@@ -42,6 +42,7 @@ import functools
 import inspect
 import logging
 import os
+import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -260,7 +261,26 @@ def truncate(value: str, limit: int = 256) -> str:
 
 
 REDACTED_KEYS = frozenset(
-    {"headers", "authorization", "api_key", "token", "password", "secret"}
+    {
+        "headers",
+        "authorization",
+        "auth",
+        "api_key",
+        "api-key",
+        "apikey",
+        "x-api-key",
+        "token",
+        "access_token",
+        "password",
+        "secret",
+    }
+)
+# Credential *shapes* inside free text — a `run_command` argv carrying
+# `-H "Authorization: Bearer …"`, a URL with `?api_key=…` — which no key name
+# can catch.  Matches the common header and query-parameter spellings; this is
+# not a secrets scanner.
+_SECRET_IN_TEXT = re.compile(
+    r"(?i)(bearer\s+|basic\s+|(?:api[_-]?key|access[_-]?token|token|password|secret)\s*[=:]\s*)[^\s&]+"
 )
 
 
@@ -274,8 +294,9 @@ def bound(value: Any, limit: int = 4096) -> Any:
     whole stdout, whole chunk texts.  Anything set on a span is written verbatim
     into ``mlflow.db`` — MLflow truncates only the UI preview — and ``dsagt
     traces`` then serves it in a browser.  Credential-bearing keys are replaced
-    outright; every string leaf is cut to ``limit`` so structure survives for
-    the UI while the store holds a preview, not a payload.
+    outright, credential shapes inside strings are masked, and every string
+    leaf is cut to ``limit`` so structure survives for the UI while the store
+    holds a preview, not a payload.
     """
     if isinstance(value, dict):
         return {
@@ -285,7 +306,7 @@ def bound(value: Any, limit: int = 4096) -> Any:
     if isinstance(value, list):
         return [bound(v, limit) for v in value]
     if isinstance(value, str):
-        return truncate(value, limit)
+        return truncate(_SECRET_IN_TEXT.sub(r"\1[redacted]", value), limit)
     return value
 
 
