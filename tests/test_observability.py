@@ -462,6 +462,8 @@ def test_kb_add_entries_emits_span(_reset_tracing, tmp_path):
     assert "kb.add_entries" in spans
     assert spans["kb.add_entries"].attributes["collection"] == "epis"
     assert spans["kb.add_entries"].attributes["n_entries"] == 3
+    # A write child reports what it wrote, the way kb.search reports what it read.
+    assert spans["kb.add_entries"].outputs == {"entries_added": 3}
 
 
 # ---------------------------------------------------------------------------
