@@ -667,14 +667,20 @@ class MLflowSink:
                 if span["usage"]:
                     inp = span["usage"].get("input_tokens") or 0
                     out = span["usage"].get("output_tokens") or 0
-                    child.set_attribute(
-                        SpanAttributeKey.CHAT_USAGE,
-                        {
-                            TokenUsageKey.INPUT_TOKENS: inp,
-                            TokenUsageKey.OUTPUT_TOKENS: out,
-                            TokenUsageKey.TOTAL_TOKENS: inp + out,
-                        },
-                    )
+                    usage = {
+                        TokenUsageKey.INPUT_TOKENS: inp,
+                        TokenUsageKey.OUTPUT_TOKENS: out,
+                        TokenUsageKey.TOTAL_TOKENS: inp + out,
+                    }
+                    # Cache counts, when the transcript has them (the keys
+                    # mlflow.anthropic's autolog records).  For a Claude session
+                    # most input is cache reads, so a cost computed from the
+                    # store undercounts badly without these.
+                    if (v := span["usage"].get("cache_read_input_tokens")) is not None:
+                        usage[TokenUsageKey.CACHE_READ_INPUT_TOKENS] = v
+                    if (v := span["usage"].get("cache_write_input_tokens")) is not None:
+                        usage[TokenUsageKey.CACHE_CREATION_INPUT_TOKENS] = v
+                    child.set_attribute(SpanAttributeKey.CHAT_USAGE, usage)
                 child.set_outputs(
                     {
                         "type": "message",

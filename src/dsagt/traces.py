@@ -1248,11 +1248,14 @@ class ClaudeTranslator(Translator):
 # An agent appears here once both its reader and translator exist; the collector
 # runs for any agent in the table and is simply absent for the rest.
 _PIPELINES = {
-    "claude": lambda pd, pr: (ClaudeReader(pd, projects_root=pr), ClaudeTranslator()),
-    "codex": lambda pd, pr: (CodexReader(pd), CodexTranslator()),
-    "goose": lambda pd, pr: (GooseReader(pd), GooseTranslator()),
-    "opencode": lambda pd, pr: (OpenCodeReader(pd), OpenCodeTranslator()),
-    "cline": lambda pd, pr: (ClineReader(pd), ClineTranslator()),
+    "claude": lambda pd, pr, sr: (
+        ClaudeReader(pd, projects_root=pr),
+        ClaudeTranslator(),
+    ),
+    "codex": lambda pd, pr, sr: (CodexReader(pd, sessions_root=sr), CodexTranslator()),
+    "goose": lambda pd, pr, sr: (GooseReader(pd), GooseTranslator()),
+    "opencode": lambda pd, pr, sr: (OpenCodeReader(pd), OpenCodeTranslator()),
+    "cline": lambda pd, pr, sr: (ClineReader(pd, sessions_root=sr), ClineTranslator()),
 }
 
 
@@ -1264,8 +1267,10 @@ def make_trace_collector(
     tracking_uri,
     *,
     projects_root: Path | None = None,
+    sessions_root: Path | None = None,
     extra_consumers: list | None = None,
     source=None,
+    ack_dir: str | Path = ".dsagt",
 ) -> "TraceCollector | None":
     """Build the collector for ``agent``, or ``None`` if no pipeline is registered.
 
@@ -1277,11 +1282,21 @@ def make_trace_collector(
     the *previous* session's recorded :meth:`Reader.active_source` token), so it
     re-reads that exact session instead of whatever is newest now — uniformly
     across all agents (transcript path, DB session id, or session-dir name).
+
+    ``sessions_root`` overrides where the codex/cline reader looks for session
+    transcripts (each reader documents its own default): an application
+    watching a session someone started by hand passes the agent's global
+    sessions dir (e.g. ``~/.codex/sessions``).  ``projects_root`` is the claude
+    equivalent.  Both are ignored for agents whose reader has no such root.
+
+    ``ack_dir`` is where the per-consumer ack files land, resolved against
+    ``project_dir`` (an absolute path is used as-is): an application keeps
+    trace state beside its own (e.g. ``.nmstudio``); dsagt's is ``.dsagt``.
     """
     builder = _PIPELINES.get(agent)
     if builder is None:
         return None
-    reader, translator = builder(project_dir, projects_root)
+    reader, translator = builder(project_dir, projects_root, sessions_root)
     if source is not None:
         reader.pin(source)
     # Imported here (not at module top) so traces stays a lean leaf — the MLflow
@@ -1296,6 +1311,7 @@ def make_trace_collector(
         session_id=session_id,
         project_dir=project_dir,
         consumers=consumers,
+        ack_dir=ack_dir,
     )
 
 
@@ -1304,11 +1320,12 @@ class TraceCollector:
 
     A *consumer* is anything with a ``name`` and a ``write(trace)`` — the MLflow
     logger and the memory indexer both qualify (no shared base needed).  Each
-    consumer keeps its own ack set (``.dsagt/trace_acks_<name>.json``), keyed by
-    session-qualified turn id (``<session_id>:<span_id>``) so the per-transcript
-    ``turn-N`` indices can't collide across sessions in the shared file.  A
-    re-pass or an N+1 catch-up can only waste work, never double-log or lose a
-    turn, and a failing consumer holds back only its own mark.
+    consumer keeps its own ack set (``<ack_dir>/trace_acks_<name>.json``), keyed
+    by session-qualified turn id (``<session_id>:<span_id>``) so the
+    per-transcript ``turn-N`` indices can't collide across sessions in the
+    shared file.  A re-pass or an N+1 catch-up can only waste work, never
+    double-log or lose a turn, and a failing consumer holds back only its own
+    mark.
 
     Completeness watermark: a periodic pass emits only *completed* turns (all but
     the still-open last one); the deferred final turn flushes when a later prompt
@@ -1317,7 +1334,15 @@ class TraceCollector:
     """
 
     def __init__(
-        self, reader, translator, *, project, session_id, project_dir, consumers
+        self,
+        reader,
+        translator,
+        *,
+        project,
+        session_id,
+        project_dir,
+        consumers,
+        ack_dir: str | Path = ".dsagt",
     ):
         self._reader = reader
         self._translator = translator
@@ -1325,7 +1350,9 @@ class TraceCollector:
         self._session_id = session_id
         self._project_dir = Path(project_dir)
         self._consumers = list(consumers)
-        self._dsagt_dir = self._project_dir / ".dsagt"
+        # pathlib join: an absolute ack_dir stands alone, a relative one nests
+        # under project_dir.
+        self._ack_dir = self._project_dir / ack_dir
         self._lock = threading.Lock()
 
     def active_source(self):
@@ -1339,7 +1366,7 @@ class TraceCollector:
             return None
 
     def _acks_path(self, name: str) -> Path:
-        return self._dsagt_dir / f"trace_acks_{name}.json"
+        return self._ack_dir / f"trace_acks_{name}.json"
 
     def _load_acks(self, name: str) -> set[str]:
         try:
@@ -1348,13 +1375,13 @@ class TraceCollector:
             return set()
 
     def _save_acks(self, name: str, acks: set[str]) -> None:
-        self._dsagt_dir.mkdir(parents=True, exist_ok=True)
+        self._ack_dir.mkdir(parents=True, exist_ok=True)
         self._acks_path(name).write_text(json.dumps(sorted(acks)))
 
     @contextmanager
     def _lock_file(self):
-        self._dsagt_dir.mkdir(parents=True, exist_ok=True)
-        with open(self._dsagt_dir / "trace_acks.lock", "w") as lf:
+        self._ack_dir.mkdir(parents=True, exist_ok=True)
+        with open(self._ack_dir / "trace_acks.lock", "w") as lf:
             fcntl.flock(lf, fcntl.LOCK_EX)
             try:
                 yield

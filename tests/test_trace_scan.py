@@ -215,6 +215,28 @@ def test_consumers_ack_independently(tmp_path):
     assert good.seen == [{"r1", "r2"}]  # not re-delivered
     assert collector._load_acks("bad") == set()
 
+    # Default ack_dir: the ack files land under <project_dir>/.dsagt/.
+    assert (tmp_path / ".dsagt" / "trace_acks_good.json").exists()
+
+
+def test_ack_dir_overrides_where_ack_files_land(tmp_path):
+    """An application embedding the pipeline keeps trace state beside its own."""
+    trace = Trace("t", "p:s", "claude", "p")
+    trace.add_agent_root("r1", "c", start_time=None, prompt="")
+    rec = _Recorder("rec")
+    collector = TraceCollector(
+        _FakeReader(),
+        _FakeTranslator(trace),
+        project="p",
+        session_id="p:s",
+        project_dir=tmp_path,
+        consumers=[rec],
+        ack_dir=".nmstudio",
+    )
+    assert collector.collect(include_last=True) == 1
+    assert (tmp_path / ".nmstudio" / "trace_acks_rec.json").exists()
+    assert not (tmp_path / ".dsagt").exists()
+
 
 def test_acks_are_session_qualified_no_cross_session_collision(tmp_path):
     """Two sessions in one project share the ack file, but each turn is keyed by
@@ -262,6 +284,19 @@ def test_acks_are_session_qualified_no_cross_session_collision(tmp_path):
         "p:2:r1",
         "p:2:r2",
     }
+
+
+def test_make_trace_collector_sessions_root(tmp_path):
+    """``sessions_root`` reaches the codex/cline reader, so an application
+    watching a hand-started session (rollouts under ``~/.codex/sessions``, not
+    the project's ``.codex-data``) can use the factory instead of wiring the
+    reader itself."""
+    root = tmp_path / "global-sessions"
+    for agent in ("codex", "cline"):
+        collector = make_trace_collector(
+            agent, tmp_path, "p", "p:s", "sqlite:///x.db", sessions_root=root
+        )
+        assert collector._reader._root == root
 
 
 def test_make_trace_collector_pins_source(tmp_path):
