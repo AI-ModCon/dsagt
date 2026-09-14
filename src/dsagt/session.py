@@ -47,7 +47,7 @@ DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
 # ``dsagt init``).  Migrated from ``~/.dsagt/`` on 2026-05-07.
 REGISTRY_DIR = DEFAULT_PROJECTS_BASE
 REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
-RESERVED_PROJECT_NAMES = ("projects.yaml", "kb_index", ".skill_sources")
+RESERVED_PROJECT_NAMES = ("projects.yaml", "kb_index", ".skill_sources", ".tools")
 
 # Per-project dsagt state lives under a hidden ``.dsagt/`` dir (alongside
 # explicit memory): ``config.yaml`` (the MCP-server object settings the user

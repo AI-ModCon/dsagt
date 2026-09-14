@@ -52,6 +52,12 @@ docs = [
 
 [project.optional-dependencies]
 fix-certificates = ["truststore>=0.10.4"]
+# One extra per walkthrough under use_cases/ that needs PyPI packages beyond
+# dsagt's own; a user installs the extra for the walkthrough they run.
+vasp-dft = ["pymatgen>=2024.1"]
+combustion-simulation = ["h5py>=3.10"]
+tokamak-stability = ["h5py>=3.10", "matplotlib>=3.8"]
+plasma-turbulence = ["adios2>=2.10"]
 
 [build-system]
 requires = ["setuptools>=77.0", "wheel"]
