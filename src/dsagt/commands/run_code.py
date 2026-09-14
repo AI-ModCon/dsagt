@@ -8,7 +8,12 @@ Usage:
 import argparse
 import sys
 
-from dsagt.provenance import _resolve_records_dir, _parse_file_list, run_and_record
+from dsagt.provenance import (
+    _current_session_tag_from_cwd,
+    _parse_file_list,
+    _resolve_records_dir,
+    run_and_record,
+)
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -63,7 +68,11 @@ def main(argv: list[str] | None = None) -> int:
 
     from dsagt.observability import init_tracing
 
-    init_tracing("dsagt-run", session_id=args.session)
+    # The session is resolved before tracing starts so the `code.execute`
+    # trace root carries it — resolving it later inside run_and_record only
+    # stamps the on-disk record, and the trace lands unbucketed.
+    session_id = args.session or _current_session_tag_from_cwd()
+    init_tracing("dsagt-run", session_id=session_id)
 
     records_dir = _resolve_records_dir(args.records_dir)
 
@@ -71,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         code_name=args.code,
         command=command,
         records_dir=records_dir,
-        session_id=args.session,
+        session_id=session_id,
         record_id=args.record_id,
         input_files=_parse_file_list(args.input_files),
         output_files=_parse_file_list(args.output_files),
