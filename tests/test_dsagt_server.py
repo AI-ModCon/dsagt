@@ -322,3 +322,76 @@ def test_returned_tool_error_marks_the_trace_as_error(tmp_path, monkeypatch):
 
     trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
     assert str(trace.info.state).endswith("ERROR")
+
+
+class TestPinTraceSource:
+    """The trace-source token must be pinned as soon as *this* session's
+    transcript exists — not on the first heartbeat tick (~50 s in), which a
+    scripted session never reaches, and never to the previous session's
+    transcript, which is what "newest file" resolves to before the agent's
+    first message."""
+
+    def _state(self, tmp_path, previous=None):
+        from dsagt.session import append_session, record_trace_source
+
+        (tmp_path / ".dsagt").mkdir(parents=True, exist_ok=True)
+        append_session(tmp_path)  # the previous session
+        if previous:
+            record_trace_source(tmp_path, previous)
+        append_session(tmp_path)  # this session
+        return tmp_path
+
+    def _run(self, collector, pdir, ticks=5):
+        import asyncio
+
+        from dsagt.mcp.server import _pin_trace_source
+
+        async def go():
+            await asyncio.wait_for(
+                _pin_trace_source(collector, pdir, interval=0.01), timeout=1.0
+            )
+
+        asyncio.run(go())
+
+    def test_skips_the_previous_sessions_transcript_and_pins_the_new_one(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+
+        from dsagt.mcp import server as server_mod
+        from dsagt.session import read_state
+
+        old = tmp_path / "old.jsonl"
+        old.write_text("{}\n")
+        stale = os.path.getmtime(old) - 100
+        os.utime(old, (stale, stale))  # written before this server started
+        monkeypatch.setattr(server_mod, "_SERVER_STARTED_AT", stale + 50)
+        pdir = self._state(tmp_path, previous=None)  # a too-short previous session
+
+        new = tmp_path / "new.jsonl"
+        seen = []
+
+        class Collector:
+            def active_source(self):
+                seen.append(1)
+                if len(seen) >= 3:  # the agent's first message lands the new file
+                    new.write_text("{}\n")
+                    return str(new)
+                return str(old)
+
+        self._run(Collector(), pdir)
+        assert read_state(pdir)["sessions"][-1]["trace_source"] == str(new)
+
+    def test_non_path_token_is_pinned_once_it_differs_from_the_previous(self, tmp_path):
+        from dsagt.session import read_state
+
+        pdir = self._state(tmp_path, previous="sess-old")
+        seen = []
+
+        class Collector:
+            def active_source(self):
+                seen.append(1)
+                return "sess-old" if len(seen) < 3 else "sess-new"
+
+        self._run(Collector(), pdir)
+        assert read_state(pdir)["sessions"][-1]["trace_source"] == "sess-new"
