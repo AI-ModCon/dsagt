@@ -761,3 +761,22 @@ def test_resolve_tracking_uri_env_overrides_sqlite(monkeypatch):
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.org")
     assert resolve_tracking_uri({"project_dir": "/p"}) == "https://mlflow.example.org"
+
+
+def test_api_key_header_provider_sends_x_api_key_only_when_set(monkeypatch):
+    from importlib.metadata import entry_points
+
+    from dsagt.observability import ApiKeyHeaderProvider
+
+    # Registered where MLflow looks for it, so every process picks it up.
+    eps = {
+        e.name: e.value for e in entry_points(group="mlflow.request_header_provider")
+    }
+    assert eps["dsagt_api_key"] == "dsagt.observability:ApiKeyHeaderProvider"
+
+    p = ApiKeyHeaderProvider()
+    monkeypatch.delenv("MLFLOW_TRACKING_API_KEY", raising=False)
+    assert p.in_context() is False
+    monkeypatch.setenv("MLFLOW_TRACKING_API_KEY", "k-123")
+    assert p.in_context() is True
+    assert p.request_headers() == {"X-API-Key": "k-123"}

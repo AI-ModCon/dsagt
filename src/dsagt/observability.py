@@ -98,7 +98,8 @@ def resolve_tracking_uri(config: dict | None) -> str:
     reaches the CLI, the MCP server and its ``dsagt-run`` children alike.  That
     is how a project logs to a shared tracking server instead of its own file.
     Credentials for such a server (``MLFLOW_TRACKING_TOKEN`` / ``_USERNAME`` /
-    ``_PASSWORD``) are read by the MLflow client from the shell and are never
+    ``_PASSWORD``, or ``MLFLOW_TRACKING_API_KEY`` for an ``X-API-Key`` gateway —
+    see :class:`ApiKeyHeaderProvider`) are read from the shell and are never
     written to disk.
 
     Otherwise ``sqlite:///<project_dir>/mlflow.db`` — the serverless default.
@@ -118,6 +119,28 @@ def resolve_tracking_uri(config: dict | None) -> str:
     pdir = cfg.get("project_dir")
     base = Path(pdir).resolve() if pdir else Path.cwd().resolve()
     return f"sqlite:///{base / 'mlflow.db'}"
+
+
+class ApiKeyHeaderProvider:
+    """Send ``X-API-Key`` on every MLflow request when ``MLFLOW_TRACKING_API_KEY`` is set.
+
+    A tracking server behind an API gateway (Kong answers ``WWW-Authenticate:
+    Key``) authenticates on that header alone, and the MLflow client cannot
+    produce it: it knows only the Bearer form of ``MLFLOW_TRACKING_TOKEN`` and
+    Basic auth.  Registered under the ``mlflow.request_header_provider`` entry
+    point in ``pyproject.toml``, so MLflow loads it in every process of this
+    environment — the CLI, the MCP server and its ``dsagt-run`` children — with
+    no import from dsagt's side.  MLflow duck-types the provider (``in_context``
+    + ``request_headers``), so no mlflow import is needed here either, which
+    keeps this module's cold start unchanged.  The key is read from the shell
+    on each request and never written to disk.
+    """
+
+    def in_context(self) -> bool:
+        return bool(os.environ.get("MLFLOW_TRACKING_API_KEY"))
+
+    def request_headers(self) -> dict[str, str]:
+        return {"X-API-Key": os.environ["MLFLOW_TRACKING_API_KEY"]}
 
 
 def init_tracing(
