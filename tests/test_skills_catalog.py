@@ -65,20 +65,23 @@ def test_known_source_genesis_covers_whole_skills_tree():
 
 
 def test_base_skills_name_their_upstream_sources():
-    # ``skill-creator`` is maintained in the genesis catalog; ``aidrin`` is the
-    # AIDRIN repo's own skill under .claude/skills on its develop branch (a
-    # bare URL would clone the whole repo including examples/sample_data).
+    # ``skill-creator`` and ``datacard-generator`` are maintained in the genesis
+    # catalog; ``aidrin`` is the AIDRIN repo's own skill under .claude/skills
+    # on its develop branch (a bare URL would clone the whole repo including
+    # examples/sample_data).
     by_name = {b["name"]: sc.resolve_source(b["source"]) for b in sc.BASE_SKILLS}
     assert by_name["skill-creator"]["url"] == sc.KNOWN_SOURCES["genesis"]["url"]
+    assert by_name["datacard-generator"]["url"] == sc.KNOWN_SOURCES["genesis"]["url"]
     assert by_name["aidrin"]["url"] == "https://github.com/idtlab/AIDRIN"
     assert by_name["aidrin"]["subdir"] == ".claude/skills"
     assert by_name["aidrin"]["branch"] == "develop"
     assert "aidrin" not in sc.KNOWN_SOURCES
 
 
-def test_install_base_skills_resyncs_each_source_and_installs(tmp_path, monkeypatch):
-    """Each base skill is re-cloned from its source (force) and installed by
-    a source-qualified name, replacing any existing project copy."""
+def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
+    """Each base skill is installed by a source-qualified name from the
+    shared source cache without a forced re-clone, replacing any existing
+    project copy."""
     cache = tmp_path / "cache"
     synced = []
 
@@ -97,9 +100,19 @@ def test_install_base_skills_resyncs_each_source_and_installs(tmp_path, monkeypa
     stale = _mkskill(proj / "skills" / "aidrin", "aidrin", desc="stale")
 
     results = sc.install_base_skills(proj, cache_dir=cache)
-    assert [r["name"] for r in results] == ["skill-creator", "aidrin"]
-    assert synced == [("ai-modcon-genesis-skills", True), ("idtlab-aidrin", True)]
+    assert [r["name"] for r in results] == [
+        "skill-creator",
+        "datacard-generator",
+        "aidrin",
+    ]
+    # No forced re-clone: a cached source is reused as is.
+    assert synced == [
+        ("ai-modcon-genesis-skills", False),
+        ("ai-modcon-genesis-skills", False),
+        ("idtlab-aidrin", False),
+    ]
     assert (proj / "skills" / "skill-creator" / "SKILL.md").exists()
+    assert (proj / "skills" / "datacard-generator" / "SKILL.md").exists()
     assert "stale" not in (stale / "SKILL.md").read_text()
     assert (proj / "skills" / "aidrin" / "PROVENANCE.txt").exists()
 
@@ -260,6 +273,27 @@ class _FakeKB:
         if collection not in self.collections:
             self.collections.append(collection)
         return {"collection": collection, "entries_added": len(texts)}
+
+
+def test_sync_source_reuses_cached_clone_without_force(tmp_path, monkeypatch):
+    """A cached source is reused as is: a second sync clones nothing, and
+    only ``force`` re-clones."""
+    clones = []
+
+    def fake_clone(url, dest, branch="main", include=None):
+        clones.append(url)
+        _mkskill(dest / "skills" / "s1", "s1")
+
+    monkeypatch.setattr("dsagt.commands.setup_core_kb.clone_github", fake_clone)
+    spec = {"url": "https://github.com/x/y", "branch": "main", "subdir": "skills"}
+    cache = tmp_path / "cache"
+
+    sc.sync_source(spec, cache_dir=cache)
+    sc.sync_source(spec, cache_dir=cache)
+    assert clones == ["https://github.com/x/y"]
+
+    sc.sync_source(spec, cache_dir=cache, force=True)
+    assert clones == ["https://github.com/x/y"] * 2
 
 
 def test_sync_source_indexes_per_source_collection(tmp_path, monkeypatch):

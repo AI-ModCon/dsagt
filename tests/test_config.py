@@ -459,6 +459,18 @@ class TestInitProject:
         assert not (pdir / "mlflow.db").exists()
         assert not (pdir / "mlflow").exists()
 
+    def test_config_yaml_content(self):
+        """The written config holds project, agent, knowledge, and skills.
+        Embedding settings come from DEFAULTS at load time; the store is
+        derived from the project directory; the agent brings its own
+        provider.  So no embedding, mlflow, or llm block is written."""
+        pdir = init_project("test-proj", "claude")
+
+        config = yaml.safe_load((pdir / ".dsagt" / "config.yaml").read_text())
+        assert set(config) == {"project", "agent", "knowledge", "skills"}, config
+        assert config["project"] == "test-proj"
+        assert config["agent"] == "claude"
+
     def test_readiness_opt_in_writes_block_only(self, tmp_path):
         """The assessment is a config block, not a code: no ``codes/aidrin`` is
         created either way.  A user-supplied executable skips provisioning."""

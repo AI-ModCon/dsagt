@@ -164,12 +164,12 @@ columns: [sex, race]
 ### 4. Generate a datacard from the assessment
 
 ```text
-Search for a skill that can generate a datacard for data/adult.csv, then use it to write a Level 1
-datacard that incorporates the readiness findings above. Take the values from the dataset and the
-reports, and note anything unknown rather than asking.
+Use the datacard-generator skill to write a Level 1 datacard for data/adult.csv that incorporates
+the readiness findings above. Take the values from the dataset and the reports, and note anything
+unknown rather than asking.
 ```
 
-The agent discovers the `datacard-generator` skill and writes a Genesis Datacard (e.g.
+The agent invokes the `datacard-generator` base skill and writes a Genesis Datacard (e.g.
 `data/genesis_datacard_*.md`) documenting the dataset and its readiness profile.
 
 ### 5. Reconstruct the pipeline
@@ -197,7 +197,7 @@ Reconstruct the full readiness assessment you just ran from the execution record
 | Code execution with provenance (execution records in `trace_archive/`) | 2 |
 | Multi-metric orchestration | 2 |
 | Multi-metric / batch execution | 3 |
-| Skill discovery and use (datacard generation) | 4 |
+| Base-skill use (`datacard-generator`) | 4 |
 | Pipeline reconstruction from execution records | 5 |
 | Observability (MLflow spans in the serverless `mlflow.db` store) | all |
 

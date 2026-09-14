@@ -165,9 +165,9 @@ and check a new record in `trace_archive/`. The loop ends with
 ### 6. Generate a datacard
 
 ```text
-Search for a skill that can generate a datacard for the converted WELL file,
-then use it to write a Level 1 datacard to audit/. Take the values from
-info.json and the conversion, and note anything unknown rather than asking.
+Use the datacard-generator skill to write a Level 1 datacard for the converted
+WELL file to audit/. Take the values from info.json and the conversion, and
+note anything unknown rather than asking.
 ```
 
 ### 7. Reconstruct the pipeline
@@ -204,7 +204,7 @@ top. The script calls the tools directly so it runs outside a DSAgt project.
 | Code registration (`save_code_spec`) and registry search | 2 |
 | Code execution with provenance through `dsagt-run` | 3–5 |
 | Check-driven iteration with failed runs on the record | 5 |
-| Skill discovery and use (datacard generation) | 6 |
+| Base-skill use (`datacard-generator`) | 6 |
 | Pipeline reconstruction with a parameterized input | 7 |
 
 ## Cleanup

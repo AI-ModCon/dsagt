@@ -10,30 +10,3 @@ All commands are available after [installation](index.md#installation) and activ
    start="<!-- md-shared:cli:start -->"
    end="<!-- md-shared:cli:end -->"
 %}
-
-### Non-interactive `dsagt init` flags
-
-Each flag skips its prompt in the menu; together they are the automation path (CI, the smoke test, headless runs):
-
-| Flag | Prompt it replaces |
-|------|--------------------|
-| `<name>` (positional) | Project name |
-| `--agent <platform>` | Agent platform |
-| `--location <path>` | Project location |
-| `--include … \| --exclude …` | Knowledge collections / skill sources |
-| `--episodic` | "Enable episodic memory?" |
-| `--readiness aidrin [--readiness-executable PATH]` | "Enable the AIDRIN AI-readiness assessment?" |
-
-Interactive use is bare `dsagt init` and the menu.
-
-## Project Location
-
-The default project location is `~/dsagt-projects/<name>/`. 
-
-## Viewing traces
-
-The trace store is a serverless SQLite file — browse it with `dsagt traces`:
-
-```bash
-dsagt traces <name>   # runs: mlflow ui --backend-store-uri sqlite:///<project-path>/mlflow.db
-```

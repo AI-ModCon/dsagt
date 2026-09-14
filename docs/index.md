@@ -1,42 +1,22 @@
 # DSAgt
 
-**D**ata**S**mith **Ag**en**t** — AI-assisted data pipeline builder.
-
-DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, execution provenance, and observability infrastructure. It provides data-pipeline scaffolding around your existing agent CLI or VS Code extension (Claude Code, Goose, Codex, and others).
-
-## Supported Agents
-
-<!-- Shared with README.md — edit there, not here. -->
+<!-- Shared with README.md. Edit there, not here. -->
 {%
    include-markdown "../README.md"
-   start="<!-- md-shared:agents:start -->"
-   end="<!-- md-shared:agents:end -->"
+   start="<!-- md-shared:intro:start -->"
+   end="<!-- md-shared:intro:end -->"
 %}
-
-## Prerequisites
-
-- Python 3.12 or later (CI tests 3.12 and 3.13)
-- One of the supported agent platforms above, installed and authenticated against your LLM provider
-- [uv](https://github.com/astral-sh/uv) — only for the development install
 
 ## Installation
 
-<!-- Shared with README.md — edit there, not here. -->
+<!-- Shared with README.md. Edit there, not here. -->
 {%
    include-markdown "../README.md"
    start="<!-- md-shared:install:start -->"
    end="<!-- md-shared:install:end -->"
 %}
 
-### For development
-
-Clone the repo and use `uv` (editable install; add `--all-groups` for the test suite):
-
-```bash
-git clone https://github.com/AI-ModCon/dsagt.git
-cd dsagt && uv sync --all-groups
-source .venv/bin/activate
-```
+For a development install from a clone, see the [Developer Guide](developer.md).
 
 ## Key Capabilities
 

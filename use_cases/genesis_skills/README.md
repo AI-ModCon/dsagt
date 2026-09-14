@@ -2,9 +2,9 @@
 title: Genesis Skills for Data Curation
 domain: Skill management — the external Genesis skill catalog driving a data-curation pipeline
 summary: >-
-  Sync the Genesis skill catalog, install data-curation skills (datacard
-  generation, Croissant validation), ground them in the dataset's domain
-  documents, and produce a datacard for a small curated dataset.
+  Sync the Genesis skill catalog, install the Croissant validation skill,
+  ground the curation skills in the dataset's domain documents, and produce a
+  datacard for a small curated dataset.
 status: published
 order: 60
 ---
@@ -16,8 +16,9 @@ order: 60
 > network access to `github.com`).
 
 An end-to-end **data-preparation** walkthrough that exercises the skill catalog
-against the **Genesis** source (AI-ModCon on GitHub). The agent pulls in the
-BASE-Data/ModCon curation skills, grounds itself in the dataset's domain
+against the **Genesis** source (AI-ModCon on GitHub). The agent installs the
+BASE-Data/ModCon Croissant validator from the catalog, grounds the
+`datacard-generator` base skill every project carries in the dataset's domain
 documents, then prepares and **datacards a finished dataset**.
 
 The "finished product" is a small curated dataset — a CO2-methanation **catalyst
@@ -70,16 +71,17 @@ Enable the "genesis" skill source so we have the GENESIS / ModCon data-curation 
 **Expect:** `add_skill_source(source="genesis")` → a shallow clone from GitHub,
 its skills indexed, source written to `.dsagt/config.yaml`.
 
-### 2. Find and install the curation skills
+### 2. Find and install the validator skill
 
 ```text
-Search the catalog for two skills — one that creates a datacard / dataset documentation for a dataset, and one that validates Croissant / JSON-LD dataset metadata — and install the best match for each into this project.
+Search the catalog for a skill that validates Croissant / JSON-LD dataset metadata and install the best match into this project.
 ```
 
-**Expect:** `search_skills` surfaces **`datacard-generator`** and
-**`croissant-validator`** → `install_skill` for each. Both are installed into
-`<project>/skills/` and mirrored into the agent's native skills directory at
-install time, each with a `PROVENANCE.txt` crediting the Genesis source.
+**Expect:** `search_skills` surfaces **`croissant-validator`** → `install_skill`.
+It is installed into `<project>/skills/` and mirrored into the agent's native
+skills directory at install time, with a `PROVENANCE.txt` crediting the Genesis
+source. `datacard-generator` needs no install: it is a base skill, present
+since init.
 
 ### 3. Generate the datacard for the finished dataset
 
@@ -116,11 +118,11 @@ ls "$PROJ/audit/"                          # catalyst_screening_datacard.md
 
 1. The KB holds a `skills_catalog__ai-modcon-genesis-skills` collection
    (searchable via `search_skills`).
-2. `datacard-generator` and `croissant-validator` are installed into
-   `<project>/skills/` and mirrored into the agent's native skills directory,
-   each with a `PROVENANCE.txt` crediting the Genesis source. The next session
-   auto-invokes them natively; this session used them by reading their
-   `SKILL.md`.
+2. `croissant-validator` is installed into `<project>/skills/` and mirrored
+   into the agent's native skills directory, with a `PROVENANCE.txt` crediting
+   the Genesis source; `datacard-generator` has been there since init as a
+   base skill. The next session auto-invokes them natively; this session used
+   them by reading their `SKILL.md`.
 3. `audit/catalyst_screening_datacard.md` was produced for the finished dataset,
    grounded in the domain documents, covering the sections in
    `mock_data/expected_datacard.md`.
@@ -134,6 +136,7 @@ ls "$PROJ/audit/"                          # catalyst_screening_datacard.md
 | Enabling an external skill source in-session (`add_skill_source`) | 1 |
 | Catalog search and install (`search_skills`, `install_skill`) | 2 |
 | Native mirroring of installed skills | 2 |
+| Base-skill use (`datacard-generator`) | 3 |
 | Installed-skill execution grounded in the domain documents | 3, 4 |
 
 ## Cleanup

@@ -26,7 +26,7 @@ uv run mkdocs build --strict                                # docs, what CI runs
 - **project**: a directory with `.dsagt/config.yaml`, registered in `~/dsagt-projects/projects.yaml` (`session.init_project`).
 - **session**: one agent launch, minted into `.dsagt/state.yaml` (`session.append_session`).
 - **code**: a CLI executable registered at `<project>/codes/<name>/SKILL.md` (`registry.CodeRegistry`). "Tool" means an MCP tool.
-- **skill**: an instruction workflow at `<project>/skills/<name>/` (`registry.SkillRegistry`). **Base skills** are installed at every init (`skills.BASE_SKILLS`).
+- **skill**: an instruction workflow at `<project>/skills/<name>/` (`registry.SkillRegistry`). **Base skills** (`skill-creator`, `datacard-generator`, `aidrin`) are installed at every init (`skills.BASE_SKILLS`).
 - **source**, **corpus**: an external skill catalog, cloned and indexed one collection per source (`skills.SkillsCatalog`, `skills.KNOWN_SOURCES`).
 - **collection**: a ChromaDB collection under `<project>/kb_index` (`knowledge.KnowledgeBase`).
 - **execution record**: the JSON `dsagt-run` writes to `trace_archive/` (`provenance.run_and_record`), indexed into `code_use` by `provenance.CodeUseIndexer`.
@@ -47,5 +47,5 @@ uv run mkdocs build --strict                                # docs, what CI runs
 
 ## Exceptions
 
-- Run only the test file relevant to a change; the unit suite takes about 50 s. `test_integration.py`, `test_*_integration.py`, `test_server_startup.py`, and `test_dependency_integration.py` reach the network or spawn subprocesses.
+- Run only the test file relevant to a change; the unit suite takes about 50 s. `test_*_integration.py` and `test_server_startup.py` load the local embedder, spawn subprocesses, or install into the venv.
 - Use `python -m pytest`; the bare `pytest` binary on this machine resolves the wrong interpreter.

@@ -172,7 +172,7 @@ Curation produced a cleaner, more balanced particle set — a **measurable** AI-
 ### 6. Generate a datacard
 
 ```text
-Search for a skill that can generate a datacard for the curated cryo-EM data, then use it.
+Use the datacard-generator skill to write a Level 1 datacard for the curated cryo-EM data.
 ```
 
 ### 7. Reconstruct the pipeline
@@ -204,7 +204,7 @@ Reconstruct the pipeline from the execution records as a bash script.
 | KB-guided code generation | 4 |
 | Code execution with provenance | 5 |
 | Readiness assessment run unprompted (before/after AIDRIN on the tabular step) | 5 |
-| Skill discovery and use | 6 |
+| Base-skill use (`datacard-generator`) | 6 |
 | Pipeline reconstruction | 7 |
 
 ## Cleanup
