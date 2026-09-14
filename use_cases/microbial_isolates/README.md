@@ -120,12 +120,11 @@ We can process them one at a time.
 ### 4. Generate datacard
 
 ```text
-Search for a skill that can generate a datacard for our processed data, then use it to write a
-Level 1 datacard. Take the values from the data and the reports, and note anything unknown rather
-than asking.
+Use the datacard-generator skill to write a Level 1 datacard for our processed data. Take the
+values from the data and the reports, and note anything unknown rather than asking.
 ```
 
-The agent should find the `datacard-generator` skill in the `genesis` catalog via `search_skills` and install it with `install_skill` (the base skills are `skill-creator` and `aidrin`; domain skills come from catalogs).
+`datacard-generator` is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search.
 
 ### 5. Reconstruct pipeline
 
@@ -158,7 +157,7 @@ The agent calls `reconstruct_pipeline` to generate a reproducible script from th
 | Registry search | 1 |
 | Pipeline planning from best-practice documents, confirmed with the user | 2 |
 | Code execution with provenance across many samples | 2, 3 |
-| Skill discovery and installation from a catalog | 4 |
+| Base-skill use (`datacard-generator`) | 4 |
 | Pipeline reconstruction | 5 |
 
 ## Cleanup
