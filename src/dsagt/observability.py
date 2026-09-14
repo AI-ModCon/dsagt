@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 # constant set once at startup and tagged onto each internal trace for grouping.
 _initialized = False
 _default_session_id: str | None = None
+_default_agent: str | None = None
 
 
 # ===========================================================================
@@ -204,7 +205,7 @@ def init_tracing(
     Never raises.  When cwd isn't a dsagt project dir, logs and no-ops so
     one-shot tools / tests outside a project simply run untraced.
     """
-    global _initialized, _default_session_id
+    global _initialized, _default_session_id, _default_agent
 
     if _initialized:
         if session_id:
@@ -223,6 +224,7 @@ def init_tracing(
         return
 
     _default_session_id = session_id
+    _default_agent = cfg.get("agent")
     resolve_cfg = dict(cfg)
     resolve_cfg["project_dir"] = str(cfg_pdir)
     if mlflow_url is None:
@@ -374,19 +376,31 @@ def _attach_trace_metadata(source: str | None) -> None:
 
     - ``dsagt.source`` tag: the MCP tool category / ``execution`` — powers the
       UI's debug-view filter.
+    - ``dsagt.agent`` tag: the agent platform that drove this session, so a
+      shared store can be split by agent — the comparison the smoke test
+      exists for.  Agent traces carry the same key in their metadata.
     - ``mlflow.trace.session`` metadata: groups this process's internal traces
       under one session (reserved MLflow key, drives the native session filter).
+    - ``dsagt.version`` metadata: which dsagt produced the trace.  On a shared
+      server holding months of traces from many installs, nothing else says;
+      MLflow's own ``mlflow.source.git.*`` are empty because the process runs
+      in the project directory, not a checkout.
 
     No-op for inner spans (``source is None``) — they inherit the root's tag.
     """
     if not source:
         return
-    metadata = (
-        {"mlflow.trace.session": _default_session_id} if _default_session_id else None
-    )
+    from dsagt import __version__
+
+    tags = {"dsagt.source": source}
+    if _default_agent:
+        tags["dsagt.agent"] = _default_agent
+    metadata = {"dsagt.version": __version__}
+    if _default_session_id:
+        metadata["mlflow.trace.session"] = _default_session_id
     import mlflow
 
-    mlflow.update_current_trace(tags={"dsagt.source": source}, metadata=metadata)
+    mlflow.update_current_trace(tags=tags, metadata=metadata)
 
 
 # ----- annotate the active span -----

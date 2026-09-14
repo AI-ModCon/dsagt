@@ -155,14 +155,19 @@ def test_root_span_source_tags_trace_and_session(_reset_tracing, monkeypatch):
     ``dsagt.source`` and, when a session id is set, the reserved
     ``mlflow.trace.session`` metadata key (the native session filter).
     """
+    from dsagt import __version__
+
     monkeypatch.setattr(obs_module, "_default_session_id", "proj-xyz")
+    monkeypatch.setattr(obs_module, "_default_agent", "goose")
 
     with obs_module.open_span("search_knowledge", source="knowledge"):
         pass
 
     trace = _last_trace()
     assert trace.info.tags["dsagt.source"] == "knowledge"
+    assert trace.info.tags["dsagt.agent"] == "goose"
     assert trace.info.trace_metadata["mlflow.trace.session"] == "proj-xyz"
+    assert trace.info.trace_metadata["dsagt.version"] == __version__
 
 
 def test_inner_spans_inherit_root_source(_reset_tracing):
