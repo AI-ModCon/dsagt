@@ -225,6 +225,36 @@ def truncate(value: str, limit: int = 256) -> str:
     return value[:head] + f"... [+{len(value) - head} chars]"
 
 
+REDACTED_KEYS = frozenset(
+    {"headers", "authorization", "api_key", "token", "password", "secret"}
+)
+
+
+def bound(value: Any, limit: int = 4096) -> Any:
+    """Shrink a tool argument or result to what a span may safely carry.
+
+    The dispatch shell records every call's raw arguments and result on the
+    trace root, and both are agent-controlled: ``http_request`` takes a
+    ``headers`` dict that is the natural home for an ``Authorization`` bearer,
+    and ``read_file`` / ``run_command`` / ``kb_search`` return whole files,
+    whole stdout, whole chunk texts.  Anything set on a span is written verbatim
+    into ``mlflow.db`` — MLflow truncates only the UI preview — and ``dsagt
+    traces`` then serves it in a browser.  Credential-bearing keys are replaced
+    outright; every string leaf is cut to ``limit`` so structure survives for
+    the UI while the store holds a preview, not a payload.
+    """
+    if isinstance(value, dict):
+        return {
+            k: "[redacted]" if str(k).lower() in REDACTED_KEYS else bound(v, limit)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [bound(v, limit) for v in value]
+    if isinstance(value, str):
+        return truncate(value, limit)
+    return value
+
+
 # ----- trace tagging — the dsagt.source debug filter + session grouping -----
 #
 # dsagt.source names the MCP tool *category* that was invoked — one of

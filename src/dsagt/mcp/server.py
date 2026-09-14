@@ -44,7 +44,7 @@ from mcp.server.lowlevel import Server, NotificationOptions  # noqa: E402
 from mcp.server.models import InitializationOptions  # noqa: E402
 
 from dsagt.knowledge import KnowledgeBase  # noqa: E402
-from dsagt.observability import open_span  # noqa: E402
+from dsagt.observability import bound, open_span  # noqa: E402
 from dsagt.registry import SkillRegistry, CodeRegistry  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -140,9 +140,11 @@ def build_dispatch_server(
             if span is not None:
                 # The trace-level Request/Inputs/Outputs are read from this
                 # categorization root; record the call's arguments and result so
-                # the MLflow UI shows them instead of a null request.
-                span.set_inputs(arguments)
-                span.set_outputs(result)
+                # the MLflow UI shows them instead of a null request.  Both are
+                # agent-controlled and land verbatim in mlflow.db, so they go
+                # through ``bound``: credential keys redacted, leaves truncated.
+                span.set_inputs(bound(arguments))
+                span.set_outputs(bound(result))
         try:
             text = (
                 result

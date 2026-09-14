@@ -112,6 +112,46 @@ def test_dispatch_root_span_records_tool_inputs_and_outputs(tmp_path, monkeypatc
     assert root.outputs == {"echoed": "hello"}
 
 
+def test_dispatch_root_span_never_stores_credentials_or_payloads(tmp_path, monkeypatch):
+    """What lands on the root span is written verbatim into ``mlflow.db`` and
+    served by ``dsagt traces`` — so an ``http_request``-style ``headers`` arg
+    must be redacted and a ``read_file``-sized result must be cut to a preview.
+    """
+    import mlflow
+
+    import dsagt.observability as obs_module
+    from dsagt.mcp.server import build_dispatch_server
+
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    mlflow.set_experiment("test")
+    monkeypatch.setattr(obs_module, "_initialized", True)
+    monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+    async def fetch(args):
+        return {"body": "x" * 100_000}
+
+    tools = [types.Tool(name="fetch", description="d", inputSchema={"type": "object"})]
+    server = build_dispatch_server(
+        "test", tools, {"fetch": fetch}, {"fetch": "registry"}
+    )
+
+    out = _call(
+        server,
+        "fetch",
+        {"url": "https://x", "headers": {"Authorization": "Bearer sk-secret"}},
+    )
+    assert (
+        len(json.loads(out)["body"]) == 100_000
+    )  # the agent still gets the full result
+
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    root = next(s for s in trace.data.spans if s.name == "fetch")
+    assert root.inputs["headers"] == "[redacted]"
+    assert "sk-secret" not in json.dumps(root.inputs)
+    assert len(root.outputs["body"]) < 5_000
+    assert "[+" in root.outputs["body"]
+
+
 def test_registry_tool_returns_plain_string(tmp_path):
     """Registry handlers return a bare string — passed through unchanged."""
     server = _make_merged_server(tmp_path)

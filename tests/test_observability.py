@@ -716,3 +716,38 @@ def test_search_registry_categorized_but_no_internal_span(_reset_tracing, tmp_pa
     assert trace.info.tags["dsagt.source"] == "registry"
     # ...but search opens no internal subsystem span.
     assert not any(n.startswith("registry.") for n in names)
+
+
+def test_bound_redacts_credential_keys_at_any_depth():
+    from dsagt.observability import bound
+
+    args = {
+        "url": "https://api.example.com",
+        "headers": {"Authorization": "Bearer sk-live-abc"},
+        "nested": {"api_key": "k", "keep": "v"},
+    }
+    out = bound(args)
+    assert out["headers"] == "[redacted]"
+    assert out["nested"]["api_key"] == "[redacted]"
+    assert out["nested"]["keep"] == "v"
+    assert out["url"] == "https://api.example.com"
+    assert "sk-live-abc" not in str(out)
+
+
+def test_bound_truncates_string_leaves_and_keeps_structure():
+    from dsagt.observability import bound
+
+    result = {"stdout": "x" * 10_000, "files": ["y" * 10_000, "short"], "code": 0}
+    out = bound(result, limit=64)
+    assert len(out["stdout"]) < 100 and "[+" in out["stdout"]
+    assert len(out["files"][0]) < 100
+    assert out["files"][1] == "short"
+    assert out["code"] == 0  # non-strings pass through
+
+
+def test_bound_handles_plain_string_result():
+    """Registry handlers return a bare ``str``, not a dict."""
+    from dsagt.observability import bound
+
+    assert bound("short") == "short"
+    assert "[+" in bound("z" * 10_000, limit=64)
