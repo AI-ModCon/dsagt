@@ -51,10 +51,12 @@ def run(project: str, port: int = _DEFAULT_PORT) -> int:
     config = load_config(project)
     pdir = Path(config["project_dir"])
     tracking_uri = resolve_tracking_uri(config)
-    if not tracking_uri.startswith("sqlite:"):
-        # A shared tracking server has its own UI; there is nothing local to
-        # serve.  Catch-up still runs so the last session's trailing turn lands
-        # there before the user looks.
+    if tracking_uri.startswith(("http://", "https://")):
+        # A tracking server has its own UI; there is nothing local to serve.
+        # Only http(s) qualifies — a `postgresql://` or `mysql://` backend store
+        # is served by `mlflow ui` like sqlite, and its DSN carries credentials
+        # that must not be printed as a link.  Catch-up still runs so the last
+        # session's trailing turn lands there before the user looks.
         try:
             catch_up_extraction(pdir, config)
         except Exception as e:  # noqa: BLE001

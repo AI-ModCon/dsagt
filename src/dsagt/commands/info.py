@@ -661,7 +661,13 @@ def run(project: str, as_json: bool) -> int:
             _print_text(r)
         return 0
 
-    traces, _ = _load_traces(tracking_uri, project)
+    try:
+        traces, _ = _load_traces(tracking_uri, project)
+    except (
+        Exception
+    ) as e:  # noqa: BLE001 — a remote store can be down or refuse the key
+        print(f"Could not read the trace store at {tracking_uri}: {e}")
+        return 1
     r = _report(project, config, traces)
     r["created"] = created
     r["kb_collections"] = kb_collections

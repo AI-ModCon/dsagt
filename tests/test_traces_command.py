@@ -101,3 +101,23 @@ def test_remote_store_prints_deeplink_and_spawns_no_viewer(
     assert (
         "https://mlflow.example.org/#/experiments/7/traces" in capsys.readouterr().out
     )
+
+
+def test_non_http_backend_dsn_is_never_printed_as_a_link(tmp_path, monkeypatch, capsys):
+    """Only an http(s) server has a UI to deep-link; a ``postgresql://`` store
+    is a backend DSN whose embedded credentials must not be echoed."""
+    pdir = tmp_path / "proj"
+    pdir.mkdir()
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "postgresql://user:hunter2@db/mlflow")
+
+    with (
+        patch.object(traces_cmd, "load_config", return_value=_config(pdir)),
+        patch.object(traces_cmd, "catch_up_extraction", return_value={}),
+        patch.object(traces_cmd, "_resolve_experiment_id", return_value="1"),
+        patch.object(
+            traces_cmd.subprocess, "run", return_value=MagicMock(returncode=0)
+        ),
+    ):
+        traces_cmd.run("proj")
+
+    assert "hunter2" not in capsys.readouterr().out

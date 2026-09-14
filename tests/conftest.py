@@ -75,3 +75,17 @@ def llm_config():
         "base_url": _require(env, "LLM_BASE_URL"),
         "api_key": _require(env, "LLM_API_KEY"),
     }
+
+
+@pytest.fixture(autouse=True)
+def _no_shell_tracking_server(monkeypatch):
+    """Keep the suite hermetic.  ``resolve_tracking_uri`` honors
+    ``MLFLOW_TRACKING_URI``, so a developer with a shared server exported would
+    otherwise have every in-project test log real spans there — and fail the
+    assertions that expect the sqlite default."""
+    for var in (
+        "MLFLOW_TRACKING_URI",
+        "MLFLOW_TRACKING_API_KEY",
+        "MLFLOW_TRACKING_TOKEN",
+    ):
+        monkeypatch.delenv(var, raising=False)
