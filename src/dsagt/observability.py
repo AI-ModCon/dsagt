@@ -39,6 +39,7 @@ business code never imports MLflow and never branches on whether tracing is on.
 from __future__ import annotations
 
 import functools
+import hashlib
 import inspect
 import logging
 import os
@@ -144,6 +145,46 @@ class ApiKeyHeaderProvider:
         return {"X-API-Key": os.environ["MLFLOW_TRACKING_API_KEY"]}
 
 
+EXPERIMENT_DESCRIPTION = "DSAgt (DataSmith Agent) AI-assisted data pipeline builder"
+
+
+def experiment_name(config: dict | None) -> str:
+    """The MLflow experiment this project logs to.
+
+    ``mlflow.experiment`` in ``.dsagt/config.yaml`` when set; otherwise
+    ``dsagt-<8 hex>`` from a hash of the project directory.  The project name
+    is the wrong default on a shared tracking server: ``demo`` collides across
+    users, and the experiment list there belongs to everyone.  The directory
+    hash is stable for the life of the project (``dsagt mv`` changes it) and
+    distinct per user because home directories are.  The readable project name
+    travels on the experiment's description and ``dsagt.project`` tag instead
+    — see :func:`_ensure_experiment`.
+    """
+    cfg = config or {}
+    name = (cfg.get("mlflow") or {}).get("experiment")
+    if name:
+        return name
+    pdir = cfg.get("project_dir")
+    base = Path(pdir).resolve() if pdir else Path.cwd().resolve()
+    return f"dsagt-{hashlib.sha1(str(base).encode()).hexdigest()[:8]}"
+
+
+def _ensure_experiment(name: str, project: str) -> None:
+    """Select the experiment; on first creation, describe it and tag the project.
+
+    ``set_experiment`` returns the experiment, so the tags cost nothing once
+    they exist — and a description edited by hand on the server is left alone.
+    """
+    import mlflow
+
+    exp = mlflow.set_experiment(name)
+    if "dsagt.project" not in exp.tags:
+        mlflow.set_experiment_tag(
+            "mlflow.note.content", f"{EXPERIMENT_DESCRIPTION} — project: {project}"
+        )
+        mlflow.set_experiment_tag("dsagt.project", project)
+
+
 def init_tracing(
     service_name: str,
     mlflow_url: str | None = None,
@@ -182,20 +223,22 @@ def init_tracing(
         return
 
     _default_session_id = session_id
+    resolve_cfg = dict(cfg)
+    resolve_cfg["project_dir"] = str(cfg_pdir)
     if mlflow_url is None:
-        resolve_cfg = dict(cfg)
-        resolve_cfg["project_dir"] = str(cfg_pdir)
         mlflow_url = resolve_tracking_uri(resolve_cfg)
+    experiment = experiment_name(resolve_cfg)
 
     import mlflow
 
     mlflow.set_tracking_uri(mlflow_url)
-    mlflow.set_experiment(project_name)
+    _ensure_experiment(experiment, project_name)
     _initialized = True
     logger.info(
-        "init_tracing: service=%s mlflow=%s project=%s session=%s",
+        "init_tracing: service=%s mlflow=%s experiment=%s project=%s session=%s",
         service_name,
         mlflow_url,
+        experiment,
         project_name,
         _default_session_id or "<none>",
     )
@@ -693,7 +736,7 @@ class MLflowSink:
         import mlflow
 
         mlflow.set_tracking_uri(self._uri)
-        mlflow.set_experiment(trace.project or self._experiment)
+        mlflow.set_experiment(self._experiment)
 
         children: dict[str, list] = {}
         for span in trace.spans:

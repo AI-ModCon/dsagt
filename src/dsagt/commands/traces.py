@@ -26,7 +26,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from dsagt.observability import resolve_tracking_uri
+from dsagt.observability import experiment_name, resolve_tracking_uri
 from dsagt.session import catch_up_extraction, load_config
 
 logger = logging.getLogger(__name__)
@@ -34,16 +34,16 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PORT = 5000
 
 
-def _resolve_experiment_id(tracking_uri: str, project: str) -> str | None:
-    """The MLflow experiment id for *project*, or None if not yet created."""
+def _resolve_experiment_id(tracking_uri: str, experiment: str) -> str | None:
+    """The MLflow experiment id for *experiment*, or None if not yet created."""
     try:
         import mlflow
 
         mlflow.set_tracking_uri(tracking_uri)
-        exp = mlflow.get_experiment_by_name(project)
+        exp = mlflow.get_experiment_by_name(experiment)
         return exp.experiment_id if exp else None
     except Exception as e:  # noqa: BLE001 — a missing id only costs the deep link
-        logger.debug("Could not resolve experiment id for %s: %s", project, e)
+        logger.debug("Could not resolve experiment id for %s: %s", experiment, e)
         return None
 
 
@@ -51,6 +51,7 @@ def run(project: str, port: int = _DEFAULT_PORT) -> int:
     config = load_config(project)
     pdir = Path(config["project_dir"])
     tracking_uri = resolve_tracking_uri(config)
+    experiment = experiment_name(config)
     if tracking_uri.startswith(("http://", "https://")):
         # A tracking server has its own UI; there is nothing local to serve.
         # Only http(s) qualifies — a `postgresql://` or `mysql://` backend store
@@ -61,7 +62,7 @@ def run(project: str, port: int = _DEFAULT_PORT) -> int:
             catch_up_extraction(pdir, config)
         except Exception as e:  # noqa: BLE001
             logger.warning("Trace catch-up failed: %s", e)
-        exp_id = _resolve_experiment_id(tracking_uri, project)
+        exp_id = _resolve_experiment_id(tracking_uri, experiment)
         url = (
             f"{tracking_uri.rstrip('/')}/#/experiments/{exp_id}/traces"
             if exp_id
@@ -92,7 +93,7 @@ def run(project: str, port: int = _DEFAULT_PORT) -> int:
 
     # 2. Deep-link to the project's Traces tab (DSAGT emits traces, not runs, so
     #    the default Runs view looks empty).
-    exp_id = _resolve_experiment_id(tracking_uri, project)
+    exp_id = _resolve_experiment_id(tracking_uri, experiment)
     base = f"http://127.0.0.1:{port}"
     url = f"{base}/#/experiments/{exp_id}/traces" if exp_id else base
 

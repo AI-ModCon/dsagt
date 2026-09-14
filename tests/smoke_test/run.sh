@@ -246,8 +246,10 @@ check "dsagt info runs"              "dsagt info '${PROJECT}'"
 STORE_URI="${MLFLOW_TRACKING_URI:-sqlite:///${PDIR}/mlflow.db}"
 TRACE_COUNTS=$(uv run --quiet python <<PY 2>/dev/null
 import mlflow
+from dsagt.observability import experiment_name
+from dsagt.session import load_config
 mlflow.set_tracking_uri("${STORE_URI}")
-exp = mlflow.get_experiment_by_name("${PROJECT}")
+exp = mlflow.get_experiment_by_name(experiment_name(load_config("${PROJECT}")))
 if exp is None:
     print("0 0"); raise SystemExit
 df = mlflow.search_traces(

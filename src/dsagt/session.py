@@ -766,7 +766,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
     guessing would risk reading the *new* session's records.
     """
     from dsagt.memory import episodic_consumers
-    from dsagt.observability import resolve_tracking_uri
+    from dsagt.observability import experiment_name, resolve_tracking_uri
     from dsagt.traces import make_trace_collector
 
     sessions = read_state(pdir).get("sessions") or []
@@ -785,6 +785,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
         project,
         prev_tag,
         resolve_tracking_uri(config),
+        experiment=experiment_name(config),
         extra_consumers=episodic_consumers(config, kb, pdir, prev_tag),
         source=source,
     )

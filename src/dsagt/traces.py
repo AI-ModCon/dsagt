@@ -1263,6 +1263,7 @@ def make_trace_collector(
     session_id,
     tracking_uri,
     *,
+    experiment: str,
     projects_root: Path | None = None,
     extra_consumers: list | None = None,
     source=None,
@@ -1288,7 +1289,7 @@ def make_trace_collector(
     # logger drags in mlflow, the heaviest thing in the pipeline.
     from dsagt.observability import MLflowSink
 
-    consumers = [MLflowSink(tracking_uri, project), *(extra_consumers or [])]
+    consumers = [MLflowSink(tracking_uri, experiment), *(extra_consumers or [])]
     return TraceCollector(
         reader,
         translator,

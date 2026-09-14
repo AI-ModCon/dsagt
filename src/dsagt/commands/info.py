@@ -38,7 +38,7 @@ from pathlib import Path
 
 import yaml
 
-from dsagt.observability import resolve_tracking_uri
+from dsagt.observability import experiment_name, resolve_tracking_uri
 from dsagt.session import load_config, project_dir, resolve_env_vars
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
@@ -402,7 +402,7 @@ def _kb_retrieval(traces) -> list[dict]:
     return sorted(rows.values(), key=lambda r: r["searches"], reverse=True)
 
 
-def _load_traces(tracking_uri: str, project_name: str):
+def _load_traces(tracking_uri: str, experiment: str):
     """Return (traces_df, experiment_id_or_none).
 
     Reads whichever store the project logs to — the serverless
@@ -414,7 +414,7 @@ def _load_traces(tracking_uri: str, project_name: str):
     import mlflow
 
     mlflow.set_tracking_uri(tracking_uri)
-    exp = mlflow.get_experiment_by_name(project_name)
+    exp = mlflow.get_experiment_by_name(experiment)
     if exp is None:
         return None, None
     traces = mlflow.search_traces(
@@ -549,6 +549,7 @@ def _report(project_name: str, config: dict, traces) -> dict:
 
 def _print_text(r: dict) -> None:
     print(f"Project: {r['project']}")
+    print(f"  Experiment: {r['experiment']}")
     print(f"  Agent:      {r['agent']}")
     print(f"  Embedding:  {r['model']}")
     if r.get("created"):
@@ -640,6 +641,7 @@ def run(project: str, as_json: bool) -> int:
         # note — rather than crashing on a missing DB.
         r = {
             "project": project,
+            "experiment": experiment_name(config),
             "agent": config.get("agent", "-"),
             "model": config.get("embedding", {}).get("model", "-"),
             "created": created,
@@ -662,7 +664,7 @@ def run(project: str, as_json: bool) -> int:
         return 0
 
     try:
-        traces, _ = _load_traces(tracking_uri, project)
+        traces, _ = _load_traces(tracking_uri, experiment_name(config))
     except (
         Exception
     ) as e:  # noqa: BLE001 — a remote store can be down or refuse the key
@@ -670,6 +672,7 @@ def run(project: str, as_json: bool) -> int:
         return 1
     r = _report(project, config, traces)
     r["created"] = created
+    r["experiment"] = experiment_name(config)
     r["kb_collections"] = kb_collections
     r["skills"] = skills
     r["config_sources"] = sources

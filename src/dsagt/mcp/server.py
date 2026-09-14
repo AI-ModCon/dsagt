@@ -516,7 +516,7 @@ def main():
     collector = None
     try:
         from dsagt.memory import episodic_consumers
-        from dsagt.observability import resolve_tracking_uri
+        from dsagt.observability import experiment_name, resolve_tracking_uri
         from dsagt.traces import make_trace_collector
 
         resolve_cfg = dict(config)
@@ -527,6 +527,7 @@ def main():
             config.get("project", ""),
             session_id or "",
             resolve_tracking_uri(resolve_cfg),
+            experiment=experiment_name(resolve_cfg),
             extra_consumers=episodic_consumers(config, kb, project_dir, session_id),
         )
     except Exception as e:  # noqa: BLE001

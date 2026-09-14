@@ -24,7 +24,7 @@ from contextlib import contextmanager
 import pytest
 
 from dsagt import observability as obs_module
-from dsagt.observability import child_span, init_tracing, obs, traced
+from dsagt.observability import experiment_name, child_span, init_tracing, obs, traced
 
 
 @pytest.fixture(autouse=True)
@@ -217,6 +217,10 @@ def test_init_tracing_points_mlflow_at_store_and_experiment(monkeypatch):
 
     def _fake_set_experiment(name):
         captured["experiment"] = name
+        return type("Exp", (), {"tags": {}})()  # fresh experiment: no tags yet
+
+    def _fake_set_experiment_tag(key, value):
+        captured.setdefault("tags", {})[key] = value
 
     def _fake_set_tracking_uri(uri):
         captured["tracking_uri"] = uri
@@ -224,19 +228,26 @@ def test_init_tracing_points_mlflow_at_store_and_experiment(monkeypatch):
     import mlflow
 
     monkeypatch.setattr(mlflow, "set_experiment", _fake_set_experiment)
+    monkeypatch.setattr(mlflow, "set_experiment_tag", _fake_set_experiment_tag)
     monkeypatch.setattr(mlflow, "set_tracking_uri", _fake_set_tracking_uri)
 
     monkeypatch.setattr(obs_module, "_initialized", False)
     monkeypatch.setattr(
         obs_module,
         "find_project_config",
-        lambda: (None, {"project": "my-project"}),
+        lambda: ("/proj", {"project": "my-project"}),
     )
 
     try:
         init_tracing("dsagt-run", mlflow_url="sqlite:///x.db")
         assert captured["tracking_uri"] == "sqlite:///x.db"
-        assert captured["experiment"] == "my-project"
+        # The experiment is the resolved hash name, not the project name; the
+        # project name rides on the description and tag instead.
+        assert captured["experiment"] == experiment_name({"project_dir": "/proj"})
+        assert captured["experiment"].startswith("dsagt-")
+        assert captured["tags"]["dsagt.project"] == "my-project"
+        assert "DSAgt (DataSmith Agent)" in captured["tags"]["mlflow.note.content"]
+        assert "my-project" in captured["tags"]["mlflow.note.content"]
         assert obs_module._initialized is True
     finally:
         monkeypatch.setattr(obs_module, "_initialized", False)
@@ -795,3 +806,36 @@ def test_bound_masks_credential_shapes_inside_strings():
 
     for key in ("X-API-Key", "access_token", "apikey", "auth"):
         assert bound({key: "sk-live-3"})[key] == "[redacted]"
+
+
+def test_experiment_name_defaults_to_project_dir_hash_and_honors_config():
+    from dsagt.observability import experiment_name
+
+    a = experiment_name({"project_dir": "/home/a/dsagt-projects/demo"})
+    b = experiment_name({"project_dir": "/home/b/dsagt-projects/demo"})
+    assert a.startswith("dsagt-") and len(a) == len("dsagt-") + 8
+    assert a == experiment_name(
+        {"project_dir": "/home/a/dsagt-projects/demo"}
+    )  # stable
+    assert a != b  # same project name, different users: no collision on a shared server
+    assert (
+        experiment_name({"project_dir": "/x", "mlflow": {"experiment": "team/demo"}})
+        == "team/demo"
+    )
+
+
+def test_ensure_experiment_tags_only_on_first_creation(monkeypatch):
+    """A description edited by hand on the server must not be overwritten on
+    every heartbeat — tags are written only when the experiment has none."""
+    import mlflow
+
+    from dsagt.observability import _ensure_experiment
+
+    calls = []
+    existing = type(
+        "Exp", (), {"tags": {"dsagt.project": "p", "mlflow.note.content": "edited"}}
+    )()
+    monkeypatch.setattr(mlflow, "set_experiment", lambda name: existing)
+    monkeypatch.setattr(mlflow, "set_experiment_tag", lambda k, v: calls.append(k))
+    _ensure_experiment("dsagt-abc", "p")
+    assert calls == []

@@ -10,7 +10,7 @@ To view in the MLflow UI:
 dsagt traces <project> # rund dsagt mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
 ```
 
-`dsagt info <name>` prints the resolved tracking URI and a session/trace summary. The tracking URI is `MLFLOW_TRACKING_URI` when set in the shell, else the `sqlite:///<project>/mlflow.db` default.
+`dsagt info <name>` prints the resolved tracking URI and a session/trace summary. The tracking URI is `MLFLOW_TRACKING_URI` when set in the shell, else the `sqlite:///<project>/mlflow.db` default. The experiment is `dsagt-<8 hex>`, hashed from the project directory so two users' `demo` projects never collide on a shared server; set `mlflow.experiment` in `.dsagt/config.yaml` to choose a name. The project name is on the experiment's description and its `dsagt.project` tag.
 
 ## Logging to a shared tracking server
 
