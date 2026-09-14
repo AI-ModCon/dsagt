@@ -6,17 +6,14 @@ immediately with a ``job_id``; poll ``kb_job_status`` for completion.
 
 Multi-collection search fans out and rank-fuses *below* this tool boundary, in
 :meth:`dsagt.knowledge.KnowledgeBase.search` — the agent just names collection(s).
-BYO external vector stores are deferred: ``kb_add_vector_db`` is intentionally
-**not** registered (an external store is a ``VectorStore`` subclass appended to
-the KB's store list, not a tool the agent calls).
-
 Server configuration (chunk_size, rerank) is read from the project's
 .dsagt/config.yaml.  Embedding credentials flow through env vars (EMBEDDING_API_KEY,
-EMBEDDING_BASE_URL, EMBEDDING_MODEL) set by ``dsagt start``.
+EMBEDDING_BASE_URL, EMBEDDING_MODEL) from the shell or from the per-agent MCP
+config env block that ``dsagt init`` writes.
 
 These definitions + handlers run inside the merged ``dsagt-server`` (see
-:mod:`dsagt.mcp.server`); ``create_knowledge_server`` is retained only as a
-test-facing constructor.  Explicit-memory tools (``kb_remember`` / etc.) live in
+:mod:`dsagt.mcp.server`); ``create_knowledge_server`` is a test-facing
+constructor.  Explicit-memory tools (``kb_remember`` / etc.) live in
 :mod:`dsagt.mcp.memory_tools`; skill-source tools in
 :mod:`dsagt.mcp.skill_tools`.
 """

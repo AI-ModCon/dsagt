@@ -88,7 +88,7 @@ def agent_env(config: dict) -> dict:
     Layers, in order:
       1. ``os.environ`` (user's shell env).
       2. DSAGT-wide vars (``DSAGT_PROJECT``, ``DSAGT_PROJECT_DIR``,
-         ``DSAGT_AGENT``, ``DSAGT_SESSION_ID``).
+         ``DSAGT_AGENT``).
       3. ``MLFLOW_TRACKING_URI`` so the MCP servers' ``init_tracing`` and
          any MLflow client running under the agent log to the project's
          store.  No OTel routing env — DSAGT does not force native agent

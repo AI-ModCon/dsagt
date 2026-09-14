@@ -245,9 +245,8 @@ def test_init_tracing_points_mlflow_at_store_and_experiment(monkeypatch):
 # ---------------------------------------------------------------------------
 # Safety nets for the remaining defensive catches in observability.py.
 #
-# After the fallback-purge pass, two "soft" catches remain in the
-# observability layer, both inline inside traced()'s wrapper (previously
-# _attach_captured_args and _attach_return_attrs):
+# Two "soft" catches exist in the observability layer, both inline inside
+# traced()'s wrapper:
 #
 #   1. traced() wraps sig.bind_partial in except TypeError so that a
 #      function whose signature was mangled by another decorator doesn't

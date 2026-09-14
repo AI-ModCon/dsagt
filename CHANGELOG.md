@@ -4,6 +4,63 @@ All notable changes to DSAgt are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- AIDRIN has one path: the code registry. The `aidrin` package is a dependency
+  of dsagt, so the CLI installs beside `dsagt-run`; every `dsagt init`
+  registers `aidrin` as a code, so each call the agent makes through it is an
+  execution record; and the `aidrin` base skill is fetched at the release tag
+  of the installed package. A cached skill source is re-cloned when the branch
+  or tag it holds differs from the one asked for, and a failed re-clone keeps
+  the previous cache.
+- The readiness gate is the AI-readiness check, on by default. `dsagt init`
+  asks whether to assess tabular data before and after each data transform
+  (`--no-readiness` declines); the answer adds one paragraph at the
+  per-operation check rule of the instructions, making the check for a tabular
+  stage the `aidrin` skill's quality baseline. The profile, the executable
+  path, the shared install, the `--readiness` flag, and the appended
+  instructions block are gone.
+- `datacard-generator` is a base skill: every `dsagt init` installs it from the
+  genesis catalog (`skills/basedata-skills/`) alongside `skill-creator` and
+  `aidrin`, so the agent invokes it natively without a catalog search.
+- Base skills install from the shared source cache. A source is cloned once,
+  on the first init that needs it, and reused as is by every later init;
+  `add_skill_source` with `force` re-clones it on request. An init with a
+  warm cache needs no network.
+
+## [0.2.1] - 2026-09-11
+
+### Changed
+
+- DSAgt holds no skills of its own. `dsagt init` installs two base skills into
+  `<project>/skills/` from the repositories that maintain them, re-cloning each
+  so the copy matches upstream: `skill-creator` from the genesis catalog
+  (`skills/basedata-skills/`) and `aidrin` from `idtlab/AIDRIN`. The `aidrin`
+  skill-catalog source is gone (it held that one skill), and so is the built-in
+  `aidrin` gate code: the readiness gate instructs the agent to run the
+  profile's metrics through the `aidrin` skill's CLI.
+- The `genesis` skill source is `github.com/AI-ModCon/genesis-skills`.
+- Intel Macs are no longer a supported platform. The `darwin/x86_64` entry in
+  `required-environments` held every environment on torch 2.2.2 and NumPy 1.x;
+  the lock now resolves torch 2.14, NumPy 2.x, transformers 5.x,
+  sentence-transformers 6.x, and tree-sitter-language-pack 1.16.
+- `requires-python` is `>=3.12` again; CI tests 3.12 and 3.13.
+- Dependencies are declared as ranges with a next-major cap, so dsagt
+  resolves beside a project that pins differently. `ruyaml`, which nothing
+  imported, is removed.
+
+### Fixed
+
+- The MCP server copied every collection in the shared `kb_index/` into the
+  project at startup, so a skill catalog excluded at `dsagt init` still
+  appeared as synced. The server now only opens the project's own `kb_index`;
+  `dsagt init` is the one place collections are provisioned.
+- `run_command` accepted its `command` as one argv element, so a code spec's
+  multi-word executable (`dsagt-run --code x -- python ...`) failed with
+  "not found". The string is now split like a shell would.
+
 ## [0.2.0] - 2026-07-08
 
 A large release. It adds an **external skill-catalog system**, consolidates the
@@ -126,8 +183,7 @@ rebuild-not-migrate, and no project data changes:
   feature (incl. the `kb_get_suggestions` / `kb_dismiss_suggestion` MCP tools
   and the `llama-cpp-python` dependency), plus their `dsagt init` prompts and
   config keys. Episodic memory keeps the mechanical capture path so a Tier-0
-  baseline can be measured first; design notes parked in
-  `design-notes/judge.md`.
+  baseline can be measured first.
 - The built-in `datacard-generator` skill — it lives in the Genesis catalog and
   is now installed on demand via `dsagt skills add <project> genesis`.
 - Dead indexing of installed/built-in skills into the `skills` ChromaDB
@@ -179,5 +235,6 @@ rebuild-not-migrate, and no project data changes:
   generation, MLflow/OTel observability, the tool/skill registry, execution
   provenance, and explicit + episodic memory.
 
+[0.2.1]: https://github.com/AI-ModCon/dsagt/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/AI-ModCon/dsagt/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/AI-ModCon/dsagt/releases/tag/0.1.0

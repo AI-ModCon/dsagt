@@ -39,6 +39,6 @@ jobs:
       - name: Install (all groups)
         run: uv sync --all-groups
       # `python -m pytest`, not bare `pytest`, per CLAUDE.md.  Integration tests
-      # need real EMBEDDING_*/LLM_* credentials and are excluded here.
+      # load the local embedder, spawn subprocesses, or install into the venv.
       - name: Tests (non-integration)
         run: uv run --no-sync python -m pytest -m "not integration" -q

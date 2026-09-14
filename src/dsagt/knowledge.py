@@ -806,16 +806,8 @@ class VectorStore(ABC):
     collections.  Heterogeneity (mixed embedding spaces) is expressed by having
     *several* stores in the list, never by routing within one store.
 
-    TODO (deferred to the second concrete store — BYO/FAISS, see
-    knowledge-base-plan.md): most of :class:`ChromaVectorStore` is backend-
-    agnostic — the BM25 sparse leg, the dense+sparse hybrid fusion, the
-    ``chunks.jsonl`` payload, ``_normalize``.  Only the dense index
-    (add/query/persist over Chroma's HNSW) is Chroma-specific.  When a second
-    store lands, lift that reusable machinery into a shared base that defers
-    only the dense primitives to subclasses, so a FAISS/BYO store reuses it
-    rather than copying it.  Not extracted now: with one impl the seam can't be
-    validated.  Dense-only stores (external adapters with no local sparse leg)
-    are modelled as a *separate store type*, not a per-instance flag.
+    A dense-only store (an external adapter without a local sparse leg) is a
+    separate store type.
     """
 
     embedder: Embedder
@@ -1250,7 +1242,6 @@ class KnowledgeBase:
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
         # The internal store: local Chroma, one embedder, many collections.
-        # External BYO stores would be appended to ``self._stores`` (deferred).
         self._store = ChromaVectorStore(
             self.index_dir,
             backend=default_embedder or "api",

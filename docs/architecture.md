@@ -7,7 +7,7 @@ DSAgt provides a preconfigured agent platform with augmented capabilities for AI
 ## Capabilities
 
 **Code Registry** (`dsagt-server`)
-The agent registers CLI data processing codes as markdown files with YAML frontmatter under `<project>/codes/`. DSAgt handles dependency installation via `uv run --with` and wraps every execution with `dsagt-run` for provenance capture. The agent discovers codes via `search_registry`.
+The agent registers CLI data processing codes as skills (markdown files with YAML frontmatter) under `<project>/codes/`. DSAgt handles dependency installation via `uv run --with` and wraps every execution with `dsagt-run` for provenance capture. The agent discovers codes via `search_registry`.
 
 **[Knowledge Base](knowledge-base.md)** (`dsagt-server`)
 Hybrid semantic + BM25 search over ChromaDB collections partitioned by concern — code specs, the skill corpus, scientific documents, and per-project memory — served by the same process as the code registry. A first `dsagt init` installs the built-in code specs and a default `genesis` skill corpus; heavier scientific collections (NeMo Curator, AIDRIN) and additional skill sources are also available (e.g. k-dense, anthropic), and new collections can be added for the documents of a specific scientific pursuit. The agent searches via `kb_search`, ingests via `kb_ingest`, and saves user-confirmed facts via `kb_remember`. Opt-in episodic memory distills each session turn into the per-project `session_memory` collection.
@@ -16,7 +16,7 @@ Hybrid semantic + BM25 search over ChromaDB collections partitioned by concern �
 A wrapper around every registered-code execution. Records the command, arguments, exit code, duration, file counts, and truncated stderr to `<project>/trace_archive/<record_id>.json` and emits a `code.execute` span to the trace store. The server incrementally embeds those records into a `code_use` collection so past executions are retrievable, and the agent calls `reconstruct_pipeline` to render the trace archive as a reproducible workflow.
 
 **[Observability](observability.md)** (serverless MLflow)
-Traces land in a serverless MLflow store — a SQLite file at `<project>/mlflow.db`. DSAgt emits its own spans live; the agent's LLM-call traces are recovered post-hoc from the on-disk session transcript by the MCP server's in-session reader. View with `dsagt traces <project>`.
+Traces are stored in an MlFlow SQLite file at `<project>/mlflow.db`. DSAgt server actions are recorded there and the agent's LLM-call traces are translated from the on-disk session transcript to MlFlow's Claude autolog trace format. View with `dsagt traces <project>`.
 
 **[Skills Discovery](skills.md)**
 DSAgt exposes MCP tools to connect to external GitHub skill repositories and search them for skills that enhance scientific workflows. On top of the agent's own progressive disclosure of the skills already installed in its native skills directory, DSAgt maintains an extendable corpus of skills that can be searched and installed on demand — without flooding the agent's context window with skills it isn't using. The agent searches via `search_skills` and installs via `install_skill`.

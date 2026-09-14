@@ -112,8 +112,8 @@ def test_is_error_handles_enum_reprs(state, expected):
 def config():
     return {
         "agent": "claude",
-        # BYOA: dsagt no longer records the agent's LLM model; the info
-        # header surfaces the embedding model dsagt configures.
+        # BYOA: the agent owns its LLM model; the info header surfaces the
+        # embedding model dsagt configures.
         "embedding": {"model": "bge-test"},
     }
 

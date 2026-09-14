@@ -1,4 +1,4 @@
-"""Tests for the in-session trace heartbeat (TraceCollector).
+"""Tests for the periodic trace pass (TraceCollector).
 
 Exercise the collect logic directly (no event loop): the completeness watermark
 (defer the open last turn) and ack-set idempotency, end-to-end through the real
@@ -65,13 +65,13 @@ def scan_env(tmp_path, monkeypatch):
 
 
 def test_make_trace_collector_registered_agents(tmp_path):
-    # The heartbeat isn't Claude-special: it runs for any agent with a pipeline.
+    # The periodic pass isn't Claude-special: it runs for any agent with a pipeline.
     for agent in ("claude", "codex", "goose", "opencode", "cline"):
         assert (
             make_trace_collector(agent, tmp_path, "p", "p:s", "sqlite:///x.db")
             is not None
         )
-    # An agent with no pipeline registered simply gets no heartbeat.
+    # An agent with no pipeline registered simply gets no periodic pass.
     assert (
         make_trace_collector("nonesuch", tmp_path, "p", "p:s", "sqlite:///x.db") is None
     )
