@@ -10,7 +10,16 @@ To view in the MLflow UI:
 dsagt traces <project> # rund dsagt mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
 ```
 
-`dsagt info <name>` prints the resolved tracking URI and a session/trace summary. The tracking URI resolves as `MLFLOW_TRACKING_URI` env → project config → the `sqlite:///<project>/mlflow.db` default.
+`dsagt info <name>` prints the resolved tracking URI and a session/trace summary. The tracking URI is `MLFLOW_TRACKING_URI` when set in the shell, else the `sqlite:///<project>/mlflow.db` default.
+
+## Logging to a shared tracking server
+
+Export `MLFLOW_TRACKING_URI` before `dsagt init`; the value is written into the agent's MCP config, so the CLI, the MCP server and its `dsagt-run` children all log there instead of the local file. Credentials stay in the shell and are never written to disk:
+
+- `MLFLOW_TRACKING_TOKEN` (Bearer) or `MLFLOW_TRACKING_USERNAME` / `_PASSWORD` — read by the MLflow client itself.
+- `MLFLOW_TRACKING_API_KEY` — for a server behind an API gateway that authenticates on an `X-API-Key` header (Kong answers `WWW-Authenticate: Key`); DSAgt adds the header through MLflow's request-header plugin.
+
+`dsagt traces` prints the remote deep-link in this mode rather than starting a local viewer, and `dsagt info` reads from the remote store.
 
 ## Two feeds
 

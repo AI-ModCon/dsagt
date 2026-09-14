@@ -374,10 +374,12 @@ def _cmd_init(args):
         print(action)
 
     # 2. Project summary.
+    from dsagt.observability import resolve_tracking_uri
+
     print()
     print(f"Project directory:  {pdir}")
     print(f"Agent:              {agent}")
-    print(f"Trace store:        sqlite:///{pdir}/mlflow.db")
+    print(f"Trace store:        {resolve_tracking_uri(config)}")
 
     # 3. Startup instructions.
     print()

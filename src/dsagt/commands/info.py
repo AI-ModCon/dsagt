@@ -38,6 +38,7 @@ from pathlib import Path
 
 import yaml
 
+from dsagt.observability import resolve_tracking_uri
 from dsagt.session import load_config, project_dir, resolve_env_vars
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
@@ -401,17 +402,18 @@ def _kb_retrieval(traces) -> list[dict]:
     return sorted(rows.values(), key=lambda r: r["searches"], reverse=True)
 
 
-def _load_traces(mlflow_db: Path, project_name: str):
+def _load_traces(tracking_uri: str, project_name: str):
     """Return (traces_df, experiment_id_or_none).
 
-    Reads the serverless ``sqlite:///<pdir>/mlflow.db`` store directly — no
-    server required.  Separate from the main reporting logic so the caller
-    can decide what to print when the experiment doesn't exist yet (new
-    project, never run).
+    Reads whichever store the project logs to — the serverless
+    ``sqlite:///<pdir>/mlflow.db`` by default, or the shared tracking server
+    named by ``MLFLOW_TRACKING_URI``.  Separate from the main reporting logic
+    so the caller can decide what to print when the experiment doesn't exist
+    yet (new project, never run).
     """
     import mlflow
 
-    mlflow.set_tracking_uri(f"sqlite:///{mlflow_db}")
+    mlflow.set_tracking_uri(tracking_uri)
     exp = mlflow.get_experiment_by_name(project_name)
     if exp is None:
         return None, None
@@ -623,14 +625,16 @@ def run(project: str, as_json: bool) -> int:
     # (not ${VAR} placeholders from .dsagt/config.yaml).
     config = resolve_env_vars(load_config(project))
     pdir = Path(config["project_dir"])
-    mlflow_db = pdir / "mlflow.db"
+    tracking_uri = resolve_tracking_uri(config)
 
     sources = _config_sources(project)
     kb_collections = _kb_collections(pdir)
     skills = _skills(pdir)
     created = _project_created(pdir)
 
-    if not mlflow_db.exists():
+    # The sqlite file only exists once a session has logged a span; a remote
+    # store has no local footprint, so only the sqlite case can short-circuit.
+    if tracking_uri.startswith("sqlite:") and not (pdir / "mlflow.db").exists():
         # New project, or one that's never been started.  Print the header
         # so the user can verify they got the right project, then a short
         # note — rather than crashing on a missing DB.
@@ -657,7 +661,7 @@ def run(project: str, as_json: bool) -> int:
             _print_text(r)
         return 0
 
-    traces, _ = _load_traces(mlflow_db, project)
+    traces, _ = _load_traces(tracking_uri, project)
     r = _report(project, config, traces)
     r["created"] = created
     r["kb_collections"] = kb_collections

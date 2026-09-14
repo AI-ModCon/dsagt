@@ -596,3 +596,24 @@ def test_project_created_returns_none_when_dir_missing(tmp_path):
     from dsagt.commands.info import _project_created
 
     assert _project_created(tmp_path / "does-not-exist") is None
+
+
+def test_run_reads_remote_store_when_tracking_uri_is_set(tmp_path, monkeypatch):
+    """With ``MLFLOW_TRACKING_URI`` pointing at a shared server there is no
+    local ``mlflow.db`` — ``dsagt info`` must query the remote store rather
+    than short-circuit on the missing file."""
+    from unittest.mock import patch
+
+    import dsagt.commands.info as info_cmd
+
+    _write_project(tmp_path, monkeypatch, "project: proj\nagent: claude\n")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.org")
+
+    with patch.object(
+        info_cmd, "_load_traces", return_value=(pd.DataFrame(), None)
+    ) as load:
+        rc = info_cmd.run("proj", as_json=False)
+
+    assert rc == 0
+    load.assert_called_once()
+    assert load.call_args.args[0] == "https://mlflow.example.org"

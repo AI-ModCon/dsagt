@@ -79,7 +79,7 @@ def _mcp_env_block(config: dict) -> dict[str, str]:
     """Env vars the dsagt MCP server children need at startup.
 
     Benign routing only (no credentials, no provider redirection): the
-    project name + dir, the serverless ``MLFLOW_TRACKING_URI``, and the
+    project name + dir, the resolved ``MLFLOW_TRACKING_URI``, and the
     embedding-backend settings.  MCP children run with cwd == project_dir
     and could read most of this from ``.dsagt/config.yaml``, but agents that
     don't inherit the parent's shell env into their MCP children (codex /
