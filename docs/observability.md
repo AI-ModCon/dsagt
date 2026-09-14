@@ -21,6 +21,11 @@ Export `MLFLOW_TRACKING_URI` before `dsagt init`; the value is written into the 
 
 `dsagt traces` prints the remote deep-link in this mode rather than starting a local viewer, and `dsagt info` reads from the remote store.
 
+Two consequences of the URL being baked at init and the credentials staying in the shell:
+
+- **Change the server by re-running `dsagt init`.** Exporting a different `MLFLOW_TRACKING_URI` later moves the CLI but not the MCP server, whose config still carries the old value.
+- **codex and cline need the key another way.** Those agents do not pass the shell environment to their MCP children, so `MLFLOW_TRACKING_API_KEY` / `_TOKEN` never reach `dsagt-server` and every write is refused. claude, goose and opencode inherit the shell and work as-is.
+
 ## Two feeds
 
 DSAgt reconstructs traces from what the agent writes to disk. Traces come from two places:
