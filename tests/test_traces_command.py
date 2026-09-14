@@ -75,3 +75,29 @@ def test_launch_survives_catchup_failure(tmp_path):
     ):
         # A hiccup in catch-up must not stop the viewer from opening.
         assert traces_cmd.run("proj") == 0
+
+
+def test_remote_store_prints_deeplink_and_spawns_no_viewer(
+    tmp_path, monkeypatch, capsys
+):
+    """With ``MLFLOW_TRACKING_URI`` pointing at a shared server there is no
+    local db and nothing to serve: catch-up still runs, the remote deep-link
+    is printed, and ``mlflow ui`` is never launched."""
+    pdir = tmp_path / "proj"
+    pdir.mkdir()  # no mlflow.db on purpose
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.org/")
+
+    with (
+        patch.object(traces_cmd, "load_config", return_value=_config(pdir)),
+        patch.object(traces_cmd, "catch_up_extraction", return_value={}) as catchup,
+        patch.object(traces_cmd, "_resolve_experiment_id", return_value="7"),
+        patch.object(traces_cmd.subprocess, "run") as spawn,
+    ):
+        rc = traces_cmd.run("proj")
+
+    assert rc == 0
+    catchup.assert_called_once()
+    spawn.assert_not_called()
+    assert (
+        "https://mlflow.example.org/#/experiments/7/traces" in capsys.readouterr().out
+    )

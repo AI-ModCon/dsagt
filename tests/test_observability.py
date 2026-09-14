@@ -751,3 +751,13 @@ def test_bound_handles_plain_string_result():
 
     assert bound("short") == "short"
     assert "[+" in bound("z" * 10_000, limit=64)
+
+
+def test_resolve_tracking_uri_env_overrides_sqlite(monkeypatch):
+    from dsagt.observability import resolve_tracking_uri
+
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    assert resolve_tracking_uri({"project_dir": "/p"}) == "sqlite:////p/mlflow.db"
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.org")
+    assert resolve_tracking_uri({"project_dir": "/p"}) == "https://mlflow.example.org"

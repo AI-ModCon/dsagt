@@ -26,6 +26,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from dsagt.observability import resolve_tracking_uri
 from dsagt.session import catch_up_extraction, load_config
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,24 @@ def _resolve_experiment_id(tracking_uri: str, project: str) -> str | None:
 def run(project: str, port: int = _DEFAULT_PORT) -> int:
     config = load_config(project)
     pdir = Path(config["project_dir"])
+    tracking_uri = resolve_tracking_uri(config)
+    if not tracking_uri.startswith("sqlite:"):
+        # A shared tracking server has its own UI; there is nothing local to
+        # serve.  Catch-up still runs so the last session's trailing turn lands
+        # there before the user looks.
+        try:
+            catch_up_extraction(pdir, config)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Trace catch-up failed: %s", e)
+        exp_id = _resolve_experiment_id(tracking_uri, project)
+        url = (
+            f"{tracking_uri.rstrip('/')}/#/experiments/{exp_id}/traces"
+            if exp_id
+            else tracking_uri
+        )
+        print(f"\nMLflow trace view for '{project}' (remote store):\n  {url}\n")
+        return 0
+
     db = pdir / "mlflow.db"
     if not db.exists():
         print(
@@ -71,7 +90,6 @@ def run(project: str, port: int = _DEFAULT_PORT) -> int:
 
     # 2. Deep-link to the project's Traces tab (DSAGT emits traces, not runs, so
     #    the default Runs view looks empty).
-    tracking_uri = f"sqlite:///{db}"
     exp_id = _resolve_experiment_id(tracking_uri, project)
     base = f"http://127.0.0.1:{port}"
     url = f"{base}/#/experiments/{exp_id}/traces" if exp_id else base

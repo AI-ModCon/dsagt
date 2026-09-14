@@ -41,6 +41,7 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
+import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -89,20 +90,30 @@ def find_project_config() -> tuple[Path | None, dict | None]:
 
 
 def resolve_tracking_uri(config: dict | None) -> str:
-    """Compute the serverless MLflow tracking URI for DSAGT self-logging.
+    """Compute the MLflow tracking URI for DSAGT self-logging.
 
-    Always ``sqlite:///<project_dir>/mlflow.db`` — DSAGT knows where it writes;
-    there is no server to point at.  ``project_dir`` comes from the resolved
-    config (injected by ``session.load_config``), falling back to cwd for
-    in-project callers.
+    ``MLFLOW_TRACKING_URI`` in the environment wins when set — MLflow's own
+    convention, and the one variable ``agents._mcp_env_block`` already bakes
+    into every per-agent MCP config, so a value exported before ``dsagt init``
+    reaches the CLI, the MCP server and its ``dsagt-run`` children alike.  That
+    is how a project logs to a shared tracking server instead of its own file.
+    Credentials for such a server (``MLFLOW_TRACKING_TOKEN`` / ``_USERNAME`` /
+    ``_PASSWORD``) are read by the MLflow client from the shell and are never
+    written to disk.
 
-    The MLflow client honors a ``sqlite:`` URI directly (auto-creating +
-    migrating the DB on first use), so self-logging needs no listener and this
-    never has to fail.  SQLite is MLflow's supported serverless backend — the
-    filesystem store (``file:`` / ``./mlruns``) is deprecated as of Feb 2026.
-    DSAGT emits only traces (no runs/models), so the experiment's default
-    artifact dir is never materialized.
+    Otherwise ``sqlite:///<project_dir>/mlflow.db`` — the serverless default.
+    ``project_dir`` comes from the resolved config (injected by
+    ``session.load_config``), falling back to cwd for in-project callers.  The
+    MLflow client honors a ``sqlite:`` URI directly (auto-creating + migrating
+    the DB on first use), so self-logging needs no listener and this never has
+    to fail.  SQLite is MLflow's supported serverless backend — the filesystem
+    store (``file:`` / ``./mlruns``) is deprecated as of Feb 2026.  DSAGT emits
+    only traces (no runs/models), so the experiment's default artifact dir is
+    never materialized.
     """
+    uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if uri:
+        return uri
     cfg = config or {}
     pdir = cfg.get("project_dir")
     base = Path(pdir).resolve() if pdir else Path.cwd().resolve()
