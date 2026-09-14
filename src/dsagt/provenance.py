@@ -156,6 +156,7 @@ def run_and_record(
             obs.set("stderr_truncated", truncate(stderr, 256))
         if return_code != 0:
             obs.event("code_failed", exit_code=return_code)
+            obs.set_status("ERROR")
 
         # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
         # ~4KB per side so big code results don't bloat the trace store

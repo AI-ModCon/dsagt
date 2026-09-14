@@ -297,3 +297,28 @@ class TestBuildKbFromConfig:
         cfg = self._cfg(backend="api", model="m", base_url="http://x")
         with pytest.raises(ValueError, match="requires the EMBEDDING_API_KEY"):
             _build_kb_from_config(cfg, tmp_path)
+
+
+def test_returned_tool_error_marks_the_trace_as_error(tmp_path, monkeypatch):
+    """A handler that *returns* ``{"status": "error"}`` must produce an ERROR
+    trace — otherwise a failed call is indistinguishable from a successful one
+    in the store, and ``dsagt info`` reports ``Errors: 0`` after failures."""
+    import mlflow
+
+    import dsagt.observability as obs_module
+    from dsagt.mcp.server import build_dispatch_server
+
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    mlflow.set_experiment("test")
+    monkeypatch.setattr(obs_module, "_initialized", True)
+    monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+    async def boom(args):
+        raise ValueError("nope")
+
+    tools = [types.Tool(name="boom", description="d", inputSchema={"type": "object"})]
+    server = build_dispatch_server("test", tools, {"boom": boom}, {"boom": "registry"})
+    assert json.loads(_call(server, "boom", {}))["status"] == "error"
+
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    assert str(trace.info.state).endswith("ERROR")

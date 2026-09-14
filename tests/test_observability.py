@@ -839,3 +839,15 @@ def test_ensure_experiment_tags_only_on_first_creation(monkeypatch):
     monkeypatch.setattr(mlflow, "set_experiment_tag", lambda k, v: calls.append(k))
     _ensure_experiment("dsagt-abc", "p")
     assert calls == []
+
+
+def test_code_execute_nonzero_exit_is_an_error_trace(_reset_tracing, tmp_path):
+    """A failed code run is a failure in the store, not an OK span with an
+    event tucked inside it."""
+    import mlflow
+
+    from dsagt.provenance import run_and_record
+
+    run_and_record(code_name="t", command=["false"], records_dir=tmp_path)
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    assert str(trace.info.state).endswith("ERROR")

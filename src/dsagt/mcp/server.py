@@ -145,6 +145,8 @@ def build_dispatch_server(
                 # through ``bound``: credential keys redacted, leaves truncated.
                 span.set_inputs(bound(arguments))
                 span.set_outputs(bound(result))
+                if isinstance(result, dict) and result.get("status") == "error":
+                    span.set_status("ERROR")
         try:
             text = (
                 result

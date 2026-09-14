@@ -441,6 +441,16 @@ class _ActiveSpanProxy:
             return
         span.set_outputs(outputs)
 
+    def set_status(self, status: str) -> None:
+        """Mark the span ``"ERROR"`` (or ``"OK"``) — the trace state the UI
+        filters on and ``dsagt info`` counts.  A failure that is *returned*
+        rather than raised (a tool's ``{"status": "error"}``, a non-zero exit)
+        is otherwise indistinguishable from success in the store."""
+        span = self._current()
+        if span is None:
+            return
+        span.set_status(status)
+
     @staticmethod
     def _current():
         """Return the currently-active MLflow span, or ``None`` if none."""
