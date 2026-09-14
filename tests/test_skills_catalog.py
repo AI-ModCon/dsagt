@@ -50,18 +50,137 @@ def test_repo_slug_is_host_agnostic():
     assert sc._repo_slug("https://gitlab.osti.gov/genesis/genesis-skills") == (
         "genesis-genesis-skills"
     )
-    assert sc._repo_slug("git@gitlab.osti.gov:genesis/genesis-skills.git") == (
-        "genesis-genesis-skills"
+    assert sc._repo_slug("git@github.com:AI-ModCon/genesis-skills.git") == (
+        "ai-modcon-genesis-skills"
     )
 
 
 def test_known_source_genesis_covers_whole_skills_tree():
     spec = sc.resolve_source("genesis")
-    assert spec["url"] == "https://gitlab.osti.gov/genesis/genesis-skills"
+    assert spec["url"] == "https://github.com/AI-ModCon/genesis-skills"
     # subdir scopes the recursive SKILL.md walk to the whole skills/ tree so
     # every category (hpc, huggingface, langchain, …) is discoverable.
     assert spec["subdir"] == "skills"
     assert spec["branch"] == "main"
+
+
+def test_base_skills_name_their_upstream_sources():
+    # ``skill-creator`` and ``datacard-generator`` are maintained in the genesis
+    # catalog; ``aidrin`` is the AIDRIN repo's own skill under .claude/skills
+    # at the release tag of the installed package (a bare URL would clone the
+    # whole repo including examples/sample_data).
+    from importlib.metadata import version
+
+    from dsagt.readiness import aidrin_release_tag
+
+    by_name = {b["name"]: sc.resolve_source(b["source"]) for b in sc.BASE_SKILLS}
+    assert by_name["skill-creator"]["url"] == sc.KNOWN_SOURCES["genesis"]["url"]
+    assert by_name["datacard-generator"]["url"] == sc.KNOWN_SOURCES["genesis"]["url"]
+    assert by_name["aidrin"]["url"] == "https://github.com/idtlab/AIDRIN"
+    assert by_name["aidrin"]["subdir"] == ".claude/skills"
+    assert by_name["aidrin"]["branch"] == aidrin_release_tag(version("aidrin"))
+    assert "aidrin" not in sc.KNOWN_SOURCES
+
+
+def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
+    """Each base skill is installed by a source-qualified name from the
+    shared source cache without a forced re-clone, replacing any existing
+    project copy."""
+    cache = tmp_path / "cache"
+    synced = []
+
+    def fake_sync(source, *, kb=None, cache_dir, force=False):
+        # Materialize the skill where a real clone would put it.
+        slug = sc._repo_slug(source["url"])
+        synced.append((slug, force))
+        (cache_dir / slug).mkdir(parents=True, exist_ok=True)
+        (cache_dir / slug / "SOURCE_COMMIT").write_text(f"{slug}-commit\n")
+        subdir = source.get("subdir") or ""
+        for b in sc.BASE_SKILLS:
+            if sc.resolve_source(b["source"])["url"] == source["url"]:
+                d = _mkskill(cache_dir / slug / subdir / "x" / b["name"], b["name"])
+                for code in b.get("codes", ()):
+                    if "script" in code:
+                        (d / code["script"]).parent.mkdir(parents=True, exist_ok=True)
+                        (d / code["script"]).write_text("print('ok')\n")
+        return {"slug": slug}
+
+    monkeypatch.setattr(sc, "sync_source", fake_sync)
+    proj = tmp_path / "proj"
+    stale = _mkskill(proj / "skills" / "aidrin", "aidrin", desc="stale")
+
+    results = sc.install_base_skills(proj, cache_dir=cache)
+    assert [r["name"] for r in results] == [
+        "skill-creator",
+        "datacard-generator",
+        "aidrin",
+    ]
+    # No forced re-clone: a cached source is reused as is.
+    assert synced == [
+        ("ai-modcon-genesis-skills", False),
+        ("ai-modcon-genesis-skills", False),
+        ("idtlab-aidrin", False),
+    ]
+    assert (proj / "skills" / "skill-creator" / "SKILL.md").exists()
+    assert (proj / "skills" / "datacard-generator" / "SKILL.md").exists()
+    assert "stale" not in (stale / "SKILL.md").read_text()
+    provenance = (proj / "skills" / "aidrin" / "PROVENANCE.txt").read_text()
+    assert "Commit: idtlab-aidrin-commit" in provenance
+    # The scripts the datacard workflow runs, and the aidrin CLI, are codes.
+    assert (proj / "codes" / "datacard-introspect" / "SKILL.md").exists()
+    assert (proj / "codes" / "datacard-validate" / "SKILL.md").exists()
+    assert (proj / "codes" / "aidrin" / "SKILL.md").exists()
+
+
+def test_register_base_skill_codes_wraps_scripts_in_place(tmp_path):
+    """Each base-skill code runs the installed skill's script through
+    ``dsagt-run``, with ``uv run --with`` for the entries that declare
+    dependencies, and a re-run updates instead of duplicating."""
+    from dsagt.registry import CodeRegistry
+
+    proj = tmp_path / "proj"
+    for entry in sc.BASE_SKILLS:
+        for code in entry.get("codes", ()):
+            if "script" not in code:
+                continue
+            script = proj / "skills" / entry["name"] / code["script"]
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text("print('ok')\n")
+
+    actions = sc.register_base_skill_codes(proj)
+    assert actions == [
+        "added datacard-introspect",
+        "added datacard-validate",
+        "added datacard-convert-v1",
+        "added aidrin",
+    ]
+    registry = CodeRegistry(runtime_dir=proj)
+    introspect = registry.get_code("datacard-introspect")
+    assert introspect["executable"] == (
+        "dsagt-run --code datacard-introspect -- "
+        "python skills/datacard-generator/scripts/introspect.py"
+    )
+    assert introspect["parameters"]["dataset_dir"]["cli"] == "positional"
+    validate = registry.get_code("datacard-validate")
+    assert validate["executable"] == (
+        "dsagt-run --code datacard-validate -- uv run --with pyyaml,pydantic -- "
+        "python skills/datacard-generator/scripts/validate_datacard.py"
+    )
+    assert validate["tags"] == ["datacard-generator"]
+    # The aidrin CLI is a code whose executable is the command on the path,
+    # so every call the agent makes through it is an execution record.
+    aidrin = registry.get_code("aidrin")
+    assert aidrin["executable"] == "dsagt-run --code aidrin -- aidrin"
+    assert aidrin["parameters"]["args"]["cli"] == "positional"
+
+    assert sc.register_base_skill_codes(proj)[0] == "updated datacard-introspect"
+
+
+def test_register_base_skill_codes_requires_the_script(tmp_path):
+    proj = tmp_path / "proj"
+    (proj / "skills" / "datacard-generator").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="datacard-generator"):
+        sc.register_base_skill_codes(proj)
 
 
 def test_persist_source_to_config_appends_and_dedupes(tmp_path):
@@ -222,6 +341,57 @@ class _FakeKB:
         return {"collection": collection, "entries_added": len(texts)}
 
 
+def test_sync_source_reuses_cached_clone_without_force(tmp_path, monkeypatch):
+    """A cached source at the requested ref is reused as is: a second sync
+    clones nothing.  ``force``, another ref, or a cache from before the
+    ``SOURCE_REF`` stamp re-clones."""
+    clones = []
+
+    def fake_clone(url, dest, branch="main", include=None):
+        clones.append(branch)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "SOURCE_REF").write_text(branch + "\n")
+        _mkskill(dest / "skills" / "s1", "s1")
+
+    monkeypatch.setattr("dsagt.commands.setup_core_kb.clone_github", fake_clone)
+    spec = {"url": "https://github.com/x/y", "branch": "main", "subdir": "skills"}
+    cache = tmp_path / "cache"
+
+    sc.sync_source(spec, cache_dir=cache)
+    sc.sync_source(spec, cache_dir=cache)
+    assert clones == ["main"]
+
+    sc.sync_source(spec, cache_dir=cache, force=True)
+    assert clones == ["main", "main"]
+
+    sc.sync_source({**spec, "branch": "v1.0"}, cache_dir=cache)
+    assert clones == ["main", "main", "v1.0"]
+
+    (cache / "x-y" / "SOURCE_REF").unlink()
+    sc.sync_source({**spec, "branch": "v1.0"}, cache_dir=cache)
+    assert clones == ["main", "main", "v1.0", "v1.0"]
+
+
+def test_sync_source_keeps_the_cache_when_a_reclone_fails(tmp_path, monkeypatch):
+    """A re-clone that fails (offline, private repository) leaves the previous
+    clone in place and raises; nothing is lost and a later sync retries."""
+
+    def failing_clone(url, dest, branch="main", include=None):
+        raise RuntimeError("Git clone failed: could not read Username")
+
+    cache = tmp_path / "cache"
+    old = _mkskill(cache / "x-y" / "skills" / "s1", "s1")
+    (cache / "x-y" / "SOURCE_REF").write_text("main\n")
+    monkeypatch.setattr("dsagt.commands.setup_core_kb.clone_github", failing_clone)
+    spec = {"url": "https://github.com/x/y", "branch": "v2.0", "subdir": "skills"}
+
+    with pytest.raises(RuntimeError, match="Username"):
+        sc.sync_source(spec, cache_dir=cache)
+    assert (old / "SKILL.md").exists()
+    assert (cache / "x-y" / "SOURCE_REF").read_text() == "main\n"
+    assert not (cache / "x-y.previous").exists()
+
+
 def test_sync_source_indexes_per_source_collection(tmp_path, monkeypatch):
     # Fake clone: populate dest/<subdir> with two skills.
     def fake_clone(url, dest, branch="main", include=None):
@@ -279,6 +449,49 @@ def test_mirror_manifest_preserves_user_skills_and_reaps(tmp_path):
         "alpha",
         "user-skill",
     ]
+
+
+def test_rewrite_cli_invocations_to_the_registered_code(tmp_path):
+    """A base skill whose CLI is a registered code shows the code's executable
+    in fenced and inline examples after install; other spellings stay, and
+    PROVENANCE.txt records the rewrite."""
+    skill = tmp_path / "skills" / "aidrin"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: aidrin\ndescription: d\n---\n"
+        "Run `aidrin run completeness <file>` or, in a fence:\n"
+        "```bash\naidrin list\n  aidrin data-quality f.csv --detail\n```\n"
+        "Already wrapped: `dsagt-run --code aidrin -- aidrin list`.\n"
+        "Untouched: `aidrin`, aidrin-mcp, `uv run aidrin list`, skills/aidrin/x.\n"
+    )
+    (skill / "reference").mkdir()
+    (skill / "reference" / "metrics.md").write_text("`aidrin run duplicity <file>`\n")
+    (skill / "PROVENANCE.txt").write_text("Installed by dsagt from catalog source: x\n")
+
+    pairs = sc.native_invocations()["aidrin"]
+    assert pairs == [("aidrin", "dsagt-run --code aidrin -- aidrin")]
+    assert sc.rewrite_cli_invocations(skill, pairs) == 4
+    text = (skill / "SKILL.md").read_text()
+    assert "Run `dsagt-run --code aidrin -- aidrin run completeness <file>`" in text
+    assert "\ndsagt-run --code aidrin -- aidrin list\n" in text
+    assert "\n  dsagt-run --code aidrin -- aidrin data-quality f.csv --detail\n" in text
+    assert (
+        text.count("dsagt-run --code aidrin -- aidrin list") == 2
+    )  # one was already wrapped
+    assert (
+        "Untouched: `aidrin`, aidrin-mcp, `uv run aidrin list`, skills/aidrin/x."
+        in text
+    )
+    assert (skill / "reference" / "metrics.md").read_text() == (
+        "`dsagt-run --code aidrin -- aidrin run duplicity <file>`\n"
+    )
+    assert (
+        "CLI examples rewritten by dsagt: `aidrin` -> `dsagt-run --code aidrin -- aidrin`"
+        in (skill / "PROVENANCE.txt").read_text()
+    )
+    # A second pass changes nothing and stamps nothing more.
+    assert sc.rewrite_cli_invocations(skill, pairs) == 0
+    assert (skill / "PROVENANCE.txt").read_text().count("rewritten") == 1
 
 
 def test_mirror_truncates_long_description(tmp_path):

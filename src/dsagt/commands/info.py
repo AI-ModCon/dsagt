@@ -329,11 +329,10 @@ def _kb_collections(pdir: Path) -> list[dict]:
 
 
 def _skills(pdir: Path) -> list[dict]:
-    """Installed + bundled skills for the project.
+    """Installed skills for the project.
 
-    Reads the project's ``skills/`` plus the bundled skill dirs via
-    ``SkillRegistry`` (no embedder needed — this is a directory scan, not a
-    search).  Returns ``[{"name", "description"}, ...]``; empty on any
+    Reads the project's ``skills/`` via ``SkillRegistry`` (no embedder
+    needed — this is a directory scan, not a search).  Returns ``[{"name", "description"}, ...]``; empty on any
     failure so the report never crashes on a malformed skill.
     """
     try:
@@ -349,7 +348,7 @@ def _skills(pdir: Path) -> list[dict]:
 
 
 def _print_skills(rows: list[dict]) -> None:
-    """Render the installed/bundled skill list (name — truncated description)."""
+    """Render the installed skill list (name — truncated description)."""
     if not rows:
         return
     name_w = max(len(r["name"]) for r in rows)

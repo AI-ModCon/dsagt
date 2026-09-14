@@ -311,8 +311,6 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     The single home for embedding-backend selection + the cross-backend
     leakage guard that the two former server mains duplicated near-verbatim.
     """
-    from dsagt.session import REGISTRY_DIR, setup_runtime_kb
-
     # embedding is a backfilled code default (not a written config choice);
     # chunk_size / rerank default in KnowledgeBase itself.
     emb_config = config.get("embedding", {})
@@ -362,7 +360,11 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
 
     from dsagt.session import _recency_half_life
 
-    runtime_kb_dir = setup_runtime_kb(REGISTRY_DIR / "kb_index", project_dir)
+    # ``dsagt init`` provisions the project's kb_index with exactly the asset
+    # set the project chose; the server only opens it.  Copying shared
+    # collections here would add catalogs the project excluded.
+    runtime_kb_dir = project_dir / "kb_index"
+    runtime_kb_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Knowledge backend: %s", backend)
     kb = KnowledgeBase(
         index_dir=runtime_kb_dir,
@@ -490,16 +492,14 @@ def main():
         kb = None
 
     # Bundled tools are pre-embedded in the shared ~/dsagt-projects/kb_index/
-    # by ``dsagt init`` (shared cache, one-time per machine) and
-    # copied into the project's kb_index by ``setup_runtime_kb`` above.  No
-    # bundled embedding work happens here; save_code_spec incurs a single
-    # embed at save time.
+    # by ``dsagt init`` (shared cache, one-time per machine) and copied into
+    # the project's kb_index at init.  No bundled embedding work happens
+    # here; save_code_spec incurs a single embed at save time.
     registry = CodeRegistry(
         runtime_dir=str(project_dir),
         kb=kb,
     )
     skill_reg = SkillRegistry(
-        source_skills_dir=None,
         runtime_dir=str(project_dir),
         kb=kb,
     )

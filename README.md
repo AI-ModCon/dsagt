@@ -124,8 +124,8 @@ The same sequence of project initialization/prompts runs automatically for insta
 `dsagt init` sets up the project's knowledge base with three kinds of collection:
 
 - **Code Specs** — DSAgt's built-in code specs, always set up so the agent finds them via `search_registry` from the first session.
-- **Skill Corpus** — the skill sources you pick at init (default `genesis`) are cloned and indexed so `search_skills` returns installable skills. The built-in `skill-creator` is discovered natively by the agent.
-- **Knowledge Collections** — optional reference document sets you pick at init (`nemo_curator`, `aidrin`), downloaded and indexed for data-curation domain knowledge.
+- **Skill Corpus** — the skill sources you pick at init (default `genesis`) are cloned and indexed so `search_skills` returns installable skills. The base skills every init installs (`skill-creator`, `datacard-generator`, `aidrin`) are discovered natively by the agent.
+- **Knowledge Collections** — optional reference document sets you pick at init (`nemo_curator`), downloaded and indexed for data-curation domain knowledge.
 
 The default embedder is a local sentence-transformers model (~130 MB of weights downloaded on first run).
 
@@ -176,7 +176,7 @@ DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to
 
 **Skills** are instruction-based agent workflows — a directory with a `SKILL.md` and optional reference docs. They come in two sets:
 
-- **Installed** skills are located in `<project>/skills/` (DSAgt provides a built-in `skill-creator`; domain skills like the MODCON datacard generator are installed from the `genesis` source). These are mirrored into the agent's native skills directory (e.g. `.claude/skills/`, `.agents/skills/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the corpus below).
+- **Installed** skills are located in `<project>/skills/` (every init installs the base skills `skill-creator`, `datacard-generator`, and `aidrin` from their upstream repositories; other domain skills like the BaseData Croissant validator are installed from the `genesis` source). These are mirrored into the agent's native skills directory (e.g. `.claude/skills/`, `.agents/skills/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the corpus below).
 - **Corpus** skills come from external Git repositories — GitHub *or* GitLab — indexed into a searchable corpus the agent browses with `search_skills` but that is **not** loaded into its context (so the corpus can hold thousands of skills). The agent enables a source with `add_skill_source(...)`, finds skills with `search_skills(...)`, then copies one into the project with `install_skill(...)`.
 
 The corpus is **opt-in**: a source must be synced before its skills are searchable. Curated named sources are provided out of the box — `k-dense-ai`, `anthropic`, `antigravity`, `composio`, and `genesis` (the OSTI GENESIS catalog: HPC, HuggingFace, LangChain, OpenAI, plasma-sim, and more) — and any Git URL or `owner/repo` works too. Manage sources from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
@@ -193,9 +193,10 @@ The agent searches these collections semantically:
 |---|---|---|
 | **Code Specs** | Built-in CLI code specs | `dsagt init` (always set up) |
 | **Skill Corpus** | Installable skills from external repos (one collection per source) | `dsagt init` (chosen sources) + `add_skill_source` |
-| **Knowledge Collections** | NeMo Curator + AIDRIN reference collections; user-ingested docs | `dsagt init` (chosen collections) + agent's `kb_ingest` |
+| **Knowledge Collections** | NeMo Curator reference collection; user-ingested docs | `dsagt init` (chosen collections) + agent's `kb_ingest` |
 | **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/.dsagt/explicit_memories.yaml`); the agent fetches via `kb_get_memories` on demand, not auto-loaded at session start |
 | **Code Execution Records** | `dsagt-run` execution traces | `dsagt-run` writes JSON to `<project>/trace_archive/`; indexed for search during the session, and before `reconstruct_pipeline` |
+| **AI-Readiness Check** | AIDRIN quality baseline per stage | **On by default** (the `dsagt init` menu can turn it off): the agent runs the AIDRIN quality baseline before and after every tabular pipeline stage through the registered `aidrin` code, with reports in `audit/`. |
 | **Episodic Memory** | Captured session turns | **Opt-in** (enabled in the `dsagt init` menu): DSAgt captures each completed turn into `session_memory` during the session (mechanical chunk + embed). Retrieval is recency-weighted. |
 
 The embedding backend is local (sentence-transformers, CPU-side, no API key).
@@ -227,7 +228,7 @@ Each launch gets a session id that every span carries, so you can filter the tra
 <!-- md-shared:cli:start -->
 | Command | Description |
 |---------|-------------|
-| `dsagt init` | Create or reconfigure a project — interactive menu for name, location, agent, knowledge collections, skill sources, and the episodic-memory opt-in; sets up the KB and writes the per-agent MCP config |
+| `dsagt init` | Create or reconfigure a project — interactive menu for name, location, agent, knowledge collections, skill sources, the episodic-memory opt-in, and the AI-readiness check; sets up the KB and writes the per-agent MCP config |
 | `dsagt start <name>` | Launch the agent in the project directory (equivalent to `cd <project> && <agent>`) |
 | `dsagt info <name> [--json]` | Resolved config (with source per value) and a session/trace summary |
 | `dsagt traces <name> [--port <n>]` | Open the MLflow trace viewer over the project's store (runs catch-up first, deep-links to the Traces tab, quiets the mlflow noise) |

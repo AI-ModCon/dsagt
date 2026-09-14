@@ -17,7 +17,8 @@ store (no server to run).
 Usage:
     dsagt init [<project>]              # interactive; re-run to reconfigure
     dsagt init <project> --agent <platform> [--location <path>]
-                         [--include <asset>... | --exclude <asset>...]   # non-interactive
+                         [--include <asset>... | --exclude <asset>...]
+                         [--episodic] [--no-readiness]
     dsagt start <project>
     dsagt info <project> [--json]
     dsagt traces <project> [--port <n>]
@@ -160,6 +161,13 @@ def _episodic_block(enabled: bool) -> dict | None:
     return {"enabled": True}
 
 
+def _readiness_block(auto_assess: bool) -> dict:
+    """The ``readiness`` config block for the user's answer."""
+    from dsagt.readiness import readiness_block
+
+    return readiness_block(auto_assess)
+
+
 def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None):
     """Resolve the init choices (the 1:1 mirror of the config).
 
@@ -212,6 +220,17 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
             default=bool(cur_epi.get("enabled")),
         )
         episodic = _episodic_block(enable_epi)
+
+        # AI-readiness check (on by default): the AIDRIN quality baseline
+        # around every tabular stage.
+        from dsagt.readiness import auto_assess_enabled
+
+        auto_assess = _confirm(
+            "Assess tabular data for AI-readiness before and after each data "
+            "transform? (the AIDRIN quality baseline, recorded like any code)",
+            default=auto_assess_enabled(existing),
+        )
+        readiness = _readiness_block(auto_assess)
     else:
         agent = args.agent or existing.get("agent")
         if not agent:
@@ -224,6 +243,7 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
         # off.  Re-pass it on re-init — like --include/--exclude, flags are
         # authoritative on the non-interactive path.
         episodic = _episodic_block(getattr(args, "episodic", False))
+        readiness = _readiness_block(getattr(args, "readiness", True))
 
     return {
         "agent": agent,
@@ -232,6 +252,7 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
         "knowledge": {"collections": collections},
         "skills": _skills_block_for(skill_names),
         "episodic": episodic,
+        "readiness": readiness,
     }
 
 
@@ -359,6 +380,7 @@ def _cmd_init(args):
         knowledge=settings["knowledge"],
         skills=settings["skills"],
         episodic=settings["episodic"],
+        readiness=settings["readiness"],
     )
 
     agent = settings["agent"]
@@ -378,6 +400,12 @@ def _cmd_init(args):
     print(f"Project directory:  {pdir}")
     print(f"Agent:              {agent}")
     print(f"Trace store:        sqlite:///{pdir}/mlflow.db")
+    from dsagt.readiness import auto_assess_enabled
+
+    state = "on" if auto_assess_enabled(config) else "off"
+    print(
+        f"AI-readiness check: {state} (AIDRIN quality baseline around tabular stages)"
+    )
 
     # 3. Startup instructions.
     print()
@@ -693,6 +721,14 @@ def main(argv=None):
         action="store_true",
         help="Enable episodic memory (captures session turns into searchable "
         "memory).  Off by default.",
+    )
+    p_init.add_argument(
+        "--no-readiness",
+        dest="readiness",
+        action="store_false",
+        default=True,
+        help="Turn off the AI-readiness check (the AIDRIN quality baseline the "
+        "agent runs before and after each tabular stage).  On by default.",
     )
 
     p_start = sub.add_parser("start", help="Start a project session")

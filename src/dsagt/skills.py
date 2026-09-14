@@ -7,7 +7,7 @@ stays searchable without being copied locally or held in the agent's context
 (you can't hold thousands of skill descriptions in context), while an
 *installed* skill is copied into ``<project>/skills/<name>/`` and mirrored into
 the agent's native skills dir (``agents.base.setup_skills``).  It backs the MCP
-``search_skills`` tool and the ``dsagt skills`` CLI through the one
+``search_skills`` / ``add_skill_source`` tools and ``dsagt init`` through the one
 :class:`SkillRouter` facade, so search/install policy can't diverge between them.
 Design-wise it stays cheap and degradable: :class:`SkillsCatalog` composes over
 the host server's :class:`~dsagt.knowledge.KnowledgeBase` (shared embedder, no
@@ -30,9 +30,10 @@ Class map — every edge is ``<branch>─<rel> Class`` (``◇`` holds · ``◆``
       source resolve  resolve_source · _repo_slug · persist_source_to_config
       sync / index    sync_source · _discover_skill_dirs · index_catalog
       install         find_catalog_skill · install_into_project · _capture_attribution
+      base skills     BASE_SKILLS · install_base_skills   (every project, from upstream)
       render          _where_label
 
-Genesis Skills: Apache-2.0, gitlab.osti.gov/genesis/genesis-skills
+Genesis Skills: Apache-2.0, github.com/AI-ModCon/genesis-skills
 (``skill_search/catalog.py``).
 """
 
@@ -42,6 +43,7 @@ import json
 import logging
 import re
 import shutil
+from importlib.metadata import version as installed_version
 from pathlib import Path
 
 import yaml
@@ -51,7 +53,8 @@ from dsagt.registry import (
     _parse_frontmatter,
     catalog_collection,
 )
-from dsagt.session import REGISTRY_DIR
+from dsagt.readiness import aidrin_release_tag
+from dsagt.session import REGISTRY_DIR, SOURCE_COMMIT_FILE, SOURCE_REF_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +160,6 @@ def rank_skills(
 # ===========================================================================
 
 #: Default source enabled out of the box (matches .dsagt/config.yaml default).
-DEFAULT_SOURCE = "k-dense-ai"
-
 #: Curated, named skill sources.  ``subdir`` scopes the recursive SKILL.md
 #: walk when set (cheaper clone); when omitted the whole repo is cloned and
 #: walked, which is robust to category-nested layouts.
@@ -188,12 +189,12 @@ KNOWN_SOURCES: dict[str, dict] = {
         "description": "Composio awesome-claude-skills — workflow skills for many SaaS apps.",
     },
     "genesis": {
-        "url": "https://gitlab.osti.gov/genesis/genesis-skills",
+        "url": "https://github.com/AI-ModCon/genesis-skills",
         "branch": "main",
         "subdir": "skills",
-        "description": "GENESIS skills (OSTI GitLab) — aggregated agent-skill "
-        "catalog: HPC (Slurm/PBS, Perlmutter/Aurora/Frontier), HuggingFace, "
-        "LangChain, OpenAI, Anthropic, plasma-sim, ModCon, and more (70+).",
+        "description": "GENESIS skills (AI-ModCon) — aggregated agent-skill "
+        "catalog: HPC (Slurm/PBS, Perlmutter/Aurora/Frontier), plasma-sim, "
+        "BaseData, BaseEval, BaseSAFE, AmSC, and more.",
     },
 }
 
@@ -239,9 +240,8 @@ def persist_source_to_config(project_dir: str | Path, spec: dict) -> bool:
 
     Dedupes by URL.  Returns True if the config was updated.  No-op (returns
     False) if the config file is missing — the catalog is still indexed
-    either way.  Used by both the ``add_skill_source`` MCP tool and the
-    ``dsagt skills add`` CLI so a CLI-added source is re-synced by a later
-    config-driven ``dsagt skills sync``.
+    either way.  Used by the ``add_skill_source`` MCP tool so the project
+    config records every enabled source.
     """
     cfg_path = Path(project_dir) / ".dsagt" / "config.yaml"
     if not cfg_path.exists():
@@ -314,7 +314,9 @@ def sync_source(
 ) -> dict:
     """Clone *source* into the cache and (re)index its skills into the catalog.
 
-    ``force`` re-clones from scratch.  Indexing wipes and rebuilds only this
+    ``force`` re-clones from scratch, and so does a cached clone whose
+    ``SOURCE_REF`` is not the branch or tag asked for (a cache from before
+    the stamp counts as differing).  Indexing wipes and rebuilds only this
     source's ``skills_catalog__<slug>`` collection, so other catalogs and the
     installed/bundled ``skills`` collection are untouched.  When *kb* is None
     the clone still happens (so ``install`` works offline-of-KB) but nothing
@@ -324,8 +326,17 @@ def sync_source(
     slug = _repo_slug(spec["url"])
     dest = cache_dir / slug
 
+    branch = spec.get("branch", "main")
+    if dest.exists() and not force:
+        stamp = dest / SOURCE_REF_FILE
+        force = not stamp.exists() or stamp.read_text().strip() != branch
+    previous: Path | None = None
     if force and dest.exists():
-        shutil.rmtree(dest)
+        # Set the old clone aside rather than deleting it: a failed re-clone
+        # (offline, or a private repository) must leave the cache as it was.
+        previous = dest.with_name(dest.name + ".previous")
+        shutil.rmtree(previous, ignore_errors=True)
+        dest.rename(previous)
     if not dest.exists():
         from dsagt.commands.setup_core_kb import clone_github  # lazy: break cycle
 
@@ -333,15 +344,17 @@ def sync_source(
         subdir = spec.get("subdir")
         include = [subdir] if subdir else None
         try:
-            clone_github(
-                spec["url"], dest, branch=spec.get("branch", "main"), include=include
-            )
+            clone_github(spec["url"], dest, branch=branch, include=include)
         except Exception:
             # A failed clone must not leave the empty dir behind: it would
             # permanently satisfy the dest.exists() skip above, wedging the
             # source at zero skills until a manual force-resync.
             shutil.rmtree(dest, ignore_errors=True)
+            if previous is not None:
+                previous.rename(dest)
             raise
+        if previous is not None:
+            shutil.rmtree(previous)
 
     walk_root = dest / spec["subdir"] if spec.get("subdir") else dest
     skill_dirs = _discover_skill_dirs(walk_root)
@@ -418,9 +431,8 @@ def find_catalog_skill(name: str, *, cache_dir: Path = SKILL_SOURCES_DIR) -> Pat
     must be unique across the machine-global clone cache; when the same name
     exists in more than one synced source, pass a **source-qualified**
     ``<slug>/<name>`` (the slug is the per-source cache dir / catalog-collection
-    suffix, as shown by ``list_skill_sources`` / ``dsagt skills list
-    --catalog``) to pick one.  Raises on no match or on a still-ambiguous bare
-    name.
+    suffix, as shown by ``list_skill_sources``) to pick one.  Raises on no
+    match or on a still-ambiguous bare name.
     """
     source_filter: str | None = None
     skill = name
@@ -440,8 +452,8 @@ def find_catalog_skill(name: str, *, cache_dir: Path = SKILL_SOURCES_DIR) -> Pat
     if not matches:
         where = f" in source '{source_filter}'" if source_filter else ""
         raise LookupError(
-            f"No catalog skill named '{skill}'{where}. Run 'dsagt skills sync' "
-            f"or add_skill_source first, then search_skills to find one."
+            f"No catalog skill named '{skill}'{where}. Run add_skill_source "
+            f"first, then search_skills to find one."
         )
     # Collapse matches that point at the same source repo (slug = first path
     # part under cache_dir); ambiguity only matters across different sources.
@@ -474,7 +486,8 @@ def _capture_attribution(src: Path, dest: Path, cache_dir: Path) -> list[str]:
     from ancestor dirs up to the source repo root (which ``clone_github`` mirrors
     into the cache root even for sparse ``subdir`` clones).  Nearest ancestor
     wins a filename collision; skill-local files (already in ``dest``) are never
-    overwritten.  Always stamps a ``PROVENANCE.txt`` recording the source.
+    overwritten.  Always stamps a ``PROVENANCE.txt`` recording the source
+    and, when the cache holds one, the commit the source was cloned at.
     Returns the names of files captured from ancestors.
     """
     src, dest, cache_dir = Path(src), Path(dest), Path(cache_dir)
@@ -497,10 +510,14 @@ def _capture_attribution(src: Path, dest: Path, cache_dir: Path) -> list[str]:
             break
         node = node.parent
 
-    (dest / "PROVENANCE.txt").write_text(
+    provenance = (
         f"Installed by dsagt from catalog source: {slug}\n"
         f"Source path in repo: {rel}\n"
     )
+    stamp = repo_root / SOURCE_COMMIT_FILE
+    if stamp.exists():
+        provenance += f"Commit: {stamp.read_text().strip()}\n"
+    (dest / "PROVENANCE.txt").write_text(provenance)
     return captured
 
 
@@ -543,6 +560,267 @@ def install_into_project(
         "action": action,
         "attribution": attribution,
     }
+
+
+# ---------------------------------------------------------------------------
+# Base skills — installed into every project at ``dsagt init``
+# ---------------------------------------------------------------------------
+
+#: Skills every project carries, each fetched from the repository that
+#: maintains it.  ``source`` is a :func:`resolve_source` argument; ``name`` is
+#: the skill's frontmatter name inside that source.  DSAgt holds no copy of
+#: these: ``dsagt init`` installs each from the shared source cache, cloned
+#: on first use, re-cloned when the cached ref differs from the one asked
+#: for, and otherwise refreshed only by an explicit ``add_skill_source``
+#: with ``force``.  The ``aidrin`` skill is fetched at the release tag of
+#: the installed ``aidrin`` package so it describes the CLI dsagt installs.
+#: ``codes`` lists what a skill's workflow runs; each entry is registered as
+#: a code (:func:`register_base_skill_codes`) so the agent runs it through
+#: ``dsagt-run`` and the run is recorded.  An entry names either ``script``,
+#: relative to the skill directory, or ``executable``, a command on the
+#: path.
+BASE_SKILLS: tuple[dict, ...] = (
+    {"name": "skill-creator", "source": "genesis"},
+    {
+        "name": "datacard-generator",
+        "source": "genesis",
+        "codes": (
+            {
+                "name": "datacard-introspect",
+                "script": "scripts/introspect.py",
+                "description": (
+                    "Summarize a dataset directory as JSON for a datacard: file "
+                    "count, total bytes, recognized formats, CSV header columns, "
+                    "README/LICENSE/CITATION presence, and train/test/val splits."
+                ),
+                "parameters": {
+                    "dataset_dir": {
+                        "type": "string",
+                        "required": True,
+                        "cli": "positional",
+                        "description": "Directory holding the dataset",
+                    },
+                },
+            },
+            {
+                "name": "datacard-validate",
+                "script": "scripts/validate_datacard.py",
+                "dependencies": ["pyyaml", "pydantic"],
+                "description": (
+                    "Validate a Genesis datacard file against the upstream "
+                    "Pydantic model and report every schema error and warning."
+                ),
+                "parameters": {
+                    "file": {
+                        "type": "string",
+                        "required": True,
+                        "cli": "positional",
+                        "description": "Path to the datacard .md file",
+                    },
+                    "json": {
+                        "type": "boolean",
+                        "required": False,
+                        "cli": "--json",
+                        "description": "Emit the report as JSON",
+                    },
+                },
+            },
+            {
+                "name": "datacard-convert-v1",
+                "script": "scripts/convert_v1_to_genesis.py",
+                "dependencies": ["pyyaml", "pydantic"],
+                "description": (
+                    "Convert a v1 datacard to the Genesis format, writing "
+                    "<input>.genesis.md and reporting the fields it mapped, "
+                    "dropped, and left to fill."
+                ),
+                "parameters": {
+                    "file": {
+                        "type": "string",
+                        "required": True,
+                        "cli": "positional",
+                        "description": "Path to the v1 datacard .md file",
+                    },
+                    "out": {
+                        "type": "string",
+                        "required": False,
+                        "cli": "--out",
+                        "description": "Output path (default: <input>.genesis.md)",
+                    },
+                    "json": {
+                        "type": "boolean",
+                        "required": False,
+                        "cli": "--json",
+                        "description": "Emit the report as JSON",
+                    },
+                    "preserve_body": {
+                        "type": "boolean",
+                        "required": False,
+                        "cli": "--preserve-body",
+                        "description": (
+                            "Append the v1 body as a legacy appendix so no prose "
+                            "is lost"
+                        ),
+                    },
+                },
+            },
+        ),
+    },
+    {
+        "name": "aidrin",
+        "source": {
+            "url": "https://github.com/idtlab/AIDRIN",
+            "branch": aidrin_release_tag(installed_version("aidrin")),
+            "subdir": ".claude/skills",
+        },
+        # The CLI the skill documents, registered so every call is an
+        # execution record; ``aidrin`` installs beside ``dsagt-run``.
+        "codes": (
+            {
+                "name": "aidrin",
+                "executable": "aidrin",
+                "description": (
+                    "AIDRIN (AI Data Readiness Inspector) command line: "
+                    "`list`, `summarize <file>`, `data-quality <file> --detail`, "
+                    "`run <metric> <file> <args...>`, `batch <config>`. Metric "
+                    "semantics and argument order: skills/aidrin/reference/metrics.md."
+                ),
+                "parameters": {
+                    "args": {
+                        "type": "string",
+                        "required": True,
+                        "cli": "positional",
+                        "description": "The aidrin subcommand and its arguments",
+                    },
+                },
+            },
+        ),
+    },
+)
+
+
+def install_base_skills(
+    project_dir: str | Path, *, cache_dir: Path = SKILL_SOURCES_DIR
+) -> list[dict]:
+    """Install every :data:`BASE_SKILLS` entry into ``<project>/skills/<name>/``
+    and register the scripts they run as codes.
+
+    A source is cloned into the cache when absent or held at another ref,
+    and reused as is otherwise, so an init with a warm cache needs no
+    network; an existing project copy is replaced.  A skill whose CLI is a
+    registered code has its examples rewritten to the code's executable
+    (:func:`rewrite_cli_invocations`).  Nothing is indexed into a KB.  Raises on a
+    failed clone or a skill missing from its source.  Returns one
+    :func:`install_into_project` result per skill.
+    """
+    results: list[dict] = []
+    for entry in BASE_SKILLS:
+        spec = resolve_source(entry["source"])
+        sync_source(spec, cache_dir=cache_dir)
+        qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
+        result = install_into_project(qualified, project_dir, cache_dir=cache_dir)
+        pairs = native_invocations().get(entry["name"])
+        if pairs:
+            rewrite_cli_invocations(Path(result["dest_dir"]), pairs)
+        results.append(result)
+    register_base_skill_codes(project_dir)
+    return results
+
+
+def native_invocations() -> dict[str, list[tuple[str, str]]]:
+    """Per base skill, the bare CLI commands its text uses and their registered forms.
+
+    A skill written upstream shows its CLI bare (``aidrin run …``); in a dsagt
+    project that CLI is a registered code whose executable carries the
+    ``dsagt-run`` prefix.  :func:`rewrite_cli_invocations` applies these pairs
+    to the installed copy, which is the text the agent reads.
+    """
+    table: dict[str, list[tuple[str, str]]] = {}
+    for entry in BASE_SKILLS:
+        pairs = [
+            (
+                code["executable"],
+                f"dsagt-run --code {code['name']} -- {code['executable']}",
+            )
+            for code in entry.get("codes", ())
+            if "executable" in code
+        ]
+        if pairs:
+            table[entry["name"]] = pairs
+    return table
+
+
+def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> int:
+    """Rewrite a skill's bare CLI commands to their registered form, in place.
+
+    Applies to every markdown file under *skill_dir*, at the start of a line
+    (a fenced example) and after a backtick (an inline command), only where
+    the command is followed by whitespace, so ``aidrin-mcp``, ``uv run
+    aidrin``, a path segment, and the bare word are untouched.  A line that
+    already carries ``dsagt-run`` is left as it is.  Appends a line to the
+    skill's ``PROVENANCE.txt`` naming the rewrite, so the difference from the
+    upstream text is on record.  Returns the number of lines changed.
+    """
+    changed = 0
+    for md in skill_dir.rglob("*.md"):
+        out = []
+        for line in md.read_text().splitlines(keepends=True):
+            new = line
+            if "dsagt-run" not in line:
+                for bare, wrapped in pairs:
+                    new = re.sub(
+                        rf"^(\s*){re.escape(bare)}(?=\s)", rf"\1{wrapped}", new
+                    )
+                    new = re.sub(rf"`{re.escape(bare)}(?=\s)", f"`{wrapped}", new)
+            changed += new != line
+            out.append(new)
+        md.write_text("".join(out))
+    if changed:
+        with (skill_dir / "PROVENANCE.txt").open("a") as f:
+            for bare, wrapped in pairs:
+                f.write(f"CLI examples rewritten by dsagt: `{bare}` -> `{wrapped}`\n")
+    return changed
+
+
+def register_base_skill_codes(project_dir: str | Path) -> list[str]:
+    """Register every ``codes`` entry of :data:`BASE_SKILLS` in ``<project>/codes/``.
+
+    A ``script`` entry runs the script in place under ``<project>/skills/``,
+    relative to the project directory, which is the agent's cwd; an
+    ``executable`` entry runs a command on the path.  The registry wraps
+    either with ``dsagt-run`` and, when the entry declares dependencies,
+    ``uv run --with``.  A re-init updates the spec and keeps the body.
+    Raises ``FileNotFoundError`` when a listed script is absent from the
+    installed skill.  Returns one ``"<action> <name>"`` line per code.
+    """
+    from dsagt.registry import CodeRegistry  # lazy: keeps this module light
+
+    project_dir = Path(project_dir)
+    registry = CodeRegistry(runtime_dir=project_dir)
+    actions: list[str] = []
+    for entry in BASE_SKILLS:
+        for code in entry.get("codes", ()):
+            if "script" in code:
+                script = Path("skills") / entry["name"] / code["script"]
+                if not (project_dir / script).exists():
+                    raise FileNotFoundError(
+                        f"base skill {entry['name']!r} has no {code['script']} in "
+                        f"{project_dir / 'skills' / entry['name']}"
+                    )
+                executable = f"python {script}"
+            else:
+                executable = code["executable"]
+            spec = {
+                "name": code["name"],
+                "description": code["description"],
+                "executable": executable,
+                "parameters": code["parameters"],
+                "tags": [entry["name"]],
+            }
+            if code.get("dependencies"):
+                spec["dependencies"] = list(code["dependencies"])
+            actions.append(f"{registry.save_tool(spec)} {code['name']}")
+    return actions
 
 
 # ---------------------------------------------------------------------------

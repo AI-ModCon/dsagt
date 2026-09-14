@@ -46,9 +46,9 @@ class GooseSetup(AgentSetup):
     native_skills_dir = ".agents/skills"  # cross-agent standard goose discovers
     install_hint = "See https://github.com/block/goose for installation."
 
-    def write_static(self, working_dir: Path) -> list[str]:
+    def write_static(self, working_dir: Path, *, auto_assess: bool = True) -> list[str]:
         actions: list[str] = []
-        instructions = _load_master_instructions()
+        instructions = _load_master_instructions(auto_assess)
         if instructions:
             action = _append_or_write(
                 working_dir / ".goosehints",

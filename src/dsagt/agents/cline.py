@@ -98,10 +98,10 @@ class ClineSetup(AgentSetup):
             working_dir / ".cline",
         ]
 
-    def write_static(self, working_dir: Path) -> list[str]:
+    def write_static(self, working_dir: Path, *, auto_assess: bool = True) -> list[str]:
         actions: list[str] = []
         (working_dir / ".cline-data").mkdir(parents=True, exist_ok=True)
-        instructions = _load_master_instructions()
+        instructions = _load_master_instructions(auto_assess)
         if instructions:
             rules_dir = working_dir / ".clinerules"
             rules_dir.mkdir(exist_ok=True)

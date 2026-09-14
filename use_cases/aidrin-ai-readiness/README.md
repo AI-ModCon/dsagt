@@ -1,22 +1,28 @@
-# DSAgt Demo: Full AIDRIN Feature Tour
+---
+title: AIDRIN
+domain: AI data readiness — `aidrin` metrics (quality, fairness, privacy) on UCI Adult
+summary: >-
+  Apply AIDRIN through DSAgt to a single tabular dataset (UCI Adult) — 15
+  metrics spanning data-quality, impact-on-AI, fairness-and-bias, and
+  data-governance.
+status: published
+order: 50
+---
 
-> **Estimated time:** ~30–40 minutes — this is a long-form tour, not a quick
-> demo. Most of the time is the one-time AIDRIN build (clone + `pip install -e`
-> in a Python 3.10 venv) plus the agent issuing ~15 separate metric runs. The
-> dataset ships with AIDRIN (no large download).
+# DSAgt Demo: AIDRIN
 
-This guide drives **every** [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector)
-metric through DSAgt on a single tabular dataset — exercising all 15 metrics across all four
-categories, with full execution provenance. It is the companion to the
-[cryo-EM readiness gate demo](../aidrin_readiness_gate/cryoem_readiness_demo.md), which applies the quality subset to
-scientific data; here we use a dataset rich enough to exercise the fairness and privacy metrics too.
+> **Estimated time:** ~15 minutes
 
-The dataset is the **UCI Adult** census extract bundled with AIDRIN
-(`examples/sample_data/csv/adult.csv`). It has everything the full metric suite needs: a record
-**ID**, quasi-identifiers (`age`, `sex`, `race`), sensitive attributes (`sex`, `race`), and a
-prediction **target** (`income`).
+This tutorial demonstrates [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) on a single tabular dataset — metrics from all four of AIDRIN's
+categories, with execution provenance.
+For how the `aidrin` skill and code are set up and what rules the agent follows, see the
+[AI-Readiness Check](../../docs/readiness.md) page.
 
-## The 15 metrics, by category
+The dataset is the **UCI Adult** census extract included with AIDRIN
+(`examples/sample_data/csv/adult.csv`). The demonstrated AIDRIN metrics rely on: a record **ID**, quasi-identifiers (`age`, `sex`, `race`), sensitive attributes (`sex`,
+`race`), and a prediction **target** (`income`).
+
+## Applied Metrics
 
 | Category | Metrics |
 |---|---|
@@ -27,50 +33,44 @@ prediction **target** (`income`).
 
 ## Prerequisites
 
-- DSAgt installed (`uv sync --all-groups`) and an agent platform installed and **already
-  authenticated** (BYOA — your agent talks to its own LLM provider; dsagt writes no
-  credentials). The default local embedder needs no API key.
-- **AIDRIN** installed from its `develop` branch in its own Python 3.10 virtual environment.
-- Git installed. (No large download — the dataset ships with AIDRIN.)
+- DSAgt installed and an agent platform installed and **already
+  authenticated**
+- Python 3.12 or later
 
 ## Setup
 
 ```bash
-git clone -b develop https://github.com/idtlab/AIDRIN.git
-python3.10 -m venv aidrin-venv
-source aidrin-venv/bin/activate
-pip install -e ./AIDRIN
-aidrin list          # sanity check: 15 metrics in 4 categories
-AIDRIN_BIN="$(pwd)/aidrin-venv/bin/aidrin"; echo "$AIDRIN_BIN"
-deactivate
+dsagt init
+```
 
-dsagt init aidrin-tour --agent claude
-PROJ=~/dsagt-projects/aidrin-tour
+At the menu, name the project `aidrin`, pick your agent, and keep the defaults. Then fetch the
+sample dataset into the project and start the session:
+
+```bash
+PROJ=~/dsagt-projects/aidrin
 mkdir -p "$PROJ/data"
-cp AIDRIN/examples/sample_data/csv/adult.csv "$PROJ/data/"
-dsagt start aidrin-tour
+curl -sL https://raw.githubusercontent.com/idtlab/AIDRIN/v2026.08.2/examples/sample_data/csv/adult.csv \
+    -o "$PROJ/data/adult.csv"
+dsagt start aidrin
 ```
 
 ## Execution
 
-Paste these prompts one at a time (substitute the absolute `$AIDRIN_BIN` path).
+Paste these prompts one at a time.
 
-### 1. Register the AIDRIN CLI
+### 1. Confirm the AIDRIN skill is installed
 
 ```text
-Register a data-readiness CLI named aidrin into the code registry. The executable is at
-<AIDRIN_BIN>. Run "<AIDRIN_BIN> --help" and "<AIDRIN_BIN> list" to discover its subcommands and the
-15 metrics, then save a code spec named aidrin describing the run/batch/data-quality subcommands
-and their positional arguments.
+Using the aidrin skill, list the readiness metrics AIDRIN provides.
 ```
 
-**Verify:** `Search the registry for the aidrin data-readiness code.`
+**Verify:** the agent reads `skills/aidrin/SKILL.md` and its `reference/metrics.md` and lists the metrics by category; it may also run `aidrin list` through `dsagt-run`.
 
-### 2. Run all 15 metrics through `dsagt-run`
+### 2. Run the metrics
 
 ```text
-Using the registry aidrin code, run AIDRIN's full readiness assessment on data/adult.csv, executing
-every metric through dsagt-run so each is recorded. Cover all four categories:
+Using the aidrin skill, run a readiness assessment on data/adult.csv. Cover these
+four categories:
 (1) data-quality: completeness, duplicity, outliers;
 (2) impact-of-data-on-AI: correlations on "age,education.num,sex,race", and feature-relevance with
     categorical columns "workclass,education,sex,race", numerical columns
@@ -133,57 +133,70 @@ quasi-identifiers — bin or suppress before sharing.
 ```text
 Write an aidrin batch config (YAML) that runs completeness, class-imbalance, statistical-rates, and
 representation-rate on data/adult.csv with target income and sensitive attribute sex, then run it
-through the registry aidrin code.
+with the aidrin skill through dsagt-run.
 ```
 
-Batch config keys: `file-path`, `file-type`, `metrics`, `target-column`,
-`sensitive-attribute-column`, `columns`.
+The config is one flat mapping, not per-metric blocks; the `aidrin` skill's
+`reference/metrics.md` documents the keys. For this step:
+
+```yaml
+file-path: data/adult.csv
+file-type: csv
+metrics: [completeness, class-imbalance, statistical-rates, representation-rate]
+target-column: income
+y-true-column: income
+sensitive-attribute-column: sex
+columns: [sex, race]
+```
 
 ### 4. Generate a datacard from the assessment
 
 ```text
-Search for a skill that can generate a datacard for data/adult.csv, then use it to produce the
-datacard — incorporating the readiness findings above.
+Use the datacard-generator skill to write a Level 1 datacard for data/adult.csv that incorporates
+the readiness findings above. Take the values from the dataset and the reports, and note anything
+unknown rather than asking.
 ```
 
-The agent discovers the `datacard-generator` skill and writes a Genesis Datacard (e.g.
+The agent invokes the `datacard-generator` base skill and writes a Genesis Datacard (e.g.
 `data/genesis_datacard_*.md`) documenting the dataset and its readiness profile.
 
-### 5. Reconstruct the pipeline
+### 5. Review the execution records
 
 ```text
-Reconstruct the full readiness assessment you just ran from the execution records as a bash script.
+Show me the execution records for this session as a table of metric, command, and exit code.
 ```
+
+The agent reads the records `dsagt-run` wrote to `trace_archive/` and lists one row per
+metric call: the fifteen runs from step 2 and the batch run from step 3, every exit code 0.
 
 ## Post-Conditions
 
-1. Code registry contains the `aidrin` spec (`codes/aidrin/SKILL.md`).
-2. `trace_archive/` holds one provenance record per metric run (15 from step 2).
-3. Results span all four categories, with the gender-fairness gap and the `k = 1` / `l = 1`
+1. `skills/aidrin/SKILL.md` is present, with a `PROVENANCE.txt` naming the AIDRIN source.
+2. `trace_archive/` holds one execution record per metric run from step 2.
+3. Results span the four categories, with the gender-fairness gap and the `k = 1` / `l = 1`
    re-identification risks identified.
 4. A datacard for the dataset exists (`data/genesis_datacard_*.md`).
-5. A reconstructed pipeline script replays all metrics in order.
-6. MLflow traces capture token usage, latency, and the `dsagt-run` / MCP spans.
+5. The agent lists every metric call from the execution records with its command and exit code.
+6. MLflow traces capture token usage, latency, and the code-execution and MCP tool spans.
 
 ## What This Tests
 
 | DSAgt Capability | Steps |
 |------------------|-------|
-| External-CLI registration (`save_code_spec`) | 1 |
-| Registry search | 1 (Verify) |
-| Code execution with provenance (`dsagt-run` → `trace_archive/`) | 2 |
-| Full-suite (15-metric) orchestration | 2 |
+| The `aidrin` base skill and code installed at init | Setup |
+| Base-skill use: the `aidrin` CLI through `dsagt-run` | 1 |
+| Code execution with provenance (execution records in `trace_archive/`) | 2 |
+| Multi-metric orchestration | 2 |
 | Multi-metric / batch execution | 3 |
-| Skill discovery and use (datacard generation) | 4 |
-| Pipeline reconstruction from execution records | 5 |
+| Base-skill use (`datacard-generator`) | 4 |
+| Provenance review from the execution records | 5 |
 | Observability (MLflow spans in the serverless `mlflow.db` store) | all |
 
 View the traces any time with
-`mlflow ui --backend-store-uri sqlite:///$PROJ/mlflow.db`.
+`dsagt traces aidrin`.
 
 ## Cleanup
 
 ```bash
-dsagt rm aidrin-tour -y
-rm -rf AIDRIN aidrin-venv
+dsagt rm aidrin -y
 ```

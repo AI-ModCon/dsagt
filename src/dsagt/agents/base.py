@@ -108,12 +108,25 @@ def _mcp_env_block(config: dict) -> dict[str, str]:
     return block
 
 
-def _load_master_instructions() -> str | None:
-    """Load the master DSAgt instructions, or None if the file is missing."""
-    if _INSTRUCTIONS_PATH.exists():
-        return _INSTRUCTIONS_PATH.read_text()
-    logger.warning("Master instructions not found: %s", _INSTRUCTIONS_PATH)
-    return None
+_READINESS_MARKER = "<!-- readiness-check -->\n"
+
+
+def _load_master_instructions(auto_assess: bool = True) -> str | None:
+    """Load the master DSAgt instructions, or None if the file is missing.
+
+    The per-operation check rule carries a marker line; with *auto_assess*
+    the AI-readiness paragraph replaces it, otherwise the line is dropped.
+    """
+    if not _INSTRUCTIONS_PATH.exists():
+        logger.warning("Master instructions not found: %s", _INSTRUCTIONS_PATH)
+        return None
+    from dsagt.readiness import INSTRUCTIONS_PARAGRAPH
+
+    text = _INSTRUCTIONS_PATH.read_text()
+    if _READINESS_MARKER not in text:
+        raise RuntimeError(f"{_INSTRUCTIONS_PATH} has no readiness-check marker")
+    filler = INSTRUCTIONS_PARAGRAPH + "\n" if auto_assess else ""
+    return text.replace(_READINESS_MARKER, filler)
 
 
 def _append_or_write(path: Path, content: str, marker: str) -> str | None:
@@ -307,12 +320,13 @@ class AgentSetup(ABC):
     native_skills_dir: ClassVar[str | None] = None
 
     @abstractmethod
-    def write_static(self, working_dir: Path) -> list[str]:
+    def write_static(self, working_dir: Path, *, auto_assess: bool = True) -> list[str]:
         """Write the agent's instructions file + any state directories.
 
         Idempotent: if the dsagt marker is already in the instructions
-        file, the write is skipped (preserves user edits).  Returns a
-        list of one-line action descriptions.
+        file, the write is skipped (preserves user edits).  *auto_assess*
+        selects whether the instructions carry the AI-readiness check
+        paragraph.  Returns a list of one-line action descriptions.
         """
 
     @abstractmethod
@@ -352,12 +366,10 @@ class AgentSetup(ABC):
 
         codes = CodeRegistry(runtime_dir=working_dir, kb=None)
         reg = SkillRegistry(runtime_dir=working_dir, kb=None)
-        # Later entries win name collisions: codes first, then bundled
-        # skills, then project skills — a deliberately installed instruction
-        # skill outranks a registered code of the same name.
-        src_dirs = (
-            codes.code_dirs() + reg._bundled_skill_dirs() + reg._project_skill_dirs()
-        )
+        # Later entries win name collisions: codes first, then project
+        # skills — a deliberately installed instruction skill outranks a
+        # registered code of the same name.
+        src_dirs = codes.code_dirs() + reg.skill_dirs()
         target = working_dir
         for part in self.native_skills_dir.split("/"):
             target = target / part
