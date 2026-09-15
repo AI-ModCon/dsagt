@@ -68,8 +68,7 @@ from pathlib import Path
 
 from .base import (
     AgentSetup,
-    _append_or_write,
-    _DSAGT_MARKER,
+    _write_dsagt_block,
     _load_master_instructions,
     _mcp_env_block,
 )
@@ -105,10 +104,8 @@ class ClineSetup(AgentSetup):
         if instructions:
             rules_dir = working_dir / ".clinerules"
             rules_dir.mkdir(exist_ok=True)
-            action = _append_or_write(
-                rules_dir / "dsagt_instructions.md",
-                instructions,
-                _DSAGT_MARKER,
+            action = _write_dsagt_block(
+                rules_dir / "dsagt_instructions.md", instructions
             )
             if action:
                 actions.append(action)

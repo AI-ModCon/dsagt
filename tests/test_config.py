@@ -719,7 +719,7 @@ class TestAgentRecord:
         static_agent_record(config, "claude", working_dir)
         text = (working_dir / "CLAUDE.md").read_text()
         assert "AI-readiness check" not in text
-        assert "<!--" not in text
+        assert "readiness-check" not in text
 
     def test_goose_writes_goose_yaml(self, tmp_path):
         config = self._init_and_load("goose")
@@ -805,10 +805,8 @@ class TestAgentRecord:
         assert "EMBEDDING_BACKEND" in toml
 
     def test_static_is_idempotent(self, tmp_path):
-        # Running static twice doesn't duplicate or destroy content —
-        # the marker check skips the second write.  This is what lets
-        # users edit CLAUDE.md / AGENTS.md between init and start
-        # without losing edits.
+        # Running static twice doesn't duplicate or destroy content: the
+        # block is unchanged, and text outside it is the user's.
         config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
@@ -818,9 +816,34 @@ class TestAgentRecord:
         # Simulate a user edit
         (working_dir / "CLAUDE.md").write_text(first + "\n\n## My project notes\nfoo")
         edited = (working_dir / "CLAUDE.md").read_text()
-        # Re-run static — should be no-op since marker is present
-        static_agent_record(config, "claude", working_dir)
+        # Re-run static: the block is already this text, a no-op.
+        assert static_agent_record(config, "claude", working_dir) == []
         assert (working_dir / "CLAUDE.md").read_text() == edited
+
+    def test_static_rewrites_the_block_when_readiness_changes(self, tmp_path):
+        """Turning the AI-readiness check off on re-init reaches the
+        instructions file: the dsagt block is replaced, and the user's own
+        text before and after it is kept."""
+        from dsagt.readiness import readiness_block
+
+        init_project("tog", "claude", exclude=["all"], readiness=readiness_block(True))
+        working_dir = tmp_path / "workdir"
+        working_dir.mkdir()
+        (working_dir / "CLAUDE.md").write_text("# Team notes\n\nBe brief.\n")
+        static_agent_record(load_config("tog"), "claude", working_dir)
+        (working_dir / "CLAUDE.md").write_text(
+            (working_dir / "CLAUDE.md").read_text() + "\n## After\nmore\n"
+        )
+        assert "#### AI-readiness check" in (working_dir / "CLAUDE.md").read_text()
+
+        init_project("tog", "claude", exclude=["all"], readiness=readiness_block(False))
+        actions = static_agent_record(load_config("tog"), "claude", working_dir)
+        text = (working_dir / "CLAUDE.md").read_text()
+        assert actions == [f"Updated DSAgt instructions in {working_dir / 'CLAUDE.md'}"]
+        assert "#### AI-readiness check" not in text
+        assert text.startswith("# Team notes\n\nBe brief.\n")
+        assert text.endswith("<!-- dsagt:end -->\n\n## After\nmore\n")
+        assert text.count("<!-- dsagt:begin -->") == 1
 
     def test_static_files_present_check(self, tmp_path):
         # Used by `dsagt start` to decide whether to call static_agent_record.
