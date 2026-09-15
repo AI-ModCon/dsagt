@@ -405,15 +405,17 @@ def _attach_trace_metadata(source: str | None) -> None:
 
     - ``dsagt.source`` tag: the MCP tool category / ``execution`` — powers the
       UI's debug-view filter.
-    - ``dsagt.agent`` tag: the agent platform that drove this session, so a
-      shared store can be split by agent — the comparison the smoke test
-      exists for.  Agent traces carry the same key in their metadata.
+    - ``dsagt.agent`` metadata: the agent platform that drove this session, so
+      a shared store can be split by agent — the comparison the smoke test
+      exists for.  Metadata, not a tag, because that is where ``MLflowSink``
+      puts it on agent traces and where ``dsagt info`` reads it; one place.
     - ``mlflow.trace.session`` metadata: groups this process's internal traces
       under one session (reserved MLflow key, drives the native session filter).
     - ``dsagt.version`` metadata: which dsagt produced the trace.  On a shared
       server holding months of traces from many installs, nothing else says;
       MLflow's own ``mlflow.source.git.*`` are empty because the process runs
-      in the project directory, not a checkout.
+      in the project directory, not a checkout.  ``MLflowSink`` stamps the
+      same key on agent traces.
 
     No-op for inner spans (``source is None``) — they inherit the root's tag.
     """
@@ -421,15 +423,14 @@ def _attach_trace_metadata(source: str | None) -> None:
         return
     from dsagt import __version__
 
-    tags = {"dsagt.source": source}
-    if _default_agent:
-        tags["dsagt.agent"] = _default_agent
     metadata = {"dsagt.version": __version__}
+    if _default_agent:
+        metadata["dsagt.agent"] = _default_agent
     if _default_session_id:
         metadata["mlflow.trace.session"] = _default_session_id
     import mlflow
 
-    mlflow.update_current_trace(tags=tags, metadata=metadata)
+    mlflow.update_current_trace(tags={"dsagt.source": source}, metadata=metadata)
 
 
 # ----- annotate the active span -----
@@ -902,10 +903,13 @@ class MLflowSink:
         try:
             mgr = InMemoryTraceManager.get_instance()
             with mgr.get_trace(ml_root.trace_id) as in_mem:
+                from dsagt import __version__
+
                 meta = {
                     TraceMetadataKey.TRACE_SESSION: trace.session_id,
                     "dsagt.trace_id": f"{trace.trace_id}:{root['span_id']}",
                     "dsagt.agent": trace.agent,
+                    "dsagt.version": __version__,
                 }
                 in_mem.info.trace_metadata = {**in_mem.info.trace_metadata, **meta}
                 if prompt := root["attributes"].get("prompt"):

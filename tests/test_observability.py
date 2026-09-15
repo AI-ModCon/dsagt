@@ -165,7 +165,9 @@ def test_root_span_source_tags_trace_and_session(_reset_tracing, monkeypatch):
 
     trace = _last_trace()
     assert trace.info.tags["dsagt.source"] == "knowledge"
-    assert trace.info.tags["dsagt.agent"] == "goose"
+    # agent + version are metadata on internal and agent traces alike — the
+    # one place `dsagt info` reads them from.
+    assert trace.info.trace_metadata["dsagt.agent"] == "goose"
     assert trace.info.trace_metadata["mlflow.trace.session"] == "proj-xyz"
     assert trace.info.trace_metadata["dsagt.version"] == __version__
 

@@ -222,3 +222,6 @@ def test_session_tag_and_canonical_id_on_trace(mlflow_sqlite):
     # Per-turn idempotency key: <session trace_id>:<root span id>.
     assert md.get("dsagt.trace_id").startswith("tr3:")
     assert md.get("dsagt.agent") == "claude"
+    from dsagt import __version__
+
+    assert md.get("dsagt.version") == __version__
