@@ -178,6 +178,17 @@ def _ensure_experiment(name: str, project: str) -> None:
     """
     import mlflow
 
+    existing = mlflow.get_experiment_by_name(name)
+    if existing is not None and existing.lifecycle_stage == "deleted":
+        # `set_experiment` refuses a name that exists in the deleted state,
+        # and the name is deterministic for this project — so without this the
+        # project could never start again.  Say what to do.
+        raise RuntimeError(
+            f"MLflow experiment {name!r} (id {existing.experiment_id}) exists "
+            f"in the deleted state on {mlflow.get_tracking_uri()}. Restore it "
+            "there, or set `mlflow.experiment` in .dsagt/config.yaml to a new "
+            "name."
+        )
     exp = mlflow.set_experiment(name)
     if "dsagt.project" not in exp.tags:
         mlflow.set_experiment_tag(
@@ -202,8 +213,11 @@ def init_tracing(
     The ``mlflow_url`` and ``session_id`` keyword args are kept for tests, where
     the caller plants known values directly.
 
-    Never raises.  When cwd isn't a dsagt project dir, logs and no-ops so
-    one-shot tools / tests outside a project simply run untraced.
+    Never raises.  When cwd isn't a dsagt project dir, or the store cannot be
+    reached or the experiment used (deleted on a shared server, refused key,
+    server down), logs the cause and no-ops so the process runs untraced —
+    one-shot tools and tests outside a project, and a server whose tools must
+    keep working regardless.
     """
     global _initialized, _default_session_id, _default_agent
 
@@ -233,8 +247,23 @@ def init_tracing(
 
     import mlflow
 
-    mlflow.set_tracking_uri(mlflow_url)
-    _ensure_experiment(experiment, project_name)
+    try:
+        mlflow.set_tracking_uri(mlflow_url)
+        _ensure_experiment(experiment, project_name)
+    except (
+        Exception
+    ) as e:  # noqa: BLE001 — a store problem must not take the server down
+        # Tracing is best-effort; the MCP tools are not.  A server that cannot
+        # reach or use its store still has to serve the agent — untraced, with
+        # the cause on the log so the operator can fix the store.
+        logger.error(
+            "%s: tracing disabled — cannot use experiment %r at %s: %s",
+            service_name,
+            experiment,
+            mlflow_url,
+            e,
+        )
+        return
     _initialized = True
     logger.info(
         "init_tracing: service=%s mlflow=%s experiment=%s project=%s session=%s",

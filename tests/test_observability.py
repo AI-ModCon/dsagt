@@ -858,3 +858,35 @@ def test_code_execute_nonzero_exit_is_an_error_trace(_reset_tracing, tmp_path):
     run_and_record(code_name="t", command=["false"], records_dir=tmp_path)
     trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
     assert str(trace.info.state).endswith("ERROR")
+
+
+def test_init_tracing_survives_a_deleted_experiment(tmp_path, monkeypatch, caplog):
+    """A deleted experiment on the store must not take the server down: the
+    name is deterministic, so `set_experiment` would refuse it on every start
+    and the project could never run again.  Tracing goes off, loudly."""
+    import logging
+
+    import mlflow
+
+    from dsagt.observability import experiment_name, init_tracing
+
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    mlflow.set_tracking_uri(uri)
+    name = experiment_name({"project_dir": "/proj"})
+    mlflow.MlflowClient().delete_experiment(mlflow.create_experiment(name))
+
+    monkeypatch.setattr(obs_module, "_initialized", False)
+    monkeypatch.setattr(
+        obs_module, "find_project_config", lambda: ("/proj", {"project": "p"})
+    )
+
+    with caplog.at_level(logging.ERROR):
+        init_tracing("dsagt-server", mlflow_url=uri)  # must not raise
+
+    assert obs_module._initialized is False
+    msg = caplog.text
+    assert (
+        "tracing disabled" in msg
+        and "deleted state" in msg
+        and "mlflow.experiment" in msg
+    )
