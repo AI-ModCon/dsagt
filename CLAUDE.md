@@ -95,7 +95,7 @@ Distilled from working on this codebase; `knowledge.py` is the reference example
 - Per-agent instructions file (e.g., `CLAUDE.md`, `.goosehints`, `AGENTS.md`).
 - Per-agent MCP config artifact (`.mcp.json` for claude, `goose.yaml` for goose, `cline_mcp_settings.json` via `cline mcp add`, `.codex-data/config.toml`). The env block carries benign routing only (`DSAGT_PROJECT`, `DSAGT_PROJECT_DIR`, `DSAGT_SESSION_ID`, `MLFLOW_TRACKING_URI`, `EMBEDDING_*`) so MCP-server children of agents that don't inherit shell env (codex/cline) still log to the right store. No credentials, no OTel routing.
 
-No launch shim is written and `dsagt init` prints no env/OTel instructions — the user starts the agent directly or via `dsagt start`. DSAGT wires no MLflow autolog hook: Claude's traces (like every agent's) come from the heartbeat pipeline, not native autolog.
+Credentials an agent cannot pass to its MCP children (codex, cline) come from `~/.config/dsagt/env` (`session.load_user_env`, loaded by `dsagt-server` and the `dsagt` CLI; shell wins) — in `$HOME`, never in a project or agent config. No launch shim is written and `dsagt init` prints no env/OTel instructions — the user starts the agent directly or via `dsagt start`. DSAGT wires no MLflow autolog hook: Claude's traces (like every agent's) come from the heartbeat pipeline, not native autolog.
 
 ## Architecture
 

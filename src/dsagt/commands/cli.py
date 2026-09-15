@@ -634,7 +634,9 @@ _USER_ERRORS = (FileNotFoundError, FileExistsError, ValueError, RuntimeError)
 
 def main(argv=None):
     from dsagt import __version__
+    from dsagt.session import load_user_env
 
+    load_user_env()
     argv = list(sys.argv[1:] if argv is None else argv)
     # `dsagt mlflow <project>` is an unlisted alias for `traces` — the word
     # people reach for when they want the MLflow viewer.  Rewritten before

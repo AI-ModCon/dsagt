@@ -11,7 +11,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   self-logging — CLI, MCP server, `dsagt-run` — to a remote MLflow server
   instead of the project's sqlite file; `MLFLOW_TRACKING_API_KEY` authenticates
   to an `X-API-Key` gateway in front of it. `dsagt traces` and `dsagt info`
-  follow the same resolution.
+  follow the same resolution. Keys an agent cannot pass to its MCP children
+  (codex, cline) are read from `~/.config/dsagt/env` at startup.
 - **Experiment naming for shared servers.** Traces log to an experiment named
   `dsagt-<8 hex>` (hashed from the project directory) rather than the bare
   project name, so two users' `demo` projects do not collide; `mlflow.experiment`

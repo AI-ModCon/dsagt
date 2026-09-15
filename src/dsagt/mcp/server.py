@@ -473,9 +473,14 @@ def main():
         DEFAULTS,
         _deep_merge,
         append_session,
+        load_user_env,
         resolve_env_vars,
         session_tag,
     )
+
+    # First: agents that don't pass their shell to MCP children (codex, cline)
+    # can only reach a shared store or an API embedder through this file.
+    load_user_env()
 
     project_dir, _cfg = find_project_config()
     if project_dir is None:
