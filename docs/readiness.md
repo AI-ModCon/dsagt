@@ -17,7 +17,7 @@ readiness:
 
 ## What the paragraph says
 
-For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz), the check is the `aidrin` skill's quality baseline, run through the registered `aidrin` code before and after the operation. The agent runs the baseline directly, without the skill's intent and plan steps, which are for assessments the user asks for. It saves the results as `audit/step_N_pre.aidrin.json` and `audit/step_N_post.aidrin.json`, reports the per-metric change before proposing the next step, writes no custom check for a metric AIDRIN provides, and keeps the generic check rule for stages whose input and output are not tabular.
+For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz), the check is the `aidrin` skill's quality baseline, run through the registered `aidrin` code before and after the operation. The agent runs the baseline directly, without the skill's intent and plan steps, which are for assessments the user asks for. It saves the results as `audit/step_N_pre.aidrin.json` and `audit/step_N_post.aidrin.json`, reports the per-metric change before proposing the next step, and writes no custom check for a metric AIDRIN provides; every other stage keeps the generic check rule.
 
 ## Try it
 
