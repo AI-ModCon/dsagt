@@ -15,7 +15,7 @@ DSAgt connects an MCP-compatible AI coding agent to code registration, a semanti
 
 ## Prerequisites
 
-- Python 3.12 or 3.13 on Apple Silicon or Linux x86_64 (torch has no NumPy 2 wheel for Intel Macs)
+- Python 3.12 or 3.13
 - One of the supported agent platforms above, installed and authenticated against your LLM provider
 - [uv](https://github.com/astral-sh/uv) — only for the development install
 
