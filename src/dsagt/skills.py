@@ -706,7 +706,7 @@ def base_skills() -> tuple[dict, ...]:
 
 
 def install_base_skills(
-    project_dir: str | Path, *, cache_dir: Path = SKILL_SOURCES_DIR
+    project_dir: str | Path, *, kb=None, cache_dir: Path = SKILL_SOURCES_DIR
 ) -> list[dict]:
     """Install every :func:`base_skills` entry into ``<project>/skills/<name>/``
     and register the scripts they run as codes.
@@ -715,21 +715,37 @@ def install_base_skills(
     and reused as is otherwise, so an init with a warm cache needs no
     network; an existing project copy is replaced.  A skill whose CLI is a
     registered code has its examples rewritten to the code's executable
-    (:func:`rewrite_cli_invocations`).  Nothing is indexed into a KB.  Raises on a
-    failed clone or a skill missing from its source.  Returns one
-    :func:`install_into_project` result per skill.
+    (:func:`rewrite_cli_invocations`).  Each skill is installed and its codes
+    registered before the next one starts, so a skill whose fetch fails
+    leaves the others complete; the codes are indexed into *kb* when one is
+    given.  Raises ``RuntimeError`` after the loop naming every skill that
+    failed.  Returns one :func:`install_into_project` result per installed
+    skill.
     """
+    from dsagt.registry import CodeRegistry  # lazy: keeps this module light
+
+    project_dir = Path(project_dir)
+    registry = CodeRegistry(runtime_dir=project_dir, kb=kb)
     results: list[dict] = []
+    failures: list[str] = []
     for entry in base_skills():
-        spec = resolve_source(entry["source"])
-        sync_source(spec, cache_dir=cache_dir)
-        qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
-        result = install_into_project(qualified, project_dir, cache_dir=cache_dir)
-        pairs = native_invocations().get(entry["name"])
-        if pairs:
-            rewrite_cli_invocations(Path(result["dest_dir"]), pairs)
+        try:
+            spec = resolve_source(entry["source"])
+            sync_source(spec, cache_dir=cache_dir)
+            qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
+            result = install_into_project(qualified, project_dir, cache_dir=cache_dir)
+            pairs = native_invocations().get(entry["name"])
+            if pairs:
+                rewrite_cli_invocations(Path(result["dest_dir"]), pairs)
+            _register_skill_codes(registry, project_dir, entry)
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 — every skill gets its turn; the failures are raised together below
+            failures.append(f"{entry['name']}: {e}")
+            continue
         results.append(result)
-    register_base_skill_codes(project_dir)
+    if failures:
+        raise RuntimeError("base skills not installed: " + "; ".join(failures))
     return results
 
 
@@ -788,44 +804,53 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
     return changed
 
 
-def register_base_skill_codes(project_dir: str | Path) -> list[str]:
+def register_base_skill_codes(project_dir: str | Path, *, kb=None) -> list[str]:
     """Register every ``codes`` entry of :func:`base_skills` in ``<project>/codes/``.
 
     A ``script`` entry runs the script in place under ``<project>/skills/``,
     relative to the project directory, which is the agent's cwd; an
     ``executable`` entry runs a command on the path.  The registry wraps
     either with ``dsagt-run`` and, when the entry declares dependencies,
-    ``uv run --with``.  A re-init updates the spec and keeps the body.
-    Raises ``FileNotFoundError`` when a listed script is absent from the
-    installed skill.  Returns one ``"<action> <name>"`` line per code.
+    ``uv run --with``.  A re-init updates the spec and keeps the body.  With
+    *kb* each spec is also indexed into the ``codes`` collection, which is
+    what ``search_registry`` searches.  Raises ``FileNotFoundError`` when a
+    listed script is absent from the installed skill.  Returns one
+    ``"<action> <name>"`` line per code.
     """
     from dsagt.registry import CodeRegistry  # lazy: keeps this module light
 
     project_dir = Path(project_dir)
-    registry = CodeRegistry(runtime_dir=project_dir)
+    registry = CodeRegistry(runtime_dir=project_dir, kb=kb)
     actions: list[str] = []
     for entry in base_skills():
-        for code in entry.get("codes", ()):
-            if "script" in code:
-                script = Path("skills") / entry["name"] / code["script"]
-                if not (project_dir / script).exists():
-                    raise FileNotFoundError(
-                        f"base skill {entry['name']!r} has no {code['script']} in "
-                        f"{project_dir / 'skills' / entry['name']}"
-                    )
-                executable = f"python {script}"
-            else:
-                executable = code["executable"]
-            spec = {
-                "name": code["name"],
-                "description": code["description"],
-                "executable": executable,
-                "parameters": code["parameters"],
-                "tags": [entry["name"]],
-            }
-            if code.get("dependencies"):
-                spec["dependencies"] = list(code["dependencies"])
-            actions.append(f"{registry.save_tool(spec)} {code['name']}")
+        actions.extend(_register_skill_codes(registry, project_dir, entry))
+    return actions
+
+
+def _register_skill_codes(registry, project_dir: Path, entry: dict) -> list[str]:
+    """Register one base skill's ``codes`` entries through *registry*."""
+    actions: list[str] = []
+    for code in entry.get("codes", ()):
+        if "script" in code:
+            script = Path("skills") / entry["name"] / code["script"]
+            if not (project_dir / script).exists():
+                raise FileNotFoundError(
+                    f"base skill {entry['name']!r} has no {code['script']} in "
+                    f"{project_dir / 'skills' / entry['name']}"
+                )
+            executable = f"python {script}"
+        else:
+            executable = code["executable"]
+        spec = {
+            "name": code["name"],
+            "description": code["description"],
+            "executable": executable,
+            "parameters": code["parameters"],
+            "tags": [entry["name"]],
+        }
+        if code.get("dependencies"):
+            spec["dependencies"] = list(code["dependencies"])
+        actions.append(f"{registry.save_tool(spec)} {code['name']}")
     return actions
 
 

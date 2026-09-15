@@ -675,3 +675,59 @@ def test_base_skills_reads_the_aidrin_version_when_called(monkeypatch):
     monkeypatch.setattr(sc, "installed_version", lambda name: "2027.1")
     with pytest.raises(ValueError):
         sc.base_skills()
+
+
+def test_install_base_skills_finishes_the_others_when_one_fetch_fails(
+    tmp_path, monkeypatch
+):
+    """A skill whose source cannot be fetched is reported after the loop; the
+    skills before and after it are installed with their codes registered."""
+    cache = tmp_path / "cache"
+
+    def fake_sync(source, *, kb=None, cache_dir, force=False):
+        if "AIDRIN" in source["url"]:
+            raise RuntimeError("clone failed")
+        slug = sc._repo_slug(source["url"])
+        (cache_dir / slug).mkdir(parents=True, exist_ok=True)
+        (cache_dir / slug / "SOURCE_COMMIT").write_text("c\n")
+        for b in sc.base_skills():
+            if sc.resolve_source(b["source"])["url"] == source["url"]:
+                d = _mkskill(cache_dir / slug / "x" / b["name"], b["name"])
+                for code in b.get("codes", ()):
+                    (d / code["script"]).parent.mkdir(parents=True, exist_ok=True)
+                    (d / code["script"]).write_text("print('ok')\n")
+        return {"slug": slug}
+
+    monkeypatch.setattr(sc, "sync_source", fake_sync)
+    proj = tmp_path / "proj"
+    with pytest.raises(RuntimeError, match="aidrin: clone failed"):
+        sc.install_base_skills(proj, cache_dir=cache)
+    assert (proj / "skills" / "skill-creator" / "SKILL.md").exists()
+    assert (proj / "skills" / "datacard-generator" / "SKILL.md").exists()
+    assert (proj / "codes" / "datacard-introspect" / "SKILL.md").exists()
+    assert not (proj / "codes" / "aidrin").exists()
+
+
+def test_register_base_skill_codes_indexes_into_the_kb(tmp_path):
+    """With a knowledge base, each registered code is added to the ``codes``
+    collection, so ``search_registry`` finds it."""
+    from dsagt.registry import CODES_COLLECTION
+
+    class FakeKB:
+        def __init__(self):
+            self.added = []
+
+        def add_entries(self, *, texts, collection, metadatas):
+            self.added.append((collection, [m["code_name"] for m in metadatas]))
+
+    proj = tmp_path / "proj"
+    for entry in sc.base_skills():
+        for code in entry.get("codes", ()):
+            if "script" in code:
+                script = proj / "skills" / entry["name"] / code["script"]
+                script.parent.mkdir(parents=True, exist_ok=True)
+                script.write_text("print('ok')\n")
+    kb = FakeKB()
+    sc.register_base_skill_codes(proj, kb=kb)
+    names = [n for coll, ns in kb.added if coll == CODES_COLLECTION for n in ns]
+    assert "aidrin" in names and "datacard-introspect" in names

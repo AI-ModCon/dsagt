@@ -482,13 +482,16 @@ class TestInitProject:
         a failed fetch is a warning, not an abort."""
         calls = []
 
-        def fake_install(pdir, **_k):
-            calls.append(Path(pdir))
+        def fake_install(pdir, *, kb):
+            calls.append((Path(pdir), kb))
             return []
 
         with patch("dsagt.skills.install_base_skills", fake_install):
             pdir = init_project("base", "claude", exclude=["all"])
-        assert calls == [pdir]
+        # Installed after the knowledge base exists, with the project's KB,
+        # so the base-skill codes are indexed where search_registry looks.
+        assert [c[0] for c in calls] == [pdir]
+        assert Path(calls[0][1].index_dir) == pdir / "kb_index"
 
         def boom(pdir, **_k):
             raise RuntimeError("no network")

@@ -595,18 +595,23 @@ def _provision_kb(
         print("  Knowledge base ready.", flush=True)
 
 
-def _provision_base_skills(pdir: Path) -> None:
+def _provision_base_skills(pdir: Path, embedding: dict | None) -> None:
     """Install the base skills (``skills.base_skills``) from their upstream
-    repositories into ``<project>/skills/``.
+    repositories into ``<project>/skills/`` and register their codes into
+    the project's knowledge base.
 
-    A failed fetch is printed, not raised: the project works without the
-    skills, and a re-run of ``dsagt init`` installs them once the network
-    is available.
+    Runs after the knowledge base is provisioned so the codes land in the
+    ``codes`` collection ``search_registry`` searches.  A failed fetch is
+    printed, not raised: the project works without the skills, and a re-run
+    of ``dsagt init`` installs them once the network is available.
     """
     from dsagt.skills import install_base_skills
 
+    kb = kb_from_config(
+        {"project_dir": str(pdir), "embedding": embedding or DEFAULTS["embedding"]}
+    )
     try:
-        install_base_skills(pdir)
+        install_base_skills(pdir, kb=kb)
     except Exception as e:  # noqa: BLE001 — offline init must still complete
         print(
             f"  Warning: could not install the base skills ({e}).  Re-run "
@@ -671,9 +676,9 @@ def init_project(
 
     CodeRegistry(runtime_dir=pdir).ensure_bundled_copies()
 
-    _provision_base_skills(pdir)
-
     _provision_kb(pdir, include, exclude, embedding=embedding)
+
+    _provision_base_skills(pdir, embedding)
 
     write_config_file(
         pdir,
