@@ -723,6 +723,35 @@ def _to_ns(epoch_s: float | None) -> int | None:
     return int(epoch_s * _S_PER_NS) if epoch_s is not None else None
 
 
+def _stamp_usage(span, usage: dict | None) -> None:
+    """Set MLflow's chat-usage attribute from a normalized usage dict.
+
+    MLflow sums this attribute across every span of a trace into
+    ``mlflow.trace.tokenUsage``, so it may sit on whichever span represents
+    the LLM call — an LLM span, or the tool span that a tool-calling message
+    collapses into under the autolog-parity layout.  ``input_tokens`` already
+    counts cached tokens (see ``traces._usage``); the cache breakdown is kept
+    as plain attributes for the per-span view.
+    """
+    if not usage:
+        return
+    from mlflow.tracing.constant import SpanAttributeKey, TokenUsageKey
+
+    inp = usage.get("input_tokens") or 0
+    out = usage.get("output_tokens") or 0
+    span.set_attribute(
+        SpanAttributeKey.CHAT_USAGE,
+        {
+            TokenUsageKey.INPUT_TOKENS: inp,
+            TokenUsageKey.OUTPUT_TOKENS: out,
+            TokenUsageKey.TOTAL_TOKENS: inp + out,
+        },
+    )
+    for key in ("cache_read_input_tokens", "cache_write_input_tokens"):
+        if usage.get(key):
+            span.set_attribute(key, usage[key])
+
+
 class MLflowSink:
     """Render a :class:`~dsagt.traces.Trace` into MLflow spans (a trace consumer).
 
@@ -781,7 +810,6 @@ class MLflowSink:
         from mlflow.entities import SpanType
         from mlflow.tracing.constant import (
             SpanAttributeKey,
-            TokenUsageKey,
             TraceMetadataKey,
         )
         from mlflow.tracing.trace_manager import InMemoryTraceManager
@@ -816,17 +844,7 @@ class MLflowSink:
                         SpanAttributeKey.MESSAGE_FORMAT: "anthropic",
                     },
                 )
-                if span["usage"]:
-                    inp = span["usage"].get("input_tokens") or 0
-                    out = span["usage"].get("output_tokens") or 0
-                    child.set_attribute(
-                        SpanAttributeKey.CHAT_USAGE,
-                        {
-                            TokenUsageKey.INPUT_TOKENS: inp,
-                            TokenUsageKey.OUTPUT_TOKENS: out,
-                            TokenUsageKey.TOTAL_TOKENS: inp + out,
-                        },
-                    )
+                _stamp_usage(child, span["usage"])
                 child.set_outputs(
                     {
                         "type": "message",
@@ -847,6 +865,7 @@ class MLflowSink:
                     },
                 )
                 child.set_outputs({"result": span["attributes"].get("result", "")})
+                _stamp_usage(child, span["usage"])
             child.end(end_time_ns=_to_ns(span["end_time"]))
 
         # Trace-level metadata: session correlation + the per-turn canonical id

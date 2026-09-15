@@ -210,3 +210,55 @@ def test_end_to_end_through_the_sink(mlflow_sqlite):
     # tool-bearing turn: root + 2 llm + 2 tool = 5; second turn: root + 1 llm = 2.
     # Pin both — `5 in shapes` alone would pass even if turn 2 collapsed.
     assert shapes == {5, 2}
+
+
+def _token_count(ts, *, input_tokens, output_tokens, cached=0):
+    return _rec(
+        ts,
+        "event_msg",
+        {
+            "type": "token_count",
+            "info": {
+                "last_token_usage": {
+                    "input_tokens": input_tokens,
+                    "cached_input_tokens": cached,
+                    "cache_write_input_tokens": 0,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                }
+            },
+        },
+    )
+
+
+def test_token_usage_and_model_are_carried_once_per_llm_call():
+    """A call's ``token_count`` lands on its assistant message, or on its first
+    tool call when the call produced no text — so a tool-only call still
+    counts.  OpenAI's cached count is a subset of input and passes through."""
+    records = [
+        _rec("2026-06-19T15:00:00.000Z", "session_meta", {"cwd": "/p"}),
+        _rec("2026-06-19T15:00:00.100Z", "turn_context", {"model": "gpt-x"}),
+        _msg("2026-06-19T15:00:01.000Z", "user", "do it"),
+        # call 1: tool only, no text
+        _fcall("2026-06-19T15:00:02.000Z", "shell", {"cmd": "ls"}, "c1"),
+        _fout("2026-06-19T15:00:03.000Z", "c1", "ok"),
+        _token_count(
+            "2026-06-19T15:00:03.500Z", input_tokens=1000, output_tokens=10, cached=800
+        ),
+        # call 2: text
+        _msg("2026-06-19T15:00:04.000Z", "assistant", "done"),
+        _token_count("2026-06-19T15:00:04.500Z", input_tokens=1200, output_tokens=5),
+    ]
+    trace = _translate(records)
+    with_usage = [s for s in trace.spans if s.get("usage")]
+    assert [s["kind"] for s in with_usage] == ["TOOL", "LLM"]
+    assert with_usage[0]["usage"]["input_tokens"] == 1000  # not 1000 + 800
+    assert with_usage[0]["usage"]["cache_read_input_tokens"] == 800
+    assert with_usage[1]["usage"] == {
+        "input_tokens": 1200,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+    }
+    assert with_usage[1]["model"] == "gpt-x"
+    assert sum(s["usage"]["input_tokens"] for s in with_usage) == 2200
