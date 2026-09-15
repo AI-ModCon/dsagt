@@ -11,7 +11,7 @@ Installed skills, the three base skills included, are located in `<project>/skil
 Skills fall into two sets — the searchable **corpus** and the project's **installed skills** — and one class, `SkillRouter`, routes every skill operation between them:
 
 - **Corpus** — skills that exist in external repositories but are *not yet installed*. DSAgt federates many sources (the known names below, or any git URL); each is cloned and indexed into its own collection. The agent browses the corpus with `search_skills` and manages sources with `add_skill_source` / `list_skill_sources`.
-- **Installed skills** — skills in the project's `<project>/skills/` directory: the base skills every init installs (`skill-creator`, `datacard-generator`, `aidrin`), skills installed from the corpus (`install_skill`), and skills authored in place (with `skill-creator`). These are mirrored into each agent's *native* skills directory (`.claude/`, `.agents/`, `.cline/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them.
+- **Installed skills** — skills in the project's `<project>/skills/` directory: the base skills init installs and leaves alone once present (`skill-creator`, `datacard-generator`, `aidrin`), skills installed from the corpus (`install_skill`), and skills authored in place (with `skill-creator`). These are mirrored into each agent's *native* skills directory (`.claude/`, `.agents/`, `.cline/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them.
 
 ## Design motivation
 

@@ -83,9 +83,10 @@ def test_base_skills_name_their_upstream_sources():
 
 
 def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
-    """Each base skill is installed by a source-qualified name from the
-    shared source cache without a forced re-clone, replacing any existing
-    project copy."""
+    """Each base skill absent from the project is installed by a
+    source-qualified name from the shared source cache without a forced
+    re-clone; a skill already in the project is kept as it is, and its
+    codes are still registered."""
     cache = tmp_path / "cache"
     synced = []
 
@@ -107,25 +108,25 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sc, "sync_source", fake_sync)
     proj = tmp_path / "proj"
-    stale = _mkskill(proj / "skills" / "aidrin", "aidrin", desc="stale")
+    edited = _mkskill(proj / "skills" / "aidrin", "aidrin", desc="edited by the user")
 
     results = sc.install_base_skills(proj, cache_dir=cache)
-    assert [r["name"] for r in results] == [
-        "skill-creator",
-        "datacard-generator",
-        "aidrin",
+    assert [(r["name"], r["action"]) for r in results] == [
+        ("skill-creator", "added"),
+        ("datacard-generator", "added"),
+        ("aidrin", "kept"),
     ]
-    # No forced re-clone: a cached source is reused as is.
+    # No forced re-clone: a cached source is reused as is; a skill already
+    # in the project is not fetched at all.
     assert synced == [
         ("ai-modcon-genesis-skills", False),
         ("ai-modcon-genesis-skills", False),
-        ("idtlab-aidrin", False),
     ]
     assert (proj / "skills" / "skill-creator" / "SKILL.md").exists()
     assert (proj / "skills" / "datacard-generator" / "SKILL.md").exists()
-    assert "stale" not in (stale / "SKILL.md").read_text()
-    provenance = (proj / "skills" / "aidrin" / "PROVENANCE.txt").read_text()
-    assert "Commit: idtlab-aidrin-commit" in provenance
+    assert "edited by the user" in (edited / "SKILL.md").read_text()
+    provenance = (proj / "skills" / "datacard-generator" / "PROVENANCE.txt").read_text()
+    assert "Commit: ai-modcon-genesis-skills-commit" in provenance
     # The scripts the datacard workflow runs, and the aidrin CLI, are codes.
     assert (proj / "codes" / "datacard-introspect" / "SKILL.md").exists()
     assert (proj / "codes" / "datacard-validate" / "SKILL.md").exists()

@@ -711,16 +711,20 @@ def install_base_skills(
     """Install every :func:`base_skills` entry into ``<project>/skills/<name>/``
     and register the scripts they run as codes.
 
-    A source is cloned into the cache when absent or held at another ref,
-    and reused as is otherwise, so an init with a warm cache needs no
-    network; an existing project copy is replaced.  A skill whose CLI is a
-    registered code has its examples rewritten to the code's executable
-    (:func:`rewrite_cli_invocations`).  Each skill is installed and its codes
-    registered before the next one starts, so a skill whose fetch fails
+    A skill already present in the project is left as it is, the rule
+    ``CodeRegistry.ensure_bundled_copies`` applies to codes: edits by the
+    user or the agent win, and deleting the directory and re-running init
+    restores the upstream version.  Otherwise the source is cloned into the
+    cache when absent or held at another ref, and reused as is when
+    present, so an init with a warm cache needs no network.  A skill whose
+    CLI is a registered code has its examples rewritten to the code's
+    executable (:func:`rewrite_cli_invocations`).  Each skill's codes are
+    registered before the next skill starts, so a skill whose fetch fails
     leaves the others complete; the codes are indexed into *kb* when one is
     given.  Raises ``RuntimeError`` after the loop naming every skill that
-    failed.  Returns one :func:`install_into_project` result per installed
-    skill.
+    failed.  Returns one result per skill: :func:`install_into_project`'s
+    for an installed skill, ``{name, dest_dir, action: "kept"}`` for one
+    left in place.
     """
     from dsagt.registry import CodeRegistry  # lazy: keeps this module light
 
@@ -729,14 +733,24 @@ def install_base_skills(
     results: list[dict] = []
     failures: list[str] = []
     for entry in base_skills():
+        dest = project_dir / "skills" / entry["name"]
         try:
-            spec = resolve_source(entry["source"])
-            sync_source(spec, cache_dir=cache_dir)
-            qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
-            result = install_into_project(qualified, project_dir, cache_dir=cache_dir)
-            pairs = native_invocations().get(entry["name"])
-            if pairs:
-                rewrite_cli_invocations(Path(result["dest_dir"]), pairs)
+            if dest.exists():
+                result = {
+                    "name": entry["name"],
+                    "dest_dir": str(dest),
+                    "action": "kept",
+                }
+            else:
+                spec = resolve_source(entry["source"])
+                sync_source(spec, cache_dir=cache_dir)
+                qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
+                result = install_into_project(
+                    qualified, project_dir, cache_dir=cache_dir
+                )
+                pairs = native_invocations().get(entry["name"])
+                if pairs:
+                    rewrite_cli_invocations(Path(result["dest_dir"]), pairs)
             _register_skill_codes(registry, project_dir, entry)
         except (
             Exception
