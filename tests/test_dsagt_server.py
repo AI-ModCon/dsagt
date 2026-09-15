@@ -441,3 +441,30 @@ def test_rejected_call_is_traced_as_an_error(tmp_path, monkeypatch):
     root = next(s for s in trace.data.spans if s.name == "demo")
     assert root.inputs == {"q": 7}
     assert "Input validation error" in root.outputs["error"]
+
+
+class TestPinTraceSourceResume:
+    def test_resumed_session_pins_the_previous_transcript_when_it_is_being_written(
+        self, tmp_path, monkeypatch
+    ):
+        """``claude --resume`` keeps writing the previous session's file; a fresh
+        mtime makes it this session's source even though the token repeats."""
+        import os
+
+        from dsagt.mcp import server as server_mod
+        from dsagt.session import append_session, read_state, record_trace_source
+
+        (tmp_path / ".dsagt").mkdir()
+        append_session(tmp_path)
+        same = tmp_path / "same.jsonl"
+        same.write_text("{}\n")
+        record_trace_source(tmp_path, str(same))
+        append_session(tmp_path)
+        monkeypatch.setattr(server_mod, "_SERVER_STARTED_AT", os.path.getmtime(same) - 1)
+
+        class Collector:
+            def active_source(self):
+                return str(same)
+
+        TestPinTraceSource()._run(Collector(), tmp_path)
+        assert read_state(tmp_path)["sessions"][-1]["trace_source"] == str(same)

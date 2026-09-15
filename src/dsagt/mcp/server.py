@@ -204,10 +204,18 @@ async def _pin_trace_source(collector, project_dir, interval: float) -> None:
         except Exception as e:  # noqa: BLE001
             logger.debug("Could not resolve trace source: %s", e)
             continue
-        if source is None or source == previous:
+        if source is None:
             continue
         path = Path(source)
-        if path.exists() and path.stat().st_mtime < _SERVER_STARTED_AT:
+        try:
+            fresh = path.stat().st_mtime >= _SERVER_STARTED_AT
+        except OSError:  # not a path (DB session id, dir name), or gone
+            fresh = None
+        # A path is judged by freshness alone: a resumed session keeps writing
+        # the previous session's transcript, and that file is this session's
+        # source too.  A non-path token has no freshness to check, so it must
+        # at least differ from the previous session's.
+        if fresh is False or (fresh is None and source == previous):
             continue
         try:
             record_trace_source(project_dir, source)
@@ -286,23 +294,23 @@ async def _run_stdio(
                     await task
                 except asyncio.CancelledError:
                     pass
-                # Best-effort end-of-session flush of the deferred final turn +
-                # any unindexed tool-use — covers the graceful-exit case.  If
-                # this is killed before it runs, the next session's startup
-                # catch-up re-collects the previous session's transcript
-                # (session.catch_up_extraction → _catch_up_traces, pinned to the
-                # recorded transcript path); session-qualified acks make both
-                # paths idempotent.  Tool-use likewise re-indexes via its ack set.
-                if collector is not None:
-                    try:
-                        await asyncio.to_thread(collector.collect, include_last=True)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("Trace heartbeat final flush failed: %s", e)
-                if tool_indexer is not None:
-                    try:
-                        await asyncio.to_thread(tool_indexer.tick)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("Tool-use final flush failed: %s", e)
+            # Best-effort end-of-session flush of the deferred final turn +
+            # any unindexed tool-use — covers the graceful-exit case.  If
+            # this is killed before it runs, the next session's startup
+            # catch-up re-collects the previous session's transcript
+            # (session.catch_up_extraction → _catch_up_traces, pinned to the
+            # recorded transcript path); session-qualified acks make both
+            # paths idempotent.  Tool-use likewise re-indexes via its ack set.
+            if collector is not None:
+                try:
+                    await asyncio.to_thread(collector.collect, include_last=True)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Trace heartbeat final flush failed: %s", e)
+            if tool_indexer is not None:
+                try:
+                    await asyncio.to_thread(tool_indexer.tick)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Tool-use final flush failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
