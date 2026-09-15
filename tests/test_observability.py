@@ -170,6 +170,10 @@ def test_root_span_source_tags_trace_and_session(_reset_tracing, monkeypatch):
     assert trace.info.trace_metadata["dsagt.agent"] == "goose"
     assert trace.info.trace_metadata["mlflow.trace.session"] == "proj-xyz"
     assert trace.info.trace_metadata["dsagt.version"] == __version__
+    # The reserved key behind the trace table's User column.
+    import getpass
+
+    assert trace.info.trace_metadata["mlflow.trace.user"] == getpass.getuser()
 
 
 def test_inner_spans_inherit_root_source(_reset_tracing):
@@ -892,3 +896,25 @@ def test_init_tracing_survives_a_deleted_experiment(tmp_path, monkeypatch, caplo
         and "deleted state" in msg
         and "mlflow.experiment" in msg
     )
+
+
+def test_init_tracing_activates_the_version_model(tmp_path, monkeypatch):
+    """`mlflow.modelId` must reference a LoggedModel named for the dsagt
+    release, created once per experiment — that is what the UI's Version
+    column shows."""
+    import mlflow
+
+    from dsagt import __version__
+    from dsagt.observability import init_tracing
+
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    monkeypatch.setattr(obs_module, "_initialized", False)
+    monkeypatch.setattr(
+        obs_module, "find_project_config", lambda: ("/proj", {"project": "p"})
+    )
+    init_tracing("dsagt-server", mlflow_url=uri)
+    with obs_module.open_span("demo", source="knowledge"):
+        pass
+    md = _last_trace().info.trace_metadata
+    model = mlflow.get_logged_model(md["mlflow.modelId"])
+    assert model.name == "dsagt-" + __version__.replace(".", "_")

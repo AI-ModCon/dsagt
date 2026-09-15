@@ -225,3 +225,11 @@ def test_session_tag_and_canonical_id_on_trace(mlflow_sqlite):
     from dsagt import __version__
 
     assert md.get("dsagt.version") == __version__
+    # User and Version columns: the reserved user key, and a LoggedModel named
+    # for the dsagt release (mlflow.modelId), on replayed agent turns too.
+    import getpass
+
+    assert md.get("mlflow.trace.user") == getpass.getuser()
+    assert mlflow.get_logged_model(
+        md["mlflow.modelId"]
+    ).name == "dsagt-" + __version__.replace(".", "_")

@@ -39,6 +39,7 @@ business code never imports MLflow and never branches on whether tracing is on.
 from __future__ import annotations
 
 import functools
+import getpass
 import hashlib
 import inspect
 import logging
@@ -170,6 +171,31 @@ def experiment_name(config: dict | None) -> str:
     return f"dsagt-{hashlib.sha1(str(base).encode()).hexdigest()[:8]}"
 
 
+def _version_model_name() -> str:
+    """The LoggedModel that stands for this dsagt release in an experiment.
+
+    MLflow's trace table fills its *Version* column from ``mlflow.modelId``,
+    which must reference a LoggedModel — MLflow 3's unit of "which version of
+    the app produced this".  ``set_active_model(name=…)`` creates or reuses one
+    per experiment and stamps every trace of the process, replayed agent turns
+    included.  Model names may not contain ``.``.
+    """
+    from dsagt import __version__
+
+    return f"dsagt-{__version__.replace('.', '_')}"
+
+
+def _current_user() -> str | None:
+    """The local user for the trace table's *User* column (``mlflow.trace.user``).
+
+    A gateway may stamp its own identity under ``mlflow.user``; the UI does
+    not read that key.  ``None`` where the process has no login identity."""
+    try:
+        return getpass.getuser()
+    except (KeyError, OSError):
+        return None
+
+
 def _ensure_experiment(name: str, project: str) -> None:
     """Select the experiment; on first creation, describe it and tag the project.
 
@@ -250,6 +276,7 @@ def init_tracing(
     try:
         mlflow.set_tracking_uri(mlflow_url)
         _ensure_experiment(experiment, project_name)
+        mlflow.set_active_model(name=_version_model_name())
     except (
         Exception
     ) as e:  # noqa: BLE001 — a store problem must not take the server down
@@ -411,6 +438,10 @@ def _attach_trace_metadata(source: str | None) -> None:
       puts it on agent traces and where ``dsagt info`` reads it; one place.
     - ``mlflow.trace.session`` metadata: groups this process's internal traces
       under one session (reserved MLflow key, drives the native session filter).
+    - ``mlflow.trace.user`` metadata: the local user — the reserved key behind
+      the trace table's *User* column.
+    - ``mlflow.modelId`` (set process-wide by :func:`init_tracing` through
+      ``set_active_model``): the dsagt release, behind the *Version* column.
     - ``dsagt.version`` metadata: which dsagt produced the trace.  On a shared
       server holding months of traces from many installs, nothing else says;
       MLflow's own ``mlflow.source.git.*`` are empty because the process runs
@@ -424,6 +455,8 @@ def _attach_trace_metadata(source: str | None) -> None:
     from dsagt import __version__
 
     metadata = {"dsagt.version": __version__}
+    if user := _current_user():
+        metadata["mlflow.trace.user"] = user
     if _default_agent:
         metadata["dsagt.agent"] = _default_agent
     if _default_session_id:
@@ -820,6 +853,10 @@ class MLflowSink:
 
         mlflow.set_tracking_uri(self._uri)
         mlflow.set_experiment(self._experiment)
+        # The CLI catch-up path (`dsagt traces` / `dsagt info`) reaches here
+        # without init_tracing, so the version model is activated here as well;
+        # create-or-reuse, one call per write.
+        mlflow.set_active_model(name=_version_model_name())
 
         children: dict[str, list] = {}
         for span in trace.spans:
@@ -911,6 +948,8 @@ class MLflowSink:
                     "dsagt.agent": trace.agent,
                     "dsagt.version": __version__,
                 }
+                if user := _current_user():
+                    meta[TraceMetadataKey.TRACE_USER] = user
                 in_mem.info.trace_metadata = {**in_mem.info.trace_metadata, **meta}
                 if prompt := root["attributes"].get("prompt"):
                     in_mem.info.request_preview = str(prompt)[:1000]
