@@ -732,3 +732,27 @@ def test_register_base_skill_codes_indexes_into_the_kb(tmp_path):
     sc.register_base_skill_codes(proj, kb=kb)
     names = [n for coll, ns in kb.added if coll == CODES_COLLECTION for n in ns]
     assert "aidrin" in names and "datacard-introspect" in names
+
+
+def test_a_previous_clone_left_behind_is_not_a_source(tmp_path, monkeypatch):
+    """``<slug>.previous`` is the clone a re-clone set aside; one left by a
+    sync that died is skipped by every scanner and removed by the next sync."""
+    cache = tmp_path / "cache"
+    live = _mkskill(cache / "x-y" / "skills" / "s1", "s1")
+    (cache / "x-y" / "SOURCE_REF").write_text("main\n")
+    _mkskill(cache / "x-y.previous" / "skills" / "s1", "s1")
+
+    # One source, not an ambiguous pair.
+    assert sc.find_catalog_skill("s1", cache_dir=cache) == live
+    names = [c["name"] for c in sc.SkillsCatalog(cache_dir=cache)._candidate_skills()]
+    assert names == ["s1"]
+
+    def no_clone(url, dest, branch="main", include=None):
+        raise AssertionError("cached clone at the requested ref is reused")
+
+    monkeypatch.setattr("dsagt.commands.setup_core_kb.clone_github", no_clone)
+    sc.sync_source(
+        {"url": "https://github.com/x/y", "branch": "main", "subdir": "skills"},
+        cache_dir=cache,
+    )
+    assert not (cache / "x-y.previous").exists()

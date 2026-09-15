@@ -305,6 +305,25 @@ def _discover_skill_dirs(root: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
+#: Suffix of the directory a re-clone sets the cached clone aside under.
+_PREVIOUS_SUFFIX = ".previous"
+
+
+def _source_dirs(cache_dir: Path) -> list[Path]:
+    """Cached source clones under *cache_dir*, sorted by name.
+
+    A ``<slug>.previous`` directory is a clone a re-clone set aside; one left
+    behind by a process that died mid-sync is not a source.
+    """
+    if not cache_dir.exists():
+        return []
+    return sorted(
+        p
+        for p in cache_dir.iterdir()
+        if p.is_dir() and not p.name.endswith(_PREVIOUS_SUFFIX)
+    )
+
+
 def sync_source(
     source: str | dict,
     *,
@@ -327,6 +346,8 @@ def sync_source(
     dest = cache_dir / slug
 
     branch = spec.get("branch", "main")
+    # A set-aside clone from a sync that died before cleaning up.
+    shutil.rmtree(dest.with_name(dest.name + _PREVIOUS_SUFFIX), ignore_errors=True)
     if dest.exists() and not force:
         stamp = dest / SOURCE_REF_FILE
         force = not stamp.exists() or stamp.read_text().strip() != branch
@@ -334,8 +355,7 @@ def sync_source(
     if force and dest.exists():
         # Set the old clone aside rather than deleting it: a failed re-clone
         # (offline, or a private repository) must leave the cache as it was.
-        previous = dest.with_name(dest.name + ".previous")
-        shutil.rmtree(previous, ignore_errors=True)
+        previous = dest.with_name(dest.name + _PREVIOUS_SUFFIX)
         dest.rename(previous)
     if not dest.exists():
         from dsagt.commands.setup_core_kb import clone_github  # lazy: break cycle
@@ -441,14 +461,13 @@ def find_catalog_skill(name: str, *, cache_dir: Path = SKILL_SOURCES_DIR) -> Pat
         source_filter, skill = name.split("/", 1)
 
     matches: list[Path] = []
-    if cache_dir.exists():
-        for slug_dir in sorted(p for p in cache_dir.iterdir() if p.is_dir()):
-            if source_filter is not None and slug_dir.name != source_filter:
-                continue
-            for d in _discover_skill_dirs(slug_dir):
-                spec = _parse_frontmatter(d / "SKILL.md")
-                if spec.get("name") == skill or d.name == skill:
-                    matches.append(d)
+    for slug_dir in _source_dirs(cache_dir):
+        if source_filter is not None and slug_dir.name != source_filter:
+            continue
+        for d in _discover_skill_dirs(slug_dir):
+            spec = _parse_frontmatter(d / "SKILL.md")
+            if spec.get("name") == skill or d.name == skill:
+                matches.append(d)
     if not matches:
         where = f" in source '{source_filter}'" if source_filter else ""
         raise LookupError(
@@ -680,7 +699,8 @@ def base_skills() -> tuple[dict, ...]:
                 "subdir": ".claude/skills",
             },
             # The CLI the skill documents, registered so every call is an
-            # execution record; ``aidrin`` installs beside ``dsagt-run``.
+            # execution record.  ``aidrin`` is installed in dsagt's own Python
+            # environment, whose bin directory dsagt-run appends to PATH.
             "codes": (
                 {
                     "name": "aidrin",
@@ -997,19 +1017,18 @@ class SkillsCatalog:
         """Cached-catalog skills as scorer-ready dicts (no KB needed)."""
         cands: list[dict] = []
         cache = self._resolved_cache_dir()
-        if cache.exists():
-            for slug_dir in sorted(p for p in cache.iterdir() if p.is_dir()):
-                for d in _discover_skill_dirs(slug_dir):
-                    spec = _parse_frontmatter(d / "SKILL.md")
-                    if spec.get("name"):
-                        cands.append(
-                            {
-                                "name": spec["name"],
-                                "description": spec.get("description", ""),
-                                "tags": ",".join(spec.get("tags", []) or []),
-                                "source": f"catalog:{slug_dir.name}",
-                            }
-                        )
+        for slug_dir in _source_dirs(cache):
+            for d in _discover_skill_dirs(slug_dir):
+                spec = _parse_frontmatter(d / "SKILL.md")
+                if spec.get("name"):
+                    cands.append(
+                        {
+                            "name": spec["name"],
+                            "description": spec.get("description", ""),
+                            "tags": ",".join(spec.get("tags", []) or []),
+                            "source": f"catalog:{slug_dir.name}",
+                        }
+                    )
         return cands
 
     def _select_keyword(self, query, top_k: int, tag) -> list[dict]:
