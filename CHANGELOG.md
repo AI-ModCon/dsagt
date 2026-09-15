@@ -9,12 +9,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - AIDRIN has one path: the code registry. The `aidrin` package is a dependency
-  of dsagt, so the CLI installs beside `dsagt-run`; every `dsagt init`
+  of dsagt, so the CLI is in dsagt's Python environment; every `dsagt init`
   registers `aidrin` as a code, so each call the agent makes through it is an
   execution record; and the `aidrin` base skill is fetched at the release tag
-  of the installed package. A cached skill source is re-cloned when the branch
-  or tag it holds differs from the one asked for, and a failed re-clone keeps
-  the previous cache.
+  of the installed package, read when init runs. A cached skill source is
+  re-cloned when the branch or tag it holds differs from the one asked for; a
+  failed re-clone keeps the previous cache, and a set-aside clone a crashed
+  sync left behind is never a source.
+- `dsagt-run` appends the directory of its own interpreter to the command's
+  PATH, so a CLI that is a dsagt dependency resolves under pipx or
+  `uv tool install`, where only dsagt's own commands are linked onto PATH.
+- Per-agent instructions files hold the dsagt text between
+  `<!-- dsagt:begin -->` and `<!-- dsagt:end -->`; init and start replace that
+  block and keep the user's text around it, so a changed readiness setting or
+  an upgraded dsagt reaches the agent.
 - The readiness gate is the AI-readiness check, on by default. `dsagt init`
   asks whether to assess tabular data before and after each data transform
   (`--no-readiness` declines); the answer adds one paragraph at the
@@ -25,8 +33,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `datacard-generator` is a base skill: every `dsagt init` installs it from the
   genesis catalog (`skills/basedata-skills/`) alongside `skill-creator` and
   `aidrin`, so the agent invokes it natively without a catalog search.
-- Base skills install from the shared source cache. A source is cloned once,
-  on the first init that needs it, and reused as is by every later init;
+- Base skills install from the shared source cache after the knowledge base
+  is provisioned, one skill at a time: each skill's codes are registered and
+  indexed into the `codes` collection before the next skill starts, and a
+  skill whose fetch fails is reported without blocking the others. A skill
+  already in the project is kept as it is; deleting its directory and
+  re-running init restores the upstream copy. A source is cloned once, on the
+  first init that needs it, and reused as is by every later init;
   `add_skill_source` with `force` re-clones it on request. An init with a
   warm cache needs no network.
 
