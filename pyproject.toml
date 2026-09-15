@@ -32,6 +32,7 @@ dependencies = [
     "transformers>=5.0,<6.0",          # sentence-transformers backend
     "rank-bm25>=0.2.2",                # sparse keyword retrieval
     "aidrin>=2026.8.2,<2027",          # AI Data Readiness Inspector CLI; the readiness assessment's check
+    "uv>=0.5",                         # runs codes with declared dependencies (uv run --with) and install_dependencies
 ]
 
 [project.scripts]

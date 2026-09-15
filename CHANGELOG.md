@@ -30,6 +30,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   re-cloned when the branch or tag it holds differs from the one asked for; a
   failed re-clone keeps the previous cache, and a set-aside clone a crashed
   sync left behind is never a source.
+- `uv` is a dependency of dsagt: codes with declared Python dependencies run
+  through `uv run --with` and `install_dependencies` installs through `uv pip`,
+  so a `pip install` of dsagt is the whole install.
 - `dsagt-run` appends the directory of its own interpreter to the command's
   PATH, so a CLI that is a dsagt dependency resolves under pipx or
   `uv tool install`, where only dsagt's own commands are linked onto PATH.
