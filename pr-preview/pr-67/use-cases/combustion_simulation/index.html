@@ -1,0 +1,1854 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DataSmith Agent — AI-assisted data pipeline builder">
+      
+      
+      
+        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/combustion_simulation/">
+      
+      
+        <link rel="prev" href="../plasma_turbulence/">
+      
+      
+        <link rel="next" href="../../developer/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>BlastNet → WELL Conversion - DSAgt</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#blastnet-well-conversion" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DSAgt" class="md-header__button md-logo" aria-label="DSAgt" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DSAgt
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              BlastNet → WELL Conversion
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AI-ModCon/dsagt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AI-ModCon/dsagt
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quick Start
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../provenance/" class="md-tabs__link">
+          
+  
+  
+  Capabilities
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../mcp-servers/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP Servers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../cli/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Use Cases
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../developer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Developer Guide
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DSAgt" class="md-nav__button md-logo" aria-label="DSAgt" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DSAgt
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AI-ModCon/dsagt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AI-ModCon/dsagt
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capabilities
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capabilities
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../provenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../knowledge-base/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Base
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-servers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Servers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use Cases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use Cases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../microbial_isolates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microbial Isolates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cryoem/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cryo-EM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vasp_dft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VASP DFT → AI-Ready Records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aidrin_readiness_gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AIDRIN Readiness Gate (Cryo-EM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tokamak_stability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tokamak Stability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aidrin_full_tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AIDRIN Full Feature Tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../genesis_skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Genesis Skills for Data Curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plasma_turbulence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plasma Turbulence Training Data (XGC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    BlastNet → WELL Conversion
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    BlastNet → WELL Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-author-the-conversion-skill-from-the-specifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Author the conversion skill from the specifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-register-the-converter-and-the-checker-as-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Register the converter and the checker as codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-dry-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Dry run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-convert-the-trajectory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Convert the trajectory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-check-against-the-holdout-reference-and-iterate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Check against the holdout reference and iterate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-generate-a-datacard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Generate a datacard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-reconstruct-the-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Reconstruct the pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-author-the-conversion-skill-from-the-specifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Author the conversion skill from the specifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-register-the-converter-and-the-checker-as-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Register the converter and the checker as codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-dry-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Dry run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-convert-the-trajectory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Convert the trajectory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-check-against-the-holdout-reference-and-iterate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Check against the holdout reference and iterate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-generate-a-datacard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Generate a datacard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-reconstruct-the-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Reconstruct the pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="blastnet-well-conversion">BlastNet → WELL Conversion<a class="headerlink" href="#blastnet-well-conversion" title="Permanent link">&para;</a></h1>
+<p><strong>Domain:</strong> Combustion CFD — BlastNet DNS trajectories to the WELL HDF5 format</p>
+<p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/combustion_simulation/"><code>use_cases/combustion_simulation/</code></a></p>
+<p>Develop a BlastNet-to-WELL converter from the format documents: author a conversion skill that carries the specifications as references, register the agent-written converter and a checker as codes, convert a sample trajectory with provenance, and compare the result with a reference WELL file held back from the agent, fixing the converter until the two match exactly.</p>
+<blockquote>
+<p><strong>Estimated time:</strong> ~45–60 minutes with the sample trajectory from the data
+bundle. The agent writes the converter and iterates against a checker, so
+the number of passes varies. Full BlastNet channel-flow cases are hundreds
+of GB and need an HPC node; this demo uses one small lifted-hydrogen-jet
+trajectory cut to three snapshots.</p>
+</blockquote>
+<p><a href="https://blastnet.github.io/">BlastNet</a> publishes combustion DNS datasets as
+per-trajectory directories of raw float32 arrays plus an <code>info.json</code>.
+Machine-learning pipelines consume them in the <a href="https://polymathic-ai.org/the_well/">WELL</a>
+HDF5 layout. This walkthrough has the agent build the bridge between the two
+from the two documents that define them, then prove it against a reference
+file produced upstream. It reproduces the workflow that produced the converter
+in <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/combustion_simulation/reference"><code>reference/</code></a>; that development history, with the bugs each
+version had, is in
+<a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/combustion_simulation/reference/development_history.md"><code>reference/development_history.md</code></a>.</p>
+<p>Folder contents:</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Role in the demo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/combustion_simulation/docs/well_format.md"><code>docs/well_format.md</code></a>, <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/combustion_simulation/docs/blastnet_layout.md"><code>docs/blastnet_layout.md</code></a></td>
+<td>the two specifications the agent works from; they become the skill's <code>references/</code></td>
+</tr>
+<tr>
+<td><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/combustion_simulation/scripts/check_well_output.py"><code>scripts/check_well_output.py</code></a></td>
+<td>the checker: compares a candidate WELL file to a reference (structure, shapes, values)</td>
+</tr>
+<tr>
+<td><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/combustion_simulation/scripts/make_demo_subset.py"><code>scripts/make_demo_subset.py</code></a></td>
+<td>builds the demo data bundle from a full trajectory</td>
+</tr>
+<tr>
+<td><a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/combustion_simulation/reference"><code>reference/</code></a></td>
+<td>the converter this workflow produced, its earlier versions, and the validation reports — a reference solution, not an input to the demo</td>
+</tr>
+</tbody>
+</table>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>DSAgt installed with the <code>combustion-simulation</code> extra
+  (<code>pip install "dsagt[combustion-simulation] @ git+https://github.com/AI-ModCon/dsagt.git"</code>),
+  which brings <code>h5py</code>.</li>
+<li>An agent platform installed and authenticated.</li>
+</ul>
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init
+</code></pre></div>
+<p>At the menu, name the project <code>blastnet-well</code> and pick your agent; the defaults
+are fine for the rest. Then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/blastnet-well
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Demo data (one BlastNet trajectory, three snapshots, and its holdout WELL</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># reference file) from the DSAgt use-case data folder:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">"https://drive.usercontent.google.com/download?id=1xUZhlr6uCahSbOLiLt5wcwMzehdpaUjL&amp;export=download&amp;confirm=t"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span>-o<span class="w"> </span>combustion_simulation_data.tar.gz
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>tar<span class="w"> </span>xzf<span class="w"> </span>combustion_simulation_data.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">"</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># creates $PROJ/data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000/</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="c1">#     and $PROJ/data/holdout/well_output/lifted_hydrogen_jet_traj_5000.hdf5</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/docs"</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>cp<span class="w"> </span>use_cases/combustion_simulation/docs/*.md<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/docs/"</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>cp<span class="w"> </span>use_cases/combustion_simulation/scripts/check_well_output.py<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts/"</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>dsagt<span class="w"> </span>start<span class="w"> </span>blastnet-well
+</code></pre></div>
+<p>The agent writes the converter. <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/combustion_simulation/reference"><code>reference/</code></a> holds the converter this
+walkthrough produced when it was developed, its earlier versions, and the validation
+reports; compare the agent's converter with them when the walkthrough is done.</p>
+<h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
+<p>Paste these prompts one at a time.</p>
+<h3 id="1-author-the-conversion-skill-from-the-specifications">1. Author the conversion skill from the specifications<a class="headerlink" href="#1-author-the-conversion-skill-from-the-specifications" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Read docs/well_format.md (the WELL HDF5 format) and docs/blastnet_layout.md
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>(the BlastNet trajectory layout). Then use the skill-creator skill to author a
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>project skill named "blastnet-to-well". Its SKILL.md states the mapping rules:
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>the field-name mapping, which fields go into t0_fields versus t1_fields, how
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>the grid and time arrays are derived, how boundary conditions are represented,
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>and which root attributes are required. Copy both documents into the skill's
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>references/ directory. Under its scripts/ directory write
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>convert_to_well_format.py: a command-line converter taking a positional
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>BlastNet trajectory directory and the options --output-file and --dry-run,
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>reading info.json for dimensions, variables, snapshot ids, and grid paths, and
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>writing one WELL HDF5 file. The coordinate arrays must be read from the grid
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>files that info.json names, not generated. Save it with save_skill.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>save_skill</code> writes <code>&lt;project&gt;/skills/blastnet-to-well/</code> with a
+<code>SKILL.md</code>, the two documents under <code>references/</code>, and
+<code>scripts/convert_to_well_format.py</code>, mirrored into the agent's native skills
+directory. The rules in <code>SKILL.md</code> should cover: scalar fields (pressure,
+density, temperature, species mass fractions as <code>mass_fraction_*</code>) in
+<code>t0_fields/</code>, velocity stacked as a vector in <code>t1_fields/</code>, per-type mask
+groups under <code>boundary_conditions/</code>, coordinate arrays from the grid files,
+time from <code>info.json</code>, and the root attributes <code>dataset_name</code>, <code>grid_type</code>,
+<code>n_spatial_dims</code>, <code>n_trajectories</code>, <code>simulation_parameters</code>.</p>
+<h3 id="2-register-the-converter-and-the-checker-as-codes">2. Register the converter and the checker as codes<a class="headerlink" href="#2-register-the-converter-and-the-checker-as-codes" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Register two codes. convert-to-well runs
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>`python skills/blastnet-to-well/scripts/convert_to_well_format.py` with a
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>positional trajectory directory and the options --output-file and --dry-run.
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>check-well-output runs `python codes/scripts/check_well_output.py` with
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>positional candidate and reference files and the options --rtol, --atol,
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>--spot-check, --n-points, and --seed. Run --help on each first to confirm.
+</code></pre></div>
+<p><strong>Verify:</strong> <code>Search the registry for WELL conversion codes.</code> → both specs under <code>codes/</code>.</p>
+<h3 id="3-dry-run">3. Dry run<a class="headerlink" href="#3-dry-run" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Run the registered convert-to-well code, with its exact command, as a dry run on
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000 and tell me the grid
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>size, the number of snapshots, and which WELL fields it would write.
+</code></pre></div>
+<p><strong>Expect:</strong> 1600 × 2000 grid, 3 snapshots, eleven <code>t0_fields</code> scalars and a
+2-component velocity; no HDF5 written.</p>
+<h3 id="4-convert-the-trajectory">4. Convert the trajectory<a class="headerlink" href="#4-convert-the-trajectory" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Convert data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000 to
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>well_output/lifted_hydrogen_jet_traj_5000.hdf5 by running the registered convert-to-well
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>code with its exact command.
+</code></pre></div>
+<h3 id="5-check-against-the-holdout-reference-and-iterate">5. Check against the holdout reference and iterate<a class="headerlink" href="#5-check-against-the-holdout-reference-and-iterate" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Spot-check well_output/lifted_hydrogen_jet_traj_5000.hdf5 against
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>data/holdout/well_output/lifted_hydrogen_jet_traj_5000.hdf5 with 10 random
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>points per dataset by running the registered check-well-output code with its exact
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>command. If anything differs, fix the converter in the skill, reconvert with the
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>registered convert-to-well code, and check again. When the spot-check passes, run the
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>full comparison the same way.
+</code></pre></div>
+<p><strong>Expect:</strong> a first pass that fails on one or more of the pitfalls the
+original development hit — all of them are visible in the checker's output:</p>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>Checker symptom</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>data files reshaped with a transpose</td>
+<td>every field value differs, errors of order 10²–10³</td>
+</tr>
+<tr>
+<td>species named <code>Y_H2</code> instead of <code>mass_fraction_h2</code></td>
+<td>datasets only in candidate / only in reference</td>
+</tr>
+<tr>
+<td>an extra root attribute (<code>Re_jet</code>) or a non-empty <code>simulation_parameters</code></td>
+<td>root-attribute mismatch</td>
+</tr>
+<tr>
+<td>boundary masks written as <code>bool</code></td>
+<td>dtype mismatch on <code>boundary_conditions/*/mask</code></td>
+</tr>
+<tr>
+<td>boundary-condition text not parsed (<code>inflow-outflow</code>, <code>pressure outlet</code>)</td>
+<td><code>boundary_conditions/</code> groups missing</td>
+</tr>
+<tr>
+<td>coordinates generated as a uniform range instead of read from the grid files</td>
+<td>none — the grid is uniform, so it passes within tolerance; read the converter, not only the checker output</td>
+</tr>
+</tbody>
+</table>
+<p>Each fix is a new version of the script inside the skill, each reconversion
+and check a new record in <code>trace_archive/</code>. The loop ends with
+<code>PASS — candidate matches reference exactly</code>.</p>
+<h3 id="6-generate-a-datacard">6. Generate a datacard<a class="headerlink" href="#6-generate-a-datacard" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Use the datacard-generator skill to write a Level 1 datacard for the converted
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>WELL file to audit/. Take the values from info.json and the conversion, and
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>note anything unknown rather than asking.
+</code></pre></div>
+<h3 id="7-reconstruct-the-pipeline">7. Reconstruct the pipeline<a class="headerlink" href="#7-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Reconstruct the conversion and validation pipeline from the execution records
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>as a bash script, save it as pipeline.sh, and put the trajectory directory in a
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>variable at the top so it can be rerun on the other BlastNet trajectories. Keep
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>only the final converter run and its checks.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>reconstruct_pipeline(format="bash")</code> orders the recorded runs by
+their input/output files; <code>pipeline.sh</code> holds the dry run, the conversion, and
+the two checks as plain <code>python</code> (or <code>uv run</code>) commands with <code>TRAJ_DIR</code> at the
+top. The script calls the tools directly so it runs outside a DSAgt project.</p>
+<h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
+<ol>
+<li><code>skills/blastnet-to-well/</code> exists with a <code>SKILL.md</code> stating the mapping rules, both specifications copied into the skill, and a converter under <code>scripts/</code>.</li>
+<li>Code registry contains <code>convert-to-well</code> and <code>check-well-output</code> specs.</li>
+<li><code>well_output/lifted_hydrogen_jet_traj_5000.hdf5</code> exists and the full checker run reports an exact match to the holdout reference.</li>
+<li><code>trace_archive/</code> holds every converter and checker run, including the failed checks that drove the fixes.</li>
+<li>A datacard exists for the converted dataset.</li>
+<li><code>pipeline.sh</code> replays conversion and validation for a parameterized trajectory directory, calling the tools directly.</li>
+<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session —
+   <code>dsagt traces blastnet-well</code>.</li>
+</ol>
+<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>DSAgt Capability</th>
+<th>Steps</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Skill authoring with <code>skill-creator</code> and <code>save_skill</code>, carrying its source documents as references</td>
+<td>1</td>
+</tr>
+<tr>
+<td>Agent-written code from documentation</td>
+<td>1</td>
+</tr>
+<tr>
+<td>Code registration (<code>save_code_spec</code>) and registry search</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Code execution with provenance through <code>dsagt-run</code></td>
+<td>3–5</td>
+</tr>
+<tr>
+<td>Check-driven iteration with failed runs on the record</td>
+<td>5</td>
+</tr>
+<tr>
+<td>Base-skill use (<code>datacard-generator</code>)</td>
+<td>6</td>
+</tr>
+<tr>
+<td>Pipeline reconstruction with a parameterized input</td>
+<td>7</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>blastnet-well<span class="w"> </span>-y
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>rm<span class="w"> </span>combustion_simulation_data.tar.gz
+</code></pre></div>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/combustion_simulation/reference/convert_to_well_format.py"><code>reference/convert_to_well_format.py</code></a>
+  is the converter this workflow produced, verified against the holdout file.
+  Compare the agent's converter to it after step 5, not before.</li>
+<li>The demo bundle is the first three snapshots of the <code>hydrogen-jet-5000</code>
+  trajectory (a full trajectory is ~32 GB) with the reference WELL file sliced
+  to the same steps, built with
+  <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/combustion_simulation/scripts/make_demo_subset.py"><code>scripts/make_demo_subset.py</code></a>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>python3<span class="w"> </span>make_demo_subset.py<span class="w"> </span>&lt;traj_dir&gt;<span class="w"> </span>&lt;reference.hdf5&gt;<span class="w"> </span>&lt;out_dir&gt;<span class="w"> </span>--steps<span class="w"> </span><span class="m">3</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>tar<span class="w"> </span>czf<span class="w"> </span>combustion_simulation_data.tar.gz<span class="w"> </span>-C<span class="w"> </span>&lt;out_dir&gt;<span class="w"> </span>data
+</code></pre></div>
+<p>The subset converts and checks exactly like the full trajectory, since a
+  converter enumerates snapshots from <code>info.json</code> and every time-varying WELL
+  dataset carries time on axis 1.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
