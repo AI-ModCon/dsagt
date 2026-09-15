@@ -1,6 +1,6 @@
 # AI-Readiness Check
 
-DSAgt runs [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage. Every project carries AIDRIN in three pieces: the `aidrin` package is a dependency of dsagt, so the CLI is in dsagt's Python environment, where `dsagt-run` finds it even when a tool installer such as pipx or `uv tool` puts only dsagt's own commands on PATH; the `aidrin` skill is installed from the AIDRIN repository at the release tag of the installed package; and `aidrin` is registered as a code at init, so every call the agent makes through it is an execution record in `trace_archive/`, like any other code, and the installed skill's examples show the CLI in that registered form. A user who asks "is my data AI-ready?" gets the skill's own workflow.
+DSAgt runs [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage. AIDRIN installs with dsagt, and every project gets the `aidrin` skill and an `aidrin` code, so each call the agent makes is an execution record in `trace_archive/` like any other code. A user who asks "is my data AI-ready?" gets the skill's own workflow.
 
 The pipeline-builder instructions require a paired check around every data operation, with reports in `audit/`. The AI-readiness check makes that check concrete for tabular files: it is the `aidrin` skill's quality baseline (completeness, duplicity, outliers), run on a stage's input before the operation and on its output after it, so every stage of a pipeline is measured the same way and the before/after delta is comparable across stages and projects.
 
@@ -17,7 +17,7 @@ readiness:
 
 ## What the paragraph says
 
-For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz), the check is the `aidrin` skill's quality baseline, run through the registered `aidrin` code before and after the operation. The agent runs the baseline directly, without the skill's intent and plan steps, which are for assessments the user asks for. It saves the results as `audit/step_N_pre.aidrin.json` and `audit/step_N_post.aidrin.json`, reports the per-metric change before proposing the next step, writes no custom check for a metric AIDRIN provides, and keeps the generic check rule for stages whose input and output are not tabular.
+For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz), the check is the `aidrin` skill's quality baseline, run through the registered `aidrin` code before and after the operation. The agent runs the baseline directly, without the skill's intent and plan steps, which are for assessments the user asks for. It saves the results as `audit/step_N_pre.aidrin.json` and `audit/step_N_post.aidrin.json`, reports the per-metric change before proposing the next step, and writes no custom check for a metric AIDRIN provides; every other stage keeps the generic check rule.
 
 ## Try it
 
