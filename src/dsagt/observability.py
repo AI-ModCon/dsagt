@@ -308,9 +308,9 @@ def init_tracing(
     except (
         Exception
     ) as e:  # noqa: BLE001 — a store problem must not take the server down
-        # Tracing is best-effort; the MCP tools are not.  A server that cannot
-        # reach or use its store still has to serve the agent — untraced, with
-        # the cause on the log so the operator can fix the store.
+        # The MCP tools serve regardless of tracing: a server that cannot
+        # reach or use its store still serves the agent, untraced, with the
+        # cause on the log so the operator can fix the store.
         logger.error(
             "%s: tracing disabled — cannot use experiment %r at %s: %s",
             service_name,
@@ -410,7 +410,7 @@ REDACTED_KEYS = frozenset(
 # prose survives: `Bearer`/`Basic` only after `Authorization:`, and a key
 # label only when its value looks like a token (16+ token characters), so
 # "a basic example", "the bearer of bad news" and "max_token: 5" pass through
-# untouched.  This masks the common shapes; it is not a secrets scanner.
+# untouched.  This masks the common shapes.
 _SECRET_IN_TEXT = re.compile(
     r"(?i)"
     r"(authorization\s*[=:]\s*(?:bearer|basic)\s+)[^\s&\"']+"

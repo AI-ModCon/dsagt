@@ -12,8 +12,7 @@ existing provider integration.
 
 **Batch / smoke-test status: NOT SUPPORTED (verified against cline
 3.0.34).** Batch itself works (``cline "prompt"`` runs act-mode with
-auto-approve, honoring the user's pre-configured auth — the old
-model-whitelist blocker is moot), and headless cline even SPAWNS
+auto-approve, honoring the user's pre-configured auth), and headless cline SPAWNS
 registered MCP servers correctly (cwd = the session dir, full shell
 env — verified with a spawn probe).  But it never bridges their tools
 into the model's toolset: a session asked to enumerate every tool it
@@ -185,11 +184,10 @@ class ClineSetup(AgentSetup):
         script_path: Path,
         max_turns: int,
     ) -> int:
-        """Not supported for cline — see module docstring.
+        """Raise: cline's headless CLI loads no MCP servers (module docstring).
 
-        Cline 3.x batch runs fine (act mode, pre-configured auth), but
-        its headless CLI never loads MCP servers, so a scripted session
-        has no dsagt tools to exercise.
+        Cline 3.x batch runs (act mode, pre-configured auth), but a
+        scripted session has no dsagt tools to exercise.
         """
         del config, env, working_dir, script_path, max_turns
         raise RuntimeError(

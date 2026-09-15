@@ -529,8 +529,8 @@ def create_knowledge_server(kb: KnowledgeBase):
     """Create a standalone MCP server exposing only the knowledge-base tools.
 
     Test-facing API: tests call it with a mock KB and drive the server via
-    ``call_tool_sync()``.  The merged ``dsagt-server`` uses
-    :func:`_knowledge_tools_and_handlers` directly instead of this wrapper.
+    ``call_tool_sync()``.  The merged ``dsagt-server`` composes
+    :func:`_knowledge_tools_and_handlers` itself.
     """
     tools, handlers = _knowledge_tools_and_handlers(kb)
     return build_dispatch_server(

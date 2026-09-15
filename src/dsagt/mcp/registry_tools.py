@@ -554,8 +554,8 @@ def create_registry_server(
     """Create a standalone MCP server exposing only the registry/exec/provenance tools.
 
     Test-facing API: tests call with a mock registry and drive the server via
-    ``call_tool_sync()``.  The merged ``dsagt-server`` uses
-    :func:`_registry_tools_and_handlers` directly instead of this wrapper.
+    ``call_tool_sync()``.  The merged ``dsagt-server`` composes
+    :func:`_registry_tools_and_handlers` itself.
     """
     tools, handlers = _registry_tools_and_handlers(registry, kb)
     return build_dispatch_server(

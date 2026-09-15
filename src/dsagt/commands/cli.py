@@ -173,7 +173,7 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
 
     Selection questions: agent platform, packaged KB document *collections*,
     skill-catalog *sources*, and the episodic-memory opt-in.  The bundled
-    ``tools`` collection is always provisioned and is NOT a per-project choice.
+    ``tools`` collection is always provisioned.
     Project name + folder location are resolved by the caller.  Embedding /
     chunk_size / rerank are code defaults, not init choices.
 
@@ -610,8 +610,7 @@ def _run_smoke_all(script: Path) -> int:
 
     Streams each agent's stdout/stderr to a per-agent log file so the
     terminal stays readable.  Prints the verdict for each agent as it
-    finishes — fastest-first, not input order — so the operator can see
-    progress instead of waiting for the slowest agent before any output.
+    finishes, fastest first, so the operator sees progress as agents finish.
     """
     import tempfile
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -655,8 +654,8 @@ def _run_smoke_all(script: Path) -> int:
     return 0 if n_pass == len(agents) else 1
 
 
-# User-facing exception types that should produce a clean one-line error
-# message rather than a traceback.  Everything else crashes loudly.
+# User-facing exception types that print as a one-line message at the CLI
+# boundary.  Everything else crashes loudly.
 _USER_ERRORS = (FileNotFoundError, FileExistsError, ValueError, RuntimeError)
 
 
@@ -829,8 +828,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     # The CLI speaks to the user via ``print()``; library logs are diagnostic.
-    # Default the console to WARNING so INFO chatter (embedder load, route
-    # registration, catalog indexing) doesn't bury the init/start output.
+    # Default the console to WARNING so the init/start output stays readable
+    # over INFO chatter (embedder load, route registration, catalog indexing).
     # ``--verbose`` opts into the full DEBUG stream.
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,

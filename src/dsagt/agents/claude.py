@@ -107,8 +107,7 @@ class ClaudeSetup(AgentSetup):
     ) -> int:
         """Single ``claude -p`` call with the entire script as one prompt.
 
-        ``--verbose`` streams tool-call progress instead of buffering
-        everything until the agent finishes.
+        ``--verbose`` streams tool-call progress as it happens.
 
         ``--max-thinking-tokens 4096`` caps per-turn extended thinking
         — claude code's default is much higher and a multi-task smoke

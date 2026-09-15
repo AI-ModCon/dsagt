@@ -15,8 +15,7 @@ Three ergonomic wins over a raw
    tab.
 3. **Quiet.** ``--workers 1`` and ``PYTHONWARNINGS=ignore`` drop the repeated
    Starlette deprecation spam; the viewer runs in the foreground (Ctrl-C to
-   stop), so there is no background server to hunt down and kill later — the
-   store stays serverless.
+   stop) and the store stays serverless.
 """
 
 from __future__ import annotations

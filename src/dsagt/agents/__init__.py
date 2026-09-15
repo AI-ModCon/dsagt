@@ -91,9 +91,8 @@ def agent_env(config: dict) -> dict:
          ``DSAGT_AGENT``).
       3. ``MLFLOW_TRACKING_URI`` so the MCP servers' ``init_tracing`` and
          any MLflow client running under the agent log to the project's
-         store.  No OTel routing env — DSAGT does not force native agent
-         telemetry; agent traces are recovered post-hoc from the on-disk
-         transcript.
+         store.  Agent traces come from the on-disk transcript, so routing
+         is all the block carries.
       4. Per-agent dsagt-owned runtime env via
          :meth:`AgentSetup.runtime_env` — per-project state dirs only
          (``CLINE_DIR``, ``CODEX_HOME``).
@@ -190,9 +189,9 @@ def refresh_native_skills(working_dir: str | Path) -> list[str]:
     invocation does.  Idempotent (manifest-tracked, the same mirror
     :func:`dynamic_agent_record` runs at init/start).
 
-    No-op when ``working_dir`` has no ``.dsagt/config.yaml`` agent — the dir
-    hasn't been ``dsagt init``-ed, so there is no native skills dir to mirror
-    into (the test-facing ``create_*_server`` wrappers over bare tmp dirs).
+    Returns without mirroring when ``working_dir`` has no ``.dsagt/config.yaml``
+    agent: a directory before ``dsagt init`` has no native skills dir (the
+    test-facing ``create_*_server`` wrappers over bare tmp dirs).
     """
     # Lazy: session drags in knowledge/provenance at module level, which this
     # package (imported by the CLI at cold start) must not pay for.

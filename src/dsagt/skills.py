@@ -313,7 +313,7 @@ def _source_dirs(cache_dir: Path) -> list[Path]:
     """Cached source clones under *cache_dir*, sorted by name.
 
     A ``<slug>.previous`` directory is a clone a re-clone set aside; one left
-    behind by a process that died mid-sync is not a source.
+    behind by a process that died mid-sync is skipped.
     """
     if not cache_dir.exists():
         return []
@@ -980,7 +980,7 @@ class SkillsCatalog:
         Fan-out + RRF live in ``KnowledgeBase.search`` (the shared substrate);
         catalog collections are homogeneous (one embedder) so the fusion is a
         clean rank merge.  When a ``tag`` filter is set we over-fetch
-        (``top_k * 3``) then post-filter so the tag doesn't starve the results.
+        (``top_k * 3``) then post-filter so the tag filter leaves enough results.
         """
         collections = self.synced_collections()
         if not collections:
@@ -1104,11 +1104,10 @@ class SkillsCatalog:
 # owns a shared KB reuses one catalog instance.
 #
 # Skill *materialization* (mirroring installed skills into each agent's native
-# skills directory) lives in the agent layer (``AgentSetup.setup_skills``), not
-# here: every supported agent (claude/codex/goose/cline) natively
-# auto-discovers ``SKILL.md`` folders, so there is no agent-facing disclosure
-# tier for the router to own.  ``search_skills`` exists for the *catalog* tier
-# (skills not yet installed, which native discovery can't see) plus the
+# skills directory) is in the agent layer (``AgentSetup.setup_skills``): every
+# supported agent (claude/codex/goose/cline) auto-discovers ``SKILL.md``
+# folders, so the router owns the *catalog* tier alone: ``search_skills`` over
+# skills not yet installed, which native discovery cannot see, plus the
 # no-embedder keyword fallback.
 
 

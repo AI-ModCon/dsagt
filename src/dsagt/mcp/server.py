@@ -60,8 +60,8 @@ def build_dispatch_server(
 ) -> Server:
     """Wrap a ``(tools, handlers)`` pair in a configured MCP ``Server``.
 
-    One dispatch contract for every concern module: reject what the tool's own
-    ``input_schema`` does not admit, run the handler, catch + wrap what it
+    One dispatch contract for every concern module: reject arguments outside
+    the tool's own ``input_schema``, run the handler, catch + wrap what it
     raises, then format by return type — a handler that returns ``str`` passes
     through, one that returns ``dict`` is JSON-encoded.  Registry handlers
     return ``str`` and never raise; knowledge handlers return ``dict`` and raise
@@ -114,8 +114,8 @@ def build_dispatch_server(
     ) -> types.CallToolResult:
         tool_name = params.name
         # ``arguments`` is optional in the protocol (None when omitted), and the
-        # mcp server does not validate against input_schema before dispatch —
-        # reject malformed calls here so handlers can assume valid input.
+        # mcp server dispatches without validating against input_schema, so
+        # malformed calls are rejected here and handlers assume valid input.
         arguments = params.arguments or {}
         # The tool name is client-controlled — an agent inventing one, or holding
         # a stale name across a restart, must get a rejection back rather than an
@@ -144,7 +144,7 @@ def build_dispatch_server(
             if span is not None:
                 # The trace-level Request/Inputs/Outputs are read from this
                 # categorization root; record the call's arguments and result so
-                # the MLflow UI shows them instead of a null request.  Both are
+                # the MLflow UI shows them as the trace's request and response.  Both are
                 # agent-controlled and land verbatim in mlflow.db, so they go
                 # through ``bound``: credential keys redacted, leaves truncated.
                 span.set_inputs(bound(arguments))
