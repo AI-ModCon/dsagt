@@ -460,7 +460,9 @@ class TestPinTraceSourceResume:
         same.write_text("{}\n")
         record_trace_source(tmp_path, str(same))
         append_session(tmp_path)
-        monkeypatch.setattr(server_mod, "_SERVER_STARTED_AT", os.path.getmtime(same) - 1)
+        monkeypatch.setattr(
+            server_mod, "_SERVER_STARTED_AT", os.path.getmtime(same) - 1
+        )
 
         class Collector:
             def active_source(self):
