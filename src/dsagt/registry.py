@@ -483,57 +483,31 @@ class CodeRegistry:
 
 class SkillRegistry:
     """
-    Manages instruction-based agent skills and optional KB indexing.
+    Manages the instruction skills installed in ``<project>/skills/``.
 
-    Two layers (mirroring CodeRegistry):
-
-    * **Bundled skills** ship with the dsagt package at
-      ``_PACKAGE_SKILLS_DIR``.  Read-only; embeddings live in shared
-      ``bundled_skills`` collection.
-    * **Project skills** are user/agent-edited skills in
-      ``<project>/skills/``.  Embeddings go into project-local
-      ``registered_skills`` on save.
-
-    List / lookup methods merge both layers; project wins on name
-    collision so a project can override a bundled skill.
+    One layer: every skill a project has — the base skills ``dsagt init``
+    installs from their upstream repositories, catalog skills added with
+    ``install_skill``, and skills the agent authors with ``save_skill`` —
+    is a skill-standard directory ``<project>/skills/<name>/``.  The
+    package holds no skills of its own.  Skills are not indexed into a KB:
+    agents auto-discover them natively after ``AgentSetup.setup_skills``
+    mirrors them.
     """
-
-    _PACKAGE_SKILLS_DIR = Path(__file__).parent / "skills"
 
     def __init__(
         self,
         runtime_dir: str | Path,
-        source_skills_dir: str | None = None,
         kb: KnowledgeBase | None = None,
     ):
         self.runtime_dir = Path(runtime_dir)
         self.skills_dir = self.runtime_dir / "skills"
         self._kb = kb
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        # Optional override of the package-bundled directory (tests).
-        self._bundled_dir = (
-            Path(source_skills_dir)
-            if source_skills_dir and Path(source_skills_dir).exists()
-            else self._PACKAGE_SKILLS_DIR
-        )
-
-        # Project skill dir always exists; agents save into it.  We no
-        # longer seed it with bundled skills — they're served directly
-        # from the package via the merge in list_skills / get_skill.
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
-    def _bundled_skill_dirs(self) -> list[Path]:
-        """Return skill directories shipped with the package."""
-        if not self._bundled_dir.exists():
-            return []
-        return [
-            d
-            for d in sorted(self._bundled_dir.iterdir())
-            if d.is_dir() and (d / "SKILL.md").exists()
-        ]
-
-    def _project_skill_dirs(self) -> list[Path]:
-        """Return skill directories the agent has saved into this project."""
+    def skill_dirs(self) -> list[Path]:
+        """All skill directories in the project (for the native-skills
+        mirror — see ``AgentSetup.setup_skills``)."""
         return [
             d
             for d in sorted(self.skills_dir.iterdir())
@@ -541,13 +515,9 @@ class SkillRegistry:
         ]
 
     def list_skills(self) -> list[dict]:
-        """Return name + description for each skill (bundled + project, project wins)."""
+        """Return the frontmatter of each skill whose SKILL.md has a name."""
         seen: dict[str, dict] = {}
-        for d in self._bundled_skill_dirs():
-            spec = _parse_frontmatter(d / "SKILL.md")
-            if spec.get("name"):
-                seen[spec["name"]] = spec
-        for d in self._project_skill_dirs():
+        for d in self.skill_dirs():
             spec = _parse_frontmatter(d / "SKILL.md")
             if spec.get("name"):
                 seen[spec["name"]] = spec
@@ -603,17 +573,12 @@ class SkillRegistry:
         return action
 
     def _skill_md_path(self, name: str) -> Path | None:
-        """Resolve a skill name to its SKILL.md, project layer first."""
-        project = self.skills_dir / name / "SKILL.md"
-        if project.exists():
-            return project
-        bundled = self._bundled_dir / name / "SKILL.md"
-        if bundled.exists():
-            return bundled
-        return None
+        """Resolve a skill name to its SKILL.md, or None if not installed."""
+        path = self.skills_dir / name / "SKILL.md"
+        return path if path.exists() else None
 
     def get_skill(self, name: str) -> dict | None:
-        """Get a skill's frontmatter by name.  Project overrides bundled."""
+        """Get a skill's frontmatter by name."""
         path = self._skill_md_path(name)
         if path is None:
             return None

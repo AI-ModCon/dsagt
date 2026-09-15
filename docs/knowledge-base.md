@@ -34,7 +34,7 @@ The same vector store additionally supports DSAgt's [memory](memory.md) (explici
 ## Try it
 
 ```bash
-dsagt init            # name it `demo`, and enable the AIDRIN collection in the prompts
+dsagt init            # name it `demo`, and check `nemo_curator` at the knowledge-collections menu
 dsagt start demo
 ```
 
@@ -42,5 +42,5 @@ Then, in the agent — substituting `<your-docs-folder>` with any folder of your
 own documents (papers, protocols, schemas):
 
 1. > Ingest the docs in `<your-docs-folder>` into a collection named `domain`.
-2. > Search the `domain` and `aidrin` collections for how to assess data completeness.
+2. > Search the `domain` and `nemo_curator` collections for how to assess data quality.
 

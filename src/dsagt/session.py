@@ -46,6 +46,13 @@ DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
 # ``~/dsagt-projects/kb_index/`` (shared bundled-content KB provisioned by
 # ``dsagt init``).  Migrated from ``~/.dsagt/`` on 2026-05-07.
 REGISTRY_DIR = DEFAULT_PROJECTS_BASE
+#: Files a cached source clone carries at its root: the commit the clone
+#: was taken at and the branch or tag it was asked for.  Written by
+#: ``clone_github``; the skill installer repeats the commit in
+#: ``PROVENANCE.txt`` and re-clones a cache whose ref differs from the
+#: one requested.
+SOURCE_COMMIT_FILE = "SOURCE_COMMIT"
+SOURCE_REF_FILE = "SOURCE_REF"
 REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
 RESERVED_PROJECT_NAMES = ("projects.yaml", "kb_index", ".skill_sources", ".tools")
 
@@ -89,7 +96,7 @@ DEFAULTS = {
         "sources": [
             {
                 "name": "genesis",
-                "url": "https://gitlab.osti.gov/genesis/genesis-skills",
+                "url": "https://github.com/AI-ModCon/genesis-skills",
                 "branch": "main",
                 "subdir": "skills",
             },
@@ -113,6 +120,40 @@ _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
 # ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------
+
+
+USER_ENV_FILE = Path.home() / ".config" / "dsagt" / "env"
+
+
+def load_user_env(path: Path = USER_ENV_FILE) -> list[str]:
+    """Load credentials from the user-level env file into ``os.environ``.
+
+    ``~/.config/dsagt/env`` holds ``KEY=VALUE`` lines (an ``export`` prefix,
+    quotes and ``#`` comments are accepted) for the secrets an agent cannot
+    hand to its MCP children: codex and cline start ``dsagt-server`` with only
+    the env block baked into their config, never the shell, so
+    ``MLFLOW_TRACKING_API_KEY`` / ``EMBEDDING_API_KEY`` exported in a terminal
+    never arrive.  The file is the ``~/.netrc`` pattern — in ``$HOME``, mode
+    600, never inside a project or an agent config, which is the line the
+    credential policy draws.  A key already in the environment wins, so a
+    shell export still overrides the file.  Returns the names it set.
+    """
+    if not path.is_file():
+        return []
+    loaded = []
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :]
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
 
 
 def resolve_env_vars(value):
@@ -144,6 +185,7 @@ def build_config(
     knowledge: dict | None = None,
     skills: dict | None = None,
     episodic: dict | None = None,
+    readiness: dict | None = None,
 ) -> dict:
     """Assemble a project's ``.dsagt/config.yaml`` body.
 
@@ -157,6 +199,8 @@ def build_config(
     - ``skills.sources`` — the skill-catalog repos chosen.
     - ``episodic`` — written *only when the user opted in* (it's an opt-in, so a
       disabled project stays minimal and backfills ``enabled: false`` on read).
+    - ``readiness`` — the AI-readiness check setting (``auto_assess``; see
+      :mod:`dsagt.readiness`), written when init asked the question.
 
     Everything else (embedding backend, chunk_size, rerank, populate_native)
     is a code default backfilled on read — NOT a written choice.  Credentials
@@ -170,6 +214,8 @@ def build_config(
     }
     if episodic:
         body["episodic"] = episodic
+    if readiness is not None:
+        body["readiness"] = readiness
     return body
 
 
@@ -180,10 +226,16 @@ def default_config_content(
     knowledge: dict | None = None,
     skills: dict | None = None,
     episodic: dict | None = None,
+    readiness: dict | None = None,
 ) -> str:
     """Serialize :func:`build_config` to YAML for ``.dsagt/config.yaml``."""
     body = build_config(
-        project_name, agent, knowledge=knowledge, skills=skills, episodic=episodic
+        project_name,
+        agent,
+        knowledge=knowledge,
+        skills=skills,
+        episodic=episodic,
+        readiness=readiness,
     )
     return yaml.dump(body, default_flow_style=False, sort_keys=False)
 
@@ -577,6 +629,31 @@ def _provision_kb(
         print("  Knowledge base ready.", flush=True)
 
 
+def _provision_base_skills(pdir: Path, embedding: dict | None) -> None:
+    """Install the base skills (``skills.base_skills``) from their upstream
+    repositories into ``<project>/skills/`` and register their codes into
+    the project's knowledge base.
+
+    Runs after the knowledge base is provisioned so the codes land in the
+    ``codes`` collection ``search_registry`` searches.  A failed fetch is
+    printed, not raised: the project works without the skills, and a re-run
+    of ``dsagt init`` installs them once the network is available.
+    """
+    from dsagt.skills import install_base_skills
+
+    kb = kb_from_config(
+        {"project_dir": str(pdir), "embedding": embedding or DEFAULTS["embedding"]}
+    )
+    try:
+        install_base_skills(pdir, kb=kb)
+    except Exception as e:  # noqa: BLE001 — offline init must still complete
+        print(
+            f"  Warning: could not install the base skills ({e}).  Re-run "
+            "`dsagt init` with network access to install them.",
+            flush=True,
+        )
+
+
 def init_project(
     project_name: str,
     agent: str,
@@ -588,6 +665,7 @@ def init_project(
     knowledge: dict | None = None,
     skills: dict | None = None,
     episodic: dict | None = None,
+    readiness: dict | None = None,
 ) -> Path:
     """Create or reconfigure a project — ``dsagt init`` is re-runnable.
 
@@ -634,10 +712,17 @@ def init_project(
 
     _provision_kb(pdir, include, exclude, embedding=embedding)
 
+    _provision_base_skills(pdir, embedding)
+
     write_config_file(
         pdir,
         build_config(
-            project_name, agent, knowledge=knowledge, skills=skills, episodic=episodic
+            project_name,
+            agent,
+            knowledge=knowledge,
+            skills=skills,
+            episodic=episodic,
+            readiness=readiness,
         ),
     )
 
@@ -766,7 +851,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
     guessing would risk reading the *new* session's records.
     """
     from dsagt.memory import episodic_consumers
-    from dsagt.observability import resolve_tracking_uri
+    from dsagt.observability import experiment_name, resolve_tracking_uri
     from dsagt.traces import make_trace_collector
 
     sessions = read_state(pdir).get("sessions") or []
@@ -785,6 +870,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
         project,
         prev_tag,
         resolve_tracking_uri(config),
+        experiment=experiment_name(config),
         extra_consumers=episodic_consumers(config, kb, pdir, prev_tag),
         source=source,
     )

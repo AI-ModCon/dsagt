@@ -23,13 +23,14 @@ logger = logging.getLogger(__name__)
 # Master instructions ship with the package, one directory above this file.
 _INSTRUCTIONS_PATH = Path(__file__).parent.parent / "dsagt_instructions.md"
 
-# Marker string we look for to decide whether an instructions file already
-# carries the dsagt body.  Present in the master instructions header and in
-# every per-agent format we emit (CLAUDE.md, AGENTS.md, .goosehints,
-# .clinerules/dsagt_instructions.md, .roomodes' JSON-embedded instructions).
-# Lets ``_append_or_write`` be idempotent so users can edit instructions
-# files between init and start without losing edits on the next start.
-_DSAGT_MARKER = "DSAgt Pipeline Builder"
+# The dsagt instructions sit between these two lines in every per-agent
+# instructions file (CLAUDE.md, AGENTS.md, .goosehints,
+# .clinerules/dsagt_instructions.md).  ``_write_dsagt_block`` replaces the
+# text between them on every init and start, so a changed setting or an
+# upgraded dsagt reaches the agent, and keeps whatever the user wrote
+# outside them.
+_BLOCK_BEGIN = "<!-- dsagt:begin -->"
+_BLOCK_END = "<!-- dsagt:end -->"
 
 # Tools the dsagt MCP server exposes — listed in ``alwaysAllow`` so cline
 # auto-approves them without a human-in-the-loop prompt.  Keep in
@@ -79,13 +80,14 @@ def _mcp_env_block(config: dict) -> dict[str, str]:
     """Env vars the dsagt MCP server children need at startup.
 
     Benign routing only (no credentials, no provider redirection): the
-    project name + dir, the serverless ``MLFLOW_TRACKING_URI``, and the
+    project name + dir, the resolved ``MLFLOW_TRACKING_URI``, and the
     embedding-backend settings.  MCP children run with cwd == project_dir
     and could read most of this from ``.dsagt/config.yaml``, but agents that
     don't inherit the parent's shell env into their MCP children (codex /
-    cline) need it baked into the per-agent MCP config.  For
-    ``backend: api`` the user still sets ``EMBEDDING_API_KEY`` in their shell
-    (creds never on disk).
+    cline) need it baked into the per-agent MCP config.  Credentials are never
+    part of it: ``EMBEDDING_API_KEY`` and the trace store's key come from the
+    shell or ``~/.config/dsagt/env`` (``session.load_user_env``), which is
+    also how codex/cline children — which see only this block — receive them.
 
     No session id here — the MCP server mints it at startup into
     ``.dsagt/state.yaml`` (it owns the session lifecycle now), so there's
@@ -108,31 +110,55 @@ def _mcp_env_block(config: dict) -> dict[str, str]:
     return block
 
 
-def _load_master_instructions() -> str | None:
-    """Load the master DSAgt instructions, or None if the file is missing."""
-    if _INSTRUCTIONS_PATH.exists():
-        return _INSTRUCTIONS_PATH.read_text()
-    logger.warning("Master instructions not found: %s", _INSTRUCTIONS_PATH)
-    return None
+_READINESS_MARKER = "<!-- readiness-check -->\n"
 
 
-def _append_or_write(path: Path, content: str, marker: str) -> str | None:
-    """Idempotent write for instructions files.
+def _load_master_instructions(auto_assess: bool = True) -> str | None:
+    """Load the master DSAgt instructions, or None if the file is missing.
 
-    - File doesn't exist → write content.
-    - File exists, marker absent → append content (preserves user prefix).
-    - File exists, marker present → no-op (preserves user edits).
-
-    Returns a one-line action description, or None on no-op.
+    The per-operation check rule carries a marker line; with *auto_assess*
+    the AI-readiness paragraph replaces it, otherwise the line is dropped.
     """
-    if path.exists():
-        existing = path.read_text()
-        if marker in existing:
-            return None
-        path.write_text(existing + "\n\n" + content)
+    if not _INSTRUCTIONS_PATH.exists():
+        logger.warning("Master instructions not found: %s", _INSTRUCTIONS_PATH)
+        return None
+    from dsagt.readiness import INSTRUCTIONS_PARAGRAPH
+
+    text = _INSTRUCTIONS_PATH.read_text()
+    if _READINESS_MARKER not in text:
+        raise RuntimeError(f"{_INSTRUCTIONS_PATH} has no readiness-check marker")
+    filler = INSTRUCTIONS_PARAGRAPH + "\n" if auto_assess else ""
+    return text.replace(_READINESS_MARKER, filler)
+
+
+def _write_dsagt_block(path: Path, content: str) -> str | None:
+    """Write *content* as the dsagt block of the instructions file at *path*.
+
+    The block is the text from the begin marker line through the end marker
+    line.  A missing file becomes the block; a file without the markers gets
+    the block appended after its own text; a file with the markers has the
+    block replaced.  Text before or after the block is the user's and is
+    kept.  Returns a one-line action description, or None when the file
+    already holds this block.
+    """
+    block = f"{_BLOCK_BEGIN}\n{content.rstrip()}\n{_BLOCK_END}\n"
+    if not path.exists():
+        path.write_text(block)
+        return f"Wrote {path}"
+    existing = path.read_text()
+    begin = existing.find(_BLOCK_BEGIN)
+    end = existing.find(_BLOCK_END, begin + 1) if begin != -1 else -1
+    if end == -1:
+        path.write_text(existing.rstrip("\n") + "\n\n" + block)
         return f"Appended DSAgt instructions to {path}"
-    path.write_text(content)
-    return f"Wrote {path}"
+    end += len(_BLOCK_END)
+    if existing[end : end + 1] == "\n":
+        end += 1
+    updated = existing[:begin] + block + existing[end:]
+    if updated == existing:
+        return None
+    path.write_text(updated)
+    return f"Updated DSAgt instructions in {path}"
 
 
 #: Claude Code caps a skill's frontmatter description (combined with
@@ -307,12 +333,13 @@ class AgentSetup(ABC):
     native_skills_dir: ClassVar[str | None] = None
 
     @abstractmethod
-    def write_static(self, working_dir: Path) -> list[str]:
+    def write_static(self, working_dir: Path, *, auto_assess: bool = True) -> list[str]:
         """Write the agent's instructions file + any state directories.
 
         Idempotent: if the dsagt marker is already in the instructions
-        file, the write is skipped (preserves user edits).  Returns a
-        list of one-line action descriptions.
+        file, the write is skipped (preserves user edits).  *auto_assess*
+        selects whether the instructions carry the AI-readiness check
+        paragraph.  Returns a list of one-line action descriptions.
         """
 
     @abstractmethod
@@ -352,12 +379,10 @@ class AgentSetup(ABC):
 
         codes = CodeRegistry(runtime_dir=working_dir, kb=None)
         reg = SkillRegistry(runtime_dir=working_dir, kb=None)
-        # Later entries win name collisions: codes first, then bundled
-        # skills, then project skills — a deliberately installed instruction
-        # skill outranks a registered code of the same name.
-        src_dirs = (
-            codes.code_dirs() + reg._bundled_skill_dirs() + reg._project_skill_dirs()
-        )
+        # Later entries win name collisions: codes first, then project
+        # skills — a deliberately installed instruction skill outranks a
+        # registered code of the same name.
+        src_dirs = codes.code_dirs() + reg.skill_dirs()
         target = working_dir
         for part in self.native_skills_dir.split("/"):
             target = target / part
@@ -386,9 +411,10 @@ class AgentSetup(ABC):
         only to set per-project state-dir env (``CLINE_DIR``,
         ``CODEX_HOME``) that isolates their global config per project.
 
-        Provider credentials (ANTHROPIC_*, OPENAI_*, GOOSE_*) are the
-        user's responsibility — exported in their shell, never translated
-        from ``config["llm"]``.
+        LLM-provider credentials (ANTHROPIC_*, OPENAI_*, GOOSE_*) are the
+        user's responsibility — exported in their shell, never read or
+        translated by dsagt.  DSAgt's own service credentials (trace store,
+        embedding backend) are a separate matter: see ``_mcp_env_block``.
         """
         del config
         return {}

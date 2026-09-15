@@ -354,6 +354,29 @@ class TestMain:
             lambda c: f"sqlite:///{tmp_path}/mlflow.db",
         )
 
+    def test_trace_root_carries_the_minted_session(self, tmp_path, monkeypatch):
+        """The MCP server mints the session into ``.dsagt/state.yaml``; the
+        ``code.execute`` root must carry it, or every execution trace lands
+        in an unbucketed ``(no-session)`` group in ``dsagt info``."""
+        import mlflow
+
+        from dsagt import observability as obs_module
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".dsagt").mkdir()
+        (tmp_path / ".dsagt" / "config.yaml").write_text("project: test\n")
+        (tmp_path / ".dsagt" / "state.yaml").write_text(
+            "sessions:\n- id: 7\n  started_at: '2026-01-01T00:00:00Z'\n"
+        )
+        monkeypatch.setattr(obs_module, "_initialized", False)
+        monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+        assert main(["--code", "t", "--records-dir", str(tmp_path), "--", "true"]) == 0
+
+        assert obs_module._default_session_id == "test-7"
+        trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+        assert trace.info.trace_metadata.get("mlflow.trace.session") == "test-7"
+
     def test_basic_invocation(self, tmp_path):
         """main() runs a command and returns its exit code."""
         exit_code = main(
@@ -400,3 +423,32 @@ class TestMain:
             ]
         )
         assert exit_code == 7
+
+
+class TestChildEnv:
+    """dsagt-run resolves a command from dsagt's own environment when PATH
+    lacks it, which is the case under pipx and ``uv tool install``."""
+
+    def test_interpreter_dir_is_appended_once(self, monkeypatch):
+        import os
+        import sys
+
+        from dsagt.provenance import _child_env
+
+        bin_dir = str(Path(sys.executable).parent)
+        monkeypatch.setenv("PATH", "/usr/bin")
+        assert _child_env()["PATH"] == f"/usr/bin{os.pathsep}{bin_dir}"
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin")
+        assert _child_env()["PATH"] == f"{bin_dir}{os.pathsep}/usr/bin"
+
+    def test_command_from_the_interpreter_dir_runs(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PATH", str(tmp_path))  # an empty directory
+        exit_code = run_and_record(
+            code_name="py",
+            command=["python", "-c", "print('found')"],
+            records_dir=tmp_path,
+            record_id="env-001",
+        )
+        assert exit_code == 0
+        (record,) = tmp_path.glob("*.json")
+        assert "found" in json.loads(record.read_text())["execution"]["stdout"]

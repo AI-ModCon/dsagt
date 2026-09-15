@@ -38,6 +38,7 @@ from pathlib import Path
 
 import yaml
 
+from dsagt.observability import experiment_name, resolve_tracking_uri
 from dsagt.session import load_config, project_dir, resolve_env_vars
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
@@ -329,11 +330,10 @@ def _kb_collections(pdir: Path) -> list[dict]:
 
 
 def _skills(pdir: Path) -> list[dict]:
-    """Installed + bundled skills for the project.
+    """Installed skills for the project.
 
-    Reads the project's ``skills/`` plus the bundled skill dirs via
-    ``SkillRegistry`` (no embedder needed — this is a directory scan, not a
-    search).  Returns ``[{"name", "description"}, ...]``; empty on any
+    Reads the project's ``skills/`` via ``SkillRegistry`` (no embedder
+    needed — this is a directory scan, not a search).  Returns ``[{"name", "description"}, ...]``; empty on any
     failure so the report never crashes on a malformed skill.
     """
     try:
@@ -349,7 +349,7 @@ def _skills(pdir: Path) -> list[dict]:
 
 
 def _print_skills(rows: list[dict]) -> None:
-    """Render the installed/bundled skill list (name — truncated description)."""
+    """Render the installed skill list (name — truncated description)."""
     if not rows:
         return
     name_w = max(len(r["name"]) for r in rows)
@@ -401,18 +401,19 @@ def _kb_retrieval(traces) -> list[dict]:
     return sorted(rows.values(), key=lambda r: r["searches"], reverse=True)
 
 
-def _load_traces(mlflow_db: Path, project_name: str):
+def _load_traces(tracking_uri: str, experiment: str):
     """Return (traces_df, experiment_id_or_none).
 
-    Reads the serverless ``sqlite:///<pdir>/mlflow.db`` store directly — no
-    server required.  Separate from the main reporting logic so the caller
-    can decide what to print when the experiment doesn't exist yet (new
-    project, never run).
+    Reads whichever store the project logs to — the serverless
+    ``sqlite:///<pdir>/mlflow.db`` by default, or the shared tracking server
+    named by ``MLFLOW_TRACKING_URI``.  Separate from the main reporting logic
+    so the caller can decide what to print when the experiment doesn't exist
+    yet (new project, never run).
     """
     import mlflow
 
-    mlflow.set_tracking_uri(f"sqlite:///{mlflow_db}")
-    exp = mlflow.get_experiment_by_name(project_name)
+    mlflow.set_tracking_uri(tracking_uri)
+    exp = mlflow.get_experiment_by_name(experiment)
     if exp is None:
         return None, None
     traces = mlflow.search_traces(
@@ -547,6 +548,7 @@ def _report(project_name: str, config: dict, traces) -> dict:
 
 def _print_text(r: dict) -> None:
     print(f"Project: {r['project']}")
+    print(f"  Experiment: {r['experiment']}")
     print(f"  Agent:      {r['agent']}")
     print(f"  Embedding:  {r['model']}")
     if r.get("created"):
@@ -623,19 +625,24 @@ def run(project: str, as_json: bool) -> int:
     # (not ${VAR} placeholders from .dsagt/config.yaml).
     config = resolve_env_vars(load_config(project))
     pdir = Path(config["project_dir"])
-    mlflow_db = pdir / "mlflow.db"
+    tracking_uri = resolve_tracking_uri(config)
 
     sources = _config_sources(project)
     kb_collections = _kb_collections(pdir)
     skills = _skills(pdir)
     created = _project_created(pdir)
 
-    if not mlflow_db.exists():
+    # The project's default file only exists once a session has logged a
+    # span; any other store has no local footprint, so only the default can
+    # short-circuit as "never started".
+    db = pdir / "mlflow.db"
+    if tracking_uri == f"sqlite:///{db}" and not db.exists():
         # New project, or one that's never been started.  Print the header
         # so the user can verify they got the right project, then a short
         # note — rather than crashing on a missing DB.
         r = {
             "project": project,
+            "experiment": experiment_name(config),
             "agent": config.get("agent", "-"),
             "model": config.get("embedding", {}).get("model", "-"),
             "created": created,
@@ -657,9 +664,16 @@ def run(project: str, as_json: bool) -> int:
             _print_text(r)
         return 0
 
-    traces, _ = _load_traces(mlflow_db, project)
+    try:
+        traces, _ = _load_traces(tracking_uri, experiment_name(config))
+    except (
+        Exception
+    ) as e:  # noqa: BLE001 — a remote store can be down or refuse the key
+        print(f"Could not read the trace store at {tracking_uri}: {e}")
+        return 1
     r = _report(project, config, traces)
     r["created"] = created
+    r["experiment"] = experiment_name(config)
     r["kb_collections"] = kb_collections
     r["skills"] = skills
     r["config_sources"] = sources

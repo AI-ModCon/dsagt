@@ -36,7 +36,7 @@ Before implementing anything, search for existing capabilities:
 3. `search_skills(query)` — now browse the synced catalog. Entries marked `[catalog]` are installable.
 4. `install_skill(skill_name=...)` — copy a catalog skill into the project. The install is **complete and immediately usable**: its SKILL.md + scripts land in `skills/<name>/` and are mirrored into your native skills dir on the spot. To use it this session, read `skills/<name>/SKILL.md` and follow it — that is exactly what native invocation does. Future sessions auto-discover it hands-free. Never tell the user a restart or any other action is needed before an installed skill can be used.
 
-To author a brand-new skill instead of installing one, use the bundled `skill-creator` skill.
+To author a brand-new skill instead of installing one, use the `skill-creator` skill installed in every project.
 
 **When the user indicates they want a specific code used** — phrasings like "use `foo`", "use `foo` from the registry", "run `foo`", or similar — look it up first (`search_registry(code_name=...)` for exact match, `get_registry()` to browse). Read the returned spec's `executable` field and each parameter's `cli` field, then invoke via your shell. Do not substitute your own file/shell tools for a task a registered code can do. (See section 1b for the verbatim-`executable` rule.)
 
@@ -75,6 +75,8 @@ check_[X](output) → audit/step_N_post.json
 ```
 
 All check reports are saved to `audit/` for the audit trail.
+
+<!-- readiness-check -->
 
 ### 5. File Organization
 - Each registered code is a self-contained dir: spec at `codes/<name>/SKILL.md`, its scripts in `codes/<name>/scripts/`

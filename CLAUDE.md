@@ -15,7 +15,7 @@ DSAGT is **bring-your-own-agent**: the agent talks to its own LLM provider direc
 
 The MCP server is self-sufficient: it derives the project from its cwd (`.dsagt/config.yaml`), with the MCP-config env block as robustness, and behaves identically regardless of how it was launched.
 
-**Serverless store.** All self-logging goes to a `sqlite:///<pdir>/mlflow.db` MLflow store — no server to run (SQLite is MLflow's supported serverless backend). `observability.resolve_tracking_uri` always computes that path from the project dir (no env/config override) and never raises. The DB auto-creates on first span; DSAGT emits only traces, so no artifact dir materializes. View with `mlflow ui --backend-store-uri sqlite:///<pdir>/mlflow.db`. Agent LLM-call history is recovered post-hoc from the on-disk transcript (the trace pipeline), not by intercepting traffic.
+**Serverless store.** All self-logging goes to a `sqlite:///<pdir>/mlflow.db` MLflow store — no server to run (SQLite is MLflow's supported serverless backend). `observability.resolve_tracking_uri` computes that path from the project dir and never raises; `MLFLOW_TRACKING_URI` in the shell overrides it (MLflow's own convention) to log to a shared tracking server instead — export it before `dsagt init` so it is baked into the agent's MCP config, and keep any `MLFLOW_TRACKING_TOKEN` in the shell only. `dsagt traces` prints the remote deep-link in that case rather than serving a local UI. The experiment is `observability.experiment_name` — `dsagt-<8 hex>` from the project directory (override: `mlflow.experiment` in config), described and tagged `dsagt.project` on first creation. The DB auto-creates on first span; DSAGT emits only traces, so no artifact dir materializes. View with `mlflow ui --backend-store-uri sqlite:///<pdir>/mlflow.db`. Agent LLM-call history is recovered post-hoc from the on-disk transcript (the trace pipeline), not by intercepting traffic.
 
 ## Commands
 
@@ -44,7 +44,7 @@ The codebase separates **commands** (entry points with argparse, launched as CLI
 
 **Modules** (`src/dsagt/`):
 - `session.py` — Project init, agent config generation, env-var resolution, config load/validate, session-id minting (`append_session` / `session_tag`), and startup **catch-up** (`catch_up_extraction`): code-use indexing + a chat-trace re-collect (`_catch_up_traces`) of the *previous* session (pinned to the `trace_source` token in `state.yaml`) so turns lost to an ungraceful shutdown still reach MLflow + episodic memory — uniform across all agents.
-- `agents/` — Per-agent-platform setup (`base.py` ABC + `claude.py` / `goose.py` / `cline.py` / `codex.py` / `opencode.py`). Each subclass owns its `write_static`, `write_dynamic`, `runtime_env`, `vscode_hint`. Shared helpers (`_mcp_env_block`, `_build_mcp_servers_dict`) in `base.py`. DSAGT sets no telemetry/OTel env, writes no launch shim, and never touches provider credentials — agents are expected pre-authenticated (shell env / their own auth flows) before dsagt is pointed at them; dsagt prints no credential hints and never troubleshoots auth.
+- `agents/` — Per-agent-platform setup (`base.py` ABC + `claude.py` / `goose.py` / `cline.py` / `codex.py` / `opencode.py`). Each subclass owns its `write_static`, `write_dynamic`, `runtime_env`, `vscode_hint`. Shared helpers (`_mcp_env_block`, `_build_mcp_servers_dict`) in `base.py`. DSAGT sets no telemetry/OTel env, writes no launch shim, and never reads or writes an LLM-provider credential (`ANTHROPIC_*`, `OPENAI_*`, `GOOSE_*`) — agents are expected pre-authenticated (shell env / their own auth flows) before dsagt is pointed at them; dsagt prints no credential hints and never troubleshoots auth. DSAGT's *own* service credentials — the trace store's `MLFLOW_TRACKING_API_KEY` / `_TOKEN`, the embedding backend's `EMBEDDING_API_KEY` — are read from the shell or `~/.config/dsagt/env` and never written into a project or an agent config.
 - `knowledge.py` — ChromaDB document retrieval, embedding backends, per-collection routing (the reference example of the house style).
 - `registry.py` — `CodeRegistry` (CLI codes) + `SkillRegistry` (agent instruction skills), KB indexing.
 - `provenance.py` — Code execution records (`run_and_record`), execution-record indexing into ChromaDB (`CodeUseIndexer` → `code_use` collection), pipeline reconstruction (`reconstruct_pipeline`, dependency graph).
@@ -95,7 +95,7 @@ Distilled from working on this codebase; `knowledge.py` is the reference example
 - Per-agent instructions file (e.g., `CLAUDE.md`, `.goosehints`, `AGENTS.md`).
 - Per-agent MCP config artifact (`.mcp.json` for claude, `goose.yaml` for goose, `cline_mcp_settings.json` via `cline mcp add`, `.codex-data/config.toml`). The env block carries benign routing only (`DSAGT_PROJECT`, `DSAGT_PROJECT_DIR`, `DSAGT_SESSION_ID`, `MLFLOW_TRACKING_URI`, `EMBEDDING_*`) so MCP-server children of agents that don't inherit shell env (codex/cline) still log to the right store. No credentials, no OTel routing.
 
-No launch shim is written and `dsagt init` prints no env/OTel instructions — the user starts the agent directly or via `dsagt start`. DSAGT wires no MLflow autolog hook: Claude's traces (like every agent's) come from the heartbeat pipeline, not native autolog.
+Credentials an agent cannot pass to its MCP children (codex, cline) come from `~/.config/dsagt/env` (`session.load_user_env`, loaded by `dsagt-server` and the `dsagt` CLI; shell wins) — in `$HOME`, never in a project or agent config. No launch shim is written and `dsagt init` prints no env/OTel instructions — the user starts the agent directly or via `dsagt start`. DSAGT wires no MLflow autolog hook: Claude's traces (like every agent's) come from the heartbeat pipeline, not native autolog.
 
 ## Architecture
 
@@ -119,7 +119,7 @@ A single merged `dsagt-server` (`src/dsagt/mcp/`) exposes 20 tools across four c
 
 - **Explicit memory** (`memory.py:ExplicitMemory`) — user-confirmed facts in YAML, loaded into agent context at session start via `kb_remember` / `kb_get_memories` (the vector mirror is optional — degrades to pure-YAML if the store is down).
 - **Code-execution indexing** — `provenance.CodeUseIndexer` embeds `trace_archive/` records into the project's `code_use` collection incrementally on the heartbeat (idempotent via a persisted ack set), plus a startup catch-up and an on-demand tick before `reconstruct_pipeline`. No LLM.
-- **Chat-trace catch-up** — the heartbeat logs the live transcript to MLflow (+ episodic memory) and a graceful shutdown flushes the deferred final turn; an ungraceful kill is backstopped at the *next* session's startup by `session._catch_up_traces`, which re-collects the previous session pinned to its recorded `trace_source` token. Idempotency rests on the collector's **session-qualified** ack keys (`<session_id>:<span_id>`).
+- **Chat-trace catch-up** — the heartbeat logs the live transcript to MLflow (+ episodic memory) and a graceful shutdown flushes the deferred final turn; an ungraceful kill is backstopped at the *next* session's startup by `session._catch_up_traces`, which re-collects the previous session pinned to its recorded `trace_source` token — pinned by `server._pin_trace_source` within seconds of the agent's first message (a 2 s poller, independent of the 45 s heartbeat, guarded so it never records the previous session's transcript), so a session of any length is recoverable. Idempotency rests on the collector's **session-qualified** ack keys (`<session_id>:<span_id>`).
 - **Episodic memory** — live, **opt-in** (`episodic.enabled`, via `dsagt init --episodic`). The `memory.MemoryExtractor` consumer consumes `Trace.to_exchanges()` on the heartbeat and mechanically chunks+tags+embeds every turn into `session_memory` (no LLM). Retrieval is recency-weighted (`episodic.recency_half_life_days`).
 
 ### Key Design Patterns
@@ -141,6 +141,6 @@ When acting as a pipeline builder (using the MCP server), follow these constrain
 ## Testing Patterns
 
 - pytest with `subprocess.run` mocking for command execution.
-- MCP server tests invoke handlers directly (no stdio transport); async tests for server handlers.
+- MCP server tests invoke handlers directly (no stdio transport); async tests for server handlers. `tests/test_mcp_wire.py` is the exception: it spawns `tests/wire_server.py` and speaks JSON-RPC over real stdio — the seam the SDK reshapes across major versions.
 - Temp directories for isolation; the `_use_tmp_registry` fixture in `tests/test_config.py` patches `DEFAULT_PROJECTS_BASE` and the project registry to `tmp_path`.
 - Integration tests in `test_*_integration.py` require real `EMBEDDING_*` / `LLM_*` credentials.

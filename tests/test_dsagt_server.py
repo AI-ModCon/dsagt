@@ -31,7 +31,7 @@ def _make_merged_server(tmp_path: Path):
     runtime = str(tmp_path / "runtime")
     reg = CodeRegistry(runtime_dir=runtime, kb=None)
     reg.ensure_bundled_copies()
-    sreg = SkillRegistry(source_skills_dir=None, runtime_dir=runtime, kb=None)
+    sreg = SkillRegistry(runtime_dir=runtime, kb=None)
     return create_dsagt_server(reg, kb, sreg, runtime_dir=runtime)
 
 
@@ -110,6 +110,46 @@ def test_dispatch_root_span_records_tool_inputs_and_outputs(tmp_path, monkeypatc
     root = next(s for s in trace.data.spans if s.name == "demo")
     assert root.inputs == {"q": "hello"}
     assert root.outputs == {"echoed": "hello"}
+
+
+def test_dispatch_root_span_never_stores_credentials_or_payloads(tmp_path, monkeypatch):
+    """What lands on the root span is written verbatim into ``mlflow.db`` and
+    served by ``dsagt traces`` — so an ``http_request``-style ``headers`` arg
+    must be redacted and a ``read_file``-sized result must be cut to a preview.
+    """
+    import mlflow
+
+    import dsagt.observability as obs_module
+    from dsagt.mcp.server import build_dispatch_server
+
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    mlflow.set_experiment("test")
+    monkeypatch.setattr(obs_module, "_initialized", True)
+    monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+    async def fetch(args):
+        return {"body": "x" * 100_000}
+
+    tools = [types.Tool(name="fetch", description="d", inputSchema={"type": "object"})]
+    server = build_dispatch_server(
+        "test", tools, {"fetch": fetch}, {"fetch": "registry"}
+    )
+
+    out = _call(
+        server,
+        "fetch",
+        {"url": "https://x", "headers": {"Authorization": "Bearer sk-secret"}},
+    )
+    assert (
+        len(json.loads(out)["body"]) == 100_000
+    )  # the agent still gets the full result
+
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    root = next(s for s in trace.data.spans if s.name == "fetch")
+    assert root.inputs["headers"] == "[redacted]"
+    assert "sk-secret" not in json.dumps(root.inputs)
+    assert len(root.outputs["body"]) < 5_000
+    assert "[+" in root.outputs["body"]
 
 
 def test_registry_tool_returns_plain_string(tmp_path):
@@ -257,3 +297,176 @@ class TestBuildKbFromConfig:
         cfg = self._cfg(backend="api", model="m", base_url="http://x")
         with pytest.raises(ValueError, match="requires the EMBEDDING_API_KEY"):
             _build_kb_from_config(cfg, tmp_path)
+
+
+def test_returned_tool_error_marks_the_trace_as_error(tmp_path, monkeypatch):
+    """A handler that *returns* ``{"status": "error"}`` must produce an ERROR
+    trace — otherwise a failed call is indistinguishable from a successful one
+    in the store, and ``dsagt info`` reports ``Errors: 0`` after failures."""
+    import mlflow
+
+    import dsagt.observability as obs_module
+    from dsagt.mcp.server import build_dispatch_server
+
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    mlflow.set_experiment("test")
+    monkeypatch.setattr(obs_module, "_initialized", True)
+    monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+    async def boom(args):
+        raise ValueError("nope")
+
+    tools = [types.Tool(name="boom", description="d", inputSchema={"type": "object"})]
+    server = build_dispatch_server("test", tools, {"boom": boom}, {"boom": "registry"})
+    assert json.loads(_call(server, "boom", {}))["status"] == "error"
+
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    assert str(trace.info.state).endswith("ERROR")
+
+
+class TestPinTraceSource:
+    """The trace-source token must be pinned as soon as *this* session's
+    transcript exists — not on the first heartbeat tick (~50 s in), which a
+    scripted session never reaches, and never to the previous session's
+    transcript, which is what "newest file" resolves to before the agent's
+    first message."""
+
+    def _state(self, tmp_path, previous=None):
+        from dsagt.session import append_session, record_trace_source
+
+        (tmp_path / ".dsagt").mkdir(parents=True, exist_ok=True)
+        append_session(tmp_path)  # the previous session
+        if previous:
+            record_trace_source(tmp_path, previous)
+        append_session(tmp_path)  # this session
+        return tmp_path
+
+    def _run(self, collector, pdir, ticks=5):
+        import asyncio
+
+        from dsagt.mcp.server import _pin_trace_source
+
+        async def go():
+            await asyncio.wait_for(
+                _pin_trace_source(collector, pdir, interval=0.01), timeout=1.0
+            )
+
+        asyncio.run(go())
+
+    def test_skips_the_previous_sessions_transcript_and_pins_the_new_one(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+
+        from dsagt.mcp import server as server_mod
+        from dsagt.session import read_state
+
+        old = tmp_path / "old.jsonl"
+        old.write_text("{}\n")
+        stale = os.path.getmtime(old) - 100
+        os.utime(old, (stale, stale))  # written before this server started
+        monkeypatch.setattr(server_mod, "_SERVER_STARTED_AT", stale + 50)
+        pdir = self._state(tmp_path, previous=None)  # a too-short previous session
+
+        new = tmp_path / "new.jsonl"
+        seen = []
+
+        class Collector:
+            def active_source(self):
+                seen.append(1)
+                if len(seen) >= 3:  # the agent's first message lands the new file
+                    new.write_text("{}\n")
+                    return str(new)
+                return str(old)
+
+        self._run(Collector(), pdir)
+        assert read_state(pdir)["sessions"][-1]["trace_source"] == str(new)
+
+    def test_non_path_token_is_pinned_once_it_differs_from_the_previous(self, tmp_path):
+        from dsagt.session import read_state
+
+        pdir = self._state(tmp_path, previous="sess-old")
+        seen = []
+
+        class Collector:
+            def active_source(self):
+                seen.append(1)
+                return "sess-old" if len(seen) < 3 else "sess-new"
+
+        self._run(Collector(), pdir)
+        assert read_state(pdir)["sessions"][-1]["trace_source"] == "sess-new"
+
+
+def test_rejected_call_is_traced_as_an_error(tmp_path, monkeypatch):
+    """A validation rejection must leave a trace — an agent looping on bad
+    arguments is the case the debug view exists for — and still be flagged
+    ``is_error`` on the wire."""
+    import asyncio
+
+    import mlflow
+
+    import dsagt.observability as obs_module
+    from dsagt.mcp.server import build_dispatch_server
+
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    mlflow.set_experiment("test")
+    monkeypatch.setattr(obs_module, "_initialized", True)
+    monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+    async def echo(args):
+        return {"echoed": args["q"]}
+
+    tools = [
+        types.Tool(
+            name="demo",
+            description="d",
+            inputSchema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+            },
+        )
+    ]
+    server = build_dispatch_server("test", tools, {"demo": echo}, {"demo": "knowledge"})
+
+    handler = server.get_request_handler("tools/call").handler
+    res = asyncio.run(
+        handler(None, types.CallToolRequestParams(name="demo", arguments={"q": 7}))
+    )
+    assert res.is_error is True
+
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    assert str(trace.info.state).endswith("ERROR")
+    assert trace.info.tags["dsagt.source"] == "knowledge"
+    root = next(s for s in trace.data.spans if s.name == "demo")
+    assert root.inputs == {"q": 7}
+    assert "Input validation error" in root.outputs["error"]
+
+
+class TestPinTraceSourceResume:
+    def test_resumed_session_pins_the_previous_transcript_when_it_is_being_written(
+        self, tmp_path, monkeypatch
+    ):
+        """``claude --resume`` keeps writing the previous session's file; a fresh
+        mtime makes it this session's source even though the token repeats."""
+        import os
+
+        from dsagt.mcp import server as server_mod
+        from dsagt.session import append_session, read_state, record_trace_source
+
+        (tmp_path / ".dsagt").mkdir()
+        append_session(tmp_path)
+        same = tmp_path / "same.jsonl"
+        same.write_text("{}\n")
+        record_trace_source(tmp_path, str(same))
+        append_session(tmp_path)
+        monkeypatch.setattr(
+            server_mod, "_SERVER_STARTED_AT", os.path.getmtime(same) - 1
+        )
+
+        class Collector:
+            def active_source(self):
+                return str(same)
+
+        TestPinTraceSource()._run(Collector(), tmp_path)
+        assert read_state(tmp_path)["sessions"][-1]["trace_source"] == str(same)

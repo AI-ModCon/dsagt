@@ -4,6 +4,29 @@ All notable changes to DSAgt are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Shared tracking server.** `MLFLOW_TRACKING_URI` in the shell redirects all
+  self-logging — CLI, MCP server, `dsagt-run` — to a remote MLflow server
+  instead of the project's sqlite file; `MLFLOW_TRACKING_API_KEY` authenticates
+  to an `X-API-Key` gateway in front of it. `dsagt traces` and `dsagt info`
+  follow the same resolution. Keys an agent cannot pass to its MCP children
+  (codex, cline) are read from `~/.config/dsagt/env` at startup.
+- **Experiment naming for shared servers.** Traces log to an experiment named
+  `dsagt-<8 hex>` (hashed from the project directory) rather than the bare
+  project name, so two users' `demo` projects do not collide; `mlflow.experiment`
+  in `.dsagt/config.yaml` overrides it. The experiment carries the description
+  "DSAgt (DataSmith Agent) AI-assisted data pipeline builder — project: <name>"
+  and a `dsagt.project` tag, both set once on creation.
+
+### Fixed
+- Tool arguments and results recorded on a trace are bounded before they
+  reach the store, with credential-bearing keys (`headers`, `api_key`,
+  `token`, …) redacted and common credential shapes inside strings (`Bearer …`,
+  `?api_key=…`) masked; an `http_request` bearer token or a whole `read_file`
+  payload was previously written verbatim into `mlflow.db`.
+
 ## [0.2.0] - 2026-07-08
 
 A large release. It adds an **external skill-catalog system**, consolidates the

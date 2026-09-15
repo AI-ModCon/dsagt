@@ -55,6 +55,11 @@ def _use_tmp_registry(tmp_path):
     def _noop_ensure_assets(*_a, **_k):
         return {"built": [], "skipped": []}
 
+    # The base skills are fetched from their upstream repos at init; stub
+    # that too (``test_init_installs_base_skills`` covers the wiring).
+    def _noop_install_base_skills(*_a, **_k):
+        return []
+
     with patch("dsagt.session._load_registry", fake_load):
         with patch("dsagt.session._save_registry", fake_save):
             with patch("dsagt.session.register_project", fake_register):
@@ -64,7 +69,11 @@ def _use_tmp_registry(tmp_path):
                             "dsagt.commands.setup_core_kb.ensure_assets",
                             _noop_ensure_assets,
                         ):
-                            yield
+                            with patch(
+                                "dsagt.skills.install_base_skills",
+                                _noop_install_base_skills,
+                            ):
+                                yield
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +396,18 @@ class TestCollectSettings:
         assert s["assets"] == ["codes", "nemo_curator", "anthropic"]
         assert s["episodic"] is None
 
+    def test_non_interactive_readiness_flag(self):
+        """The check is on unless --no-readiness turns it off on the no-TTY path."""
+        import types
+        from dsagt.commands import cli
+
+        args = types.SimpleNamespace(agent="claude", include=["codes"], exclude=None)
+        s = cli._collect_settings(args, interactive=False, existing={}, pdir=None)
+        assert s["readiness"] == {"auto_assess": True}
+        args.readiness = False
+        s = cli._collect_settings(args, interactive=False, existing={}, pdir=None)
+        assert s["readiness"] == {"auto_assess": False}
+
     def test_non_interactive_episodic_flag(self):
         """--episodic builds the opt-in block on the no-TTY path."""
         import types
@@ -426,6 +447,59 @@ class TestInitProject:
         # written lazily by the MLflow client on first span.
         assert not (pdir / "mlflow.db").exists()
         assert not (pdir / "mlflow").exists()
+
+    def test_config_yaml_content(self):
+        """The written config holds project, agent, knowledge, and skills.
+        Embedding settings come from DEFAULTS at load time; the store is
+        derived from the project directory; the agent brings its own
+        provider.  So no embedding, mlflow, or llm block is written."""
+        pdir = init_project("test-proj", "claude")
+
+        config = yaml.safe_load((pdir / ".dsagt" / "config.yaml").read_text())
+        assert set(config) == {"project", "agent", "knowledge", "skills"}, config
+        # init_project without a readiness answer writes no block; the check
+        # is then on by default at read time.
+        assert config["project"] == "test-proj"
+        assert config["agent"] == "claude"
+
+    def test_readiness_answer_is_written_as_given(self):
+        """The check setting is a config block written as answered; the
+        ``aidrin`` code itself comes from the base-skill registration."""
+        from dsagt.readiness import readiness_block
+
+        init_project("plain", "claude", exclude=["all"])
+        assert "readiness" not in load_config("plain")
+
+        for answer in (True, False):
+            name = f"assessed-{answer}"
+            init_project(
+                name, "claude", exclude=["all"], readiness=readiness_block(answer)
+            )
+            assert load_config(name)["readiness"] == {"auto_assess": answer}
+
+    def test_init_installs_base_skills(self, tmp_path, capsys):
+        """Every init fetches the base skills into ``<project>/skills/``;
+        a failed fetch is a warning, not an abort."""
+        calls = []
+
+        def fake_install(pdir, *, kb):
+            calls.append((Path(pdir), kb))
+            return []
+
+        with patch("dsagt.skills.install_base_skills", fake_install):
+            pdir = init_project("base", "claude", exclude=["all"])
+        # Installed after the knowledge base exists, with the project's KB,
+        # so the base-skill codes are indexed where search_registry looks.
+        assert [c[0] for c in calls] == [pdir]
+        assert Path(calls[0][1].index_dir) == pdir / "kb_index"
+
+        def boom(pdir, **_k):
+            raise RuntimeError("no network")
+
+        with patch("dsagt.skills.install_base_skills", boom):
+            init_project("offline", "claude", exclude=["all"])
+        assert "no network" in capsys.readouterr().out
+        assert load_config("offline")["project"] == "offline"
 
     def test_config_is_valid(self):
         init_project("myproj", "claude")
@@ -613,6 +687,40 @@ class TestAgentRecord:
         # BYOA: .dsagt_env is no longer written; user manages shell env.
         assert not (working_dir / ".dsagt_env").exists()
 
+    def test_readiness_paragraph_at_the_check_rule(self, tmp_path):
+        """With the check on, the instructions carry the AI-readiness paragraph
+        inside the per-operation check rule; re-running changes nothing."""
+        from dsagt.readiness import readiness_block
+
+        init_project(
+            "testproj", "claude", exclude=["all"], readiness=readiness_block(True)
+        )
+        config = load_config("testproj")
+        working_dir = tmp_path / "workdir"
+        working_dir.mkdir()
+        static_agent_record(config, "claude", working_dir)
+        text = (working_dir / "CLAUDE.md").read_text()
+        assert text.count("#### AI-readiness check") == 1
+        assert (
+            text.index("### 4. Per-Operation Checks")
+            < text.index("#### AI-readiness check")
+            < text.index("### 5. File Organization")
+        )
+        static_agent_record(config, "claude", working_dir)
+        assert (working_dir / "CLAUDE.md").read_text() == text
+
+    def test_no_readiness_paragraph_when_off(self, tmp_path):
+        from dsagt.readiness import readiness_block
+
+        init_project("off", "claude", exclude=["all"], readiness=readiness_block(False))
+        config = load_config("off")
+        working_dir = tmp_path / "workdir"
+        working_dir.mkdir()
+        static_agent_record(config, "claude", working_dir)
+        text = (working_dir / "CLAUDE.md").read_text()
+        assert "AI-readiness check" not in text
+        assert "readiness-check" not in text
+
     def test_goose_writes_goose_yaml(self, tmp_path):
         config = self._init_and_load("goose")
         working_dir = tmp_path / "workdir"
@@ -697,10 +805,8 @@ class TestAgentRecord:
         assert "EMBEDDING_BACKEND" in toml
 
     def test_static_is_idempotent(self, tmp_path):
-        # Running static twice doesn't duplicate or destroy content —
-        # the marker check skips the second write.  This is what lets
-        # users edit CLAUDE.md / AGENTS.md between init and start
-        # without losing edits.
+        # Running static twice doesn't duplicate or destroy content: the
+        # block is unchanged, and text outside it is the user's.
         config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
@@ -710,9 +816,34 @@ class TestAgentRecord:
         # Simulate a user edit
         (working_dir / "CLAUDE.md").write_text(first + "\n\n## My project notes\nfoo")
         edited = (working_dir / "CLAUDE.md").read_text()
-        # Re-run static — should be no-op since marker is present
-        static_agent_record(config, "claude", working_dir)
+        # Re-run static: the block is already this text, a no-op.
+        assert static_agent_record(config, "claude", working_dir) == []
         assert (working_dir / "CLAUDE.md").read_text() == edited
+
+    def test_static_rewrites_the_block_when_readiness_changes(self, tmp_path):
+        """Turning the AI-readiness check off on re-init reaches the
+        instructions file: the dsagt block is replaced, and the user's own
+        text before and after it is kept."""
+        from dsagt.readiness import readiness_block
+
+        init_project("tog", "claude", exclude=["all"], readiness=readiness_block(True))
+        working_dir = tmp_path / "workdir"
+        working_dir.mkdir()
+        (working_dir / "CLAUDE.md").write_text("# Team notes\n\nBe brief.\n")
+        static_agent_record(load_config("tog"), "claude", working_dir)
+        (working_dir / "CLAUDE.md").write_text(
+            (working_dir / "CLAUDE.md").read_text() + "\n## After\nmore\n"
+        )
+        assert "#### AI-readiness check" in (working_dir / "CLAUDE.md").read_text()
+
+        init_project("tog", "claude", exclude=["all"], readiness=readiness_block(False))
+        actions = static_agent_record(load_config("tog"), "claude", working_dir)
+        text = (working_dir / "CLAUDE.md").read_text()
+        assert actions == [f"Updated DSAgt instructions in {working_dir / 'CLAUDE.md'}"]
+        assert "#### AI-readiness check" not in text
+        assert text.startswith("# Team notes\n\nBe brief.\n")
+        assert text.endswith("<!-- dsagt:end -->\n\n## After\nmore\n")
+        assert text.count("<!-- dsagt:begin -->") == 1
 
     def test_static_files_present_check(self, tmp_path):
         # Used by `dsagt start` to decide whether to call static_agent_record.
@@ -1184,3 +1315,31 @@ class TestClaudeSetup:
         # No autolog: no Stop hook, no .claude/settings.json.
         assert not any("autolog" in a.lower() for a in actions)
         assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+class TestLoadUserEnv:
+    """``~/.config/dsagt/env`` is how codex/cline MCP children receive
+    credentials the shell cannot hand them.  Shell wins over file."""
+
+    def test_loads_keys_the_shell_did_not_set(self, tmp_path, monkeypatch):
+        from dsagt.session import load_user_env
+
+        f = tmp_path / "env"
+        f.write_text(
+            "# shared server\n"
+            "export MLFLOW_TRACKING_API_KEY='k-file'\n"
+            'EMBEDDING_API_KEY="e-file"\n'
+            "\n"
+            "not a pair\n"
+        )
+        monkeypatch.delenv("MLFLOW_TRACKING_API_KEY", raising=False)
+        monkeypatch.setenv("EMBEDDING_API_KEY", "e-shell")
+
+        assert load_user_env(f) == ["MLFLOW_TRACKING_API_KEY"]
+        assert os.environ["MLFLOW_TRACKING_API_KEY"] == "k-file"
+        assert os.environ["EMBEDDING_API_KEY"] == "e-shell"  # shell wins
+
+    def test_missing_file_is_a_noop(self, tmp_path):
+        from dsagt.session import load_user_env
+
+        assert load_user_env(tmp_path / "absent") == []
