@@ -377,12 +377,22 @@ REDACTED_KEYS = frozenset(
     }
 )
 # Credential *shapes* inside free text — a `run_command` argv carrying
-# `-H "Authorization: Bearer …"`, a URL with `?api_key=…` — which no key name
-# can catch.  Matches the common header and query-parameter spellings; this is
-# not a secrets scanner.
+# `-H "Authorization: Bearer …"`, a URL with `?api_key=…`, a printed config
+# with `"api_key": "…"` — which no key name can catch.  Anchored so ordinary
+# prose survives: `Bearer`/`Basic` only after `Authorization:`, and a key
+# label only when its value looks like a token (16+ token characters), so
+# "a basic example", "the bearer of bad news" and "max_token: 5" pass through
+# untouched.  This masks the common shapes; it is not a secrets scanner.
 _SECRET_IN_TEXT = re.compile(
-    r"(?i)(bearer\s+|basic\s+|(?:api[_-]?key|access[_-]?token|token|password|secret)\s*[=:]\s*)[^\s&]+"
+    r"(?i)"
+    r"(authorization\s*[=:]\s*(?:bearer|basic)\s+)[^\s&\"']+"
+    r"|((?:api[_-]?key|access[_-]?token|secret[_-]?key|password|token|secret)"
+    r"\"?\s*[=:]\s*\"?)[A-Za-z0-9._\-]{16,}"
 )
+
+
+def _mask(m: "re.Match[str]") -> str:
+    return (m.group(1) or m.group(2)) + "[redacted]"
 
 
 def bound(value: Any, limit: int = 4096) -> Any:
@@ -407,7 +417,7 @@ def bound(value: Any, limit: int = 4096) -> Any:
     if isinstance(value, list):
         return [bound(v, limit) for v in value]
     if isinstance(value, str):
-        return truncate(_SECRET_IN_TEXT.sub(r"\1[redacted]", value), limit)
+        return truncate(_SECRET_IN_TEXT.sub(_mask, value), limit)
     return value
 
 

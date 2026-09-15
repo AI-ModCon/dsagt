@@ -811,10 +811,10 @@ def test_bound_masks_credential_shapes_inside_strings():
     an API key in a URL query string — the value shape has to be masked."""
     from dsagt.observability import bound
 
-    argv = {"command": ["curl", "-H", "Authorization: Bearer sk-live-1", "https://x"]}
+    argv = {"command": ["curl", "-H", "Authorization: Bearer sk-live-abcdefghijklmnop", "https://x"]}
     assert bound(argv)["command"][2] == "Authorization: Bearer [redacted]"
 
-    url = bound({"url": "https://api.x/v1?api_key=sk-live-2&page=2"})["url"]
+    url = bound({"url": "https://api.x/v1?api_key=sk-live-abcdefghijklmnop&page=2"})["url"]
     assert url == "https://api.x/v1?api_key=[redacted]&page=2"
 
     for key in ("X-API-Key", "access_token", "apikey", "auth"):
@@ -918,3 +918,23 @@ def test_init_tracing_activates_the_version_model(tmp_path, monkeypatch):
     md = _last_trace().info.trace_metadata
     model = mlflow.get_logged_model(md["mlflow.modelId"])
     assert model.name == "dsagt-" + __version__.replace(".", "_")
+
+
+def test_bound_leaves_ordinary_prose_alone_and_catches_json_keys():
+    """The value-shape sweep is anchored: `Bearer`/`Basic` only after an
+    `Authorization:` label, key labels only before a token-shaped value —
+    otherwise a `read_file` of any document with "basic " or "bearer " in it
+    lost the next word in the stored preview.  JSON-quoted keys, the shape of
+    a printed config, are caught."""
+    from dsagt.observability import bound
+
+    prose = "A basic example of the bearer of bad news; max_token: 5 items"
+    assert bound(prose) == prose
+    assert (
+        bound({"cfg": '{"api_key": "sk-live-abcdefghijklmnop"}'})["cfg"]
+        == '{"api_key": "[redacted]"}'
+    )
+    assert (
+        bound("OPENAI_API_KEY=sk-live-abcdefghijklmnop") == "OPENAI_API_KEY=[redacted]"
+    )
+    assert bound("token=abc") == "token=abc"  # too short to be a credential
