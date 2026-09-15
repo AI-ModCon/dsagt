@@ -8,8 +8,10 @@ This guide walks through knowledge ingest, code registration, provenance, and ex
 # Install (Python 3.12 or later on Apple Silicon or Linux x86_64; CI tests 3.12 and 3.13)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
 
-# Set a convenience variable for the smoke test directory (not a normal dsagt step)
-export SMOKE_DIR="$(pwd)/tests/smoke_test"
+# Fetch the sample files and set a convenience variable for the prompts below
+curl -sL https://github.com/AI-ModCon/dsagt/archive/refs/heads/main.tar.gz \
+    | tar xz --strip-components=2 dsagt-main/tests/smoke_test
+export SMOKE_DIR="$PWD/smoke_test"
 
 # 1. Create a project.  `dsagt init` is interactive — follow the menu to name it
 #    `quickstart`, pick your agent, and choose knowledge collections + skill sources.
