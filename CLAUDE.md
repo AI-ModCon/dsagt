@@ -119,7 +119,7 @@ A single merged `dsagt-server` (`src/dsagt/mcp/`) exposes 20 tools across four c
 
 - **Explicit memory** (`memory.py:ExplicitMemory`) — user-confirmed facts in YAML, loaded into agent context at session start via `kb_remember` / `kb_get_memories` (the vector mirror is optional — degrades to pure-YAML if the store is down).
 - **Code-execution indexing** — `provenance.CodeUseIndexer` embeds `trace_archive/` records into the project's `code_use` collection incrementally on the heartbeat (idempotent via a persisted ack set), plus a startup catch-up and an on-demand tick before `reconstruct_pipeline`. No LLM.
-- **Chat-trace catch-up** — the heartbeat logs the live transcript to MLflow (+ episodic memory) and a graceful shutdown flushes the deferred final turn; an ungraceful kill is backstopped at the *next* session's startup by `session._catch_up_traces`, which re-collects the previous session pinned to its recorded `trace_source` token. Idempotency rests on the collector's **session-qualified** ack keys (`<session_id>:<span_id>`).
+- **Chat-trace catch-up** — the heartbeat logs the live transcript to MLflow (+ episodic memory) and a graceful shutdown flushes the deferred final turn; an ungraceful kill is backstopped at the *next* session's startup by `session._catch_up_traces`, which re-collects the previous session pinned to its recorded `trace_source` token — pinned by `server._pin_trace_source` within seconds of the agent's first message (a 2 s poller, independent of the 45 s heartbeat, guarded so it never records the previous session's transcript), so a session of any length is recoverable. Idempotency rests on the collector's **session-qualified** ack keys (`<session_id>:<span_id>`).
 - **Episodic memory** — live, **opt-in** (`episodic.enabled`, via `dsagt init --episodic`). The `memory.MemoryExtractor` consumer consumes `Trace.to_exchanges()` on the heartbeat and mechanically chunks+tags+embeds every turn into `session_memory` (no LLM). Retrieval is recency-weighted (`episodic.recency_half_life_days`).
 
 ### Key Design Patterns
@@ -141,6 +141,6 @@ When acting as a pipeline builder (using the MCP server), follow these constrain
 ## Testing Patterns
 
 - pytest with `subprocess.run` mocking for command execution.
-- MCP server tests invoke handlers directly (no stdio transport); async tests for server handlers.
+- MCP server tests invoke handlers directly (no stdio transport); async tests for server handlers. `tests/test_mcp_wire.py` is the exception: it spawns `tests/wire_server.py` and speaks JSON-RPC over real stdio — the seam the SDK reshapes across major versions.
 - Temp directories for isolation; the `_use_tmp_registry` fixture in `tests/test_config.py` patches `DEFAULT_PROJECTS_BASE` and the project registry to `tmp_path`.
 - Integration tests in `test_*_integration.py` require real `EMBEDDING_*` / `LLM_*` credentials.
