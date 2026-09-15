@@ -134,10 +134,15 @@ def static_agent_record(
 
     Idempotent.  If the dsagt marker is already in the instructions file,
     the write is skipped — preserves any user edits made between init
-    and start.
+    and start.  The instructions carry the AI-readiness check paragraph
+    when the project keeps that check on (``readiness.auto_assess``).
     """
-    del config  # reserved
-    return _setup_for(agent).write_static(Path(working_dir))
+    from dsagt.readiness import auto_assess_enabled
+
+    setup = _setup_for(agent)
+    return setup.write_static(
+        Path(working_dir), auto_assess=auto_assess_enabled(config)
+    )
 
 
 def static_agent_files_present(agent: str, working_dir: str | Path) -> bool:

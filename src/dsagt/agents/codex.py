@@ -48,8 +48,7 @@ from pathlib import Path
 
 from .base import (
     AgentSetup,
-    _append_or_write,
-    _DSAGT_MARKER,
+    _write_dsagt_block,
     _load_master_instructions,
     _mcp_env_block,
     _mcp_server_args,
@@ -100,16 +99,12 @@ class CodexSetup(AgentSetup):
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
         return [working_dir / "AGENTS.md", working_dir / ".codex-data"]
 
-    def write_static(self, working_dir: Path) -> list[str]:
+    def write_static(self, working_dir: Path, *, auto_assess: bool = True) -> list[str]:
         actions: list[str] = []
         (working_dir / ".codex-data").mkdir(parents=True, exist_ok=True)
-        instructions = _load_master_instructions()
+        instructions = _load_master_instructions(auto_assess)
         if instructions:
-            action = _append_or_write(
-                working_dir / "AGENTS.md",
-                instructions,
-                _DSAGT_MARKER,
-            )
+            action = _write_dsagt_block(working_dir / "AGENTS.md", instructions)
             if action:
                 actions.append(action)
         return actions

@@ -46,6 +46,13 @@ DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
 # ``~/dsagt-projects/kb_index/`` (shared bundled-content KB provisioned by
 # ``dsagt init``).  Migrated from ``~/.dsagt/`` on 2026-05-07.
 REGISTRY_DIR = DEFAULT_PROJECTS_BASE
+#: Files a cached source clone carries at its root: the commit the clone
+#: was taken at and the branch or tag it was asked for.  Written by
+#: ``clone_github``; the skill installer repeats the commit in
+#: ``PROVENANCE.txt`` and re-clones a cache whose ref differs from the
+#: one requested.
+SOURCE_COMMIT_FILE = "SOURCE_COMMIT"
+SOURCE_REF_FILE = "SOURCE_REF"
 REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
 RESERVED_PROJECT_NAMES = ("projects.yaml", "kb_index", ".skill_sources")
 
@@ -89,7 +96,7 @@ DEFAULTS = {
         "sources": [
             {
                 "name": "genesis",
-                "url": "https://gitlab.osti.gov/genesis/genesis-skills",
+                "url": "https://github.com/AI-ModCon/genesis-skills",
                 "branch": "main",
                 "subdir": "skills",
             },
@@ -178,6 +185,7 @@ def build_config(
     knowledge: dict | None = None,
     skills: dict | None = None,
     episodic: dict | None = None,
+    readiness: dict | None = None,
 ) -> dict:
     """Assemble a project's ``.dsagt/config.yaml`` body.
 
@@ -191,6 +199,8 @@ def build_config(
     - ``skills.sources`` — the skill-catalog repos chosen.
     - ``episodic`` — written *only when the user opted in* (it's an opt-in, so a
       disabled project stays minimal and backfills ``enabled: false`` on read).
+    - ``readiness`` — the AI-readiness check setting (``auto_assess``; see
+      :mod:`dsagt.readiness`), written when init asked the question.
 
     Everything else (embedding backend, chunk_size, rerank, populate_native)
     is a code default backfilled on read — NOT a written choice.  Credentials
@@ -204,6 +214,8 @@ def build_config(
     }
     if episodic:
         body["episodic"] = episodic
+    if readiness is not None:
+        body["readiness"] = readiness
     return body
 
 
@@ -214,10 +226,16 @@ def default_config_content(
     knowledge: dict | None = None,
     skills: dict | None = None,
     episodic: dict | None = None,
+    readiness: dict | None = None,
 ) -> str:
     """Serialize :func:`build_config` to YAML for ``.dsagt/config.yaml``."""
     body = build_config(
-        project_name, agent, knowledge=knowledge, skills=skills, episodic=episodic
+        project_name,
+        agent,
+        knowledge=knowledge,
+        skills=skills,
+        episodic=episodic,
+        readiness=readiness,
     )
     return yaml.dump(body, default_flow_style=False, sort_keys=False)
 
@@ -610,6 +628,31 @@ def _provision_kb(
         print("  Knowledge base ready.", flush=True)
 
 
+def _provision_base_skills(pdir: Path, embedding: dict | None) -> None:
+    """Install the base skills (``skills.base_skills``) from their upstream
+    repositories into ``<project>/skills/`` and register their codes into
+    the project's knowledge base.
+
+    Runs after the knowledge base is provisioned so the codes land in the
+    ``codes`` collection ``search_registry`` searches.  A failed fetch is
+    printed, not raised: the project works without the skills, and a re-run
+    of ``dsagt init`` installs them once the network is available.
+    """
+    from dsagt.skills import install_base_skills
+
+    kb = kb_from_config(
+        {"project_dir": str(pdir), "embedding": embedding or DEFAULTS["embedding"]}
+    )
+    try:
+        install_base_skills(pdir, kb=kb)
+    except Exception as e:  # noqa: BLE001 — offline init must still complete
+        print(
+            f"  Warning: could not install the base skills ({e}).  Re-run "
+            "`dsagt init` with network access to install them.",
+            flush=True,
+        )
+
+
 def init_project(
     project_name: str,
     agent: str,
@@ -621,6 +664,7 @@ def init_project(
     knowledge: dict | None = None,
     skills: dict | None = None,
     episodic: dict | None = None,
+    readiness: dict | None = None,
 ) -> Path:
     """Create or reconfigure a project — ``dsagt init`` is re-runnable.
 
@@ -667,10 +711,17 @@ def init_project(
 
     _provision_kb(pdir, include, exclude, embedding=embedding)
 
+    _provision_base_skills(pdir, embedding)
+
     write_config_file(
         pdir,
         build_config(
-            project_name, agent, knowledge=knowledge, skills=skills, episodic=episodic
+            project_name,
+            agent,
+            knowledge=knowledge,
+            skills=skills,
+            episodic=episodic,
+            readiness=readiness,
         ),
     )
 

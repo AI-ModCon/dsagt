@@ -12,7 +12,6 @@ base_model: N/A  # DSAgt is agent-platform-agnostic; it wraps Claude Code, Goose
 
 datasets:
     - # NeMo Curator reference corpus (optional knowledge collection, indexed at dsagt init)
-    - # AI Data Readiness Inspector (AIDRIN) reference corpus (optional knowledge collection)
 
 metrics:
     - # Code registration success rate
@@ -87,7 +86,7 @@ agent_card:
 
     - id: "skill_discovery"
       name: "Skill Discovery and Installation"
-      description: "Search external skill catalogs (Genesis, Anthropic, K-Dense, and others cloned+indexed at init) and install skills into the project, where the agent auto-discovers them natively. Agents can also author and save their own skills."
+      description: "Search external skill catalogs (Genesis, Anthropic, K-Dense, and others cloned+indexed at init) and install skills into the project, where the agent auto-discovers them natively. Every project carries the base skills skill-creator, datacard-generator, and aidrin. Agents can also author and save their own skills."
       tags: [skills, catalog, mcp]
       examples:
         - "Search the skill catalog for a literature-search skill and install it."
