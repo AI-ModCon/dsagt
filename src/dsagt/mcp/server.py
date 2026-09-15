@@ -126,13 +126,18 @@ def build_dispatch_server(
         if tool_name not in handlers:
             return rejected(f"Unknown tool: {tool_name}")
         handler = handlers[tool_name]
-        try:
-            jsonschema.validate(instance=arguments, schema=schemas[tool_name])
-        except jsonschema.ValidationError as e:
-            return rejected(f"Input validation error: {e.message}")
+        # Validation runs inside the span so a malformed call is traced like any
+        # other — an agent looping on bad arguments is exactly what the debug
+        # view exists to show.  An unknown name has no category to tag and stays
+        # untraced.
+        rejection: str | None = None
         with open_span(tool_name, source=tool_category.get(tool_name)) as span:
             try:
+                jsonschema.validate(instance=arguments, schema=schemas[tool_name])
                 result = await handler(arguments)
+            except jsonschema.ValidationError as e:
+                rejection = f"Input validation error: {e.message}"
+                result = {"status": "error", "error": rejection}
             except ValueError as e:
                 result = {"status": "error", "error": str(e)}
             except Exception as e:
@@ -148,6 +153,8 @@ def build_dispatch_server(
                 span.set_outputs(bound(result))
                 if isinstance(result, dict) and result.get("status") == "error":
                     span.set_status("ERROR")
+        if rejection is not None:
+            return rejected(rejection)
         try:
             text = (
                 result

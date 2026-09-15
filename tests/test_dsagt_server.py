@@ -395,3 +395,49 @@ class TestPinTraceSource:
 
         self._run(Collector(), pdir)
         assert read_state(pdir)["sessions"][-1]["trace_source"] == "sess-new"
+
+
+def test_rejected_call_is_traced_as_an_error(tmp_path, monkeypatch):
+    """A validation rejection must leave a trace — an agent looping on bad
+    arguments is the case the debug view exists for — and still be flagged
+    ``is_error`` on the wire."""
+    import asyncio
+
+    import mlflow
+
+    import dsagt.observability as obs_module
+    from dsagt.mcp.server import build_dispatch_server
+
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    mlflow.set_experiment("test")
+    monkeypatch.setattr(obs_module, "_initialized", True)
+    monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+    async def echo(args):
+        return {"echoed": args["q"]}
+
+    tools = [
+        types.Tool(
+            name="demo",
+            description="d",
+            inputSchema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+            },
+        )
+    ]
+    server = build_dispatch_server("test", tools, {"demo": echo}, {"demo": "knowledge"})
+
+    handler = server.get_request_handler("tools/call").handler
+    res = asyncio.run(
+        handler(None, types.CallToolRequestParams(name="demo", arguments={"q": 7}))
+    )
+    assert res.is_error is True
+
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    assert str(trace.info.state).endswith("ERROR")
+    assert trace.info.tags["dsagt.source"] == "knowledge"
+    root = next(s for s in trace.data.spans if s.name == "demo")
+    assert root.inputs == {"q": 7}
+    assert "Input validation error" in root.outputs["error"]
