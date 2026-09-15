@@ -518,6 +518,16 @@ def test_code_execute_span_attributes(_reset_tracing):
     assert span.attributes["duration_ms"] == 42.5
 
 
+def test_mlflow_agent_hint_is_off_by_default():
+    """Importing dsagt sets the mlflow hint switch, so dsagt-run under an
+    agent prints no hint; a value the user exported is kept."""
+    import os
+
+    import dsagt  # noqa: F401  (the import is the effect under test)
+
+    assert os.environ["MLFLOW_DISABLE_AGENT_HINT"] == "1"
+
+
 def test_run_and_record_emits_code_execute_span(_reset_tracing, tmp_path):
     """run_and_record() should produce a tool.execute span with the
     expected execution attributes."""
