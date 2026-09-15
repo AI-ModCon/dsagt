@@ -175,10 +175,15 @@ def run_and_record(
             obs.set("stderr_truncated", truncate(stderr, 256))
         if return_code != 0:
             obs.event("code_failed", exit_code=return_code)
+            obs.set_status("ERROR")
 
         # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
-        # ~4KB per side so big code results don't bloat the trace store
-        # (the full payload is on disk in trace_archive/<record_id>.json).
+        # ~4KB per side so big code results don't bloat the trace store.  The
+        # span is a preview by contract: the full stdout/stderr is in
+        # trace_archive/<code>_<ts>_<record_id>.json on the machine that ran
+        # the code, findable by the span's ``record_id`` attribute — and that
+        # file is the only full copy, including when the store is a shared
+        # server that other people read.
         obs.set_inputs(
             {
                 "code": code_name,

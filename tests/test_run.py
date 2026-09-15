@@ -354,6 +354,29 @@ class TestMain:
             lambda c: f"sqlite:///{tmp_path}/mlflow.db",
         )
 
+    def test_trace_root_carries_the_minted_session(self, tmp_path, monkeypatch):
+        """The MCP server mints the session into ``.dsagt/state.yaml``; the
+        ``code.execute`` root must carry it, or every execution trace lands
+        in an unbucketed ``(no-session)`` group in ``dsagt info``."""
+        import mlflow
+
+        from dsagt import observability as obs_module
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".dsagt").mkdir()
+        (tmp_path / ".dsagt" / "config.yaml").write_text("project: test\n")
+        (tmp_path / ".dsagt" / "state.yaml").write_text(
+            "sessions:\n- id: 7\n  started_at: '2026-01-01T00:00:00Z'\n"
+        )
+        monkeypatch.setattr(obs_module, "_initialized", False)
+        monkeypatch.setattr(obs_module, "_default_session_id", None)
+
+        assert main(["--code", "t", "--records-dir", str(tmp_path), "--", "true"]) == 0
+
+        assert obs_module._default_session_id == "test-7"
+        trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+        assert trace.info.trace_metadata.get("mlflow.trace.session") == "test-7"
+
     def test_basic_invocation(self, tmp_path):
         """main() runs a command and returns its exit code."""
         exit_code = main(

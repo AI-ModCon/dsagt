@@ -39,6 +39,11 @@ dsagt = "dsagt.commands.cli:main"
 dsagt-run = "dsagt.commands.run_code:main"
 dsagt-server = "dsagt.mcp.server:main"
 
+# Loaded by MLflow itself in every process of this environment; see
+# observability.ApiKeyHeaderProvider.
+[project.entry-points."mlflow.request_header_provider"]
+dsagt_api_key = "dsagt.observability:ApiKeyHeaderProvider"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

@@ -435,3 +435,51 @@ def test_reader_no_transcripts_is_empty(tmp_path):
     proj.mkdir()
     reader = ClaudeReader(proj, projects_root=tmp_path / "projects")
     assert reader.read() == []
+
+
+def test_usage_counted_once_per_api_call_across_split_records():
+    """Claude Code writes one record per content block — a thinking block, then
+    N tool_use blocks — all sharing one ``message.id`` and each repeating the
+    whole call's ``usage``.  A real session had 18 records for 6 calls.  The
+    usage must land exactly once per call, on the first span the call
+    produces, and a thinking-only record (no span) must not swallow it."""
+    call = {
+        "input_tokens": 36,
+        "cache_creation_input_tokens": 1000,
+        "cache_read_input_tokens": 9000,
+        "output_tokens": 50,
+    }
+
+    def _rec(ts, *blocks):
+        r = _asst(ts, *blocks, usage=dict(call))
+        r["message"]["id"] = "msg_A"
+        return r
+
+    records = [
+        _user("2026-06-19T15:00:00.000Z", "go"),
+        _rec("2026-06-19T15:00:01.000Z", {"type": "thinking", "thinking": "hm"}),
+        _rec(
+            "2026-06-19T15:00:01.100Z",
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"c": "a"}},
+        ),
+        _rec(
+            "2026-06-19T15:00:01.200Z",
+            {"type": "tool_use", "id": "t2", "name": "Bash", "input": {"c": "b"}},
+        ),
+        _user(
+            "2026-06-19T15:00:02.000Z",
+            [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "x"},
+                {"type": "tool_result", "tool_use_id": "t2", "content": "y"},
+            ],
+            tool_use_result=True,
+        ),
+    ]
+    trace = _translate(records)
+    with_usage = [s for s in trace.spans if s.get("usage")]
+    assert len(with_usage) == 1, [s["name"] for s in with_usage]
+    assert with_usage[0]["kind"] == "TOOL"  # no llm span for a tool-calling call
+    # cached tokens are input the model read; the breakdown is kept alongside
+    assert with_usage[0]["usage"]["input_tokens"] == 36 + 1000 + 9000
+    assert with_usage[0]["usage"]["cache_read_input_tokens"] == 9000
+    assert with_usage[0]["usage"]["output_tokens"] == 50

@@ -122,6 +122,40 @@ _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
 # ---------------------------------------------------------------------------
 
 
+USER_ENV_FILE = Path.home() / ".config" / "dsagt" / "env"
+
+
+def load_user_env(path: Path = USER_ENV_FILE) -> list[str]:
+    """Load credentials from the user-level env file into ``os.environ``.
+
+    ``~/.config/dsagt/env`` holds ``KEY=VALUE`` lines (an ``export`` prefix,
+    quotes and ``#`` comments are accepted) for the secrets an agent cannot
+    hand to its MCP children: codex and cline start ``dsagt-server`` with only
+    the env block baked into their config, never the shell, so
+    ``MLFLOW_TRACKING_API_KEY`` / ``EMBEDDING_API_KEY`` exported in a terminal
+    never arrive.  The file is the ``~/.netrc`` pattern — in ``$HOME``, mode
+    600, never inside a project or an agent config, which is the line the
+    credential policy draws.  A key already in the environment wins, so a
+    shell export still overrides the file.  Returns the names it set.
+    """
+    if not path.is_file():
+        return []
+    loaded = []
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :]
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
+
+
 def resolve_env_vars(value):
     """Replace ${VAR_NAME} references with environment variable values."""
     if isinstance(value, str):
@@ -817,7 +851,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
     guessing would risk reading the *new* session's records.
     """
     from dsagt.memory import episodic_consumers
-    from dsagt.observability import resolve_tracking_uri
+    from dsagt.observability import experiment_name, resolve_tracking_uri
     from dsagt.traces import make_trace_collector
 
     sessions = read_state(pdir).get("sessions") or []
@@ -836,6 +870,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
         project,
         prev_tag,
         resolve_tracking_uri(config),
+        experiment=experiment_name(config),
         extra_consumers=episodic_consumers(config, kb, pdir, prev_tag),
         source=source,
     )

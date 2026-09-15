@@ -1315,3 +1315,31 @@ class TestClaudeSetup:
         # No autolog: no Stop hook, no .claude/settings.json.
         assert not any("autolog" in a.lower() for a in actions)
         assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+class TestLoadUserEnv:
+    """``~/.config/dsagt/env`` is how codex/cline MCP children receive
+    credentials the shell cannot hand them.  Shell wins over file."""
+
+    def test_loads_keys_the_shell_did_not_set(self, tmp_path, monkeypatch):
+        from dsagt.session import load_user_env
+
+        f = tmp_path / "env"
+        f.write_text(
+            "# shared server\n"
+            "export MLFLOW_TRACKING_API_KEY='k-file'\n"
+            'EMBEDDING_API_KEY="e-file"\n'
+            "\n"
+            "not a pair\n"
+        )
+        monkeypatch.delenv("MLFLOW_TRACKING_API_KEY", raising=False)
+        monkeypatch.setenv("EMBEDDING_API_KEY", "e-shell")
+
+        assert load_user_env(f) == ["MLFLOW_TRACKING_API_KEY"]
+        assert os.environ["MLFLOW_TRACKING_API_KEY"] == "k-file"
+        assert os.environ["EMBEDDING_API_KEY"] == "e-shell"  # shell wins
+
+    def test_missing_file_is_a_noop(self, tmp_path):
+        from dsagt.session import load_user_env
+
+        assert load_user_env(tmp_path / "absent") == []
