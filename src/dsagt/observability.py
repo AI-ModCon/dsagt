@@ -196,6 +196,20 @@ def _current_user() -> str | None:
         return None
 
 
+def _bound_remote_retries(tracking_uri: str) -> None:
+    """Cap the MLflow client's retry budget against an http(s) store.
+
+    The client defaults — 7 retries at backoff 2, 120 s per request — mean a
+    hung server stalls a single call for minutes, and the unattended paths
+    (``dsagt-run`` cold start, the heartbeat) make several.  Tracing is
+    best-effort; a few seconds is the most it may cost a tool call.
+    ``setdefault``, so an explicit setting in the environment wins.
+    """
+    if tracking_uri.startswith(("http://", "https://")):
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "20")
+
+
 def _ensure_experiment(name: str, project: str) -> None:
     """Select the experiment; on first creation, describe it and tag the project.
 
@@ -274,6 +288,7 @@ def init_tracing(
     import mlflow
 
     try:
+        _bound_remote_retries(mlflow_url)
         mlflow.set_tracking_uri(mlflow_url)
         _ensure_experiment(experiment, project_name)
         mlflow.set_active_model(name=_version_model_name())
@@ -861,6 +876,7 @@ class MLflowSink:
         """Log every turn subtree; return the MLflow trace id of each."""
         import mlflow
 
+        _bound_remote_retries(self._uri)
         mlflow.set_tracking_uri(self._uri)
         mlflow.set_experiment(self._experiment)
         # The CLI catch-up path (`dsagt traces` / `dsagt info`) reaches here

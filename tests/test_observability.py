@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+import os
+
 import pytest
 
 from dsagt import observability as obs_module
@@ -811,10 +813,19 @@ def test_bound_masks_credential_shapes_inside_strings():
     an API key in a URL query string — the value shape has to be masked."""
     from dsagt.observability import bound
 
-    argv = {"command": ["curl", "-H", "Authorization: Bearer sk-live-abcdefghijklmnop", "https://x"]}
+    argv = {
+        "command": [
+            "curl",
+            "-H",
+            "Authorization: Bearer sk-live-abcdefghijklmnop",
+            "https://x",
+        ]
+    }
     assert bound(argv)["command"][2] == "Authorization: Bearer [redacted]"
 
-    url = bound({"url": "https://api.x/v1?api_key=sk-live-abcdefghijklmnop&page=2"})["url"]
+    url = bound({"url": "https://api.x/v1?api_key=sk-live-abcdefghijklmnop&page=2"})[
+        "url"
+    ]
     assert url == "https://api.x/v1?api_key=[redacted]&page=2"
 
     for key in ("X-API-Key", "access_token", "apikey", "auth"):
@@ -938,3 +949,17 @@ def test_bound_leaves_ordinary_prose_alone_and_catches_json_keys():
         bound("OPENAI_API_KEY=sk-live-abcdefghijklmnop") == "OPENAI_API_KEY=[redacted]"
     )
     assert bound("token=abc") == "token=abc"  # too short to be a credential
+
+
+def test_remote_store_retry_budget_is_bounded_but_overridable(monkeypatch):
+    from dsagt.observability import _bound_remote_retries
+
+    for v in ("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "MLFLOW_HTTP_REQUEST_TIMEOUT"):
+        monkeypatch.delenv(v, raising=False)
+    _bound_remote_retries("sqlite:///x.db")
+    assert "MLFLOW_HTTP_REQUEST_MAX_RETRIES" not in os.environ  # local: untouched
+    _bound_remote_retries("https://mlflow.example.org")
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "2"
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "9")
+    _bound_remote_retries("https://mlflow.example.org")
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "9"  # explicit wins

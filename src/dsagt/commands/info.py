@@ -633,9 +633,11 @@ def run(project: str, as_json: bool) -> int:
     skills = _skills(pdir)
     created = _project_created(pdir)
 
-    # The sqlite file only exists once a session has logged a span; a remote
-    # store has no local footprint, so only the sqlite case can short-circuit.
-    if tracking_uri.startswith("sqlite:") and not (pdir / "mlflow.db").exists():
+    # The project's default file only exists once a session has logged a
+    # span; any other store has no local footprint, so only the default can
+    # short-circuit as "never started".
+    db = pdir / "mlflow.db"
+    if tracking_uri == f"sqlite:///{db}" and not db.exists():
         # New project, or one that's never been started.  Print the header
         # so the user can verify they got the right project, then a short
         # note — rather than crashing on a missing DB.

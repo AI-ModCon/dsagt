@@ -60,6 +60,13 @@ def _parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The agent runs this from its own shell (the instructions hand it the
+    # `dsagt-run --code …` prefix), not as a child of dsagt-server — so under
+    # codex/cline the credentials file is the only way a shared-store key or
+    # URI reaches the code.execute trace.
+    from dsagt.session import load_user_env
+
+    load_user_env()
     args, command = _parse_args(argv)
 
     if not command:

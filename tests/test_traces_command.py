@@ -103,12 +103,16 @@ def test_remote_store_prints_deeplink_and_spawns_no_viewer(
     )
 
 
-def test_non_http_backend_dsn_is_never_printed_as_a_link(tmp_path, monkeypatch, capsys):
-    """Only an http(s) server has a UI to deep-link; a ``postgresql://`` store
-    is a backend DSN whose embedded credentials must not be echoed."""
+def test_non_http_backend_is_served_locally_and_its_dsn_never_printed(
+    tmp_path, monkeypatch, capsys
+):
+    """A ``postgresql://`` store is served by ``mlflow ui`` like the default
+    sqlite file — with no local ``mlflow.db`` to gate on — and its DSN, which
+    carries credentials, is passed to the viewer but never echoed as a link."""
     pdir = tmp_path / "proj"
-    pdir.mkdir()
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "postgresql://user:hunter2@db/mlflow")
+    pdir.mkdir()  # no mlflow.db: the store is elsewhere
+    dsn = "postgresql://user:hunter2@db/mlflow"
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", dsn)
 
     with (
         patch.object(traces_cmd, "load_config", return_value=_config(pdir)),
@@ -116,8 +120,11 @@ def test_non_http_backend_dsn_is_never_printed_as_a_link(tmp_path, monkeypatch, 
         patch.object(traces_cmd, "_resolve_experiment_id", return_value="1"),
         patch.object(
             traces_cmd.subprocess, "run", return_value=MagicMock(returncode=0)
-        ),
+        ) as spawn,
     ):
-        traces_cmd.run("proj")
+        rc = traces_cmd.run("proj")
 
+    assert rc == 0
+    cmd = spawn.call_args.args[0]
+    assert cmd[cmd.index("--backend-store-uri") + 1] == dsn  # served, not refused
     assert "hunter2" not in capsys.readouterr().out

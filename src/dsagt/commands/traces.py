@@ -71,8 +71,11 @@ def run(project: str, port: int = _DEFAULT_PORT) -> int:
         print(f"\nMLflow trace view for '{project}' (remote store):\n  {url}\n")
         return 0
 
+    # Any other backend store — `postgresql://`, a sqlite file elsewhere — is
+    # served by `mlflow ui` below; only the project's own default file can
+    # mean "never started".
     db = pdir / "mlflow.db"
-    if not db.exists():
+    if tracking_uri == f"sqlite:///{db}" and not db.exists():
         print(
             f"No trace store yet for '{project}' ({db} not found). "
             "Run a session first: dsagt start "
