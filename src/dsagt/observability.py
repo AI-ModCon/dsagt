@@ -39,8 +39,12 @@ business code never imports MLflow and never branches on whether tracing is on.
 from __future__ import annotations
 
 import functools
+import getpass
+import hashlib
 import inspect
 import logging
+import os
+import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -55,6 +59,7 @@ logger = logging.getLogger(__name__)
 # constant set once at startup and tagged onto each internal trace for grouping.
 _initialized = False
 _default_session_id: str | None = None
+_default_agent: str | None = None
 
 
 # ===========================================================================
@@ -89,24 +94,159 @@ def find_project_config() -> tuple[Path | None, dict | None]:
 
 
 def resolve_tracking_uri(config: dict | None) -> str:
-    """Compute the serverless MLflow tracking URI for DSAGT self-logging.
+    """Compute the MLflow tracking URI for DSAGT self-logging.
 
-    Always ``sqlite:///<project_dir>/mlflow.db`` — DSAGT knows where it writes;
-    there is no server to point at.  ``project_dir`` comes from the resolved
-    config (injected by ``session.load_config``), falling back to cwd for
-    in-project callers.
+    ``MLFLOW_TRACKING_URI`` in the environment wins when set — MLflow's own
+    convention, and the one variable ``agents._mcp_env_block`` already bakes
+    into every per-agent MCP config, so a value exported before ``dsagt init``
+    reaches the CLI, the MCP server and its ``dsagt-run`` children alike.  That
+    is how a project logs to a shared tracking server instead of its own file.
+    Credentials for such a server (``MLFLOW_TRACKING_TOKEN`` / ``_USERNAME`` /
+    ``_PASSWORD``, or ``MLFLOW_TRACKING_API_KEY`` for an ``X-API-Key`` gateway —
+    see :class:`ApiKeyHeaderProvider`) are read from the shell and are never
+    written to disk.
 
-    The MLflow client honors a ``sqlite:`` URI directly (auto-creating +
-    migrating the DB on first use), so self-logging needs no listener and this
-    never has to fail.  SQLite is MLflow's supported serverless backend — the
-    filesystem store (``file:`` / ``./mlruns``) is deprecated as of Feb 2026.
-    DSAGT emits only traces (no runs/models), so the experiment's default
-    artifact dir is never materialized.
+    Otherwise ``sqlite:///<project_dir>/mlflow.db`` — the serverless default.
+    ``project_dir`` comes from the resolved config (injected by
+    ``session.load_config``), falling back to cwd for in-project callers.  The
+    MLflow client honors a ``sqlite:`` URI directly (auto-creating + migrating
+    the DB on first use), so self-logging needs no listener and this never has
+    to fail.  SQLite is MLflow's supported serverless backend — the filesystem
+    store (``file:`` / ``./mlruns``) is deprecated as of Feb 2026.  DSAGT emits
+    only traces (no runs/models), so the experiment's default artifact dir is
+    never materialized.
     """
+    uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if uri:
+        return uri
     cfg = config or {}
     pdir = cfg.get("project_dir")
     base = Path(pdir).resolve() if pdir else Path.cwd().resolve()
     return f"sqlite:///{base / 'mlflow.db'}"
+
+
+class ApiKeyHeaderProvider:
+    """Send ``X-API-Key`` on every MLflow request when ``MLFLOW_TRACKING_API_KEY`` is set.
+
+    A tracking server behind an API gateway (Kong answers ``WWW-Authenticate:
+    Key``) authenticates on that header alone, and the MLflow client cannot
+    produce it: it knows only the Bearer form of ``MLFLOW_TRACKING_TOKEN`` and
+    Basic auth.  Registered under the ``mlflow.request_header_provider`` entry
+    point in ``pyproject.toml``, so MLflow loads it in every process of this
+    environment — the CLI, the MCP server and its ``dsagt-run`` children — with
+    no import from dsagt's side.  MLflow duck-types the provider (``in_context``
+    + ``request_headers``), so no mlflow import is needed here either, which
+    keeps this module's cold start unchanged.  The key is read from the shell
+    on each request and never written to disk.
+    """
+
+    def in_context(self) -> bool:
+        return bool(os.environ.get("MLFLOW_TRACKING_API_KEY"))
+
+    def request_headers(self) -> dict[str, str]:
+        return {"X-API-Key": os.environ["MLFLOW_TRACKING_API_KEY"]}
+
+
+EXPERIMENT_DESCRIPTION = "DSAgt (DataSmith Agent) AI-assisted data pipeline builder"
+
+
+def experiment_name(config: dict | None) -> str:
+    """The MLflow experiment this project logs to.
+
+    ``mlflow.experiment`` in ``.dsagt/config.yaml`` when set; otherwise
+    ``dsagt-<8 hex>`` from a hash of the project directory.  The project name
+    is the wrong default on a shared tracking server: ``demo`` collides across
+    users, and the experiment list there belongs to everyone.  The directory
+    hash is stable for the life of the project (``dsagt mv`` changes it) and
+    distinct per user because home directories are.  The readable project name
+    travels on the experiment's description and ``dsagt.project`` tag instead
+    — see :func:`_ensure_experiment`.
+    """
+    cfg = config or {}
+    name = (cfg.get("mlflow") or {}).get("experiment")
+    if name:
+        return name
+    pdir = cfg.get("project_dir")
+    base = Path(pdir).resolve() if pdir else Path.cwd().resolve()
+    return f"dsagt-{hashlib.sha1(str(base).encode()).hexdigest()[:8]}"
+
+
+def _version_model_name() -> str:
+    """The LoggedModel that stands for this dsagt release in an experiment.
+
+    MLflow's trace table fills its *Version* column from ``mlflow.modelId``,
+    which must reference a LoggedModel — MLflow 3's unit of "which version of
+    the app produced this".  ``set_active_model(name=…)`` creates or reuses one
+    per experiment and stamps every trace of the process, replayed agent turns
+    included.  Model names may not contain ``.``.
+    """
+    from dsagt import __version__
+
+    return f"dsagt-{__version__.replace('.', '_')}"
+
+
+def _current_user() -> str | None:
+    """The local user for the trace table's *User* column (``mlflow.trace.user``).
+
+    A gateway may stamp its own identity under ``mlflow.user``; the UI does
+    not read that key.  ``None`` where the process has no login identity."""
+    try:
+        return getpass.getuser()
+    except (KeyError, OSError):
+        return None
+
+
+def _quiet_mlflow_chatter() -> None:
+    """Drop MLflow's INFO narration of what DSAgt just did on purpose.
+
+    ``set_experiment`` and ``set_active_model`` log "Experiment … does not
+    exist. Creating", "LoggedModel … creating one" and "Active model is set to
+    …" at INFO — the last on every ``dsagt-run``.  They go to stderr, and an
+    agent that captures a code's stderr reads them as the code's output.
+    Warnings and errors still surface.
+    """
+    logging.getLogger("mlflow.tracking.fluent").setLevel(logging.WARNING)
+
+
+def _bound_remote_retries(tracking_uri: str) -> None:
+    """Cap the MLflow client's retry budget against an http(s) store.
+
+    The client defaults — 7 retries at backoff 2, 120 s per request — mean a
+    hung server stalls a single call for minutes, and the unattended paths
+    (``dsagt-run`` cold start, the heartbeat) make several.  Tracing is
+    best-effort; a few seconds is the most it may cost a tool call.
+    ``setdefault``, so an explicit setting in the environment wins.
+    """
+    if tracking_uri.startswith(("http://", "https://")):
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "20")
+
+
+def _ensure_experiment(name: str, project: str) -> None:
+    """Select the experiment; on first creation, describe it and tag the project.
+
+    ``set_experiment`` returns the experiment, so the tags cost nothing once
+    they exist — and a description edited by hand on the server is left alone.
+    """
+    import mlflow
+
+    existing = mlflow.get_experiment_by_name(name)
+    if existing is not None and existing.lifecycle_stage == "deleted":
+        # `set_experiment` refuses a name that exists in the deleted state,
+        # and the name is deterministic for this project — so without this the
+        # project could never start again.  Say what to do.
+        raise RuntimeError(
+            f"MLflow experiment {name!r} (id {existing.experiment_id}) exists "
+            f"in the deleted state on {mlflow.get_tracking_uri()}. Restore it "
+            "there, or set `mlflow.experiment` in .dsagt/config.yaml to a new "
+            "name."
+        )
+    exp = mlflow.set_experiment(name)
+    if "dsagt.project" not in exp.tags:
+        mlflow.set_experiment_tag(
+            "mlflow.note.content", f"{EXPERIMENT_DESCRIPTION} — project: {project}"
+        )
+        mlflow.set_experiment_tag("dsagt.project", project)
 
 
 def init_tracing(
@@ -125,10 +265,13 @@ def init_tracing(
     The ``mlflow_url`` and ``session_id`` keyword args are kept for tests, where
     the caller plants known values directly.
 
-    Never raises.  When cwd isn't a dsagt project dir, logs and no-ops so
-    one-shot tools / tests outside a project simply run untraced.
+    Never raises.  When cwd isn't a dsagt project dir, or the store cannot be
+    reached or the experiment used (deleted on a shared server, refused key,
+    server down), logs the cause and no-ops so the process runs untraced —
+    one-shot tools and tests outside a project, and a server whose tools must
+    keep working regardless.
     """
-    global _initialized, _default_session_id
+    global _initialized, _default_session_id, _default_agent
 
     if _initialized:
         if session_id:
@@ -147,20 +290,41 @@ def init_tracing(
         return
 
     _default_session_id = session_id
+    _default_agent = cfg.get("agent")
+    resolve_cfg = dict(cfg)
+    resolve_cfg["project_dir"] = str(cfg_pdir)
     if mlflow_url is None:
-        resolve_cfg = dict(cfg)
-        resolve_cfg["project_dir"] = str(cfg_pdir)
         mlflow_url = resolve_tracking_uri(resolve_cfg)
+    experiment = experiment_name(resolve_cfg)
 
     import mlflow
 
-    mlflow.set_tracking_uri(mlflow_url)
-    mlflow.set_experiment(project_name)
+    try:
+        _quiet_mlflow_chatter()
+        _bound_remote_retries(mlflow_url)
+        mlflow.set_tracking_uri(mlflow_url)
+        _ensure_experiment(experiment, project_name)
+        mlflow.set_active_model(name=_version_model_name())
+    except (
+        Exception
+    ) as e:  # noqa: BLE001 — a store problem must not take the server down
+        # Tracing is best-effort; the MCP tools are not.  A server that cannot
+        # reach or use its store still has to serve the agent — untraced, with
+        # the cause on the log so the operator can fix the store.
+        logger.error(
+            "%s: tracing disabled — cannot use experiment %r at %s: %s",
+            service_name,
+            experiment,
+            mlflow_url,
+            e,
+        )
+        return
     _initialized = True
     logger.info(
-        "init_tracing: service=%s mlflow=%s project=%s session=%s",
+        "init_tracing: service=%s mlflow=%s experiment=%s project=%s session=%s",
         service_name,
         mlflow_url,
+        experiment,
         project_name,
         _default_session_id or "<none>",
     )
@@ -225,6 +389,66 @@ def truncate(value: str, limit: int = 256) -> str:
     return value[:head] + f"... [+{len(value) - head} chars]"
 
 
+REDACTED_KEYS = frozenset(
+    {
+        "headers",
+        "authorization",
+        "auth",
+        "api_key",
+        "api-key",
+        "apikey",
+        "x-api-key",
+        "token",
+        "access_token",
+        "password",
+        "secret",
+    }
+)
+# Credential *shapes* inside free text — a `run_command` argv carrying
+# `-H "Authorization: Bearer …"`, a URL with `?api_key=…`, a printed config
+# with `"api_key": "…"` — which no key name can catch.  Anchored so ordinary
+# prose survives: `Bearer`/`Basic` only after `Authorization:`, and a key
+# label only when its value looks like a token (16+ token characters), so
+# "a basic example", "the bearer of bad news" and "max_token: 5" pass through
+# untouched.  This masks the common shapes; it is not a secrets scanner.
+_SECRET_IN_TEXT = re.compile(
+    r"(?i)"
+    r"(authorization\s*[=:]\s*(?:bearer|basic)\s+)[^\s&\"']+"
+    r"|((?:api[_-]?key|access[_-]?token|secret[_-]?key|password|token|secret)"
+    r"\"?\s*[=:]\s*\"?)[A-Za-z0-9._\-]{16,}"
+)
+
+
+def _mask(m: "re.Match[str]") -> str:
+    return (m.group(1) or m.group(2)) + "[redacted]"
+
+
+def bound(value: Any, limit: int = 4096) -> Any:
+    """Shrink a tool argument or result to what a span may safely carry.
+
+    The dispatch shell records every call's raw arguments and result on the
+    trace root, and both are agent-controlled: ``http_request`` takes a
+    ``headers`` dict that is the natural home for an ``Authorization`` bearer,
+    and ``read_file`` / ``run_command`` / ``kb_search`` return whole files,
+    whole stdout, whole chunk texts.  Anything set on a span is written verbatim
+    into ``mlflow.db`` — MLflow truncates only the UI preview — and ``dsagt
+    traces`` then serves it in a browser.  Credential-bearing keys are replaced
+    outright, credential shapes inside strings are masked, and every string
+    leaf is cut to ``limit`` so structure survives for the UI while the store
+    holds a preview, not a payload.
+    """
+    if isinstance(value, dict):
+        return {
+            k: "[redacted]" if str(k).lower() in REDACTED_KEYS else bound(v, limit)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [bound(v, limit) for v in value]
+    if isinstance(value, str):
+        return truncate(_SECRET_IN_TEXT.sub(_mask, value), limit)
+    return value
+
+
 # ----- trace tagging — the dsagt.source debug filter + session grouping -----
 #
 # dsagt.source names the MCP tool *category* that was invoked — one of
@@ -246,16 +470,35 @@ def _attach_trace_metadata(source: str | None) -> None:
 
     - ``dsagt.source`` tag: the MCP tool category / ``execution`` — powers the
       UI's debug-view filter.
+    - ``dsagt.agent`` metadata: the agent platform that drove this session, so
+      a shared store can be split by agent — the comparison the smoke test
+      exists for.  Metadata, not a tag, because that is where ``MLflowSink``
+      puts it on agent traces and where ``dsagt info`` reads it; one place.
     - ``mlflow.trace.session`` metadata: groups this process's internal traces
       under one session (reserved MLflow key, drives the native session filter).
+    - ``mlflow.trace.user`` metadata: the local user — the reserved key behind
+      the trace table's *User* column.
+    - ``mlflow.modelId`` (set process-wide by :func:`init_tracing` through
+      ``set_active_model``): the dsagt release, behind the *Version* column.
+    - ``dsagt.version`` metadata: which dsagt produced the trace.  On a shared
+      server holding months of traces from many installs, nothing else says;
+      MLflow's own ``mlflow.source.git.*`` are empty because the process runs
+      in the project directory, not a checkout.  ``MLflowSink`` stamps the
+      same key on agent traces.
 
     No-op for inner spans (``source is None``) — they inherit the root's tag.
     """
     if not source:
         return
-    metadata = (
-        {"mlflow.trace.session": _default_session_id} if _default_session_id else None
-    )
+    from dsagt import __version__
+
+    metadata = {"dsagt.version": __version__}
+    if user := _current_user():
+        metadata["mlflow.trace.user"] = user
+    if _default_agent:
+        metadata["dsagt.agent"] = _default_agent
+    if _default_session_id:
+        metadata["mlflow.trace.session"] = _default_session_id
     import mlflow
 
     mlflow.update_current_trace(tags={"dsagt.source": source}, metadata=metadata)
@@ -312,6 +555,16 @@ class _ActiveSpanProxy:
         if span is None or outputs is None:
             return
         span.set_outputs(outputs)
+
+    def set_status(self, status: str) -> None:
+        """Mark the span ``"ERROR"`` (or ``"OK"``) — the trace state the UI
+        filters on and ``dsagt info`` counts.  A failure that is *returned*
+        rather than raised (a tool's ``{"status": "error"}``, a non-zero exit)
+        is otherwise indistinguishable from success in the store."""
+        span = self._current()
+        if span is None:
+            return
+        span.set_status(status)
 
     @staticmethod
     def _current():
@@ -571,6 +824,35 @@ def _to_ns(epoch_s: float | None) -> int | None:
     return int(epoch_s * _S_PER_NS) if epoch_s is not None else None
 
 
+def _stamp_usage(span, usage: dict | None) -> None:
+    """Set MLflow's chat-usage attribute from a normalized usage dict.
+
+    MLflow sums this attribute across every span of a trace into
+    ``mlflow.trace.tokenUsage``, so it may sit on whichever span represents
+    the LLM call — an LLM span, or the tool span that a tool-calling message
+    collapses into under the autolog-parity layout.  ``input_tokens`` already
+    counts cached tokens (see ``traces._usage``); the cache breakdown is kept
+    as plain attributes for the per-span view.
+    """
+    if not usage:
+        return
+    from mlflow.tracing.constant import SpanAttributeKey, TokenUsageKey
+
+    inp = usage.get("input_tokens") or 0
+    out = usage.get("output_tokens") or 0
+    span.set_attribute(
+        SpanAttributeKey.CHAT_USAGE,
+        {
+            TokenUsageKey.INPUT_TOKENS: inp,
+            TokenUsageKey.OUTPUT_TOKENS: out,
+            TokenUsageKey.TOTAL_TOKENS: inp + out,
+        },
+    )
+    for key in ("cache_read_input_tokens", "cache_write_input_tokens"):
+        if usage.get(key):
+            span.set_attribute(key, usage[key])
+
+
 class MLflowSink:
     """Render a :class:`~dsagt.traces.Trace` into MLflow spans (a trace consumer).
 
@@ -607,8 +889,14 @@ class MLflowSink:
         """Log every turn subtree; return the MLflow trace id of each."""
         import mlflow
 
+        _quiet_mlflow_chatter()
+        _bound_remote_retries(self._uri)
         mlflow.set_tracking_uri(self._uri)
-        mlflow.set_experiment(trace.project or self._experiment)
+        mlflow.set_experiment(self._experiment)
+        # The CLI catch-up path (`dsagt traces` / `dsagt info`) reaches here
+        # without init_tracing, so the version model is activated here as well;
+        # create-or-reuse, one call per write.
+        mlflow.set_active_model(name=_version_model_name())
 
         children: dict[str, list] = {}
         for span in trace.spans:
@@ -629,7 +917,6 @@ class MLflowSink:
         from mlflow.entities import SpanType
         from mlflow.tracing.constant import (
             SpanAttributeKey,
-            TokenUsageKey,
             TraceMetadataKey,
         )
         from mlflow.tracing.trace_manager import InMemoryTraceManager
@@ -664,17 +951,7 @@ class MLflowSink:
                         SpanAttributeKey.MESSAGE_FORMAT: "anthropic",
                     },
                 )
-                if span["usage"]:
-                    inp = span["usage"].get("input_tokens") or 0
-                    out = span["usage"].get("output_tokens") or 0
-                    child.set_attribute(
-                        SpanAttributeKey.CHAT_USAGE,
-                        {
-                            TokenUsageKey.INPUT_TOKENS: inp,
-                            TokenUsageKey.OUTPUT_TOKENS: out,
-                            TokenUsageKey.TOTAL_TOKENS: inp + out,
-                        },
-                    )
+                _stamp_usage(child, span["usage"])
                 child.set_outputs(
                     {
                         "type": "message",
@@ -695,6 +972,7 @@ class MLflowSink:
                     },
                 )
                 child.set_outputs({"result": span["attributes"].get("result", "")})
+                _stamp_usage(child, span["usage"])
             child.end(end_time_ns=_to_ns(span["end_time"]))
 
         # Trace-level metadata: session correlation + the per-turn canonical id
@@ -702,11 +980,16 @@ class MLflowSink:
         try:
             mgr = InMemoryTraceManager.get_instance()
             with mgr.get_trace(ml_root.trace_id) as in_mem:
+                from dsagt import __version__
+
                 meta = {
                     TraceMetadataKey.TRACE_SESSION: trace.session_id,
                     "dsagt.trace_id": f"{trace.trace_id}:{root['span_id']}",
                     "dsagt.agent": trace.agent,
+                    "dsagt.version": __version__,
                 }
+                if user := _current_user():
+                    meta[TraceMetadataKey.TRACE_USER] = user
                 in_mem.info.trace_metadata = {**in_mem.info.trace_metadata, **meta}
                 if prompt := root["attributes"].get("prompt"):
                     in_mem.info.request_preview = str(prompt)[:1000]

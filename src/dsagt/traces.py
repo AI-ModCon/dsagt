@@ -110,14 +110,40 @@ def _message(role: str, blocks: list[dict]) -> dict:
 
 
 def _usage(raw: dict | None) -> dict | None:
-    """Token counts from a transcript ``usage`` dict; ``None`` when absent."""
+    """Token counts from an Anthropic ``usage`` dict; ``None`` when absent.
+
+    ``input_tokens`` is every token the model read — Anthropic reports the
+    uncached, cache-written and cache-read parts as three disjoint counts, so
+    they are summed here.  Reading only ``input_tokens`` undercounts an agentic
+    turn by roughly the whole prompt: a smoke session showed 36 uncached
+    against 902,248 cached.  The parts are kept alongside for the breakdown.
+    """
+    if not raw:
+        return None
+    uncached = raw.get("input_tokens") or 0
+    cache_read = raw.get("cache_read_input_tokens") or 0
+    cache_write = raw.get("cache_creation_input_tokens") or 0
+    return {
+        "input_tokens": uncached + cache_read + cache_write,
+        "output_tokens": raw.get("output_tokens"),
+        "cache_read_input_tokens": cache_read,
+        "cache_write_input_tokens": cache_write,
+    }
+
+
+def _codex_usage(raw: dict | None) -> dict | None:
+    """Token counts from a Codex ``token_count`` event; ``None`` when absent.
+
+    Same shape as :func:`_usage`.  OpenAI's ``cached_input_tokens`` is a subset
+    of ``input_tokens``, not an addition, so ``input_tokens`` passes through.
+    """
     if not raw:
         return None
     return {
         "input_tokens": raw.get("input_tokens"),
         "output_tokens": raw.get("output_tokens"),
-        "cache_read_input_tokens": raw.get("cache_read_input_tokens"),
-        "cache_write_input_tokens": raw.get("cache_creation_input_tokens"),
+        "cache_read_input_tokens": raw.get("cached_input_tokens") or 0,
+        "cache_write_input_tokens": raw.get("cache_write_input_tokens") or 0,
     }
 
 
@@ -210,6 +236,7 @@ class Trace:
         tool_input,
         result,
         tool_id="",
+        usage=None,
     ) -> dict:
         span = {
             "span_id": span_id,
@@ -222,7 +249,7 @@ class Trace:
             "request": [],
             "response": [],
             "model": None,
-            "usage": None,
+            "usage": usage,
             "attributes": {
                 "tool_name": name,
                 "tool_id": tool_id,
@@ -237,7 +264,9 @@ class Trace:
         """Append one AGENT subtree from a turn's ordered ``events``.
 
         Each event is a tuple — ``("llm", ts, text, model, usage)`` or
-        ``("tool", ts, name, input, result)`` — in transcript order.  This is the
+        ``("tool", ts, name, input, result[, usage])`` — in transcript order.
+        A tool event carries usage when the LLM call that emitted it produced
+        no text, so the call's tokens are not lost with the missing llm span.  This is the
         shared builder the four template translators use: it derives each span's
         duration from the next event's timestamp (1s fallback for the last), and
         threads the request "window" (the prompt, then each tool call+result)
@@ -274,7 +303,7 @@ class Trace:
                 )
                 pending = []
             else:  # "tool"
-                _, _, name, tin, result = ev
+                _, _, name, tin, result = ev[:5]
                 self.add_tool_span(
                     f"{root_id}-{i}",
                     parent_id=root_id,
@@ -283,6 +312,7 @@ class Trace:
                     name=name,
                     tool_input=tin,
                     result=result,
+                    usage=ev[5] if len(ev) > 5 else None,
                 )
                 tool_input = tin if isinstance(tin, dict) else {"raw": tin}
                 pending.append(
@@ -975,11 +1005,43 @@ class CodexTranslator(Translator):
     root_name = "codex_conversation"
 
     def _normalize(self, records) -> list[dict]:
-        return [
-            {"ts": _parse_ts(r.get("timestamp")), "p": r["payload"]}
-            for r in records
-            if r.get("type") == "response_item" and isinstance(r.get("payload"), dict)
-        ]
+        """Conversation items, each stamped with the model and — once per LLM
+        call — that call's token usage.
+
+        A call's output is a run of ``response_item`` records closed by an
+        ``event_msg/token_count`` whose ``last_token_usage`` is the call's
+        bill.  The usage goes on the call's assistant message when it produced
+        one, else on its first tool call, so a tool-only call still counts.
+        """
+        items: list[dict] = []
+        model = None
+        open_call: list[dict] = []  # this call's items, until its token_count
+        for r in records:
+            p = r.get("payload")
+            if not isinstance(p, dict):
+                continue
+            if r.get("type") == "turn_context":
+                model = p.get("model") or model
+                continue
+            if r.get("type") == "response_item":
+                item = {"ts": _parse_ts(r.get("timestamp")), "p": p, "model": model}
+                items.append(item)
+                is_output = p.get("type") in ("function_call", "custom_tool_call") or (
+                    p.get("type") == "message" and p.get("role") == _ROLE_ASSISTANT
+                )
+                if is_output:
+                    open_call.append(item)
+                continue
+            if r.get("type") == "event_msg" and p.get("type") == "token_count":
+                usage = _codex_usage((p.get("info") or {}).get("last_token_usage"))
+                target = next(
+                    (it for it in open_call if it["p"].get("type") == "message"),
+                    open_call[0] if open_call else None,
+                )
+                if target is not None and usage:
+                    target["usage"] = usage
+                open_call = []
+        return items
 
     def _ts(self, rec) -> float | None:
         return rec["ts"]
@@ -1018,13 +1080,21 @@ class CodexTranslator(Translator):
     def _events(self, rec, ts, results) -> list:
         p = rec["p"]
         ptype = p.get("type")
+        usage = rec.get("usage")
         if ptype == "message" and p.get("role") == _ROLE_ASSISTANT:
             text = self._msg_text(p)
-            return [("llm", ts, text, None, None)] if text.strip() else []
+            return [("llm", ts, text, rec.get("model"), usage)] if text.strip() else []
         if ptype in ("function_call", "custom_tool_call"):
             name, tool_input = self._tool_call(p)
             return [
-                ("tool", ts, name, tool_input, results.get(p.get("call_id", ""), ""))
+                (
+                    "tool",
+                    ts,
+                    name,
+                    tool_input,
+                    results.get(p.get("call_id", ""), ""),
+                    usage,
+                )
             ]
         return []
 
@@ -1078,6 +1148,12 @@ class ClaudeTranslator(Translator):
         counter = 0
         final_response: str | None = None
         last_ts = root_ts
+        # Claude Code writes one record per content block and repeats the whole
+        # API response's ``usage`` on each — a thinking block, then four
+        # tool_use blocks, five records, one call.  Usage is attached once per
+        # ``message.id``, to the first span that call produces; a record that
+        # produces no span (thinking only) does not claim it.
+        counted: set[str] = set()
         for i in range(user_idx + 1, end_idx):
             rec = records[i]
             if (t := _parse_ts(rec.get("timestamp"))) is not None:
@@ -1087,6 +1163,11 @@ class ClaudeTranslator(Translator):
             msg = rec.get("message") or {}
             ts = _parse_ts(rec.get("timestamp"))
             text, tools = self._text_and_tools(msg.get("content"))
+            call_id = msg.get("id")
+            already = call_id is not None and call_id in counted
+            usage = None if already else _usage(msg.get("usage"))
+            if usage is not None and call_id is not None and (text.strip() or tools):
+                counted.add(call_id)  # a span below takes it
             nxt = self._next_timestamp(records, i, stop=end_idx)
             duration = (
                 (nxt - ts)
@@ -1104,7 +1185,7 @@ class ClaudeTranslator(Translator):
                     request=self._window_messages(records, i),
                     response=[_text_block(text)],
                     model=msg.get("model"),
-                    usage=_usage(msg.get("usage")),
+                    usage=usage,
                 )
                 counter += 1
 
@@ -1125,6 +1206,12 @@ class ClaudeTranslator(Translator):
                         tool_input=tu.get("input", {}),
                         result=results.get(tid, ""),
                         tool_id=tid,
+                        # The span layout mirrors MLflow's Claude Code autolog,
+                        # which has no LLM span for a tool-calling message — so
+                        # the call's usage rides on its first tool span.  MLflow
+                        # sums usage across every span, so the trace total is
+                        # right and the layout the parity tests pin is kept.
+                        usage=usage if idx_t == 0 else None,
                     )
                     counter += 1
 
@@ -1263,6 +1350,7 @@ def make_trace_collector(
     session_id,
     tracking_uri,
     *,
+    experiment: str,
     projects_root: Path | None = None,
     extra_consumers: list | None = None,
     source=None,
@@ -1288,7 +1376,7 @@ def make_trace_collector(
     # logger drags in mlflow, the heaviest thing in the pipeline.
     from dsagt.observability import MLflowSink
 
-    consumers = [MLflowSink(tracking_uri, project), *(extra_consumers or [])]
+    consumers = [MLflowSink(tracking_uri, experiment), *(extra_consumers or [])]
     return TraceCollector(
         reader,
         translator,

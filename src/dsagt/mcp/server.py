@@ -33,6 +33,7 @@ import asyncio  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import threading  # noqa: E402
+import time  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import jsonschema  # noqa: E402
@@ -44,7 +45,7 @@ from mcp.server.lowlevel import Server, NotificationOptions  # noqa: E402
 from mcp.server.models import InitializationOptions  # noqa: E402
 
 from dsagt.knowledge import KnowledgeBase  # noqa: E402
-from dsagt.observability import open_span  # noqa: E402
+from dsagt.observability import bound, open_span  # noqa: E402
 from dsagt.registry import SkillRegistry, CodeRegistry  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -125,13 +126,18 @@ def build_dispatch_server(
         if tool_name not in handlers:
             return rejected(f"Unknown tool: {tool_name}")
         handler = handlers[tool_name]
-        try:
-            jsonschema.validate(instance=arguments, schema=schemas[tool_name])
-        except jsonschema.ValidationError as e:
-            return rejected(f"Input validation error: {e.message}")
+        # Validation runs inside the span so a malformed call is traced like any
+        # other — an agent looping on bad arguments is exactly what the debug
+        # view exists to show.  An unknown name has no category to tag and stays
+        # untraced.
+        rejection: str | None = None
         with open_span(tool_name, source=tool_category.get(tool_name)) as span:
             try:
+                jsonschema.validate(instance=arguments, schema=schemas[tool_name])
                 result = await handler(arguments)
+            except jsonschema.ValidationError as e:
+                rejection = f"Input validation error: {e.message}"
+                result = {"status": "error", "error": rejection}
             except ValueError as e:
                 result = {"status": "error", "error": str(e)}
             except Exception as e:
@@ -140,9 +146,15 @@ def build_dispatch_server(
             if span is not None:
                 # The trace-level Request/Inputs/Outputs are read from this
                 # categorization root; record the call's arguments and result so
-                # the MLflow UI shows them instead of a null request.
-                span.set_inputs(arguments)
-                span.set_outputs(result)
+                # the MLflow UI shows them instead of a null request.  Both are
+                # agent-controlled and land verbatim in mlflow.db, so they go
+                # through ``bound``: credential keys redacted, leaves truncated.
+                span.set_inputs(bound(arguments))
+                span.set_outputs(bound(result))
+                if isinstance(result, dict) and result.get("status") == "error":
+                    span.set_status("ERROR")
+        if rejection is not None:
+            return rejected(rejection)
         try:
             text = (
                 result
@@ -158,6 +170,60 @@ def build_dispatch_server(
 
 
 HEARTBEAT_INTERVAL_S = 45.0
+TRACE_SOURCE_POLL_S = 2.0
+# Import time is process start: the earliest point that is certainly before
+# the agent's first message, which is what makes the mtime test below sound.
+_SERVER_STARTED_AT = time.time()
+
+
+async def _pin_trace_source(collector, project_dir, interval: float) -> None:
+    """Record this session's trace-source token into ``state.yaml`` as soon as it exists.
+
+    The token is what the *next* session's startup catch-up re-reads, so turns
+    lost to an ungraceful kill still reach the store.  It cannot be taken at
+    startup: the reader resolves "newest transcript", and until the agent's
+    first message that is the previous session's.  Nor on the heartbeat: its
+    first tick lands ~50 s in, after KB build and the embedder load, and a
+    scripted session is over by then — which loses the whole session.
+
+    So poll fast, and accept a source only once it is provably this session's:
+    a path modified since the process started (a transcript's mtime advances on
+    every append, so a late first look only delays the pin to the next turn),
+    or a non-path token — a DB session id, a session-dir name — that differs
+    from the previous session's.  Exits once recorded; failure is logged, never
+    fatal.
+    """
+    from dsagt.session import read_state, record_trace_source
+
+    sessions = read_state(project_dir).get("sessions") or []
+    previous = sessions[-2].get("trace_source") if len(sessions) >= 2 else None
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            source = collector.active_source()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Could not resolve trace source: %s", e)
+            continue
+        if source is None:
+            continue
+        path = Path(source)
+        try:
+            fresh = path.stat().st_mtime >= _SERVER_STARTED_AT
+        except OSError:  # not a path (DB session id, dir name), or gone
+            fresh = None
+        # A path is judged by freshness alone: a resumed session keeps writing
+        # the previous session's transcript, and that file is this session's
+        # source too.  A non-path token has no freshness to check, so it must
+        # at least differ from the previous session's.
+        if fresh is False or (fresh is None and source == previous):
+            continue
+        try:
+            record_trace_source(project_dir, source)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not record trace source: %s", e)
+            return
+        logger.info("Trace source pinned: %s", source)
+        return
 
 
 async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> None:
@@ -167,13 +233,7 @@ async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> N
     editing with its own tools, plain chat) is still captured.  Both block on
     disk (+ MLflow / embedding), so they run in a worker thread to keep handlers
     responsive; a failure is logged, never fatal.
-
-    It also records the live session's trace-source token into ``state.yaml``
-    once resolved, so the *next* session's startup catch-up can pin this exact
-    session even if this one is killed ungracefully (the deferred final-turn
-    flush never runs).  Uniform across agents — JSONL or SQLite.
     """
-    recorded = False
     while True:
         await asyncio.sleep(interval)
         if collector is not None:
@@ -183,16 +243,6 @@ async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> N
                     logger.info("Trace heartbeat: logged %d trace(s)", n)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Trace heartbeat collect failed: %s", e)
-            if not recorded:
-                try:
-                    source = collector.active_source()
-                    if source is not None:
-                        from dsagt.session import record_trace_source
-
-                        record_trace_source(project_dir, source)
-                        recorded = True
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("Could not record trace source: %s", e)
         if tool_indexer is not None:
             try:
                 # tick_traced (not tick): opens a code_use categorization root on
@@ -209,13 +259,21 @@ async def _run_stdio(
     server: Server, name: str, collector=None, tool_indexer=None, project_dir=None
 ) -> None:
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        hb = (
-            asyncio.create_task(
-                _heartbeat(collector, tool_indexer, HEARTBEAT_INTERVAL_S, project_dir)
+        tasks = []
+        if collector is not None or tool_indexer is not None:
+            tasks.append(
+                asyncio.create_task(
+                    _heartbeat(
+                        collector, tool_indexer, HEARTBEAT_INTERVAL_S, project_dir
+                    )
+                )
             )
-            if (collector is not None or tool_indexer is not None)
-            else None
-        )
+        if collector is not None:
+            tasks.append(
+                asyncio.create_task(
+                    _pin_trace_source(collector, project_dir, TRACE_SOURCE_POLL_S)
+                )
+            )
         try:
             await server.run(
                 read_stream,
@@ -230,29 +288,29 @@ async def _run_stdio(
                 ),
             )
         finally:
-            if hb is not None:
-                hb.cancel()
+            for task in tasks:
+                task.cancel()
                 try:
-                    await hb
+                    await task
                 except asyncio.CancelledError:
                     pass
-                # Best-effort end-of-session flush of the deferred final turn +
-                # any unindexed tool-use — covers the graceful-exit case.  If
-                # this is killed before it runs, the next session's startup
-                # catch-up re-collects the previous session's transcript
-                # (session.catch_up_extraction → _catch_up_traces, pinned to the
-                # recorded transcript path); session-qualified acks make both
-                # paths idempotent.  Tool-use likewise re-indexes via its ack set.
-                if collector is not None:
-                    try:
-                        await asyncio.to_thread(collector.collect, include_last=True)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("Trace heartbeat final flush failed: %s", e)
-                if tool_indexer is not None:
-                    try:
-                        await asyncio.to_thread(tool_indexer.tick)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("Tool-use final flush failed: %s", e)
+            # Best-effort end-of-session flush of the deferred final turn +
+            # any unindexed tool-use — covers the graceful-exit case.  If
+            # this is killed before it runs, the next session's startup
+            # catch-up re-collects the previous session's transcript
+            # (session.catch_up_extraction → _catch_up_traces, pinned to the
+            # recorded transcript path); session-qualified acks make both
+            # paths idempotent.  Tool-use likewise re-indexes via its ack set.
+            if collector is not None:
+                try:
+                    await asyncio.to_thread(collector.collect, include_last=True)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Trace heartbeat final flush failed: %s", e)
+            if tool_indexer is not None:
+                try:
+                    await asyncio.to_thread(tool_indexer.tick)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Tool-use final flush failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -423,9 +481,14 @@ def main():
         DEFAULTS,
         _deep_merge,
         append_session,
+        load_user_env,
         resolve_env_vars,
         session_tag,
     )
+
+    # First: agents that don't pass their shell to MCP children (codex, cline)
+    # can only reach a shared store or an API embedder through this file.
+    load_user_env()
 
     project_dir, _cfg = find_project_config()
     if project_dir is None:
@@ -514,7 +577,7 @@ def main():
     collector = None
     try:
         from dsagt.memory import episodic_consumers
-        from dsagt.observability import resolve_tracking_uri
+        from dsagt.observability import experiment_name, resolve_tracking_uri
         from dsagt.traces import make_trace_collector
 
         resolve_cfg = dict(config)
@@ -525,6 +588,7 @@ def main():
             config.get("project", ""),
             session_id or "",
             resolve_tracking_uri(resolve_cfg),
+            experiment=experiment_name(resolve_cfg),
             extra_consumers=episodic_consumers(config, kb, project_dir, session_id),
         )
     except Exception as e:  # noqa: BLE001

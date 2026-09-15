@@ -374,10 +374,13 @@ def _cmd_init(args):
         print(action)
 
     # 2. Project summary.
+    from dsagt.observability import experiment_name, resolve_tracking_uri
+
     print()
     print(f"Project directory:  {pdir}")
     print(f"Agent:              {agent}")
-    print(f"Trace store:        sqlite:///{pdir}/mlflow.db")
+    print(f"Trace store:        {resolve_tracking_uri(config)}")
+    print(f"Experiment:         {experiment_name(config)}")
 
     # 3. Startup instructions.
     print()
@@ -631,7 +634,9 @@ _USER_ERRORS = (FileNotFoundError, FileExistsError, ValueError, RuntimeError)
 
 def main(argv=None):
     from dsagt import __version__
+    from dsagt.session import load_user_env
 
+    load_user_env()
     argv = list(sys.argv[1:] if argv is None else argv)
     # `dsagt mlflow <project>` is an unlisted alias for `traces` — the word
     # people reach for when they want the MLflow viewer.  Rewritten before
