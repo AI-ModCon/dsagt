@@ -17,10 +17,10 @@ are imported lazily so only actual ingestion pays for them, not server startup.
 
 The niche it fills
 ------------------
-General coding agents have settled retrieval into two modes this KB deliberately
-does not compete with — agentic ``grep`` / tool search over *code* (Claude Code,
-Cursor, Windsurf et al. dropped codebase vector indexing outright) and *web
-search* for open-ended questions.  Neither serves **bounded, domain-scoped,
+General coding agents have settled retrieval into two modes: agentic ``grep``
+and tool search over *code* (Claude Code, Cursor, Windsurf et al. dropped
+codebase vector indexing outright) and *web search* for open-ended questions.
+Neither serves **bounded, domain-scoped,
 vetted corpora of highly technical prose** — protocols, API references, domain
 knowledge, tool-use provenance — which is exactly where hybrid dense+sparse
 retrieval still wins and where general agents otherwise fall back to untrusted
@@ -298,9 +298,8 @@ _RETRY_AFTER_RE = re.compile(
 def _extract_retry_after_seconds(message: str, default: float = 60.0) -> float:
     """Parse 'Please retry after N seconds' from upstream error messages.
 
-    Honors the upstream's own hint when present so we don't undershoot the
-    quota window.  Falls back to *default* when the message doesn't contain
-    a parseable hint.
+    Uses the upstream's own hint when present, so the wait covers the quota
+    window, and *default* otherwise.
     """
     m = _RETRY_AFTER_RE.search(message)
     if m:
@@ -617,7 +616,7 @@ class BM25Index:
     collection as *hybrid*.
 
     Rebuilt from scratch on every write because BM25 IDF stats are
-    corpus-global — there is no cheap incremental update.  For DSAGT corpus
+    corpus-global, so every write changes every score.  For DSAGT corpus
     sizes (single-digit thousands of chunks) the rebuild is millisecond-scale.
     Watch the cost if a collection grows past tens of thousands of entries.
     """
@@ -806,16 +805,8 @@ class VectorStore(ABC):
     collections.  Heterogeneity (mixed embedding spaces) is expressed by having
     *several* stores in the list, never by routing within one store.
 
-    TODO (deferred to the second concrete store — BYO/FAISS, see
-    knowledge-base-plan.md): most of :class:`ChromaVectorStore` is backend-
-    agnostic — the BM25 sparse leg, the dense+sparse hybrid fusion, the
-    ``chunks.jsonl`` payload, ``_normalize``.  Only the dense index
-    (add/query/persist over Chroma's HNSW) is Chroma-specific.  When a second
-    store lands, lift that reusable machinery into a shared base that defers
-    only the dense primitives to subclasses, so a FAISS/BYO store reuses it
-    rather than copying it.  Not extracted now: with one impl the seam can't be
-    validated.  Dense-only stores (external adapters with no local sparse leg)
-    are modelled as a *separate store type*, not a per-instance flag.
+    A dense-only store (an external adapter without a local sparse leg) is a
+    separate store type.
     """
 
     embedder: Embedder
@@ -881,11 +872,10 @@ class ChromaVectorStore(VectorStore):
     directly for reuse across stores.
 
     The local store is **unconditionally hybrid**: it writes a BM25 sparse leg on
-    every write and fuses dense + sparse on every (unfiltered) search.  Dense-only
-    retrieval is not a toggle here — a metadata-``where`` filter falls back to
-    dense-only for that one query (BM25 has no filter equivalent), and dense-only
-    *stores* (external/BYO adapters with no local sparse leg) are a separate store
-    type, not a flag on this one.
+    every write and fuses dense + sparse on every (unfiltered) search.  A
+    metadata-``where`` filter searches the dense leg alone for that one query,
+    since BM25 has no filter equivalent; a dense-only *store* (an external or BYO
+    adapter without a local sparse leg) is its own store type.
     """
 
     def __init__(
@@ -1156,7 +1146,7 @@ class ChromaVectorStore(VectorStore):
         """Return a user-friendly hint when *exc* looks like a dim mismatch.
 
         Chroma raises ``InvalidDimensionException`` with "dimension" in the
-        message when a query vector's dimension doesn't match the index's —
+        message when a query vector's dimension differs from the index's —
         i.e. the embedder that BUILT the index was swapped for one with a
         different output dim (the user changed ``embedding.backend`` /
         ``embedding.model`` after init).  Detect on message-shape.
@@ -1250,7 +1240,6 @@ class KnowledgeBase:
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
         # The internal store: local Chroma, one embedder, many collections.
-        # External BYO stores would be appended to ``self._stores`` (deferred).
         self._store = ChromaVectorStore(
             self.index_dir,
             backend=default_embedder or "api",

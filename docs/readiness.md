@@ -1,6 +1,6 @@
 # AI-Readiness Check
 
-DSAgt runs [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage. AIDRIN installs with dsagt, and every project gets the `aidrin` skill and an `aidrin` code, so each call the agent makes is an execution record in `trace_archive/` like any other code. A user who asks "is my data AI-ready?" gets the skill's own workflow.
+DSAgt is configured at init to run [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage; uncheck it on the menu to turn it off. AIDRIN installs with dsagt, and every project gets the `aidrin` skill and an `aidrin` code, so each call the agent makes is an execution record in `trace_archive/` like any other code. A user who asks "is my data AI-ready?" gets the skill's own workflow.
 
 The pipeline-builder instructions require a paired check around every data operation, with reports in `audit/`. The AI-readiness check makes that check concrete for tabular files: it is the `aidrin` skill's quality baseline (completeness, duplicity, outliers), run on a stage's input before the operation and on its output after it, so every stage of a pipeline is measured the same way and the before/after delta is comparable across stages and projects.
 
@@ -71,4 +71,4 @@ The table lists one record per baseline run (two per stage) and one per operatio
 
 ## Demos
 
-The [cryo-EM curation demo](use-cases/cryoem.md) runs on real scientific data — the check measures the particle-curation step unprompted. The [AIDRIN tour](use-cases/aidrin-ai-readiness.md) drives quality, fairness, and privacy metrics on a tabular dataset.
+The [cryo-EM curation demo](use-cases/cryoem.md) runs on real scientific data — the check measures the particle-curation step unprompted. The [AIDRIN example](use-cases/aidrin-ai-readiness.md) drives quality, fairness, and privacy metrics on a tabular dataset.

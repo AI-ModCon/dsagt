@@ -17,8 +17,6 @@ composes their ``(tools, handlers)`` under one dispatch shell
 imports are *lazy* (inside :func:`create_dsagt_server` / :func:`main`) so the
 concern modules can import :func:`build_dispatch_server` from here without a
 cycle.
-
-See ``design-notes/skills-catalog-server-merge.md`` §2.
 """
 
 import os
@@ -62,8 +60,8 @@ def build_dispatch_server(
 ) -> Server:
     """Wrap a ``(tools, handlers)`` pair in a configured MCP ``Server``.
 
-    One dispatch contract for every concern module: reject what the tool's own
-    ``input_schema`` does not admit, run the handler, catch + wrap what it
+    One dispatch contract for every concern module: reject arguments outside
+    the tool's own ``input_schema``, run the handler, catch + wrap what it
     raises, then format by return type — a handler that returns ``str`` passes
     through, one that returns ``dict`` is JSON-encoded.  Registry handlers
     return ``str`` and never raise; knowledge handlers return ``dict`` and raise
@@ -116,8 +114,8 @@ def build_dispatch_server(
     ) -> types.CallToolResult:
         tool_name = params.name
         # ``arguments`` is optional in the protocol (None when omitted), and the
-        # mcp server does not validate against input_schema before dispatch —
-        # reject malformed calls here so handlers can assume valid input.
+        # mcp server dispatches without validating against input_schema, so
+        # malformed calls are rejected here and handlers assume valid input.
         arguments = params.arguments or {}
         # The tool name is client-controlled — an agent inventing one, or holding
         # a stale name across a restart, must get a rejection back rather than an
@@ -146,7 +144,7 @@ def build_dispatch_server(
             if span is not None:
                 # The trace-level Request/Inputs/Outputs are read from this
                 # categorization root; record the call's arguments and result so
-                # the MLflow UI shows them instead of a null request.  Both are
+                # the MLflow UI shows them as the trace's request and response.  Both are
                 # agent-controlled and land verbatim in mlflow.db, so they go
                 # through ``bound``: credential keys redacted, leaves truncated.
                 span.set_inputs(bound(arguments))
@@ -169,7 +167,7 @@ def build_dispatch_server(
     return Server(name, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
-HEARTBEAT_INTERVAL_S = 45.0
+PASS_INTERVAL_S = 45.0
 TRACE_SOURCE_POLL_S = 2.0
 # Import time is process start: the earliest point that is certainly before
 # the agent's first message, which is what makes the mtime test below sound.
@@ -182,7 +180,7 @@ async def _pin_trace_source(collector, project_dir, interval: float) -> None:
     The token is what the *next* session's startup catch-up re-reads, so turns
     lost to an ungraceful kill still reach the store.  It cannot be taken at
     startup: the reader resolves "newest transcript", and until the agent's
-    first message that is the previous session's.  Nor on the heartbeat: its
+    first message that is the previous session's.  Nor on the periodic pass: its
     first tick lands ~50 s in, after KB build and the embedder load, and a
     scripted session is over by then — which loses the whole session.
 
@@ -226,7 +224,7 @@ async def _pin_trace_source(collector, project_dir, interval: float) -> None:
         return
 
 
-async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> None:
+async def _periodic_pass(collector, tool_indexer, interval: float, project_dir) -> None:
     """Periodically run the trace collector + tool-use indexer on wall-clock time.
 
     Runs regardless of tool traffic, so a quiet session (the agent thinking,
@@ -240,9 +238,9 @@ async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> N
             try:
                 n = await asyncio.to_thread(collector.collect)
                 if n:
-                    logger.info("Trace heartbeat: logged %d trace(s)", n)
+                    logger.info("Trace pass: logged %d trace(s)", n)
             except Exception as e:  # noqa: BLE001
-                logger.warning("Trace heartbeat collect failed: %s", e)
+                logger.warning("Trace pass failed: %s", e)
         if tool_indexer is not None:
             try:
                 # tick_traced (not tick): opens a code_use categorization root on
@@ -250,9 +248,9 @@ async def _heartbeat(collector, tool_indexer, interval: float, project_dir) -> N
                 # instead of orphaning as untagged top-level traces.
                 n = await asyncio.to_thread(tool_indexer.tick_traced)
                 if n:
-                    logger.info("Tool-use heartbeat: indexed %d record(s)", n)
+                    logger.info("Tool-use pass: indexed %d record(s)", n)
             except Exception as e:  # noqa: BLE001
-                logger.warning("Tool-use heartbeat tick failed: %s", e)
+                logger.warning("Tool-use pass failed: %s", e)
 
 
 async def _run_stdio(
@@ -263,8 +261,8 @@ async def _run_stdio(
         if collector is not None or tool_indexer is not None:
             tasks.append(
                 asyncio.create_task(
-                    _heartbeat(
-                        collector, tool_indexer, HEARTBEAT_INTERVAL_S, project_dir
+                    _periodic_pass(
+                        collector, tool_indexer, PASS_INTERVAL_S, project_dir
                     )
                 )
             )
@@ -305,7 +303,7 @@ async def _run_stdio(
                 try:
                     await asyncio.to_thread(collector.collect, include_last=True)
                 except Exception as e:  # noqa: BLE001
-                    logger.warning("Trace heartbeat final flush failed: %s", e)
+                    logger.warning("Final trace pass failed: %s", e)
             if tool_indexer is not None:
                 try:
                     await asyncio.to_thread(tool_indexer.tick)
@@ -569,7 +567,7 @@ def main():
 
     server = create_dsagt_server(registry, kb, skill_reg, runtime_dir=str(project_dir))
 
-    # The in-session trace heartbeat: read the live transcript → MLflow.  The
+    # The periodic trace pass: read the live transcript → MLflow.  The
     # loop is agent-agnostic; ``make_trace_collector`` returns a collector for any
     # agent with a registered (reader, translator) pair and ``None`` otherwise (so
     # agents whose readers haven't landed yet simply run without it).
@@ -592,10 +590,10 @@ def main():
             extra_consumers=episodic_consumers(config, kb, project_dir, session_id),
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning("Could not start trace heartbeat: %s", e)
+        logger.warning("Could not start the periodic trace pass: %s", e)
 
     # Tool-use indexer: incremental, idempotent embedding of dsagt-run records
-    # into the ``tool_use`` collection on the same heartbeat (no collector
+    # into the ``tool_use`` collection on the same periodic pass (no collector
     # dependency — it reads trace_archive/, not the transcript).
     tool_indexer = None
     try:

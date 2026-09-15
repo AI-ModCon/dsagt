@@ -266,7 +266,7 @@ class Trace:
         Each event is a tuple — ``("llm", ts, text, model, usage)`` or
         ``("tool", ts, name, input, result[, usage])`` — in transcript order.
         A tool event carries usage when the LLM call that emitted it produced
-        no text, so the call's tokens are not lost with the missing llm span.  This is the
+        no text, so the call's tokens survive when it produces no llm span.  This is the
         shared builder the four template translators use: it derives each span's
         duration from the next event's timestamp (1s fallback for the last), and
         threads the request "window" (the prompt, then each tool call+result)
@@ -442,7 +442,7 @@ class JsonlReader(Reader):
             except json.JSONDecodeError:
                 # One corrupt complete line must not drop the whole session's
                 # transcript — it persists on disk and would re-fail every
-                # heartbeat.  Skip it, as we already skip the trailing partial.
+                # pass.  Skip it, as we already skip the trailing partial.
                 logger.warning("skipping unparseable transcript line in %s", f)
         return out
 
@@ -1151,8 +1151,7 @@ class ClaudeTranslator(Translator):
         # Claude Code writes one record per content block and repeats the whole
         # API response's ``usage`` on each — a thinking block, then four
         # tool_use blocks, five records, one call.  Usage is attached once per
-        # ``message.id``, to the first span that call produces; a record that
-        # produces no span (thinking only) does not claim it.
+        # ``message.id``, to the first span that call produces.
         counted: set[str] = set()
         for i in range(user_idx + 1, end_idx):
             rec = records[i]
@@ -1423,7 +1422,7 @@ class TraceCollector:
         """
         try:
             return self._reader.active_source()
-        except Exception:  # noqa: BLE001 — best-effort; never break the heartbeat
+        except Exception:  # noqa: BLE001 — best-effort; never break the periodic pass
             return None
 
     def _acks_path(self, name: str) -> Path:

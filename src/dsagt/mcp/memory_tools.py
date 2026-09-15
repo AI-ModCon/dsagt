@@ -163,8 +163,8 @@ def create_memory_server(
     """Create a standalone MCP server exposing only the explicit-memory tools.
 
     Test-facing API: tests call it with a mock KB and drive the server via
-    ``call_tool_sync()``.  The merged ``dsagt-server`` uses
-    :func:`_memory_tools_and_handlers` directly instead of this wrapper.
+    ``call_tool_sync()``.  The merged ``dsagt-server`` composes
+    :func:`_memory_tools_and_handlers` itself.
     """
     tools, handlers = _memory_tools_and_handlers(kb, runtime_dir)
     return build_dispatch_server(

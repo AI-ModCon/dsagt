@@ -9,8 +9,8 @@ Codex's config layer has no per-workspace file — instead it reads
 ``$CODEX_HOME/config.toml`` for everything (model, provider base_url, MCP
 servers).  We point ``CODEX_HOME`` at ``<working_dir>/.codex-data`` to
 keep state isolated per project, and :meth:`CodexSetup.write_dynamic`
-writes ``[mcp_servers.*]`` blocks with explicit env (codex doesn't
-inherit parent env into MCP children, same as cline).
+writes ``[mcp_servers.*]`` blocks with explicit env (codex starts MCP
+children with only the env written there, as cline does).
 
 The user owns model + provider config in ``$CODEX_HOME/config.toml``
 (or via ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL`` env).  We don't write
@@ -28,15 +28,15 @@ Codex's ``codex-otel`` Rust crate emits OTel spans/logs/metrics, BUT:
   * User prompts go to a separate log event (``codex.user_prompt``)
     that is **REDACTED by default** — only emitted when the
     ``[otel]`` table sets ``log_user_prompt = true``.
-  * Codex does not honor standard ``OTEL_EXPORTER_OTLP_*`` env vars;
-    config lives in ``~/.codex/config.toml`` ``[otel]`` table.
+  * Codex reads its OTel exporter settings from the ``[otel]`` table of
+    ``~/.codex/config.toml``.
   * Tool *results* go to ``codex.tool_result`` log events with full
     args + output (``session_telemetry.rs:962-1000``).
 
 Conversation history is recovered from
 ``$CODEX_HOME/sessions/rollout-<ts>-<uuid>.jsonl`` (full assistant text
 + tool calls + responses) by the trace pipeline's Codex reader/translator
-on the heartbeat — feeding MLflow and episodic memory like every other agent.
+on the periodic pass — feeding MLflow and episodic memory like every other agent.
 
 Open Codex issues tracking richer OTel: openai/codex#12913,
 #10277, #6153, #16248.

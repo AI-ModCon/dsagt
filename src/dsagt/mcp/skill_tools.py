@@ -172,8 +172,8 @@ async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> d
     A source is ``synced`` (searchable via ``search_skills``) only after an
     ``add_skill_source`` call has cloned + indexed it; otherwise it is
     ``available`` (known name + URL, nothing indexed yet).  Reporting the
-    flag + ``indexed`` count inline means the agent doesn't have to cross-
-    reference a separate ``synced_collections`` list to tell the difference.
+    flag + ``indexed`` count inline lets the agent tell the two apart from
+    this one list.
     """
     from dsagt.registry import CATALOG_COLLECTION_PREFIX, catalog_collection
     from dsagt.skills import KNOWN_SOURCES, SkillRouter, _repo_slug
@@ -400,8 +400,8 @@ def create_skill_server(
     """Create a standalone MCP server exposing only the skill tools.
 
     Test-facing API: tests call it with mock deps and drive the server via
-    ``call_tool_sync()``.  The merged ``dsagt-server`` uses
-    :func:`_skill_tools_and_handlers` directly instead of this wrapper.
+    ``call_tool_sync()``.  The merged ``dsagt-server`` composes
+    :func:`_skill_tools_and_handlers` itself.
     """
     tools, handlers = _skill_tools_and_handlers(skill_registry, kb, runtime_dir)
     return build_dispatch_server(

@@ -8,12 +8,11 @@ BYOA: Goose talks directly to the user's provider via its own
 ``~/.config/goose/config.yaml`` or ``GOOSE_PROVIDER`` / ``GOOSE_MODEL`` env;
 DSAGT sets no telemetry env.
 
-Telemetry / episodic memory: Goose has **no Stop/turn hook and no MLflow
-autolog integration**, so DSAGT does not offer the mlflow-autolog or
-episodic-memory options for goose — those are gated on agents that have both
-(claude / codex / opencode).  Goose stays fully supported for the core,
-agent-agnostic capabilities (KB retrieval, registered tools, skills,
-tool-execution provenance via ``dsagt-run``).  If goose gains a hook
+Telemetry / episodic memory: goose's turns come from its on-disk session
+database through the periodic pass (``traces.GooseReader``), the same way as
+every agent's, so traces and episodic memory work for goose without any hook
+in goose itself.  The core capabilities (KB retrieval, registered tools,
+skills, tool-execution provenance via ``dsagt-run``) are agent-agnostic.  If goose gains a hook
 mechanism the options can be enabled.
 
 Gateway note: goose's openai/anthropic providers read ``OPENAI_HOST`` /
@@ -88,8 +87,8 @@ class GooseSetup(AgentSetup):
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
         # Base default is just the static marker (.goosehints), but
-        # write_dynamic also writes goose.yaml — list both so switching off
-        # goose doesn't strand the stale MCP-extension config.
+        # write_dynamic also writes goose.yaml — list both so switching
+        # agents removes the MCP-extension config too.
         return [
             working_dir / ".goosehints",
             working_dir / "goose.yaml",

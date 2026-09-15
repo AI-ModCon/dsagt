@@ -6,10 +6,10 @@ Generates: ``AGENTS.md`` (auto-loaded from cwd, same convention codex uses)
 and ``opencode.json`` (per-project config with MCP servers + provider
 interpolation references).
 
-OTel support: **none** natively (one third-party plugin exists but isn't
-wired in by default).  Agent transparency in MLflow is limited to MCP-server
-spans (kb.*, registry.*) and dsagt-run tool.execute spans; LLM-call payloads
-are not captured.
+Traces: opencode's turns come from its on-disk session database through the
+periodic pass (``traces.OpenCodeReader``), the same way as every agent's;
+MCP-server spans (kb.*, registry.*) and dsagt-run tool.execute spans are
+emitted live.
 
 Auth model: opencode reads creds via ``{env:VAR}`` interpolation in its
 ``opencode.json`` provider block, so we can keep BYOA-pure — the file
@@ -23,7 +23,7 @@ only (no flags), so non-interactive setup must hand-write the JSON.
 
 Model whitelist: pass-through for known providers (pulled from models.dev)
 and fully user-controlled for custom providers via ``provider.<id>.models``.
-Unlike cline, opencode does NOT rewrite gateway-aliased model names.
+opencode passes model names through unchanged.
 
 Batch mode: ``opencode run --dir <path> --dangerously-skip-permissions
 -m <provider/model> <prompt>``.  ``--dir`` is the cwd flag (not ``-C`` /

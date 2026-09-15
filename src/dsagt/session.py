@@ -76,11 +76,10 @@ def state_path(pdir: Path) -> Path:
 
 
 # Code defaults backfilled into a project's config on read (``_deep_merge``).
-# These are NOT user choices and so are NOT written to ``.dsagt/config.yaml``
-# nor prompted at ``dsagt init`` — they live here as the single source of
-# truth and are filled in for the MCP server / KB.  Embedding is local-only
-# for now (BYOA, no credentials); an ``api`` backend can be re-introduced as
-# an init choice if it's ever requested.  ``chunk_size`` / ``rerank`` default
+# They are code settings, held here as the one definition and filled in for
+# the MCP server and the KB; ``.dsagt/config.yaml`` and the ``dsagt init``
+# prompts carry user choices only.  Embedding is local (BYOA, no
+# credentials).  ``chunk_size`` / ``rerank`` default
 # in :class:`~dsagt.knowledge.KnowledgeBase`; ``skills.populate_native`` in
 # :meth:`AgentSetup.setup_skills`.
 DEFAULTS = {
@@ -102,7 +101,7 @@ DEFAULTS = {
             },
         ],
     },
-    # Episodic memory: the heartbeat's MemoryExtractor subscriber.  ``enabled``
+    # Episodic memory: the periodic pass's MemoryExtractor subscriber.  ``enabled``
     # is a compute/storage opt-in that mechanically chunks/tags/embeds each
     # completed turn into session_memory (no credentials).
     "episodic": {
@@ -194,8 +193,7 @@ def build_config(
 
     - ``project`` / ``agent`` — identity (agent + name/location are prompted).
     - ``knowledge.collections`` — the packaged document collections chosen
-      (default none; the bundled ``tools`` collection is always provisioned
-      and is not a per-project choice).
+      (default none; the bundled ``tools`` collection is always provisioned).
     - ``skills.sources`` — the skill-catalog repos chosen.
     - ``episodic`` — written *only when the user opted in* (it's an opt-in, so a
       disabled project stays minimal and backfills ``enabled: false`` on read).
@@ -442,8 +440,7 @@ def current_session_tag(pdir: Path, project: str) -> str | None:
     """The trace tag of the current session, or ``None`` if none exists.
 
     Used by ``dsagt-run`` to tag tool spans with the same session the MCP
-    server minted — read from ``state.yaml`` instead of a ``DSAGT_SESSION_ID``
-    env var.
+    server minted, read from ``state.yaml``.
     """
     cur = current_session(pdir)
     if cur is None:
@@ -505,15 +502,14 @@ def setup_runtime_kb(
     """Copy base KB collections into a project's kb_index directory.
 
     Creates ``<runtime_dir>/kb_index`` if missing.  For each collection
-    under *base_index_dir* that looks populated and whose project-local
-    twin doesn't already exist, **copies** (not symlinks) the entire
+    under *base_index_dir* that looks populated and has no project-local
+    twin yet, **copies** the entire
     collection directory into the project's kb_index.
 
     *collections*, when given, is an allowlist of collection-directory
     names to copy — so a project gets exactly its requested asset set even
     when the shared KB holds more (e.g. heavy collections another project
-    installed).  ``None`` copies every populated collection (legacy
-    copy-everything behavior).
+    installed).  ``None`` copies every populated collection.
 
     Why copy instead of symlink: different projects on the same machine
     may run different dsagt versions, and a symlink would let one
@@ -762,9 +758,8 @@ def move_project(project_name: str, new_location: Path) -> Path:
 def remove_project(project_name: str, keep_files: bool = False) -> Path:
     """Unregister a project. By default also deletes the project directory.
 
-    Serverless: there are no background services to reap — ``dsagt start``
-    runs the agent in the foreground and returns when it exits — so there
-    is nothing to stop before removing.
+    ``dsagt start`` runs the agent in the foreground and returns when it
+    exits, so removal is a directory delete.
     """
     pdir = project_dir(project_name)
 
@@ -796,11 +791,11 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
     1. **Code-execution indexing** (always): embed the previous session's
        ``<pdir>/trace_archive/`` records into the ``code_use`` collection via
        the shared :class:`~dsagt.provenance.CodeUseIndexer` — idempotent against
-       the same ``.dsagt/code_use_acks.json`` the live heartbeat uses, so the
-       startup catch-up and the heartbeat never double-index.  No LLM, no
+       the same ``.dsagt/code_use_acks.json`` the periodic pass uses, so the
+       startup catch-up and the periodic pass never double-index.  No LLM, no
        credentials (local-backend default).
     2. **Chat-trace catch-up** (:func:`_catch_up_traces`): re-collect the
-       previous session so any turns the heartbeat missed before an ungraceful
+       previous session so any turns the periodic pass missed before an ungraceful
        shutdown still reach MLflow (and episodic memory).  Pinned to the
        trace-source token recorded in ``state.yaml`` (uniform across agents);
        session-qualified acks dedupe against the live pass, so only dangling
@@ -847,7 +842,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
     session token, not a transcript-file assumption.
 
     Returns 0 (a no-op) when there is no previous session, or it stamped no
-    trace-source (a session too short for the heartbeat to record one), where
+    trace-source (a session too short for the periodic pass to record one), where
     guessing would risk reading the *new* session's records.
     """
     from dsagt.memory import episodic_consumers

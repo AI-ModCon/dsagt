@@ -764,9 +764,9 @@ class TestOpenMPWorkaround:
 
 
 class TestRerankSchemaDefault:
-    """The kb_search schema previously hardcoded 'default': True for the
-    rerank parameter, causing agents to request reranking even when the
-    server wasn't started with --rerank. This triggered the OpenMP crash."""
+    """The kb_search schema's rerank parameter carries no default of True:
+    that default makes agents request reranking on a server started
+    without --rerank, which triggers the OpenMP crash."""
 
     def _get_rerank_default(self, server):
         """Extract the rerank default from the kb_search tool schema."""

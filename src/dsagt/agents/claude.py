@@ -8,7 +8,7 @@ The user brings ``ANTHROPIC_API_KEY`` (and optionally ``ANTHROPIC_MODEL``,
 ``ANTHROPIC_BASE_URL``) themselves and Claude Code talks directly to its
 provider.  DSAGT sets **no** telemetry env on the agent — agent-side traces
 are recovered post-hoc from Claude's on-disk transcript by DSAGT's own
-serverless pipeline (MCP-server heartbeat → ``ClaudeReader`` →
+serverless pipeline (MCP server periodic pass → ``ClaudeReader`` →
 ``ClaudeTranslator`` → ``MLflowSink``), uniformly with every other agent; not
 by forcing native OTel emission or wiring MLflow's autolog hook.
 
@@ -72,8 +72,8 @@ class ClaudeSetup(AgentSetup):
         children — claude inherits parent env into them, but baking it into the
         JSON is robust against shells that don't have those vars set.
 
-        No trace wiring here: DSAGT's own serverless pipeline (the MCP-server
-        heartbeat → ``ClaudeReader`` → ``ClaudeTranslator`` → ``MLflowSink``)
+        No trace wiring here: DSAGT's own serverless pipeline (the MCP server's
+        periodic pass → ``ClaudeReader`` → ``ClaudeTranslator`` → ``MLflowSink``)
         produces Claude's traces, uniformly with every other agent — so we do
         NOT also wire MLflow's ``autolog claude`` Stop hook (which would
         double-log the same turns, and only Claude can use it serverlessly).
@@ -107,8 +107,7 @@ class ClaudeSetup(AgentSetup):
     ) -> int:
         """Single ``claude -p`` call with the entire script as one prompt.
 
-        ``--verbose`` streams tool-call progress instead of buffering
-        everything until the agent finishes.
+        ``--verbose`` streams tool-call progress as it happens.
 
         ``--max-thinking-tokens 4096`` caps per-turn extended thinking
         — claude code's default is much higher and a multi-task smoke

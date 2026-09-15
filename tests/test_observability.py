@@ -269,9 +269,8 @@ def test_init_tracing_points_mlflow_at_store_and_experiment(monkeypatch):
 # ---------------------------------------------------------------------------
 # Safety nets for the remaining defensive catches in observability.py.
 #
-# After the fallback-purge pass, two "soft" catches remain in the
-# observability layer, both inline inside traced()'s wrapper (previously
-# _attach_captured_args and _attach_return_attrs):
+# Two "soft" catches exist in the observability layer, both inline inside
+# traced()'s wrapper:
 #
 #   1. traced() wraps sig.bind_partial in except TypeError so that a
 #      function whose signature was mangled by another decorator doesn't
@@ -850,7 +849,7 @@ def test_experiment_name_defaults_to_project_dir_hash_and_honors_config():
 
 def test_ensure_experiment_tags_only_on_first_creation(monkeypatch):
     """A description edited by hand on the server must not be overwritten on
-    every heartbeat — tags are written only when the experiment has none."""
+    every periodic pass — tags are written only when the experiment has none."""
     import mlflow
 
     from dsagt.observability import _ensure_experiment
