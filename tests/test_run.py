@@ -400,3 +400,32 @@ class TestMain:
             ]
         )
         assert exit_code == 7
+
+
+class TestChildEnv:
+    """dsagt-run resolves a command from dsagt's own environment when PATH
+    lacks it, which is the case under pipx and ``uv tool install``."""
+
+    def test_interpreter_dir_is_appended_once(self, monkeypatch):
+        import os
+        import sys
+
+        from dsagt.provenance import _child_env
+
+        bin_dir = str(Path(sys.executable).parent)
+        monkeypatch.setenv("PATH", "/usr/bin")
+        assert _child_env()["PATH"] == f"/usr/bin{os.pathsep}{bin_dir}"
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin")
+        assert _child_env()["PATH"] == f"{bin_dir}{os.pathsep}/usr/bin"
+
+    def test_command_from_the_interpreter_dir_runs(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PATH", str(tmp_path))  # an empty directory
+        exit_code = run_and_record(
+            code_name="py",
+            command=["python", "-c", "print('found')"],
+            records_dir=tmp_path,
+            record_id="env-001",
+        )
+        assert exit_code == 0
+        (record,) = tmp_path.glob("*.json")
+        assert "found" in json.loads(record.read_text())["execution"]["stdout"]

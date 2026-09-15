@@ -20,6 +20,7 @@ from __future__ import annotations
 import fcntl
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -93,6 +94,23 @@ def _parse_file_list(raw: str | None) -> list[str]:
     return [f.strip() for f in raw.split(",") if f.strip()]
 
 
+def _child_env() -> dict[str, str]:
+    """Environment for the code's process: the caller's, with the directory
+    of dsagt's own interpreter appended to PATH.
+
+    A tool installer (pipx, ``uv tool install``) links only dsagt's commands
+    onto PATH; a CLI that is a dsagt dependency, such as ``aidrin``, is in
+    that private environment's bin directory.  Appended, not prepended, so
+    every command already on PATH resolves as it did before.
+    """
+    env = dict(os.environ)
+    bin_dir = str(Path(sys.executable).parent)
+    path = env.get("PATH", "")
+    if bin_dir not in path.split(os.pathsep):
+        env["PATH"] = f"{path}{os.pathsep}{bin_dir}" if path else bin_dir
+    return env
+
+
 def run_and_record(
     code_name: str,
     command: list[str],
@@ -122,6 +140,7 @@ def run_and_record(
                 command,
                 capture_output=True,
                 text=True,
+                env=_child_env(),
             )
             return_code = result.returncode
             stdout = result.stdout
