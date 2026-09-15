@@ -43,10 +43,12 @@ def _fake_clone(fake_repo: Path):
     """
 
     def _run(cmd, capture_output=True, text=True, **kwargs):
-        # cmd is e.g. ["git", "clone", "--depth", "1", "--branch", "main", url, dest]
-        dest = Path(cmd[-1])
-        shutil.copytree(fake_repo, dest)
-        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[1] == "clone":
+            # ["git", "clone", "--depth", "1", "--branch", "main", url, dest]
+            shutil.copytree(fake_repo, Path(cmd[-1]))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        assert cmd[1:2] == ["-C"] and cmd[-2:] == ["rev-parse", "HEAD"], cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="fake0commit\n", stderr="")
 
     return _run
 
@@ -112,6 +114,9 @@ def test_clone_with_include_keeps_top_level_files(fake_repo, tmp_path):
 
     # Subdirs not in include must NOT be copied.
     assert not (dest / "tests").exists()
+    # The clone's commit and ref are recorded for consumers of the cache.
+    assert (dest / "SOURCE_COMMIT").read_text() == "fake0commit\n"
+    assert (dest / "SOURCE_REF").read_text() == "main\n"
 
 
 def test_clone_without_include_copies_everything(fake_repo, tmp_path):
@@ -158,7 +163,10 @@ class TestResolveAssets:
 
     def test_include_subset_returns_canonical_order(self):
         # input order shouldn't matter — cheap assets always built first.
-        assert resolve_assets(include=["aidrin", "codes"]) == ["codes", "aidrin"]
+        assert resolve_assets(include=["nemo_curator", "codes"]) == [
+            "codes",
+            "nemo_curator",
+        ]
 
     def test_exclude_trims_the_default_set(self):
         assert resolve_assets(exclude=["genesis"]) == ["codes"]

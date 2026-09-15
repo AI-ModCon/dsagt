@@ -20,14 +20,8 @@ def _mkskill(d, name, desc):
 
 
 def _registry(tmp_path, skills=None):
-    """SkillRegistry with bundled skills suppressed and optional project skills."""
-    empty_bundled = tmp_path / "no_bundled"
-    empty_bundled.mkdir()
-    reg = SkillRegistry(
-        runtime_dir=tmp_path / "proj",
-        source_skills_dir=str(empty_bundled),
-        kb=None,
-    )
+    """SkillRegistry over a fresh project dir with optional project skills."""
+    reg = SkillRegistry(runtime_dir=tmp_path / "proj", kb=None)
     for name, desc in (skills or {}).items():
         _mkskill(reg.skills_dir / name, name, desc)
     return reg

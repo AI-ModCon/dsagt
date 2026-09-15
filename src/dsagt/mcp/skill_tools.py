@@ -131,7 +131,11 @@ async def _handle_add_skill_source(
     kb: KnowledgeBase,
     runtime_dir: Path,
 ) -> dict:
-    """Enable a skill source (known name or GitHub URL): clone + index the catalog."""
+    """Enable a skill source (known name or git URL): clone + index the catalog.
+
+    ``force`` re-clones a cached source so skills added upstream since the
+    first sync are indexed; without it a cached clone is only re-indexed.
+    """
     from dsagt.skills import (
         KNOWN_SOURCES,
         SkillRouter,
@@ -141,15 +145,14 @@ async def _handle_add_skill_source(
 
     source = arguments.get("source")
     if not source:
-        return {
-            "error": "add_skill_source requires 'source' (known name or GitHub URL)."
-        }
+        return {"error": "add_skill_source requires 'source' (known name or git URL)."}
     try:
         spec = resolve_source(source)
         if isinstance(source, str) and source in KNOWN_SOURCES:
             spec.setdefault("name", source)
         router = SkillRouter(kb=kb)
-        stats = await asyncio.to_thread(router.sync, source)
+        force = bool(arguments.get("force", False))
+        stats = await asyncio.to_thread(router.sync, source, force=force)
     except (ValueError, RuntimeError) as e:
         return {"error": str(e)}
     persist_source_to_config(
@@ -316,8 +319,9 @@ def _skill_tools_and_handlers(
         types.Tool(
             name="add_skill_source",
             description=(
-                "Enable an external agent-skill source (a known name like "
-                "'k-dense-ai'/'anthropic'/'antigravity'/'composio', or a GitHub URL). "
+                "Enable an external agent-skill source (a known name: "
+                "'genesis', 'k-dense-ai', 'anthropic', 'antigravity', "
+                "'composio'; or a git URL on any host). "
                 "Clones it and indexes its skills into the searchable catalog "
                 "(search_skills). Does NOT load them into context."
             ),
@@ -326,7 +330,14 @@ def _skill_tools_and_handlers(
                 "properties": {
                     "source": {
                         "type": "string",
-                        "description": "Known source name or GitHub repo URL / owner/repo",
+                        "description": "Known source name or git repo URL / owner/repo",
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": (
+                            "Re-clone a source that is already cached, picking up "
+                            "skills added upstream since the last sync. Default false."
+                        ),
                     },
                 },
                 "required": ["source"],

@@ -7,7 +7,7 @@ once, then copies them per project.
 Asset namespace (the ``--include`` / ``--exclude`` selectors on ``dsagt init``):
 - ``tools``                bundled tool specs (cheap, local)
 - skill catalogs           ``genesis`` (default), ``scientific``, ``composio``, …
-- scientific collections   ``nemo_curator``, ``aidrin`` (clone external repos; docs + papers only, not source)
+- scientific collections   ``nemo_curator`` (clones the external repo; docs + papers only, not source)
 
 :data:`DEFAULT_ASSETS` (bundled tools + the genesis skill catalog) is the
 cheap set installed automatically on a machine's first project.  Embedding
@@ -23,7 +23,12 @@ from pathlib import Path
 
 import httpx
 
-from dsagt.session import REGISTRY_DIR, _collection_exists
+from dsagt.session import (
+    REGISTRY_DIR,
+    SOURCE_COMMIT_FILE,
+    SOURCE_REF_FILE,
+    _collection_exists,
+)
 
 DEFAULT_INDEX_DIR = REGISTRY_DIR / "kb_index"
 
@@ -101,39 +106,6 @@ quality assessment strategies.
             },
         ],
     },
-    "aidrin": {
-        "description": """# AIDRIN - AI Data Readiness Inspector
-
-Framework for assessing data readiness for AI/ML applications.
-
-## Key Topics
-- Data quality metrics (completeness, outliers, duplicates)
-- Fairness and bias assessment
-- Privacy evaluation
-- FAIR principle compliance
-- Feature importance analysis
-
-## Use For
-Understanding data quality requirements, assessment metrics,
-readiness evaluation for ML pipelines.
-""",
-        "sources": [
-            {
-                "type": "github",
-                "url": "https://github.com/kaveenh/AIDRIN",
-                "branch": "develop",
-                # Docs only — omit the `aidrin` source package.  The docs
-                # and the two arxiv papers below cover how to use the tool;
-                # code retrieval is better served by the agent's native
-                # file search, and skipping the source speeds ingestion.
-                # clone_github still keeps the top-level files (README,
-                # pyproject.toml, requirements.txt, …) for install metadata.
-                "include": ["docs"],
-            },
-            {"type": "arxiv", "id": "2406.19256"},  # AIDRIN paper
-            {"type": "arxiv", "id": "2404.05779"},  # Data Readiness Survey
-        ],
-    },
 }
 
 
@@ -146,7 +118,10 @@ def clone_github(
     top-level files at the repo root (README, pyproject.toml, setup.py,
     LICENSE, etc.).  Top-level files are usually small and contain
     critical packaging metadata the agent needs to install dependencies
-    correctly when it registers tools against the library.
+    correctly when it registers tools against the library.  The commit the
+    clone was taken at and the *branch* (or tag) asked for are written to
+    ``<dest>/SOURCE_COMMIT`` and ``<dest>/SOURCE_REF`` so a consumer can
+    tell what a cached clone holds.
     """
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp) / "repo"
@@ -157,6 +132,16 @@ def clone_github(
         )
         if result.returncode != 0:
             raise RuntimeError(f"Git clone failed: {result.stderr}")
+        head = subprocess.run(
+            ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if head.returncode != 0 or not head.stdout.strip():
+            raise RuntimeError(f"Git rev-parse failed after clone: {head.stderr}")
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / SOURCE_COMMIT_FILE).write_text(head.stdout.strip() + "\n")
+        (dest / SOURCE_REF_FILE).write_text(branch + "\n")
 
         if include:
             # Copy the requested subdirectories.
@@ -297,7 +282,7 @@ def _current_dsagt_version() -> str:
 #   <catalog>      a skill-catalog source from ``skills.KNOWN_SOURCES``
 #                  (e.g. "genesis", "k-dense-ai", "composio", "antigravity")
 #   <collection>   a heavy scientific doc collection from ``COLLECTIONS``
-#                  (e.g. "nemo_curator", "aidrin" — clones external repos)
+#                  (e.g. "nemo_curator" — clones external repos)
 #
 # DEFAULT_ASSETS is the cheap core a first-ever ``dsagt init`` installs
 # automatically; everything else is opt-in via ``--include``.
