@@ -73,7 +73,7 @@ def test_base_skills_name_their_upstream_sources():
 
     from dsagt.readiness import aidrin_release_tag
 
-    by_name = {b["name"]: sc.resolve_source(b["source"]) for b in sc.BASE_SKILLS}
+    by_name = {b["name"]: sc.resolve_source(b["source"]) for b in sc.base_skills()}
     assert by_name["skill-creator"]["url"] == sc.KNOWN_SOURCES["genesis"]["url"]
     assert by_name["datacard-generator"]["url"] == sc.KNOWN_SOURCES["genesis"]["url"]
     assert by_name["aidrin"]["url"] == "https://github.com/idtlab/AIDRIN"
@@ -96,7 +96,7 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
         (cache_dir / slug).mkdir(parents=True, exist_ok=True)
         (cache_dir / slug / "SOURCE_COMMIT").write_text(f"{slug}-commit\n")
         subdir = source.get("subdir") or ""
-        for b in sc.BASE_SKILLS:
+        for b in sc.base_skills():
             if sc.resolve_source(b["source"])["url"] == source["url"]:
                 d = _mkskill(cache_dir / slug / subdir / "x" / b["name"], b["name"])
                 for code in b.get("codes", ()):
@@ -139,7 +139,7 @@ def test_register_base_skill_codes_wraps_scripts_in_place(tmp_path):
     from dsagt.registry import CodeRegistry
 
     proj = tmp_path / "proj"
-    for entry in sc.BASE_SKILLS:
+    for entry in sc.base_skills():
         for code in entry.get("codes", ()):
             if "script" not in code:
                 continue
@@ -662,3 +662,16 @@ def test_index_catalog_embeds_frontmatter_not_body(tmp_path):
     assert "SECRET_BODY_MARKER" not in joined  # body NOT embedded
     # description is also carried in metadata for the search summary.
     assert captured["metas"][0]["description"] == "does a thing"
+
+
+def test_base_skills_reads_the_aidrin_version_when_called(monkeypatch):
+    """The aidrin release tag comes from the installed package at call time,
+    so an unparseable version fails the caller, never the import of
+    dsagt.skills (which every skill tool needs)."""
+    monkeypatch.setattr(sc, "installed_version", lambda name: "2027.1.5")
+    aidrin = next(b for b in sc.base_skills() if b["name"] == "aidrin")
+    assert aidrin["source"]["branch"] == "v2027.01.5"
+
+    monkeypatch.setattr(sc, "installed_version", lambda name: "2027.1")
+    with pytest.raises(ValueError):
+        sc.base_skills()

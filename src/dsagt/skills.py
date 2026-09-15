@@ -30,7 +30,7 @@ Class map — every edge is ``<branch>─<rel> Class`` (``◇`` holds · ``◆``
       source resolve  resolve_source · _repo_slug · persist_source_to_config
       sync / index    sync_source · _discover_skill_dirs · index_catalog
       install         find_catalog_skill · install_into_project · _capture_attribution
-      base skills     BASE_SKILLS · install_base_skills   (every project, from upstream)
+      base skills     base_skills · install_base_skills  (every project, from upstream)
       render          _where_label
 
 Genesis Skills: Apache-2.0, github.com/AI-ModCon/genesis-skills
@@ -566,143 +566,149 @@ def install_into_project(
 # Base skills — installed into every project at ``dsagt init``
 # ---------------------------------------------------------------------------
 
-#: Skills every project carries, each fetched from the repository that
-#: maintains it.  ``source`` is a :func:`resolve_source` argument; ``name`` is
-#: the skill's frontmatter name inside that source.  DSAgt holds no copy of
-#: these: ``dsagt init`` installs each from the shared source cache, cloned
-#: on first use, re-cloned when the cached ref differs from the one asked
-#: for, and otherwise refreshed only by an explicit ``add_skill_source``
-#: with ``force``.  The ``aidrin`` skill is fetched at the release tag of
-#: the installed ``aidrin`` package so it describes the CLI dsagt installs.
-#: ``codes`` lists what a skill's workflow runs; each entry is registered as
-#: a code (:func:`register_base_skill_codes`) so the agent runs it through
-#: ``dsagt-run`` and the run is recorded.  An entry names either ``script``,
-#: relative to the skill directory, or ``executable``, a command on the
-#: path.
-BASE_SKILLS: tuple[dict, ...] = (
-    {"name": "skill-creator", "source": "genesis"},
-    {
-        "name": "datacard-generator",
-        "source": "genesis",
-        "codes": (
-            {
-                "name": "datacard-introspect",
-                "script": "scripts/introspect.py",
-                "description": (
-                    "Summarize a dataset directory as JSON for a datacard: file "
-                    "count, total bytes, recognized formats, CSV header columns, "
-                    "README/LICENSE/CITATION presence, and train/test/val splits."
-                ),
-                "parameters": {
-                    "dataset_dir": {
-                        "type": "string",
-                        "required": True,
-                        "cli": "positional",
-                        "description": "Directory holding the dataset",
+
+def base_skills() -> tuple[dict, ...]:
+    """Return the skills every project carries, each fetched from the repository
+    that maintains it.
+
+    ``source`` is a :func:`resolve_source` argument; ``name`` is the skill's
+    frontmatter name inside that source.  DSAgt holds no copy of these:
+    ``dsagt init`` installs each from the shared source cache, cloned on first
+    use, re-cloned when the cached ref differs from the one asked for, and
+    otherwise refreshed only by an explicit ``add_skill_source`` with
+    ``force``.  The ``aidrin`` skill is fetched at the release tag of the
+    installed ``aidrin`` package so it describes the CLI dsagt installs; the
+    tag is read when this function is called, so importing the module never
+    touches package metadata.  ``codes`` lists what a skill's workflow runs;
+    each entry is registered as a code (:func:`register_base_skill_codes`) so
+    the agent runs it through ``dsagt-run`` and the run is recorded.  An entry
+    names either ``script``, relative to the skill directory, or
+    ``executable``, a command on the path.
+    """
+    return (
+        {"name": "skill-creator", "source": "genesis"},
+        {
+            "name": "datacard-generator",
+            "source": "genesis",
+            "codes": (
+                {
+                    "name": "datacard-introspect",
+                    "script": "scripts/introspect.py",
+                    "description": (
+                        "Summarize a dataset directory as JSON for a datacard: file "
+                        "count, total bytes, recognized formats, CSV header columns, "
+                        "README/LICENSE/CITATION presence, and train/test/val splits."
+                    ),
+                    "parameters": {
+                        "dataset_dir": {
+                            "type": "string",
+                            "required": True,
+                            "cli": "positional",
+                            "description": "Directory holding the dataset",
+                        },
                     },
                 },
-            },
-            {
-                "name": "datacard-validate",
-                "script": "scripts/validate_datacard.py",
-                "dependencies": ["pyyaml", "pydantic"],
-                "description": (
-                    "Validate a Genesis datacard file against the upstream "
-                    "Pydantic model and report every schema error and warning."
-                ),
-                "parameters": {
-                    "file": {
-                        "type": "string",
-                        "required": True,
-                        "cli": "positional",
-                        "description": "Path to the datacard .md file",
-                    },
-                    "json": {
-                        "type": "boolean",
-                        "required": False,
-                        "cli": "--json",
-                        "description": "Emit the report as JSON",
-                    },
-                },
-            },
-            {
-                "name": "datacard-convert-v1",
-                "script": "scripts/convert_v1_to_genesis.py",
-                "dependencies": ["pyyaml", "pydantic"],
-                "description": (
-                    "Convert a v1 datacard to the Genesis format, writing "
-                    "<input>.genesis.md and reporting the fields it mapped, "
-                    "dropped, and left to fill."
-                ),
-                "parameters": {
-                    "file": {
-                        "type": "string",
-                        "required": True,
-                        "cli": "positional",
-                        "description": "Path to the v1 datacard .md file",
-                    },
-                    "out": {
-                        "type": "string",
-                        "required": False,
-                        "cli": "--out",
-                        "description": "Output path (default: <input>.genesis.md)",
-                    },
-                    "json": {
-                        "type": "boolean",
-                        "required": False,
-                        "cli": "--json",
-                        "description": "Emit the report as JSON",
-                    },
-                    "preserve_body": {
-                        "type": "boolean",
-                        "required": False,
-                        "cli": "--preserve-body",
-                        "description": (
-                            "Append the v1 body as a legacy appendix so no prose "
-                            "is lost"
-                        ),
+                {
+                    "name": "datacard-validate",
+                    "script": "scripts/validate_datacard.py",
+                    "dependencies": ["pyyaml", "pydantic"],
+                    "description": (
+                        "Validate a Genesis datacard file against the upstream "
+                        "Pydantic model and report every schema error and warning."
+                    ),
+                    "parameters": {
+                        "file": {
+                            "type": "string",
+                            "required": True,
+                            "cli": "positional",
+                            "description": "Path to the datacard .md file",
+                        },
+                        "json": {
+                            "type": "boolean",
+                            "required": False,
+                            "cli": "--json",
+                            "description": "Emit the report as JSON",
+                        },
                     },
                 },
-            },
-        ),
-    },
-    {
-        "name": "aidrin",
-        "source": {
-            "url": "https://github.com/idtlab/AIDRIN",
-            "branch": aidrin_release_tag(installed_version("aidrin")),
-            "subdir": ".claude/skills",
+                {
+                    "name": "datacard-convert-v1",
+                    "script": "scripts/convert_v1_to_genesis.py",
+                    "dependencies": ["pyyaml", "pydantic"],
+                    "description": (
+                        "Convert a v1 datacard to the Genesis format, writing "
+                        "<input>.genesis.md and reporting the fields it mapped, "
+                        "dropped, and left to fill."
+                    ),
+                    "parameters": {
+                        "file": {
+                            "type": "string",
+                            "required": True,
+                            "cli": "positional",
+                            "description": "Path to the v1 datacard .md file",
+                        },
+                        "out": {
+                            "type": "string",
+                            "required": False,
+                            "cli": "--out",
+                            "description": "Output path (default: <input>.genesis.md)",
+                        },
+                        "json": {
+                            "type": "boolean",
+                            "required": False,
+                            "cli": "--json",
+                            "description": "Emit the report as JSON",
+                        },
+                        "preserve_body": {
+                            "type": "boolean",
+                            "required": False,
+                            "cli": "--preserve-body",
+                            "description": (
+                                "Append the v1 body as a legacy appendix so no prose "
+                                "is lost"
+                            ),
+                        },
+                    },
+                },
+            ),
         },
-        # The CLI the skill documents, registered so every call is an
-        # execution record; ``aidrin`` installs beside ``dsagt-run``.
-        "codes": (
-            {
-                "name": "aidrin",
-                "executable": "aidrin",
-                "description": (
-                    "AIDRIN (AI Data Readiness Inspector) command line: "
-                    "`list`, `summarize <file>`, `data-quality <file> --detail`, "
-                    "`run <metric> <file> <args...>`, `batch <config>`. Metric "
-                    "semantics and argument order: skills/aidrin/reference/metrics.md."
-                ),
-                "parameters": {
-                    "args": {
-                        "type": "string",
-                        "required": True,
-                        "cli": "positional",
-                        "description": "The aidrin subcommand and its arguments",
+        {
+            "name": "aidrin",
+            "source": {
+                "url": "https://github.com/idtlab/AIDRIN",
+                "branch": aidrin_release_tag(installed_version("aidrin")),
+                "subdir": ".claude/skills",
+            },
+            # The CLI the skill documents, registered so every call is an
+            # execution record; ``aidrin`` installs beside ``dsagt-run``.
+            "codes": (
+                {
+                    "name": "aidrin",
+                    "executable": "aidrin",
+                    "description": (
+                        "AIDRIN (AI Data Readiness Inspector) command line: "
+                        "`list`, `summarize <file>`, `data-quality <file> --detail`, "
+                        "`run <metric> <file> <args...>`, `batch <config>`. Metric "
+                        "semantics and argument order: skills/aidrin/reference/metrics.md."
+                    ),
+                    "parameters": {
+                        "args": {
+                            "type": "string",
+                            "required": True,
+                            "cli": "positional",
+                            "description": "The aidrin subcommand and its arguments",
+                        },
                     },
                 },
-            },
-        ),
-    },
-)
+            ),
+        },
+    )
 
 
 def install_base_skills(
     project_dir: str | Path, *, cache_dir: Path = SKILL_SOURCES_DIR
 ) -> list[dict]:
-    """Install every :data:`BASE_SKILLS` entry into ``<project>/skills/<name>/``
+    """Install every :func:`base_skills` entry into ``<project>/skills/<name>/``
     and register the scripts they run as codes.
 
     A source is cloned into the cache when absent or held at another ref,
@@ -714,7 +720,7 @@ def install_base_skills(
     :func:`install_into_project` result per skill.
     """
     results: list[dict] = []
-    for entry in BASE_SKILLS:
+    for entry in base_skills():
         spec = resolve_source(entry["source"])
         sync_source(spec, cache_dir=cache_dir)
         qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
@@ -736,7 +742,7 @@ def native_invocations() -> dict[str, list[tuple[str, str]]]:
     to the installed copy, which is the text the agent reads.
     """
     table: dict[str, list[tuple[str, str]]] = {}
-    for entry in BASE_SKILLS:
+    for entry in base_skills():
         pairs = [
             (
                 code["executable"],
@@ -783,7 +789,7 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
 
 
 def register_base_skill_codes(project_dir: str | Path) -> list[str]:
-    """Register every ``codes`` entry of :data:`BASE_SKILLS` in ``<project>/codes/``.
+    """Register every ``codes`` entry of :func:`base_skills` in ``<project>/codes/``.
 
     A ``script`` entry runs the script in place under ``<project>/skills/``,
     relative to the project directory, which is the agent's cwd; an
@@ -798,7 +804,7 @@ def register_base_skill_codes(project_dir: str | Path) -> list[str]:
     project_dir = Path(project_dir)
     registry = CodeRegistry(runtime_dir=project_dir)
     actions: list[str] = []
-    for entry in BASE_SKILLS:
+    for entry in base_skills():
         for code in entry.get("codes", ()):
             if "script" in code:
                 script = Path("skills") / entry["name"] / code["script"]

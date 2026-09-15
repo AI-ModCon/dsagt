@@ -596,7 +596,7 @@ def _provision_kb(
 
 
 def _provision_base_skills(pdir: Path) -> None:
-    """Install the base skills (``skills.BASE_SKILLS``) from their upstream
+    """Install the base skills (``skills.base_skills``) from their upstream
     repositories into ``<project>/skills/``.
 
     A failed fetch is printed, not raised: the project works without the
