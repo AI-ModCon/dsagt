@@ -45,7 +45,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Intel Macs are no longer a supported platform. The `darwin/x86_64` entry in
   `required-environments` held every environment on torch 2.2.2 and NumPy 1.x;
   the lock now resolves torch 2.14, NumPy 2.x, transformers 5.x,
-  sentence-transformers 6.x, and tree-sitter-language-pack 1.16.
+  sentence-transformers 6.x, and tree-sitter-language-pack 1.16. `torch>=2.3`
+  is a declared dependency, so an install on an Intel Mac fails at dependency
+  resolution with a message naming torch. Without the floor, a fresh install
+  there produced torch 2.2.2 beside NumPy 2 and the knowledge-base build
+  failed at import.
 - `requires-python` is `>=3.12` again; CI tests 3.12 and 3.13.
 - Dependencies are declared as ranges with a next-major cap, so dsagt
   resolves beside a project that pins differently. `ruyaml`, which nothing
