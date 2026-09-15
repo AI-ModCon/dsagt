@@ -10,7 +10,21 @@ To view in the MLflow UI:
 dsagt traces <project> # mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db
 ```
 
-`dsagt info <project>` prints the resolved tracking URI and a session/trace summary. 
+`dsagt info <project>` prints the resolved tracking URI and a session/trace summary. The tracking URI is `MLFLOW_TRACKING_URI` when set in the shell, else the `sqlite:///<project>/mlflow.db` default. The experiment is `dsagt-<8 hex>`, hashed from the project directory so two users' `demo` projects never collide on a shared server; set `mlflow.experiment` in `.dsagt/config.yaml` to choose a name. The project name is on the experiment's description and its `dsagt.project` tag.
+
+## Logging to a shared tracking server
+
+Export `MLFLOW_TRACKING_URI` before `dsagt init`; the value is written into the agent's MCP config, so the CLI, the MCP server and its `dsagt-run` children all log there instead of the local file. Credentials are never written into a project or an agent config:
+
+- `MLFLOW_TRACKING_TOKEN` (Bearer) or `MLFLOW_TRACKING_USERNAME` / `_PASSWORD` — read by the MLflow client itself.
+- `MLFLOW_TRACKING_API_KEY` — for a server behind an API gateway that authenticates on an `X-API-Key` header (Kong answers `WWW-Authenticate: Key`); DSAgt adds the header through MLflow's request-header plugin.
+
+`dsagt traces` prints the remote deep-link in this mode rather than starting a local viewer, and `dsagt info` reads from the remote store.
+
+Two consequences of the URL being baked at init:
+
+- **Change the server by re-running `dsagt init`.** Exporting a different `MLFLOW_TRACKING_URI` later moves the CLI but not the MCP server, whose config still carries the old value.
+- **codex and cline do not pass the shell to their MCP children**, so a key exported in a terminal never reaches `dsagt-server` under those agents. Put it in **`~/.config/dsagt/env`** instead (`KEY=VALUE` lines, mode 600): `dsagt-server` and the `dsagt` CLI load it at startup for any key the shell did not set. The file is in `$HOME`, never inside a project or an agent config — the `~/.netrc` pattern. It works for every agent, and for `EMBEDDING_API_KEY` too.
 
 ## Trace sources
 

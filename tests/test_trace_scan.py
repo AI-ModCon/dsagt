@@ -59,7 +59,7 @@ def scan_env(tmp_path, monkeypatch):
     f = tdir / "sess.jsonl"
     uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
     collector = make_trace_collector(
-        "claude", proj, "proj", "proj:s", uri, projects_root=proot
+        "claude", proj, "proj", "proj:s", uri, experiment="proj", projects_root=proot
     )
     return collector, f, proj
 
@@ -68,12 +68,17 @@ def test_make_trace_collector_registered_agents(tmp_path):
     # The periodic pass isn't Claude-special: it runs for any agent with a pipeline.
     for agent in ("claude", "codex", "goose", "opencode", "cline"):
         assert (
-            make_trace_collector(agent, tmp_path, "p", "p:s", "sqlite:///x.db")
+            make_trace_collector(
+                agent, tmp_path, "p", "p:s", "sqlite:///x.db", experiment="p"
+            )
             is not None
         )
     # An agent with no pipeline registered simply gets no periodic pass.
     assert (
-        make_trace_collector("nonesuch", tmp_path, "p", "p:s", "sqlite:///x.db") is None
+        make_trace_collector(
+            "nonesuch", tmp_path, "p", "p:s", "sqlite:///x.db", experiment="p"
+        )
+        is None
     )
 
 
@@ -279,6 +284,7 @@ def test_make_trace_collector_pins_source(tmp_path):
         "p",
         "p:1",
         f"sqlite:///{tmp_path / 'm.db'}",
+        experiment="p",
         source=str(transcript),
     )
     assert collector.active_source() == str(transcript)

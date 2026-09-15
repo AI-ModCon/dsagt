@@ -21,10 +21,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+import os
+
 import pytest
 
 from dsagt import observability as obs_module
-from dsagt.observability import child_span, init_tracing, obs, traced
+from dsagt.observability import experiment_name, child_span, init_tracing, obs, traced
 
 
 @pytest.fixture(autouse=True)
@@ -155,14 +157,25 @@ def test_root_span_source_tags_trace_and_session(_reset_tracing, monkeypatch):
     ``dsagt.source`` and, when a session id is set, the reserved
     ``mlflow.trace.session`` metadata key (the native session filter).
     """
+    from dsagt import __version__
+
     monkeypatch.setattr(obs_module, "_default_session_id", "proj-xyz")
+    monkeypatch.setattr(obs_module, "_default_agent", "goose")
 
     with obs_module.open_span("search_knowledge", source="knowledge"):
         pass
 
     trace = _last_trace()
     assert trace.info.tags["dsagt.source"] == "knowledge"
+    # agent + version are metadata on internal and agent traces alike — the
+    # one place `dsagt info` reads them from.
+    assert trace.info.trace_metadata["dsagt.agent"] == "goose"
     assert trace.info.trace_metadata["mlflow.trace.session"] == "proj-xyz"
+    assert trace.info.trace_metadata["dsagt.version"] == __version__
+    # The reserved key behind the trace table's User column.
+    import getpass
+
+    assert trace.info.trace_metadata["mlflow.trace.user"] == getpass.getuser()
 
 
 def test_inner_spans_inherit_root_source(_reset_tracing):
@@ -217,6 +230,10 @@ def test_init_tracing_points_mlflow_at_store_and_experiment(monkeypatch):
 
     def _fake_set_experiment(name):
         captured["experiment"] = name
+        return type("Exp", (), {"tags": {}})()  # fresh experiment: no tags yet
+
+    def _fake_set_experiment_tag(key, value):
+        captured.setdefault("tags", {})[key] = value
 
     def _fake_set_tracking_uri(uri):
         captured["tracking_uri"] = uri
@@ -224,19 +241,26 @@ def test_init_tracing_points_mlflow_at_store_and_experiment(monkeypatch):
     import mlflow
 
     monkeypatch.setattr(mlflow, "set_experiment", _fake_set_experiment)
+    monkeypatch.setattr(mlflow, "set_experiment_tag", _fake_set_experiment_tag)
     monkeypatch.setattr(mlflow, "set_tracking_uri", _fake_set_tracking_uri)
 
     monkeypatch.setattr(obs_module, "_initialized", False)
     monkeypatch.setattr(
         obs_module,
         "find_project_config",
-        lambda: (None, {"project": "my-project"}),
+        lambda: ("/proj", {"project": "my-project"}),
     )
 
     try:
         init_tracing("dsagt-run", mlflow_url="sqlite:///x.db")
         assert captured["tracking_uri"] == "sqlite:///x.db"
-        assert captured["experiment"] == "my-project"
+        # The experiment is the resolved hash name, not the project name; the
+        # project name rides on the description and tag instead.
+        assert captured["experiment"] == experiment_name({"project_dir": "/proj"})
+        assert captured["experiment"].startswith("dsagt-")
+        assert captured["tags"]["dsagt.project"] == "my-project"
+        assert "DSAgt (DataSmith Agent)" in captured["tags"]["mlflow.note.content"]
+        assert "my-project" in captured["tags"]["mlflow.note.content"]
         assert obs_module._initialized is True
     finally:
         monkeypatch.setattr(obs_module, "_initialized", False)
@@ -445,6 +469,8 @@ def test_kb_add_entries_emits_span(_reset_tracing, tmp_path):
     assert "kb.add_entries" in spans
     assert spans["kb.add_entries"].attributes["collection"] == "epis"
     assert spans["kb.add_entries"].attributes["n_entries"] == 3
+    # A write child reports what it wrote, the way kb.search reports what it read.
+    assert spans["kb.add_entries"].outputs == {"entries_added": 3}
 
 
 # ---------------------------------------------------------------------------
@@ -715,3 +741,241 @@ def test_search_registry_categorized_but_no_internal_span(_reset_tracing, tmp_pa
     assert trace.info.tags["dsagt.source"] == "registry"
     # ...but search opens no internal subsystem span.
     assert not any(n.startswith("registry.") for n in names)
+
+
+def test_bound_redacts_credential_keys_at_any_depth():
+    from dsagt.observability import bound
+
+    args = {
+        "url": "https://api.example.com",
+        "headers": {"Authorization": "Bearer sk-live-abc"},
+        "nested": {"api_key": "k", "keep": "v"},
+    }
+    out = bound(args)
+    assert out["headers"] == "[redacted]"
+    assert out["nested"]["api_key"] == "[redacted]"
+    assert out["nested"]["keep"] == "v"
+    assert out["url"] == "https://api.example.com"
+    assert "sk-live-abc" not in str(out)
+
+
+def test_bound_truncates_string_leaves_and_keeps_structure():
+    from dsagt.observability import bound
+
+    result = {"stdout": "x" * 10_000, "files": ["y" * 10_000, "short"], "code": 0}
+    out = bound(result, limit=64)
+    assert len(out["stdout"]) < 100 and "[+" in out["stdout"]
+    assert len(out["files"][0]) < 100
+    assert out["files"][1] == "short"
+    assert out["code"] == 0  # non-strings pass through
+
+
+def test_bound_handles_plain_string_result():
+    """Registry handlers return a bare ``str``, not a dict."""
+    from dsagt.observability import bound
+
+    assert bound("short") == "short"
+    assert "[+" in bound("z" * 10_000, limit=64)
+
+
+def test_resolve_tracking_uri_env_overrides_sqlite(monkeypatch):
+    from dsagt.observability import resolve_tracking_uri
+
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    assert resolve_tracking_uri({"project_dir": "/p"}) == "sqlite:////p/mlflow.db"
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.org")
+    assert resolve_tracking_uri({"project_dir": "/p"}) == "https://mlflow.example.org"
+
+
+def test_api_key_header_provider_sends_x_api_key_only_when_set(monkeypatch):
+    from importlib.metadata import entry_points
+
+    from dsagt.observability import ApiKeyHeaderProvider
+
+    # Registered where MLflow looks for it, so every process picks it up.
+    eps = {
+        e.name: e.value for e in entry_points(group="mlflow.request_header_provider")
+    }
+    assert eps["dsagt_api_key"] == "dsagt.observability:ApiKeyHeaderProvider"
+
+    p = ApiKeyHeaderProvider()
+    monkeypatch.delenv("MLFLOW_TRACKING_API_KEY", raising=False)
+    assert p.in_context() is False
+    monkeypatch.setenv("MLFLOW_TRACKING_API_KEY", "k-123")
+    assert p.in_context() is True
+    assert p.request_headers() == {"X-API-Key": "k-123"}
+
+
+def test_bound_masks_credential_shapes_inside_strings():
+    """Key-name redaction cannot see a bearer inside a ``run_command`` argv or
+    an API key in a URL query string — the value shape has to be masked."""
+    from dsagt.observability import bound
+
+    argv = {
+        "command": [
+            "curl",
+            "-H",
+            "Authorization: Bearer sk-live-abcdefghijklmnop",
+            "https://x",
+        ]
+    }
+    assert bound(argv)["command"][2] == "Authorization: Bearer [redacted]"
+
+    url = bound({"url": "https://api.x/v1?api_key=sk-live-abcdefghijklmnop&page=2"})[
+        "url"
+    ]
+    assert url == "https://api.x/v1?api_key=[redacted]&page=2"
+
+    for key in ("X-API-Key", "access_token", "apikey", "auth"):
+        assert bound({key: "sk-live-3"})[key] == "[redacted]"
+
+
+def test_experiment_name_defaults_to_project_dir_hash_and_honors_config():
+    from dsagt.observability import experiment_name
+
+    a = experiment_name({"project_dir": "/home/a/dsagt-projects/demo"})
+    b = experiment_name({"project_dir": "/home/b/dsagt-projects/demo"})
+    assert a.startswith("dsagt-") and len(a) == len("dsagt-") + 8
+    assert a == experiment_name(
+        {"project_dir": "/home/a/dsagt-projects/demo"}
+    )  # stable
+    assert a != b  # same project name, different users: no collision on a shared server
+    assert (
+        experiment_name({"project_dir": "/x", "mlflow": {"experiment": "team/demo"}})
+        == "team/demo"
+    )
+
+
+def test_ensure_experiment_tags_only_on_first_creation(monkeypatch):
+    """A description edited by hand on the server must not be overwritten on
+    every periodic pass — tags are written only when the experiment has none."""
+    import mlflow
+
+    from dsagt.observability import _ensure_experiment
+
+    calls = []
+    existing = type(
+        "Exp", (), {"tags": {"dsagt.project": "p", "mlflow.note.content": "edited"}}
+    )()
+    monkeypatch.setattr(mlflow, "set_experiment", lambda name: existing)
+    monkeypatch.setattr(mlflow, "set_experiment_tag", lambda k, v: calls.append(k))
+    _ensure_experiment("dsagt-abc", "p")
+    assert calls == []
+
+
+def test_code_execute_nonzero_exit_is_an_error_trace(_reset_tracing, tmp_path):
+    """A failed code run is a failure in the store, not an OK span with an
+    event tucked inside it."""
+    import mlflow
+
+    from dsagt.provenance import run_and_record
+
+    run_and_record(code_name="t", command=["false"], records_dir=tmp_path)
+    trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
+    assert str(trace.info.state).endswith("ERROR")
+
+
+def test_init_tracing_survives_a_deleted_experiment(tmp_path, monkeypatch, caplog):
+    """A deleted experiment on the store must not take the server down: the
+    name is deterministic, so `set_experiment` would refuse it on every start
+    and the project could never run again.  Tracing goes off, loudly."""
+    import logging
+
+    import mlflow
+
+    from dsagt.observability import experiment_name, init_tracing
+
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    mlflow.set_tracking_uri(uri)
+    name = experiment_name({"project_dir": "/proj"})
+    mlflow.MlflowClient().delete_experiment(mlflow.create_experiment(name))
+
+    monkeypatch.setattr(obs_module, "_initialized", False)
+    monkeypatch.setattr(
+        obs_module, "find_project_config", lambda: ("/proj", {"project": "p"})
+    )
+
+    with caplog.at_level(logging.ERROR):
+        init_tracing("dsagt-server", mlflow_url=uri)  # must not raise
+
+    assert obs_module._initialized is False
+    msg = caplog.text
+    assert (
+        "tracing disabled" in msg
+        and "deleted state" in msg
+        and "mlflow.experiment" in msg
+    )
+
+
+def test_init_tracing_activates_the_version_model(tmp_path, monkeypatch):
+    """`mlflow.modelId` must reference a LoggedModel named for the dsagt
+    release, created once per experiment — that is what the UI's Version
+    column shows."""
+    import mlflow
+
+    from dsagt import __version__
+    from dsagt.observability import init_tracing
+
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    monkeypatch.setattr(obs_module, "_initialized", False)
+    monkeypatch.setattr(
+        obs_module, "find_project_config", lambda: ("/proj", {"project": "p"})
+    )
+    init_tracing("dsagt-server", mlflow_url=uri)
+    with obs_module.open_span("demo", source="knowledge"):
+        pass
+    md = _last_trace().info.trace_metadata
+    model = mlflow.get_logged_model(md["mlflow.modelId"])
+    assert model.name == "dsagt-" + __version__.replace(".", "_")
+
+
+def test_bound_leaves_ordinary_prose_alone_and_catches_json_keys():
+    """The value-shape sweep is anchored: `Bearer`/`Basic` only after an
+    `Authorization:` label, key labels only before a token-shaped value —
+    otherwise a `read_file` of any document with "basic " or "bearer " in it
+    lost the next word in the stored preview.  JSON-quoted keys, the shape of
+    a printed config, are caught."""
+    from dsagt.observability import bound
+
+    prose = "A basic example of the bearer of bad news; max_token: 5 items"
+    assert bound(prose) == prose
+    assert (
+        bound({"cfg": '{"api_key": "sk-live-abcdefghijklmnop"}'})["cfg"]
+        == '{"api_key": "[redacted]"}'
+    )
+    assert (
+        bound("OPENAI_API_KEY=sk-live-abcdefghijklmnop") == "OPENAI_API_KEY=[redacted]"
+    )
+    assert bound("token=abc") == "token=abc"  # too short to be a credential
+
+
+def test_remote_store_retry_budget_is_bounded_but_overridable(monkeypatch):
+    from dsagt.observability import _bound_remote_retries
+
+    for v in ("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "MLFLOW_HTTP_REQUEST_TIMEOUT"):
+        monkeypatch.delenv(v, raising=False)
+    _bound_remote_retries("sqlite:///x.db")
+    assert "MLFLOW_HTTP_REQUEST_MAX_RETRIES" not in os.environ  # local: untouched
+    _bound_remote_retries("https://mlflow.example.org")
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "2"
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "9")
+    _bound_remote_retries("https://mlflow.example.org")
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "9"  # explicit wins
+
+
+def test_init_tracing_quiets_mlflow_info_chatter(tmp_path, monkeypatch, capsys):
+    """MLflow narrates set_experiment / set_active_model at INFO on stderr —
+    "Active model is set to …" on every dsagt-run.  An agent capturing a
+    code's stderr would read that as the code's output."""
+    import logging
+
+    from dsagt.observability import init_tracing
+
+    monkeypatch.setattr(obs_module, "_initialized", False)
+    monkeypatch.setattr(
+        obs_module, "find_project_config", lambda: ("/proj", {"project": "p"})
+    )
+    init_tracing("dsagt-run", mlflow_url=f"sqlite:///{tmp_path}/mlflow.db")
+    assert logging.getLogger("mlflow.tracking.fluent").level == logging.WARNING
+    assert "Active model is set" not in capsys.readouterr().err

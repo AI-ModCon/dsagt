@@ -242,12 +242,17 @@ check "dsagt info runs"              "dsagt info '${PROJECT}'"
 #    backstopped by session 2's startup catch-up), so agent traces in the
 #    store are a hard requirement for all five agents.
 # ---------------------------------------------------------------------------
-AGENT_TRACES=$(uv run --quiet python <<PY 2>/dev/null
+# The store is whichever one the session logged to: MLFLOW_TRACKING_URI when
+# set (a shared tracking server), else the project's serverless sqlite file.
+STORE_URI="${MLFLOW_TRACKING_URI:-sqlite:///${PDIR}/mlflow.db}"
+TRACE_COUNTS=$(uv run --quiet python <<PY 2>/dev/null
 import mlflow
-mlflow.set_tracking_uri("sqlite:///${PDIR}/mlflow.db")
-exp = mlflow.get_experiment_by_name("${PROJECT}")
+from dsagt.observability import experiment_name
+from dsagt.session import load_config
+mlflow.set_tracking_uri("${STORE_URI}")
+exp = mlflow.get_experiment_by_name(experiment_name(load_config("${PROJECT}")))
 if exp is None:
-    print(0); raise SystemExit
+    print("0 0"); raise SystemExit
 df = mlflow.search_traces(
     locations=[exp.experiment_id],
     max_results=500,
@@ -263,10 +268,11 @@ n = sum(
     for _, row in df.iterrows()
     if "dsagt.trace_id" in (row.get("trace_metadata") or {})
 )
-print(n)
+print(len(df), n)
 PY
 )
-AGENT_TRACES="${AGENT_TRACES:-0}"
+read -r TOTAL_TRACES AGENT_TRACES <<< "${TRACE_COUNTS:-0 0}"
+check "mlflow store has traces (${TOTAL_TRACES})" "test '${TOTAL_TRACES}' -gt 0"
 check "agent traces recovered (${AGENT_TRACES})" "test '${AGENT_TRACES}' -gt 0"
 
 echo

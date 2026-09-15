@@ -86,6 +86,7 @@ def test_periodic_pass_indexes_turn_into_session_memory(tmp_path):
         "proj",
         "proj:s",
         tracking_uri,
+        experiment="proj",
         projects_root=proot,
         extra_consumers=subs,
     )

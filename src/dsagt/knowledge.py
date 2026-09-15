@@ -1345,12 +1345,14 @@ class KnowledgeBase:
                 "texts_preview": [t[:200] for t in texts[:3]],
             }
         )
-        return self._store.add_entries(
+        result = self._store.add_entries(
             texts,
             collection,
             metadatas=metadatas,
             return_embeddings=return_embeddings,
         )
+        obs.set_outputs({"entries_added": result.get("entries_added")})
+        return result
 
     # -- document ingestion pipeline ----------------------------------------
 

@@ -2,7 +2,7 @@
 
 ## What this is
 
-DSAgt (DataSmith Agent) is an MCP server and a CLI that give a user's own agent platform (Claude Code, Goose, Codex, opencode, Cline) code registration, a knowledge base, skill discovery, execution provenance, memory, and trace logging for building data-curation pipelines. Two facts every change respects: the agent talks to its own LLM provider and dsagt recovers its traces from the on-disk transcript; and all self-logging goes to the serverless store `sqlite:///<pdir>/mlflow.db`, so a project is self-contained in its directory.
+DSAgt (DataSmith Agent) is an MCP server and a CLI that give a user's own agent platform (Claude Code, Goose, Codex, opencode, Cline) code registration, a knowledge base, skill discovery, execution provenance, memory, and trace logging for building data-curation pipelines. Two facts every change respects: the agent talks to its own LLM provider and dsagt recovers its traces from the on-disk transcript; and all self-logging goes to one MLflow store, the project's `sqlite:///<pdir>/mlflow.db` unless `MLFLOW_TRACKING_URI` names a shared server, so a project is self-contained in its directory by default.
 
 ## Documents
 
@@ -33,7 +33,7 @@ uv run mkdocs build --strict                                # docs, what CI runs
 - **explicit memory**, **episodic memory**: `memory.ExplicitMemory`, `memory.MemoryExtractor`.
 - **trace**: one session's spans as plain data (`traces.Trace`). The **periodic pass** (`mcp.server._periodic_pass`, every 45 seconds) runs `traces.TraceCollector`; the **deferred final turn** is the open last turn a periodic pass withholds; **catch-up** re-collects the previous session at startup (`session.catch_up_extraction`).
 - **AI-readiness check**: the default-on AIDRIN quality baseline around every tabular stage, one paragraph at the per-operation check rule (`readiness.INSTRUCTIONS_PARAGRAPH`); `aidrin` is a registered code in every project (`skills.base_skills`).
-- **store**: the project's MLflow sqlite file (`observability.resolve_tracking_uri`).
+- **store**: the MLflow store traces go to, `MLFLOW_TRACKING_URI` when set, else the project's sqlite file (`observability.resolve_tracking_uri`); traces log to the **experiment** `dsagt-<8 hex>` derived from the project directory, or `mlflow.experiment` from the config (`observability.experiment_name`).
 
 ## Invariants
 
@@ -41,11 +41,11 @@ uv run mkdocs build --strict                                # docs, what CI runs
 - The package holds no skill directories. A base skill is an entry in `skills.base_skills` whose directory is maintained upstream (the genesis catalog's `skills/basedata-skills/`, idtlab/AIDRIN).
 - `dsagt init` is the one place collections are provisioned; `dsagt-server` opens only `<project>/kb_index`.
 - A tool is registered on `dsagt-server` only when its handler is complete end to end; internal scaffolding for an unfinished path stays unregistered.
-- `dsagt-server` derives its project from its cwd and behaves the same from a bare launch or `dsagt start`. The MCP-config env block carries routing only; dsagt never reads or writes provider credentials.
+- `dsagt-server` derives its project from its cwd and behaves the same from a bare launch or `dsagt start`. The MCP-config env block carries routing only. dsagt never reads or writes an LLM-provider credential (`ANTHROPIC_*`, `OPENAI_*`, `GOOSE_*`); its own service credentials, the trace store's `MLFLOW_TRACKING_API_KEY` or `_TOKEN` and the embedding backend's `EMBEDDING_API_KEY`, are read from the shell or `~/.config/dsagt/env` (`session.load_user_env`) and never written into a project or an agent config.
 - Agent traces come from the on-disk transcript through the periodic pass, the same way for all five agents.
 - Modules on the `dsagt-run` path import no heavy dependency at module scope.
 
 ## Exceptions
 
-- Run only the test file relevant to a change; the unit suite takes about 50 s. `test_*_integration.py` and `test_server_startup.py` load the local embedder, spawn subprocesses, or install into the venv.
+- Run only the test file relevant to a change; the unit suite takes about 50 s. `test_*_integration.py` and `test_server_startup.py` load the local embedder, spawn subprocesses, or install into the venv; `test_mcp_wire.py` spawns `tests/wire_server.py` and speaks JSON-RPC over stdio.
 - Use `python -m pytest`; the bare `pytest` binary on this machine resolves the wrong interpreter.
