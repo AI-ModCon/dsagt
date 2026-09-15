@@ -737,6 +737,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#logging-to-a-shared-tracking-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logging to a shared tracking server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#two-feeds" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1249,6 +1260,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#logging-to-a-shared-tracking-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logging to a shared tracking server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#two-feeds" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1324,7 +1346,19 @@
 <p>To view in the MLflow UI:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;project&gt;<span class="w"> </span><span class="c1"># rund dsagt mlflow ui --backend-store-uri sqlite:///&lt;project&gt;/mlflow.db</span>
 </code></pre></div>
-<p><code>dsagt info &lt;name&gt;</code> prints the resolved tracking URI and a session/trace summary. The tracking URI resolves as <code>MLFLOW_TRACKING_URI</code> env → project config → the <code>sqlite:///&lt;project&gt;/mlflow.db</code> default.</p>
+<p><code>dsagt info &lt;name&gt;</code> prints the resolved tracking URI and a session/trace summary. The tracking URI is <code>MLFLOW_TRACKING_URI</code> when set in the shell, else the <code>sqlite:///&lt;project&gt;/mlflow.db</code> default. The experiment is <code>dsagt-&lt;8 hex&gt;</code>, hashed from the project directory so two users' <code>demo</code> projects never collide on a shared server; set <code>mlflow.experiment</code> in <code>.dsagt/config.yaml</code> to choose a name. The project name is on the experiment's description and its <code>dsagt.project</code> tag.</p>
+<h2 id="logging-to-a-shared-tracking-server">Logging to a shared tracking server<a class="headerlink" href="#logging-to-a-shared-tracking-server" title="Permanent link">&para;</a></h2>
+<p>Export <code>MLFLOW_TRACKING_URI</code> before <code>dsagt init</code>; the value is written into the agent's MCP config, so the CLI, the MCP server and its <code>dsagt-run</code> children all log there instead of the local file. Credentials are never written into a project or an agent config:</p>
+<ul>
+<li><code>MLFLOW_TRACKING_TOKEN</code> (Bearer) or <code>MLFLOW_TRACKING_USERNAME</code> / <code>_PASSWORD</code> — read by the MLflow client itself.</li>
+<li><code>MLFLOW_TRACKING_API_KEY</code> — for a server behind an API gateway that authenticates on an <code>X-API-Key</code> header (Kong answers <code>WWW-Authenticate: Key</code>); DSAgt adds the header through MLflow's request-header plugin.</li>
+</ul>
+<p><code>dsagt traces</code> prints the remote deep-link in this mode rather than starting a local viewer, and <code>dsagt info</code> reads from the remote store.</p>
+<p>Two consequences of the URL being baked at init:</p>
+<ul>
+<li><strong>Change the server by re-running <code>dsagt init</code>.</strong> Exporting a different <code>MLFLOW_TRACKING_URI</code> later moves the CLI but not the MCP server, whose config still carries the old value.</li>
+<li><strong>codex and cline do not pass the shell to their MCP children</strong>, so a key exported in a terminal never reaches <code>dsagt-server</code> under those agents. Put it in <strong><code>~/.config/dsagt/env</code></strong> instead (<code>KEY=VALUE</code> lines, mode 600): <code>dsagt-server</code> and the <code>dsagt</code> CLI load it at startup for any key the shell did not set. The file is in <code>$HOME</code>, never inside a project or an agent config — the <code>~/.netrc</code> pattern. It works for every agent, and for <code>EMBEDDING_API_KEY</code> too.</li>
+</ul>
 <h2 id="two-feeds">Two feeds<a class="headerlink" href="#two-feeds" title="Permanent link">&para;</a></h2>
 <p>DSAgt reconstructs traces from what the agent writes to disk. Traces come from two places:</p>
 <ol>
