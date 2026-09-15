@@ -83,9 +83,10 @@ def _mcp_env_block(config: dict) -> dict[str, str]:
     embedding-backend settings.  MCP children run with cwd == project_dir
     and could read most of this from ``.dsagt/config.yaml``, but agents that
     don't inherit the parent's shell env into their MCP children (codex /
-    cline) need it baked into the per-agent MCP config.  For
-    ``backend: api`` the user still sets ``EMBEDDING_API_KEY`` in their shell
-    (creds never on disk).
+    cline) need it baked into the per-agent MCP config.  Credentials are never
+    part of it: ``EMBEDDING_API_KEY`` and the trace store's key come from the
+    shell or ``~/.config/dsagt/env`` (``session.load_user_env``), which is
+    also how codex/cline children — which see only this block — receive them.
 
     No session id here — the MCP server mints it at startup into
     ``.dsagt/state.yaml`` (it owns the session lifecycle now), so there's
@@ -386,9 +387,10 @@ class AgentSetup(ABC):
         only to set per-project state-dir env (``CLINE_DIR``,
         ``CODEX_HOME``) that isolates their global config per project.
 
-        Provider credentials (ANTHROPIC_*, OPENAI_*, GOOSE_*) are the
-        user's responsibility — exported in their shell, never translated
-        from ``config["llm"]``.
+        LLM-provider credentials (ANTHROPIC_*, OPENAI_*, GOOSE_*) are the
+        user's responsibility — exported in their shell, never read or
+        translated by dsagt.  DSAgt's own service credentials (trace store,
+        embedding backend) are a separate matter: see ``_mcp_env_block``.
         """
         del config
         return {}

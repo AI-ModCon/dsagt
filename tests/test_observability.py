@@ -963,3 +963,20 @@ def test_remote_store_retry_budget_is_bounded_but_overridable(monkeypatch):
     monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "9")
     _bound_remote_retries("https://mlflow.example.org")
     assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "9"  # explicit wins
+
+
+def test_init_tracing_quiets_mlflow_info_chatter(tmp_path, monkeypatch, capsys):
+    """MLflow narrates set_experiment / set_active_model at INFO on stderr —
+    "Active model is set to …" on every dsagt-run.  An agent capturing a
+    code's stderr would read that as the code's output."""
+    import logging
+
+    from dsagt.observability import init_tracing
+
+    monkeypatch.setattr(obs_module, "_initialized", False)
+    monkeypatch.setattr(
+        obs_module, "find_project_config", lambda: ("/proj", {"project": "p"})
+    )
+    init_tracing("dsagt-run", mlflow_url=f"sqlite:///{tmp_path}/mlflow.db")
+    assert logging.getLogger("mlflow.tracking.fluent").level == logging.WARNING
+    assert "Active model is set" not in capsys.readouterr().err

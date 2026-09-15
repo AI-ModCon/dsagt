@@ -196,6 +196,18 @@ def _current_user() -> str | None:
         return None
 
 
+def _quiet_mlflow_chatter() -> None:
+    """Drop MLflow's INFO narration of what DSAgt just did on purpose.
+
+    ``set_experiment`` and ``set_active_model`` log "Experiment … does not
+    exist. Creating", "LoggedModel … creating one" and "Active model is set to
+    …" at INFO — the last on every ``dsagt-run``.  They go to stderr, and an
+    agent that captures a code's stderr reads them as the code's output.
+    Warnings and errors still surface.
+    """
+    logging.getLogger("mlflow.tracking.fluent").setLevel(logging.WARNING)
+
+
 def _bound_remote_retries(tracking_uri: str) -> None:
     """Cap the MLflow client's retry budget against an http(s) store.
 
@@ -288,6 +300,7 @@ def init_tracing(
     import mlflow
 
     try:
+        _quiet_mlflow_chatter()
         _bound_remote_retries(mlflow_url)
         mlflow.set_tracking_uri(mlflow_url)
         _ensure_experiment(experiment, project_name)
@@ -876,6 +889,7 @@ class MLflowSink:
         """Log every turn subtree; return the MLflow trace id of each."""
         import mlflow
 
+        _quiet_mlflow_chatter()
         _bound_remote_retries(self._uri)
         mlflow.set_tracking_uri(self._uri)
         mlflow.set_experiment(self._experiment)
