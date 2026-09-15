@@ -168,8 +168,8 @@ def test_our_llm_spans_carry_the_navigable_attributes(mlflow_sqlite):
 
 
 def test_llm_span_usage_carries_cache_tokens(mlflow_sqlite):
-    """Cache counts reach the token-usage attribute; most of a Claude session's
-    input is cache reads, so a consumer pricing from the store needs them."""
+    """Cache counts reach the span; most of a Claude session's input is cache
+    reads, so a consumer pricing from the store needs them."""
     import mlflow
     from mlflow.tracing.constant import SpanAttributeKey, TokenUsageKey
 
@@ -191,19 +191,21 @@ def test_llm_span_usage_carries_cache_tokens(mlflow_sqlite):
     )
     (tid,) = MLflowSink(mlflow_sqlite, "parity").write(trace)
     (llm,) = _llm_spans(mlflow.get_trace(tid))
+    # input_tokens is every token read (uncached + cache read + cache write);
+    # the breakdown sits beside the usage attribute as plain attributes.
     usage = llm.attributes[SpanAttributeKey.CHAT_USAGE]
-    assert usage[TokenUsageKey.CACHE_READ_INPUT_TOKENS] == 9000
-    assert usage[TokenUsageKey.CACHE_CREATION_INPUT_TOKENS] == 500
+    assert usage[TokenUsageKey.INPUT_TOKENS] == 14 + 9000 + 500
+    assert llm.attributes["cache_read_input_tokens"] == 9000
+    assert llm.attributes["cache_write_input_tokens"] == 500
 
-    # Absent from the transcript: absent from the attribute (as autolog does).
+    # Absent from the transcript: absent from the span.
     trace = ClaudeTranslator().translate(
         TRANSCRIPT, trace_id="trC2", session_id="proj:sessC2", project="parity"
     )
     (tid,) = MLflowSink(mlflow_sqlite, "parity").write(trace)
     for llm in _llm_spans(mlflow.get_trace(tid)):
-        usage = llm.attributes[SpanAttributeKey.CHAT_USAGE]
-        assert TokenUsageKey.CACHE_READ_INPUT_TOKENS not in usage
-        assert TokenUsageKey.CACHE_CREATION_INPUT_TOKENS not in usage
+        assert "cache_read_input_tokens" not in llm.attributes
+        assert "cache_write_input_tokens" not in llm.attributes
 
 
 def test_multi_turn_each_subtree_matches_autolog_on_its_slice(tmp_path, mlflow_sqlite):
@@ -261,3 +263,14 @@ def test_session_tag_and_canonical_id_on_trace(mlflow_sqlite):
     # Per-turn idempotency key: <session trace_id>:<root span id>.
     assert md.get("dsagt.trace_id").startswith("tr3:")
     assert md.get("dsagt.agent") == "claude"
+    from dsagt import __version__
+
+    assert md.get("dsagt.version") == __version__
+    # User and Version columns: the reserved user key, and a LoggedModel named
+    # for the dsagt release (mlflow.modelId), on replayed agent turns too.
+    import getpass
+
+    assert md.get("mlflow.trace.user") == getpass.getuser()
+    assert mlflow.get_logged_model(
+        md["mlflow.modelId"]
+    ).name == "dsagt-" + __version__.replace(".", "_")
