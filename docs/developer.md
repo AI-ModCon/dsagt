@@ -6,7 +6,7 @@ mechanics (branch/PR flow, commit style), see
 
 ## Setup
 
-DSAgt develops on [uv](https://github.com/astral-sh/uv) with Python 3.12 or 3.13:
+DSAgt develops on [uv](https://github.com/astral-sh/uv) with Python 3.12:
 
 ```bash
 git clone https://github.com/AI-ModCon/dsagt.git
