@@ -52,9 +52,15 @@ uv run mkdocs build --strict    # what CI runs
 
 ## Agentic coding
 
-Five skills are in the genesis catalog, under `skills/basedata-skills/` which steer consistent agentic code development:
+`CLAUDE.md` at the repository root is the contract an agent works to here:
+what the project is, the commands, the glossary, and the invariants. How the
+agent gets from that contract to a change is the developer's own tooling. If
+you have no skills corpus of your own for coding, or want one in dsagt's
+register, five skills under `basedata_aaron/` in
+[AI-ModCon/dev_skills](https://github.com/AI-ModCon/dev_skills) are one
+option:
 
-| Skill | Purpose |
+| Skill | Load it when |
 |---|---|
 | `coding` | writing or changing code, removing code, committing |
 | `documentation` | writing a docstring, comment, README, or plan; deciding where a fact is recorded |
@@ -62,9 +68,9 @@ Five skills are in the genesis catalog, under `skills/basedata-skills/` which st
 | `autodocs` | adding a page or a collection to this site |
 | `write-like-aaron` | any prose: docs, comments, commit messages, pull-request descriptions |
 
-Install these into the agent's skills directory (for Claude Code,
-`~/.claude/skills/<name>/`) from a clone of the catalog. `CLAUDE.md` at the
-repository root contains DSAgt specific instructions for agents.
+Copy a skill directory into the agent's skills directory (for Claude Code,
+`~/.claude/skills/<name>/` for every project, or `.claude/skills/<name>/` in
+this checkout) and the agent loads it when its description matches the task.
 
 ## Codebase orientation
 
