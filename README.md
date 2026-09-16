@@ -238,3 +238,7 @@ Each launch gets a session id that every span carries, so you can filter the tra
 <!-- md-shared:cli:end -->
 
 For tests, troubleshooting, and other developer-facing material, see [docs/developer.md](docs/developer.md).
+
+## Acknowledgments
+
+This project acknowledges support from the U.S. Department of Energy's Genesis Mission.

@@ -7,8 +7,7 @@ for how the codebase is organized and why, see the
 
 ## Getting started
 
-DSAgt develops on [`uv`](https://github.com/astral-sh/uv) with Python 3.12 or
-3.13.
+DSAgt develops on [`uv`](https://github.com/astral-sh/uv) with Python 3.12.
 
 ```bash
 git clone https://github.com/AI-ModCon/dsagt.git
@@ -60,3 +59,19 @@ uv run black src tests          # drop the path to format everything you touched
 Open a GitHub issue with steps to reproduce, expected vs actual behavior, your
 OS/Python version, and the agent platform involved. For security issues, follow
 [SECURITY.md](SECURITY.md) instead of opening a public issue.
+
+## AI/LLM-assisted contributions
+
+- **Remain accountable.** You are responsible for the accuracy, quality, and
+  consequences of anything you submit, regardless of how it was produced. Using
+  an AI tool does not transfer that responsibility to the tool.
+- **Understand your work.** Review AI-generated code line by line before
+  submitting it. You are responsible for its correctness, security, and scope,
+  and for confirming it doesn't breach copyright.
+- **Disclose it.** If AI/LLM tools were used to generate a substantial part of
+  a PR, say so in the PR description.
+- **Human review is mandatory.** An LLM review can supplement a human
+  reviewer, but every PR needs a human reviewer who is accountable for the
+  review.
+- **No proprietary or personal data to AI tools.** Never send proprietary data,
+  credentials, or personal information to a code generator or AI tool.
