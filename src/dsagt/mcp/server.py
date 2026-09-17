@@ -56,7 +56,11 @@ logger = logging.getLogger(__name__)
 
 
 def build_dispatch_server(
-    name: str, tools, handlers, tool_category: dict[str, str] | None = None
+    name: str,
+    tools,
+    handlers,
+    tool_category: dict[str, str] | None = None,
+    ready: asyncio.Event | None = None,
 ) -> Server:
     """Wrap a ``(tools, handlers)`` pair in a configured MCP ``Server``.
 
@@ -85,6 +89,12 @@ def build_dispatch_server(
     category, so the source reflects the tool the agent called, not whichever
     subsystem did the work.  Tracing no-ops outside a project, so this is inert
     in the single-concern test servers / one-shot tools.
+
+    ``ready`` is the startup gate: ``initialize`` and ``tools/list`` are answered
+    at once, and a tool call waits on it, so the session, the trace store, and
+    the catch-up can be set up after the client already sees the tools.  Codex
+    starts its model turn without waiting for MCP servers, and a ``tool_search``
+    that ran before the server had answered ``initialize`` found nothing.
     """
     tool_category = tool_category or {}
     schemas = {tool.name: tool.input_schema for tool in tools}
@@ -124,6 +134,8 @@ def build_dispatch_server(
         if tool_name not in handlers:
             return rejected(f"Unknown tool: {tool_name}")
         handler = handlers[tool_name]
+        if ready is not None:
+            await ready.wait()
         # Validation runs inside the span so a malformed call is traced like any
         # other — an agent looping on bad arguments is exactly what the debug
         # view exists to show.  An unknown name has no category to tag and stays
@@ -254,26 +266,26 @@ async def _periodic_pass(collector, tool_indexer, interval: float, project_dir) 
 
 
 async def _run_stdio(
-    server: Server, name: str, collector=None, tool_indexer=None, project_dir=None
+    server: Server,
+    name: str,
+    *,
+    startup=None,
+    ready: asyncio.Event | None = None,
+    project_dir=None,
 ) -> None:
+    """Serve *server* over stdio.
+
+    ``startup`` is a zero-argument callable run in a thread once the transport
+    is up; it returns ``(collector, tool_indexer)`` and does the work that
+    takes seconds on a fresh project (minting the session, ``init_tracing``
+    with its sqlite schema, the catch-up).  The client's ``initialize`` and
+    ``tools/list`` are answered meanwhile; ``ready`` opens the tool-call gate
+    when startup returns, and the periodic pass and the trace-source poller
+    start then.  A startup failure stops the server.
+    """
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        tasks = []
-        if collector is not None or tool_indexer is not None:
-            tasks.append(
-                asyncio.create_task(
-                    _periodic_pass(
-                        collector, tool_indexer, PASS_INTERVAL_S, project_dir
-                    )
-                )
-            )
-        if collector is not None:
-            tasks.append(
-                asyncio.create_task(
-                    _pin_trace_source(collector, project_dir, TRACE_SOURCE_POLL_S)
-                )
-            )
-        try:
-            await server.run(
+        run_task = asyncio.create_task(
+            server.run(
                 read_stream,
                 write_stream,
                 InitializationOptions(
@@ -285,12 +297,39 @@ async def _run_stdio(
                     ),
                 ),
             )
+        )
+        tasks = []
+        collector = tool_indexer = None
+        try:
+            if startup is not None:
+                collector, tool_indexer = await asyncio.to_thread(startup)
+                if collector is not None or tool_indexer is not None:
+                    tasks.append(
+                        asyncio.create_task(
+                            _periodic_pass(
+                                collector, tool_indexer, PASS_INTERVAL_S, project_dir
+                            )
+                        )
+                    )
+                if collector is not None:
+                    tasks.append(
+                        asyncio.create_task(
+                            _pin_trace_source(
+                                collector, project_dir, TRACE_SOURCE_POLL_S
+                            )
+                        )
+                    )
+            if ready is not None:
+                ready.set()
+            await run_task
         finally:
-            for task in tasks:
+            if not run_task.done():
+                run_task.cancel()
+            for task in [run_task, *tasks]:
                 task.cancel()
                 try:
                     await task
-                except asyncio.CancelledError:
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
             # Best-effort end-of-session flush of the deferred final turn +
             # any unindexed tool-use — covers the graceful-exit case.  If
@@ -321,6 +360,7 @@ def create_dsagt_server(
     kb: KnowledgeBase | None,
     skill_registry: SkillRegistry | None,
     runtime_dir: str | Path | None = None,
+    ready: asyncio.Event | None = None,
 ):
     """Compose the registry + knowledge + memory + skill tools under one ``Server``.
 
@@ -358,7 +398,7 @@ def create_dsagt_server(
         for tool_name in g_handlers:
             tool_category[tool_name] = category
 
-    return build_dispatch_server("dsagt", tools, handlers, tool_category)
+    return build_dispatch_server("dsagt", tools, handlers, tool_category, ready)
 
 
 def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
@@ -522,23 +562,6 @@ def main():
         _deep_merge(DEFAULTS, yaml.safe_load(cfg_file.read_text()) or {})
     )
 
-    # Own the session lifecycle: mint this session's id into state.yaml and
-    # tag traces with it (replaces the DSAGT_SESSION_ID env minted by the old
-    # ``dsagt start``).  Best-effort — never block startup on state I/O.
-    session_id = None
-    try:
-        entry = append_session(project_dir)
-        session_id = session_tag(config.get("project", ""), entry["id"])
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Could not mint session into state.yaml: %s", e)
-
-    init_tracing("dsagt-server", session_id=session_id)
-
-    # Catch up post-session extraction for the previous session in the
-    # background (tool-use indexing now; episodic stub later).  Daemon thread:
-    # best-effort, never blocks or fails server startup.
-    _spawn_catch_up(project_dir, config)
-
     # A KB misconfig (e.g. embedding.backend='api' with no base_url/API key)
     # must not take down the whole server: the tool surface accepts kb=None and
     # only KB-backed tools degrade, so fall back rather than crash all 20 tools.
@@ -565,46 +588,77 @@ def main():
         kb=kb,
     )
 
-    server = create_dsagt_server(registry, kb, skill_reg, runtime_dir=str(project_dir))
+    ready = asyncio.Event()
+    server = create_dsagt_server(
+        registry, kb, skill_reg, runtime_dir=str(project_dir), ready=ready
+    )
 
-    # The periodic trace pass: read the live transcript → MLflow.  The
-    # loop is agent-agnostic; ``make_trace_collector`` returns a collector for any
-    # agent with a registered (reader, translator) pair and ``None`` otherwise (so
-    # agents whose readers haven't landed yet simply run without it).
-    # Best-effort — a collector that can't be built never blocks the server.
-    collector = None
+    def startup():
+        """Mint the session, start tracing, catch up, build the pass consumers.
+
+        Runs in a thread after the transport is up (see ``_run_stdio``): on a
+        fresh project ``init_tracing`` creates the sqlite schema, which took
+        four seconds in one measured start, longer than a client waits before
+        its first tool lookup.
+        """
+        # Own the session lifecycle: mint this session's id into state.yaml
+        # and tag traces with it.  Best-effort — never block startup on state
+        # I/O.
+        session_id = None
+        try:
+            entry = append_session(project_dir)
+            session_id = session_tag(config.get("project", ""), entry["id"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not mint session into state.yaml: %s", e)
+
+        init_tracing("dsagt-server", session_id=session_id)
+
+        # Catch up post-session extraction for the previous session in the
+        # background.  Daemon thread: best-effort, never fails startup.
+        _spawn_catch_up(project_dir, config)
+
+        # The periodic trace pass: read the live transcript → MLflow.  The
+        # loop is agent-agnostic; ``make_trace_collector`` returns a collector
+        # for any agent with a registered (reader, translator) pair and
+        # ``None`` otherwise.  Best-effort — a collector that can't be built
+        # never blocks the server.
+        collector = None
+        try:
+            from dsagt.memory import episodic_consumers
+            from dsagt.observability import experiment_name, resolve_tracking_uri
+            from dsagt.traces import make_trace_collector
+
+            resolve_cfg = dict(config)
+            resolve_cfg["project_dir"] = str(project_dir)
+            collector = make_trace_collector(
+                config.get("agent"),
+                project_dir,
+                config.get("project", ""),
+                session_id or "",
+                resolve_tracking_uri(resolve_cfg),
+                experiment=experiment_name(resolve_cfg),
+                extra_consumers=episodic_consumers(config, kb, project_dir, session_id),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not start the periodic trace pass: %s", e)
+
+        # Tool-use indexer: incremental, idempotent embedding of dsagt-run
+        # records into the ``code_use`` collection on the same periodic pass.
+        tool_indexer = None
+        try:
+            from dsagt.provenance import CodeUseIndexer
+
+            tool_indexer = CodeUseIndexer(kb, project_dir)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not start tool-use indexer: %s", e)
+        return collector, tool_indexer
+
     try:
-        from dsagt.memory import episodic_consumers
-        from dsagt.observability import experiment_name, resolve_tracking_uri
-        from dsagt.traces import make_trace_collector
-
-        resolve_cfg = dict(config)
-        resolve_cfg["project_dir"] = str(project_dir)
-        collector = make_trace_collector(
-            config.get("agent"),
-            project_dir,
-            config.get("project", ""),
-            session_id or "",
-            resolve_tracking_uri(resolve_cfg),
-            experiment=experiment_name(resolve_cfg),
-            extra_consumers=episodic_consumers(config, kb, project_dir, session_id),
+        asyncio.run(
+            _run_stdio(
+                server, "dsagt", startup=startup, ready=ready, project_dir=project_dir
+            )
         )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Could not start the periodic trace pass: %s", e)
-
-    # Tool-use indexer: incremental, idempotent embedding of dsagt-run records
-    # into the ``tool_use`` collection on the same periodic pass (no collector
-    # dependency — it reads trace_archive/, not the transcript).
-    tool_indexer = None
-    try:
-        from dsagt.provenance import CodeUseIndexer
-
-        tool_indexer = CodeUseIndexer(kb, project_dir)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Could not start tool-use indexer: %s", e)
-
-    try:
-        asyncio.run(_run_stdio(server, "dsagt", collector, tool_indexer, project_dir))
     finally:
         kb.close()
 
