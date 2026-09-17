@@ -54,12 +54,15 @@ else
     git clone -q https://github.com/nferraro/fusion-io.git "$SRC"
 fi
 
+# A rerun configures from scratch: the build is bound to the interpreter it was
+# configured with, and a cached one from an earlier Python segfaults on import.
+rm -rf "$SRC/build"
 mkdir -p "$SRC/build"
 cmake -S "$SRC" -B "$SRC/build" \
     -DCMAKE_INSTALL_PREFIX="$FIO_INSTALL_DIR" \
     -DFUSIONIO_ENABLE_PYTHON=ON \
     -DPYTHON_MODULE_INSTALL_PATH="$FIO_INSTALL_DIR/lib" \
-    -DPython_EXECUTABLE="$PYTHON"
+    -DPython3_EXECUTABLE="$PYTHON"
 cmake --build "$SRC/build" --target install -j "$(getconf _NPROCESSORS_ONLN)"
 
 # write_neo_input (used for flux-surface quantities such as q and the Miller
