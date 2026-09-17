@@ -59,7 +59,7 @@ To author a brand-new skill instead of installing one, use the `skill-creator` s
 
 Booleans render as a bare flag when truthy, nothing when falsy.
 
-When registering a new code via `save_code_spec`, set the `cli` field on every parameter so the next invocation doesn't have to guess. Code names use lowercase letters, digits, and hyphens (e.g. `scan-directory`) — the skill-standard charset, since registered codes are mirrored into your native skills directory.
+When registering a new code via `save_code_spec`, set the `cli` field on every parameter so the next invocation doesn't have to guess, and set `role: input` or `role: output` on each parameter that names a file the code reads or writes: `dsagt-run` records those files on every run, and `reconstruct_pipeline` orders steps by them. Code names use lowercase letters, digits, and hyphens (e.g. `scan-directory`) — the skill-standard charset, since registered codes are mirrored into your native skills directory.
 
 ### 3. Code Preference Hierarchy
 

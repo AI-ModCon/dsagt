@@ -486,6 +486,16 @@ def _registry_tools_and_handlers(
                                                         "if omitted."
                                                     ),
                                                 },
+                                                "role": {
+                                                    "type": "string",
+                                                    "enum": ["input", "output"],
+                                                    "description": (
+                                                        "Set on a parameter whose value is a file the code "
+                                                        "reads ('input') or writes ('output'). dsagt-run "
+                                                        "records those files on every run, which is what "
+                                                        "reconstruct_pipeline's dependency graph reads."
+                                                    ),
+                                                },
                                             },
                                             "required": ["type", "description"],
                                         },

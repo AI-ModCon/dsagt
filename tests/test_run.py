@@ -104,6 +104,48 @@ class TestParseFileList:
 # ---------------------------------------------------------------------------
 
 
+class TestFileRolesFromCommand:
+    """The record's input and output files come from the spec's parameter
+    roles, read off the command line the way the parameters' ``cli`` says."""
+
+    SPEC = {
+        "name": "conv",
+        "executable": "dsagt-run --code conv -- python codes/conv/scripts/conv.py",
+        "parameters": {
+            "src": {"type": "string", "cli": "positional", "role": "input"},
+            "out": {"type": "string", "cli": "--out", "role": "output"},
+            "grid": {"type": "string", "cli": "--grid=", "role": "input"},
+            "verbose": {"type": "boolean", "cli": "-v"},
+            "n": {"type": "integer", "cli": "-n"},
+        },
+    }
+
+    def test_reads_positional_spaced_and_glued_values(self):
+        from dsagt.provenance import file_roles_from_command
+
+        cmd = [
+            "python", "codes/conv/scripts/conv.py",
+            "-v", "-n", "3", "data/in.h5", "--out", "data/out.h5", "--grid=data/grid.npy",
+        ]  # fmt: skip
+        inputs, outputs = file_roles_from_command(self.SPEC, cmd)
+        assert inputs == ["data/in.h5", "data/grid.npy"]
+        assert outputs == ["data/out.h5"]
+
+    def test_absent_parameters_name_nothing(self):
+        from dsagt.provenance import file_roles_from_command
+
+        cmd = ["python", "codes/conv/scripts/conv.py", "data/in.h5"]
+        assert file_roles_from_command(self.SPEC, cmd) == (["data/in.h5"], [])
+
+    def test_a_command_that_is_not_the_spec_executable_names_nothing(self):
+        """A different prefix is not this code's invocation; the roles are
+        not applied to it."""
+        from dsagt.provenance import file_roles_from_command
+
+        cmd = ["python3", "other.py", "data/in.h5", "--out", "x"]
+        assert file_roles_from_command(self.SPEC, cmd) == ([], [])
+
+
 class TestResolveRecordsDir:
 
     def test_explicit_wins(self):
@@ -428,6 +470,53 @@ class TestMain:
         assert obs_module._default_session_id == "test-7"
         trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
         assert trace.info.trace_metadata.get("mlflow.trace.session") == "test-7"
+
+    def test_record_files_come_from_the_spec_roles(self, tmp_path, monkeypatch):
+        """Without --input-files/--output-files, dsagt-run reads the spec of
+        --code from the project and records the files its role parameters
+        name, so the dependency graph has edges without the agent passing
+        the flags."""
+        from dsagt.registry import CodeRegistry
+
+        project = tmp_path / "proj"
+        (project / ".dsagt").mkdir(parents=True)
+        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        script = project / "codes" / "conv" / "scripts" / "conv.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("import sys; print(sys.argv[1:])\n")
+        CodeRegistry(runtime_dir=project).save_tool(
+            {
+                "name": "conv",
+                "description": "Convert.",
+                "executable": "python codes/conv/scripts/conv.py",
+                "parameters": {
+                    "src": {
+                        "type": "string",
+                        "description": "in",
+                        "cli": "positional",
+                        "role": "input",
+                    },
+                    "out": {
+                        "type": "string",
+                        "description": "out",
+                        "cli": "--out",
+                        "role": "output",
+                    },
+                },
+            }
+        )
+        monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
+        monkeypatch.chdir(project)
+        rc = main(
+            ["--code", "conv", "--", "python", "codes/conv/scripts/conv.py",
+             "data/in.csv", "--out", "data/out.csv"]
+        )  # fmt: skip
+        assert rc == 0
+        records = list((project / "trace_archive").glob("*.json"))
+        assert len(records) == 1
+        execution = json.loads(records[0].read_text())["execution"]
+        assert execution["input_files"] == ["data/in.csv"]
+        assert execution["output_files"] == ["data/out.csv"]
 
     def test_basic_invocation(self, tmp_path):
         """main() runs a command and returns its exit code."""

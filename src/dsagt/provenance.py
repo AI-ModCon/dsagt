@@ -93,6 +93,82 @@ def _current_session_tag_from_cwd() -> str | None:
     return session.current_session_tag(cwd, project)
 
 
+def file_roles_from_command(
+    spec: dict, command: list[str]
+) -> tuple[list[str], list[str]]:
+    """The input and output files a command names, by the spec's parameter roles.
+
+    A parameter whose ``role`` is ``input`` or ``output`` names a file; its
+    value is read off *command* by the parameter's ``cli`` rendering: a
+    ``--name``/``-n`` flag takes the next token, a glued ``--name=``/``-n=``
+    flag carries its value, and ``positional[:N]`` is the Nth bare token
+    after the spec's own executable tokens.  The command must start with the
+    spec's executable (the part after ``dsagt-run --code <name> --``); a
+    command that does not is not this code's invocation and names nothing.
+    The agent records the mapping once at registration and the record gets
+    its files on every run, which is what the dependency graph in
+    :func:`build_dependency_graph` reads.
+    """
+    import shlex
+
+    executable = spec.get("executable", "")
+    marker = " -- "
+    inner = (
+        executable.split(marker, 1)[1]
+        if executable.startswith("dsagt-run")
+        else executable
+    )
+    prefix = shlex.split(inner)
+    if command[: len(prefix)] != prefix:
+        return [], []
+    args = command[len(prefix) :]
+    params = spec.get("parameters") or {}
+
+    by_flag: dict[str, tuple[str, dict]] = {}
+    positional_params: list[tuple[int | None, str, dict]] = []
+    for name, param in params.items():
+        cli = param.get("cli") or f"--{name}"
+        if cli.startswith("positional"):
+            index = int(cli.split(":", 1)[1]) if ":" in cli else None
+            positional_params.append((index, name, param))
+        else:
+            by_flag[cli.rstrip("=")] = (name, param)
+
+    values: dict[str, str] = {}
+    positionals: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token.startswith("-"):
+            flag, glued, value = token.partition("=")
+            if flag in by_flag:
+                name, param = by_flag[flag]
+                if glued:
+                    values[name] = value
+                elif param.get("type") != "boolean" and i + 1 < len(args):
+                    values[name] = args[i + 1]
+                    i += 1
+            i += 1
+            continue
+        positionals.append(token)
+        i += 1
+    unindexed = [p for p in positional_params if p[0] is None]
+    for slot, (index, name, param) in enumerate(positional_params):
+        position = index if index is not None else unindexed.index((index, name, param))
+        if position < len(positionals):
+            values[name] = positionals[position]
+
+    inputs = [
+        values[n] for n, p in params.items() if p.get("role") == "input" and n in values
+    ]
+    outputs = [
+        values[n]
+        for n, p in params.items()
+        if p.get("role") == "output" and n in values
+    ]
+    return inputs, outputs
+
+
 def _parse_file_list(raw: str | None) -> list[str]:
     """Split a comma-separated file list, stripping whitespace."""
     if not raw:
