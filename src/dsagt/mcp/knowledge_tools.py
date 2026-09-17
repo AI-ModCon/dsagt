@@ -20,9 +20,8 @@ constructor.  Explicit-memory tools (``kb_remember`` / etc.) live in
 
 import os
 
-# Prevent fatal OpenMP crash when multiple libraries (PyTorch /
-# sentence-transformers) each bundle their own libomp.  Must precede the
-# ``dsagt.knowledge`` import below.
+# Prevent a fatal OpenMP crash when multiple native libraries each bundle
+# their own libomp.  Must precede the ``dsagt.knowledge`` import below.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import asyncio  # noqa: E402

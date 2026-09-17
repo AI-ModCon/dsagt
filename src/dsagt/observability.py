@@ -710,7 +710,7 @@ def kb_embed_span(backend: str | None, model: str | None, n_texts: int):
 
     Used for both query embedding (kb.search) and chunk embedding (kb.ingest,
     kb.append, kb.add_entries).  Backend-agnostic: ``backend`` is ``"api"``
-    for the HTTP embedder or ``"local"`` for sentence-transformers.
+    for the HTTP embedder or ``"local"`` for the ONNX model.
     """
     from mlflow.entities import SpanType
 

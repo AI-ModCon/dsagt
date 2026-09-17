@@ -21,7 +21,7 @@ Retrieval is **hybrid** — dense semantic embeddings fused with sparse BM25 key
 - **BM25 keyword matching** catches the exact terms embeddings tend to under-rank — identifiers, gene names, parameter flags, standard names — where a literal match matters.
 - **Per-collection partitioning** scopes a search to a domain, so a materials-science query isn't diluted by genomics references.
 
-The default embedder is a local sentence-transformers model (~130 MB).
+The default embedder is `BAAI/bge-small-en-v1.5` run locally on onnxruntime from the ONNX export the model's repository publishes (133 MB, downloaded once).
 ## Shared vector store
 
 The same vector store additionally supports DSAgt's [memory](memory.md) (explicit + episodic), [skills discovery](skills.md) (the installable-skill corpus), and [code execution tracking](provenance.md) (the `code_use` records). Each is a separate partitioned collection in that store, sharing one embedder and one ChromaDB. Respective docs on [memory](memory.md), [skills](skills.md), and [provenance](provenance.md) share specific details about those collections.

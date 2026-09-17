@@ -55,7 +55,7 @@ Class map — every edge is ``<branch>─<rel> Class``, where ``<rel>`` is one o
             │                         collection, fused by _rrf_merge
             ├─◇ Embedder «abstract» 1   text → vectors; .create() factory
             │   │                       (one per store; may be shared)
-            │   ├─▷ LocalEmbedder       sentence-transformers, offline
+            │   ├─▷ LocalEmbedder       bge on onnxruntime, offline
             │   └─▷ APIEmbedder         OpenAI /v1/embeddings + rate-limit retry
             ├─◆ ChromaIndex  *          dense leg   (add/search/save/load)
             └─◆ BM25Index    *          sparse leg  (build/search/save/load)
@@ -85,18 +85,10 @@ import warnings as _warnings
 for _noisy in ("pypdf", "pypdf2", "PyPDF2", "pdfminer", "fontTools"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
-for _noisy in (
-    "httpx",
-    "httpcore",
-    "huggingface_hub",
-    "sentence_transformers",
-    "transformers",
-    "transformers_modules",
-):
+for _noisy in ("httpx", "httpcore", "huggingface_hub"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
 
-os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
 _warnings.filterwarnings(
@@ -170,7 +162,6 @@ class Embedder(ABC):
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        device: str | None = None,
     ) -> "Embedder":
         """Factory: construct the one embedder for a store, with explicit args.
 
@@ -180,7 +171,7 @@ class Embedder(ABC):
         """
         backend = (backend or "api").lower()
         if backend == "local":
-            return LocalEmbedder(model=model, device=device)
+            return LocalEmbedder(model=model)
         if backend == "api":
             return APIEmbedder(model=model, base_url=base_url, api_key=api_key)
         raise ValueError(
@@ -196,87 +187,94 @@ class Embedder(ABC):
 
 
 class LocalEmbedder(Embedder):
-    """sentence-transformers, runs fully offline."""
+    """bge on onnxruntime, offline after the first download.
+
+    The model's own repository publishes ``onnx/model.onnx`` and
+    ``tokenizer.json``; those two files, onnxruntime, and tokenizers are the
+    whole runtime, and importing it costs well under a second in every
+    process that embeds.  Pooling is the CLS vector, normalized, which is
+    what the bge models specify; the vectors equal the reference PyTorch
+    implementation's to six decimals, so an index built by either is valid.
+    """
 
     backend = "local"
 
-    #: Default local model.  ``bge-small-en-v1.5`` (33M params, ~130 MB
-    #: on disk, ~250 MB resident) is ~3× faster and ~3× smaller than
-    #: ``bge-base`` for ~2 nDCG@10 points lower MTEB retrieval score — a
-    #: hard-to-notice difference for typical DSAGT KB sizes (single-digit
-    #: thousands of chunks).
-    #: Override via ``embedding.model`` in ``.dsagt/config.yaml`` (e.g.
-    #: ``BAAI/bge-large-en-v1.5`` for higher quality at the cost of
-    #: ~10× memory and ~5× CPU).
+    #: Default local model.  ``bge-small-en-v1.5`` (33M params, 133 MB
+    #: ONNX file) is ~3× faster and ~3× smaller than ``bge-base`` for ~2
+    #: nDCG@10 points lower MTEB retrieval score — a hard-to-notice
+    #: difference for typical DSAGT KB sizes (single-digit thousands of
+    #: chunks).  Override via ``embedding.model`` in ``.dsagt/config.yaml``
+    #: with any model whose repository publishes ``onnx/model.onnx``
+    #: (``BAAI/bge-base-en-v1.5``, ``BAAI/bge-large-en-v1.5``).
     DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 
-    def __init__(
-        self,
-        model: str | None = None,
-        batch_size: int = 256,
-        device: str | None = None,
-    ):
+    MAX_TOKENS = 512
+
+    def __init__(self, model: str | None = None, batch_size: int = 256):
         import sys
-        from sentence_transformers import SentenceTransformer
+
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download, try_to_load_from_cache
+        from huggingface_hub.errors import EntryNotFoundError
+        from tokenizers import Tokenizer
 
         model = model or self.DEFAULT_MODEL
         self.model = model
         self.batch_size = batch_size
-        # Probe the HF cache for the model's config.  If hit, load with
-        # ``local_files_only=True`` so SentenceTransformer skips the
-        # ETag-validation HEAD requests it would otherwise issue against
-        # huggingface.co — those round-trips are anonymous (HF_TOKEN
-        # isn't propagated into MCP-server env blocks for cline /
-        # codex), so they trigger an "unauthenticated requests" warning
-        # surfaced under the agent's debug stream.  Cache miss path stays
-        # online so first-run downloads still work.
-        try:
-            from huggingface_hub import try_to_load_from_cache
-
-            cache_hit = try_to_load_from_cache(model, "config.json") is not None
-        except Exception:
-            cache_hit = False
-        if cache_hit:
-            self._model = SentenceTransformer(
-                model,
-                device=device,
-                local_files_only=True,
-            )
-        else:
+        # A cache hit loads with no network; a miss announces the one-time
+        # download, since the agent's debug stream is where the wait shows.
+        if try_to_load_from_cache(model, "onnx/model.onnx") is None:
             print(
                 f"  Downloading {model} from HuggingFace "
                 "(set HF_TOKEN for faster throughput)...",
                 file=sys.stderr,
                 flush=True,
             )
-            self._model = SentenceTransformer(model, device=device)
-        # Belt-and-suspenders: dsagt/__init__.py sets OMP_NUM_THREADS /
-        # MKL_NUM_THREADS env vars before heavy imports, but PyTorch
-        # also has its own intra-op thread count that ignores those env
-        # vars in some configurations.  Cap explicitly here.
         try:
-            import torch
-
-            torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", "4")))
-        except Exception:  # noqa: BLE001 — best-effort cap, never fatal
-            pass
-        logger.info(
-            "Loaded local embedding model: %s (dim=%d)",
-            model,
-            self._model.get_embedding_dimension(),
+            model_path = hf_hub_download(model, "onnx/model.onnx")
+            tokenizer_path = hf_hub_download(model, "tokenizer.json")
+        except EntryNotFoundError as err:
+            raise ValueError(
+                f"embedding.model {model!r} publishes no onnx/model.onnx; the "
+                "local backend runs a model's ONNX export (BAAI/bge-small-en-v1.5, "
+                "bge-base, bge-large)"
+            ) from err
+        options = ort.SessionOptions()
+        options.log_severity_level = 3
+        options.intra_op_num_threads = int(os.environ.get("OMP_NUM_THREADS", "4"))
+        self._session = ort.InferenceSession(
+            model_path, options, providers=["CPUExecutionProvider"]
         )
+        self._input_names = {i.name for i in self._session.get_inputs()}
+        self._tokenizer = Tokenizer.from_file(tokenizer_path)
+        self._tokenizer.enable_truncation(self.MAX_TOKENS)
+        self._tokenizer.enable_padding(
+            pad_id=self._tokenizer.token_to_id("[PAD]") or 0, pad_token="[PAD]"
+        )
+        self._dim = int(self._session.get_outputs()[0].shape[-1])
+        logger.info("Loaded local embedding model: %s (dim=%d)", model, self._dim)
+
+    def _embed_batch(self, texts: list[str]) -> np.ndarray:
+        encoded = self._tokenizer.encode_batch(texts)
+        ids = np.array([e.ids for e in encoded], dtype=np.int64)
+        inputs = {
+            "input_ids": ids,
+            "attention_mask": np.array(
+                [e.attention_mask for e in encoded], dtype=np.int64
+            ),
+        }
+        if "token_type_ids" in self._input_names:
+            inputs["token_type_ids"] = np.zeros_like(ids)
+        hidden = self._session.run(None, inputs)[0]
+        cls = hidden[:, 0, :]
+        return cls / np.linalg.norm(cls, axis=1, keepdims=True)
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        # Show the progress bar only for non-trivial inputs so single-query
-        # search calls (kb.search → embed([query])) stay silent while large
-        # ingest runs surface tqdm progress.
-        show_bar = len(texts) > self.batch_size
-        return self._model.encode(
-            texts,
-            batch_size=self.batch_size,
-            show_progress_bar=show_bar,
-            normalize_embeddings=True,
-        ).astype(np.float32)
+        batches = [
+            self._embed_batch(texts[i : i + self.batch_size])
+            for i in range(0, len(texts), self.batch_size)
+        ]
+        return np.concatenate(batches).astype(np.float32)
 
 
 # --- rate-limit retry helpers (used by APIEmbedder) ----------------
@@ -886,21 +884,20 @@ class ChromaVectorStore(VectorStore):
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        device: str | None = None,
     ):
         self.index_dir = Path(index_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
         # Embedder is either injected (shareable across stores) or built lazily
-        # from explicit args.  Lazy build keeps the ~5-10s sentence-transformers
-        # load off the hot path (see preload via KnowledgeBase).  backend/model
-        # are kept as lightweight labels so listing never forces a model load.
+        # from explicit args.  Lazy build keeps the model load off the hot path
+        # (see preload via KnowledgeBase).  backend/model are kept as
+        # lightweight labels so listing never forces a model load.
         self._embedder = embedder
         if embedder is not None:
             self._backend, self._model = embedder.backend, embedder.model
         else:
             self._backend, self._model = backend, model
-        self._base_url, self._api_key, self._device = base_url, api_key, device
+        self._base_url, self._api_key = base_url, api_key
         # Serializes embedder construction so a background preload and a
         # foreground first-query call don't race and double-load the model.
         self._embedder_lock = threading.Lock()
@@ -920,7 +917,6 @@ class ChromaVectorStore(VectorStore):
                     model=self._model,
                     base_url=self._base_url,
                     api_key=self._api_key,
-                    device=self._device,
                 )
             return self._embedder
 
@@ -1224,7 +1220,6 @@ class KnowledgeBase:
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        device: str | None = None,
     ):
         self.index_dir = Path(index_dir)
         self.chunk_size = chunk_size
@@ -1241,7 +1236,6 @@ class KnowledgeBase:
             model=model,
             base_url=base_url,
             api_key=api_key,
-            device=device,
         )
         self._stores: list[VectorStore] = [self._store]
 
@@ -1286,9 +1280,8 @@ class KnowledgeBase:
     def preload_default_embedder(self) -> None:
         """Kick off internal-store embedder construction in a daemon thread.
 
-        Called at MCP server startup so the heavy load (sentence-transformers
-        import + model load, ~5-10s) happens in parallel with the rest of
-        bootstrap.  Failure is swallowed: it resurfaces with a full traceback
+        Called at MCP server startup so the model load happens in parallel
+        with the rest of bootstrap.  Failure is swallowed: it resurfaces with a full traceback
         on the first real embedding call.
         """
 

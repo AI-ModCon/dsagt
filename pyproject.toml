@@ -28,15 +28,13 @@ dependencies = [
     "jsonschema>=4.0",                 # tool-argument validation in the dispatch shell
     "mlflow>=3.11,<4.0",               # trace store & observability
     "numpy>=2.0,<3.0",
-    # First torch built against NumPy 2. Excludes darwin/x86_64, whose last
-    # wheel is 2.2.2 and fails to import beside NumPy 2; aidrin needs NumPy 2.
-    "torch>=2.3,<3.0",
+    "onnxruntime>=1.20",               # local embeddings: the model's ONNX export
+    "tokenizers>=0.20",                # the embedder's tokenizer
+    "huggingface_hub>=0.30",           # fetches the embedding model's files
     "llama-index-core>=0.11",          # document & code chunking
     "llama-index-readers-file>=0.1",   # SimpleDirectoryReader file readers
     "tree-sitter-language-pack>=1.6,<2.0",  # code-aware chunking (CodeSplitter parsers)
     "chromadb>=1.5.1",                 # vector store
-    "sentence-transformers>=6.0,<7.0", # local embeddings & reranking
-    "transformers>=5.0,<6.0",          # sentence-transformers backend
     "rank-bm25>=0.2.2",                # sparse keyword retrieval
     "aidrin>=2026.8.2,<2027",          # AI Data Readiness Inspector CLI; the readiness assessment's check
     "uv>=0.5",                         # runs codes with declared dependencies (uv run --with) and install_dependencies
@@ -107,9 +105,10 @@ filterwarnings = [
 ]
 
 [tool.uv]
-# Platforms the lock must resolve for.  Intel Macs are not supported: the last
-# torch wheel for darwin/x86_64 is 2.2.2, and including that platform holds
-# every environment on it.
+# Platforms the lock must resolve for.  Intel Macs are not supported:
+# onnxruntime, which runs the local embedding model, publishes no
+# darwin/x86_64 wheel, and including that platform holds every environment
+# on it.
 required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",

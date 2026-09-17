@@ -985,7 +985,6 @@ class TestStoreEmbedderConstruction:
                 model="text-embedding-3-small",
                 base_url="https://embed.example.com",
                 api_key="sk-real-key",
-                device=None,
             )
 
     def test_embedder_built_once_and_cached(self, tmp_path):
@@ -1231,3 +1230,45 @@ class TestHybridSearch:
             bm25 = kb._store._get_bm25("memory")
             assert bm25.size == 3
             kb.close()
+
+
+# ---------------------------------------------------------------------------
+# LocalEmbedder (onnxruntime)
+# ---------------------------------------------------------------------------
+
+
+class TestLocalEmbedder:
+
+    def test_model_without_an_onnx_export_is_a_clear_error(self):
+        """A model repository that publishes no onnx/model.onnx cannot be run
+        locally; the error names the file and the models that have one."""
+        from huggingface_hub.errors import EntryNotFoundError
+
+        from dsagt.knowledge import LocalEmbedder
+
+        def missing(repo, filename, **_):
+            raise EntryNotFoundError(f"{filename} not in {repo}")
+
+        with (
+            patch("huggingface_hub.hf_hub_download", side_effect=missing),
+            patch("huggingface_hub.try_to_load_from_cache", return_value=None),
+        ):
+            with pytest.raises(ValueError, match="onnx/model.onnx"):
+                LocalEmbedder(model="example/no-onnx-here")
+
+    @pytest.mark.integration
+    def test_embeds_unit_vectors_that_rank_by_meaning(self):
+        """Real model: 384-dim unit vectors, batches concatenated in order,
+        and a query closer to its paraphrase than to an unrelated text."""
+        from dsagt.knowledge import LocalEmbedder
+
+        emb = LocalEmbedder(batch_size=2)
+        texts = [
+            "Assemble a microbial isolate genome with megahit",
+            "Build the genome of a bacterial isolate from short reads",
+            "Compute the Miller geometry parameters of a tokamak equilibrium",
+        ]
+        vecs = emb.embed(texts)
+        assert vecs.shape == (3, 384) and vecs.dtype == np.float32
+        assert np.allclose(np.linalg.norm(vecs, axis=1), 1.0, atol=1e-5)
+        assert vecs[0] @ vecs[1] > vecs[0] @ vecs[2]

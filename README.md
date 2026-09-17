@@ -9,7 +9,7 @@ Documentation: **https://ai-modcon.github.io/dsagt** — quick start, capability
 
 DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It exposes these capabilities to a user's existing agent CLI or VS Code extension (Claude Code, OpenCode, Codex, and others).
 
-**Prerequisites:** Python 3.12 or later (CI tests 3.12 and 3.13) on Apple Silicon or Linux x86_64 (torch has no NumPy 2 wheel for Intel Macs), and an agent platform (currently supported platforms are listed below) — already installed and authenticated against whatever LLM provider you intend to use.
+**Prerequisites:** Python 3.12 or later (CI tests 3.12 and 3.13) on Apple Silicon or Linux x86_64 (onnxruntime, which runs the local embedding model, has no Intel Mac wheel), and an agent platform (currently supported platforms are listed below) — already installed and authenticated against whatever LLM provider you intend to use.
 
 <!-- md-shared:agents:start -->
 | Agent | Install | Verify |
