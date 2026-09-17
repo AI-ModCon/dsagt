@@ -309,8 +309,13 @@ def _skill_tools_and_handlers(
                     "reference_files": {
                         "description": (
                             "Optional additional files to write into the "
-                            "skill directory.  Object mapping relative "
-                            "path -> file contents, or JSON-encoded string."
+                            "skill directory.  Object mapping a path inside "
+                            "the skill directory -> file contents, or a "
+                            "JSON-encoded string.  Skill-standard layout: "
+                            "reference documents under references/ (for "
+                            "example 'references/spec.md') and scripts under "
+                            "scripts/ (for example 'scripts/convert.py'); a "
+                            "bare filename lands at the skill root."
                         ),
                         "anyOf": [
                             {
