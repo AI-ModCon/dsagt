@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dsagt.provenance import (
     build_dependency_graph,
+    compute_pipeline_fingerprint,
     compute_terminal_outputs,
     load_pipeline_records,
     reconstruct_pipeline,
@@ -360,6 +361,106 @@ class TestRenderJson:
 
         assert result["dependency_graph"] == {"0": [], "1": [0], "2": [0], "3": [1, 2]}
         assert result["terminal_outputs"] == ["final.txt"]
+
+
+# ---------------------------------------------------------------------------
+# compute_pipeline_fingerprint
+# ---------------------------------------------------------------------------
+
+
+class TestComputePipelineFingerprint:
+
+    def _structured(self, records):
+        deps = build_dependency_graph(records)
+        return json.loads(render_json(records, deps))
+
+    def test_stable_across_reruns(self):
+        # Same pipeline shape, different timestamps/stdout/exit code — as if
+        # rerun a second time — must fingerprint identically.
+        run1 = [
+            _make_record(
+                "fastp",
+                ["fastp"],
+                output_files=["clean.fq"],
+                timestamp="2024-01-15T10:00:00Z",
+            ),
+            _make_record(
+                "align",
+                ["bwa"],
+                input_files=["clean.fq"],
+                output_files=["aligned.bam"],
+                record_id="r1",
+                timestamp="2024-01-15T10:05:00Z",
+            ),
+        ]
+        run2 = [
+            _make_record(
+                "fastp",
+                ["fastp"],
+                output_files=["clean.fq"],
+                timestamp="2024-02-01T09:00:00Z",
+                return_code=0,
+            ),
+            _make_record(
+                "align",
+                ["bwa"],
+                input_files=["clean.fq"],
+                output_files=["aligned.bam"],
+                record_id="r1",
+                timestamp="2024-02-01T09:07:00Z",
+            ),
+        ]
+        fp1 = compute_pipeline_fingerprint(self._structured(run1))
+        fp2 = compute_pipeline_fingerprint(self._structured(run2))
+        assert fp1 == fp2
+        assert fp1.startswith("sha256:")
+
+    def test_changes_when_step_added(self):
+        base = [_make_record("fastp", ["fastp"], output_files=["clean.fq"])]
+        extended = base + [
+            _make_record(
+                "align",
+                ["bwa"],
+                input_files=["clean.fq"],
+                output_files=["aligned.bam"],
+                record_id="r1",
+            )
+        ]
+        fp_base = compute_pipeline_fingerprint(self._structured(base))
+        fp_extended = compute_pipeline_fingerprint(self._structured(extended))
+        assert fp_base != fp_extended
+
+    def test_changes_when_step_removed(self):
+        full = [
+            _make_record("fastp", ["fastp"], output_files=["clean.fq"]),
+            _make_record(
+                "align",
+                ["bwa"],
+                input_files=["clean.fq"],
+                output_files=["aligned.bam"],
+                record_id="r1",
+            ),
+        ]
+        reduced = full[:1]
+        fp_full = compute_pipeline_fingerprint(self._structured(full))
+        fp_reduced = compute_pipeline_fingerprint(self._structured(reduced))
+        assert fp_full != fp_reduced
+
+    def test_changes_when_output_path_altered(self):
+        original = [_make_record("fastp", ["fastp"], output_files=["clean.fq"])]
+        renamed = [_make_record("fastp", ["fastp"], output_files=["clean_v2.fq"])]
+        fp_original = compute_pipeline_fingerprint(self._structured(original))
+        fp_renamed = compute_pipeline_fingerprint(self._structured(renamed))
+        assert fp_original != fp_renamed
+
+    def test_ignores_stdout_and_exit_code(self):
+        records = [_make_record("fastp", ["fastp"], output_files=["clean.fq"])]
+        structured = self._structured(records)
+        structured["records"][0]["execution"]["stdout"] = "noisy rerun output"
+        structured["records"][0]["execution"]["return_code"] = 1
+        fp_original = compute_pipeline_fingerprint(self._structured(records))
+        fp_noisy = compute_pipeline_fingerprint(structured)
+        assert fp_original == fp_noisy
 
 
 # ---------------------------------------------------------------------------

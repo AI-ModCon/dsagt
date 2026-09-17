@@ -57,6 +57,7 @@ nav:
   - Architecture: architecture.md
   - Capabilities:
     - Provenance: provenance.md
+    - Dataset Contract: dataset-contract.md
     - Knowledge Base: knowledge-base.md
     - Skills: skills.md
     - Memory: memory.md
