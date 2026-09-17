@@ -5,6 +5,7 @@ Tests tool handlers: save_code_spec, get_registry, search_registry,
 read_file, run_command, http_request, install_dependencies.
 """
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -608,3 +609,82 @@ class TestToolIndexing:
             server, "search_registry", {"query": "tool", "tag": "genomics"}
         )
         assert "fastp" in text
+
+
+# ---------------------------------------------------------------------------
+# check_contract_staleness
+# ---------------------------------------------------------------------------
+
+
+class TestCheckContractStaleness:
+
+    def _records(self, runtime_dir: Path, names: list[str]) -> None:
+        trace_dir = runtime_dir / "trace_archive"
+        trace_dir.mkdir(exist_ok=True)
+        for i, name in enumerate(names):
+            record = {
+                "record_id": f"r{i}",
+                "code_name": name,
+                "session_id": "s1",
+                "execution": {
+                    "exact_command": [name],
+                    "return_code": 0,
+                    "stdout": "",
+                    "stderr": "",
+                    "timestamp_start": f"2024-01-15T1{i}:00:00Z",
+                    "timestamp_end": f"2024-01-15T1{i}:00:01Z",
+                    "input_files": [f"{names[i - 1]}.csv"] if i else [],
+                    "output_files": [f"{name}.csv"],
+                },
+            }
+            (trace_dir / f"{name}_r{i}.json").write_text(json.dumps(record))
+
+    def test_reports_a_pipeline_change_against_the_stored_fingerprint(self, tmp_path):
+        """The tool reads dataset_contract.yaml and the records; a step added
+        after the contract was written is a failed status with both
+        fingerprints and the current steps."""
+        from dsagt.contract import save_contract
+        from dsagt.provenance import reconstruct_pipeline
+
+        server, registry = _make_server(tmp_path)
+        runtime_dir = Path(registry.runtime_dir)
+        self._records(runtime_dir, ["load"])
+        payload = json.loads(
+            reconstruct_pipeline(runtime_dir / "trace_archive", fmt="json")
+        )
+        contract = {
+            "version": 1,
+            "mode": "pipeline",
+            "pipeline_fingerprint": payload["pipeline_fingerprint"],
+            "keys": {
+                "features": {
+                    "dtype": "float32",
+                    "shape": [4],
+                    "role": "input",
+                    "collation": "stack",
+                }
+            },
+            "normalization": {"owner": "dataset"},
+            "split": {
+                "strategy": "random",
+                "seed": 0,
+                "ratios": {"train": 0.8, "val": 0.1, "test": 0.1},
+            },
+            "reconciliation": [],
+        }
+        save_contract(runtime_dir / "dataset_contract.yaml", contract)
+
+        unchanged = json.loads(call_tool(server, "check_contract_staleness", {}))
+        assert unchanged["status"] == "passed"
+
+        self._records(runtime_dir, ["load", "normalize"])
+        changed = json.loads(call_tool(server, "check_contract_staleness", {}))
+        assert changed["status"] == "failed"
+        assert changed["current_steps"] == ["load", "normalize"]
+        assert changed["contract_fingerprint"] != changed["current_fingerprint"]
+
+    def test_missing_contract_is_an_error_payload(self, tmp_path):
+        server, _ = _make_server(tmp_path)
+        result = json.loads(call_tool(server, "check_contract_staleness", {}))
+        assert result["status"] == "error"
+        assert "dataset_contract.yaml" in result["error"]

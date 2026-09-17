@@ -10,6 +10,7 @@ from dsagt.provenance import (
     build_dependency_graph,
     compute_pipeline_fingerprint,
     compute_terminal_outputs,
+    contract_staleness,
     load_pipeline_records,
     reconstruct_pipeline,
     render_bash,
@@ -520,7 +521,10 @@ class TestReconstructPipeline:
     def test_empty_json_format(self, tmp_path):
         tmp_path.mkdir(exist_ok=True)
         result = json.loads(reconstruct_pipeline(tmp_path, fmt="json"))
-        assert result == {"records": [], "dependency_graph": {}, "terminal_outputs": []}
+        assert result["records"] == []
+        assert result["dependency_graph"] == {}
+        assert result["terminal_outputs"] == []
+        assert result["pipeline_fingerprint"] == compute_pipeline_fingerprint(result)
 
     def test_session_filter(self, tmp_path):
         _write_record(
@@ -582,3 +586,93 @@ class TestReconstructPipeline:
         # Dependencies noted
         assert "depends: fastp" in script
         assert "depends: megahit" in script
+
+
+# ---------------------------------------------------------------------------
+# the json payload's fingerprint, and contract_staleness
+# ---------------------------------------------------------------------------
+
+
+PIPELINE_CONTRACT = {
+    "version": 1,
+    "mode": "pipeline",
+    "keys": {
+        "features": {
+            "dtype": "float32",
+            "shape": [4],
+            "role": "input",
+            "collation": "stack",
+        },
+    },
+    "normalization": {"owner": "dataset"},
+    "split": {
+        "strategy": "random",
+        "seed": 0,
+        "ratios": {"train": 0.8, "val": 0.1, "test": 0.1},
+    },
+    "reconciliation": [],
+}
+
+
+class TestJsonFingerprint:
+
+    def test_payload_carries_the_fingerprint_of_its_own_graph(self, tmp_path):
+        _write_record(
+            tmp_path, _make_record("load", ["load"], output_files=["raw.csv"])
+        )
+        payload = json.loads(reconstruct_pipeline(tmp_path, fmt="json"))
+        assert payload["pipeline_fingerprint"] == compute_pipeline_fingerprint(payload)
+
+    def test_empty_archive_has_a_fingerprint_too(self, tmp_path):
+        payload = json.loads(reconstruct_pipeline(tmp_path, fmt="json"))
+        assert payload["records"] == []
+        assert payload["pipeline_fingerprint"].startswith("sha256:")
+
+
+class TestContractStaleness:
+
+    def _stored(self, trace_dir):
+        payload = json.loads(reconstruct_pipeline(trace_dir, fmt="json"))
+        return {
+            **PIPELINE_CONTRACT,
+            "pipeline_fingerprint": payload["pipeline_fingerprint"],
+        }
+
+    def test_standalone_contract_is_skipped(self, tmp_path):
+        result = contract_staleness(
+            {**PIPELINE_CONTRACT, "mode": "standalone"}, tmp_path
+        )
+        assert result["status"] == "skipped"
+
+    def test_unchanged_pipeline_passes(self, tmp_path):
+        _write_record(
+            tmp_path, _make_record("load", ["load"], output_files=["raw.csv"])
+        )
+        result = contract_staleness(self._stored(tmp_path), tmp_path)
+        assert result["status"] == "passed"
+        assert result["current_steps"] == ["load"]
+        assert result["current_terminal_outputs"] == ["raw.csv"]
+
+    def test_upstream_pipeline_change_fails(self, tmp_path):
+        """A step added after the contract was written changes the graph
+        and the terminal outputs, so the fingerprints differ."""
+        _write_record(
+            tmp_path,
+            _make_record("load", ["load"], output_files=["raw.csv"], record_id="r1"),
+        )
+        contract = self._stored(tmp_path)
+        _write_record(
+            tmp_path,
+            _make_record(
+                "normalize",
+                ["normalize"],
+                input_files=["raw.csv"],
+                output_files=["normalized.csv"],
+                record_id="r2",
+                timestamp="2024-01-15T11:00:00Z",
+            ),
+        )
+        result = contract_staleness(contract, tmp_path)
+        assert result["status"] == "failed"
+        assert result["current_fingerprint"] != result["contract_fingerprint"]
+        assert result["current_steps"] == ["load", "normalize"]

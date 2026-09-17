@@ -19,9 +19,9 @@ label encoding).
 In **pipeline mode**, the contract also carries a ``pipeline_fingerprint``: a
 hash (see ``provenance.compute_pipeline_fingerprint``) over the dependency
 graph and terminal outputs of the upstream ``reconstruct_pipeline`` run that
-produced the sample's inputs. A later staleness check recomputes the
-fingerprint and flags the contract for review if the upstream pipeline has
-changed. In **standalone mode** (no DSAgt pipeline; the data root was
+produced the sample's inputs. The ``check_contract_staleness`` tool recomputes
+the fingerprint and reports a mismatch, which flags the contract for review
+when the upstream pipeline has changed. In **standalone mode** (no DSAgt pipeline; the data root was
 characterized directly) there is nothing to fingerprint, so the field is
 absent.
 
@@ -41,8 +41,8 @@ CONTRACT_FILENAME = "dataset_contract.yaml"
 
 #: How the sample's inputs were produced.
 #:   pipeline   - the inputs are terminal outputs of a DSAgt-tracked pipeline;
-#:                the contract carries a pipeline_fingerprint (see below) for
-#:                the staleness check.
+#:                the contract carries a pipeline_fingerprint (see below) that
+#:                the check_contract_staleness tool compares.
 #:   standalone - no DSAgt pipeline; the data root was characterized directly
 #:                (e.g. via the scan-directory code). No pipeline to
 #:                fingerprint, so the field must be absent.

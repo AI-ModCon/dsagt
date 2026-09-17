@@ -16,7 +16,6 @@ they're importable by path, exactly like a real generated ``Dataset``.
 
 from __future__ import annotations
 
-import copy
 import importlib.util
 import json
 import os
@@ -29,7 +28,6 @@ import pytest
 pytest.importorskip("torch")
 
 from dsagt.contract import save_contract
-from dsagt.provenance import compute_pipeline_fingerprint, reconstruct_pipeline
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECKS_DIR = (
@@ -375,68 +373,6 @@ class TestModelForwardCheck:
         )
         assert result["status"] == "failed"
         assert "error" in result["detail"]
-
-
-# ---------------------------------------------------------------------------
-# staleness check
-# ---------------------------------------------------------------------------
-
-
-class TestStalenessCheck:
-    def test_standalone_contract_is_skipped(self, tmp_path):
-        contract_path = _write_contract(tmp_path, MINIMAL_CONTRACT)
-        mod = _load_check("staleness")
-        result = mod.run_check(
-            {"contract": str(contract_path), "project_dir": str(tmp_path)}
-        )
-        assert result["status"] == "skipped"
-
-    def test_matching_fingerprint_passes(self, tmp_path):
-        trace_dir = tmp_path / "trace_archive"
-        _write_record(trace_dir, "r1", "load_csv", output_files=["raw.csv"])
-        structured = json.loads(reconstruct_pipeline(trace_dir, fmt="json"))
-        fingerprint = compute_pipeline_fingerprint(structured)
-
-        pipeline_contract = copy.deepcopy(MINIMAL_CONTRACT)
-        pipeline_contract["mode"] = "pipeline"
-        pipeline_contract["pipeline_fingerprint"] = fingerprint
-        contract_path = _write_contract(tmp_path, pipeline_contract)
-
-        mod = _load_check("staleness")
-        result = mod.run_check(
-            {"contract": str(contract_path), "project_dir": str(tmp_path)}
-        )
-        assert result["status"] == "passed", result
-
-    def test_upstream_pipeline_change_caught(self, tmp_path):
-        """Acceptance criterion: detects an upstream pipeline change via
-        fingerprint mismatch."""
-        trace_dir = tmp_path / "trace_archive"
-        _write_record(trace_dir, "r1", "load_csv", output_files=["raw.csv"])
-        structured = json.loads(reconstruct_pipeline(trace_dir, fmt="json"))
-        fingerprint = compute_pipeline_fingerprint(structured)
-
-        pipeline_contract = copy.deepcopy(MINIMAL_CONTRACT)
-        pipeline_contract["mode"] = "pipeline"
-        pipeline_contract["pipeline_fingerprint"] = fingerprint
-        contract_path = _write_contract(tmp_path, pipeline_contract)
-
-        # Upstream pipeline gains a new step after the contract was written.
-        _write_record(
-            trace_dir,
-            "r2",
-            "normalize",
-            output_files=["normalized.csv"],
-            input_files=["raw.csv"],
-            timestamp_start="2024-01-01T00:01:00+00:00",
-        )
-
-        mod = _load_check("staleness")
-        result = mod.run_check(
-            {"contract": str(contract_path), "project_dir": str(tmp_path)}
-        )
-        assert result["status"] == "failed"
-        assert result["detail"]["current_fingerprint"] != fingerprint
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from _common import build_object, worker_main  # noqa: E402
 
-from dsagt.contract import load_contract  # noqa: E402
+from _common import load_contract  # noqa: E402
 
 
 def _normalize_dtype(s: str) -> str:

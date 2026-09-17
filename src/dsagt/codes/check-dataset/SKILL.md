@@ -2,7 +2,7 @@
 name: check-dataset
 description: Validate a PyTorch Dataset against its sample contract, running
   each check (contract, determinism, worker equivalence, split leakage,
-  throughput, model forward, contract staleness) in an isolated subprocess
+  throughput, model forward) in an isolated subprocess
 executable: dsagt-run --code check-dataset -- python codes/check-dataset/scripts/check_dataset.py
 parameters:
   contract:
@@ -30,7 +30,7 @@ parameters:
     required: false
     default: all
     cli: "--checks"
-    description: Comma-separated subset of contract,determinism,worker_equivalence,split_leakage,throughput,model_forward,staleness
+    description: Comma-separated subset of contract,determinism,worker_equivalence,split_leakage,throughput,model_forward
   seed:
     type: integer
     required: false
@@ -86,12 +86,6 @@ parameters:
     default: 2
     cli: "--batch-size"
     description: Batch size used by the model_forward check
-  project_dir:
-    type: string
-    required: false
-    default: "."
-    cli: "--project-dir"
-    description: Project root containing trace_archive/, used by the staleness check
   check_timeout_s:
     type: number
     required: false
@@ -127,7 +121,12 @@ dsagt-run --code check-dataset -- python codes/check-dataset/scripts/check_datas
 | `split_leakage` | Group ids appearing in more than one split; declared sizes wrong; skipped without `--split-manifest` | `--split-manifest` |
 | `throughput` | Pathologically slow `__getitem__` | dataset |
 | `model_forward` | Batch fails to pass through `model.forward()`; skipped without `--model` | dataset, `--model` |
-| `staleness` | The upstream pipeline changed after the contract was written; skipped for a `standalone`-mode contract | `--project-dir` |
+
+The code runs in the environment the `Dataset` imports in, with torch and
+PyYAML; it imports nothing from the `dsagt` package. Whether the upstream
+pipeline changed since the contract was written is the
+`check_contract_staleness` MCP tool's question, answered from the execution
+records: call it beside this code for a `pipeline`-mode contract.
 
 Each check runs in its own subprocess: importing the user's dataset into a
 shared process would contaminate the fork-sensitive state

@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from _common import worker_main  # noqa: E402
 
-from dsagt.contract import load_contract  # noqa: E402
+from _common import load_contract  # noqa: E402
 
 _RATIO_TOLERANCE_PCT = 5.0
 

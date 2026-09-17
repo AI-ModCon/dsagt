@@ -2,7 +2,7 @@
 """Validate a generated PyTorch Dataset against its sample contract.
 
 Runs each check in ``checks/`` (contract, determinism, worker_equivalence,
-split_leakage, throughput, model_forward, staleness) as its own subprocess:
+split_leakage, throughput, model_forward) as its own subprocess:
 importing the user's ``Dataset`` into this process would contaminate the
 fork-sensitive state ``worker_equivalence`` specifically measures (open file
 handles, a seeded global RNG, an initialized CUDA context), and a segfault in
@@ -12,6 +12,11 @@ check whose own worker processes fail to tear down cannot hang the whole
 run either. Emits one JSON report to ``--output`` (default
 ``audit/check_dataset_<ts>.json``) and to stdout. Exits 0 iff every
 requested, non-skipped check passed.
+
+The code runs in the environment the user's ``Dataset`` imports in and
+imports nothing from the ``dsagt`` package; whether the upstream pipeline
+changed since the contract was written is the ``check_contract_staleness``
+MCP tool's question, answered from the execution records dsagt holds.
 """
 
 from __future__ import annotations
@@ -31,10 +36,11 @@ ALL_CHECKS = [
     "split_leakage",
     "throughput",
     "model_forward",
-    "staleness",
 ]
 
 _CHECKS_DIR = Path(__file__).parent / "checks"
+sys.path.insert(0, str(_CHECKS_DIR))
+from _common import load_contract  # noqa: E402
 
 
 def _parse_checks(raw: str | None) -> list[str]:
@@ -90,8 +96,6 @@ def _run_one(check_name: str, worker_args: dict, timeout_s: float) -> dict:
 def _resolve_id_key(explicit: str | None, contract_path: str) -> str | None:
     if explicit:
         return explicit
-    from dsagt.contract import load_contract
-
     contract = load_contract(contract_path)
     for name, spec in contract["keys"].items():
         if spec.get("role") == "metadata":
@@ -120,7 +124,6 @@ def main():
     parser.add_argument("--model-args", "--model_args", default=None)
     parser.add_argument("--collate-fn", "--collate_fn", default=None)
     parser.add_argument("--batch-size", "--batch_size", type=int, default=2)
-    parser.add_argument("--project-dir", "--project_dir", default=".")
     parser.add_argument(
         "--check-timeout-s", "--check_timeout_s", type=float, default=300.0
     )
@@ -146,7 +149,6 @@ def main():
         "model_args": json.loads(args.model_args) if args.model_args else {},
         "collate_fn": args.collate_fn,
         "batch_size": args.batch_size,
-        "project_dir": args.project_dir,
     }
 
     results = {

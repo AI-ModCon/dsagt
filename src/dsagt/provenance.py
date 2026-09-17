@@ -604,12 +604,19 @@ def compute_terminal_outputs(records: list[dict]) -> list[str]:
 
 
 def render_json(records: list[dict], deps: dict[int, list[int]]) -> str:
-    """Render the pipeline as structured JSON: records, dependency graph, and terminal outputs."""
+    """Render the pipeline as structured JSON.
+
+    The payload holds the records, the dependency graph, the terminal
+    outputs, and ``pipeline_fingerprint``, the hash a dataset contract
+    stores; carrying it here means a consumer never recomputes it from the
+    other three.
+    """
     payload = {
         "records": records,
         "dependency_graph": deps,
         "terminal_outputs": compute_terminal_outputs(records),
     }
+    payload["pipeline_fingerprint"] = compute_pipeline_fingerprint(payload)
     return json.dumps(payload, indent=2)
 
 
@@ -631,6 +638,35 @@ def compute_pipeline_fingerprint(structured_output: dict) -> str:
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return f"sha256:{digest}"
+
+
+def contract_staleness(contract: dict, trace_dir: Path) -> dict:
+    """Compare a contract's stored pipeline fingerprint with the current one.
+
+    Returns ``status`` ``passed`` when the fingerprints match, ``failed``
+    when they differ, and ``skipped`` for a ``standalone`` contract, which
+    carries no fingerprint; a result also holds both fingerprints, the
+    current step names, and the current terminal outputs, so a reader can
+    see what the pipeline is now.  This is the ``check_contract_staleness``
+    tool's body; it lives beside the fingerprint because both read the
+    execution records dsagt holds, which a code running in the user's
+    environment does not.
+    """
+    if contract["mode"] == "standalone":
+        return {
+            "status": "skipped",
+            "reason": "contract mode is 'standalone'; no pipeline to fingerprint",
+        }
+    structured = json.loads(reconstruct_pipeline(trace_dir, fmt="json"))
+    current = structured["pipeline_fingerprint"]
+    stored = contract["pipeline_fingerprint"]
+    return {
+        "status": "passed" if current == stored else "failed",
+        "contract_fingerprint": stored,
+        "current_fingerprint": current,
+        "current_steps": [r["code_name"] for r in structured["records"]],
+        "current_terminal_outputs": structured["terminal_outputs"],
+    }
 
 
 def _shell_quote(s: str) -> str:
@@ -667,9 +703,7 @@ def reconstruct_pipeline(
     records = load_pipeline_records(trace_dir, session_id)
     if not records:
         if fmt == "json":
-            return json.dumps(
-                {"records": [], "dependency_graph": {}, "terminal_outputs": []}
-            )
+            return render_json([], {})
         return f"# No execution records found{' for session ' + session_id if session_id else ''}\n"
 
     deps = build_dependency_graph(records)

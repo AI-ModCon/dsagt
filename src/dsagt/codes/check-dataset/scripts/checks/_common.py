@@ -3,11 +3,10 @@
 Each worker script (``contract_check.py``, ``determinism_check.py``, etc.) is
 invoked as its own subprocess by ``check_dataset.py`` so that importing the
 user's ``Dataset`` never contaminates the orchestrator process, and a
-segfault in a native reader takes down only one check. This module has no
-dependency on the ``dsagt`` package itself (contract/staleness checks import
-``dsagt.contract`` / ``dsagt.provenance`` directly, which is fine since they
-run in the same environment ``dsagt-run`` was launched from) — it only
-provides the import-by-path and JSON worker-loop plumbing every check shares.
+segfault in a native reader takes down only one check. The code runs in the
+environment the user's ``Dataset`` imports in, so nothing here imports the
+``dsagt`` package: this module provides the contract reader, the
+import-by-path helper, and the JSON worker loop every check shares.
 """
 
 from __future__ import annotations
@@ -16,6 +15,24 @@ import importlib
 import json
 import sys
 import traceback
+
+
+def load_contract(path: str) -> dict:
+    """Read the sample contract as written.
+
+    Validation is dsagt's: ``save_contract`` validates at write time and the
+    ``check_contract_staleness`` tool validates on read.  PyYAML is the one
+    package the reader needs beyond the standard library.
+    """
+    try:
+        import yaml
+    except ImportError as err:
+        raise ImportError(
+            "check-dataset reads dataset_contract.yaml with PyYAML; install "
+            "pyyaml in the environment the Dataset imports in"
+        ) from err
+    with open(path) as fh:
+        return yaml.safe_load(fh)
 
 
 def import_by_path(path: str):

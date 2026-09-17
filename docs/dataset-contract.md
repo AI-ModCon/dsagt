@@ -105,9 +105,14 @@ In pipeline mode, the contract carries a hash over the upstream pipeline's
 structural shape, computed by `provenance.compute_pipeline_fingerprint` from
 `reconstruct_pipeline(..., fmt="json")`'s `dependency_graph` and
 `terminal_outputs` (never `records` — timestamps and stdout vary rerun to
-rerun even when the pipeline hasn't changed). A later staleness check
-recomputes the fingerprint and flags the contract for review when it no
-longer matches: a step was added or removed, or an output path changed.
+rerun even when the pipeline hasn't changed). The `check_contract_staleness`
+tool recomputes the fingerprint and reports a mismatch, which flags the
+contract for review: a step was added or removed, or an output path changed.
+The tool, not the `check-dataset` code, holds this check because it reads the
+execution records dsagt keeps, and the code runs in the environment the
+`Dataset` imports in. The fingerprint depends on each record's input and
+output files, which come from the `role: input` and `role: output`
+parameters of the codes that ran.
 
 Standalone mode (no DSAgt pipeline; the data root was characterized directly
 with codes like `scan-directory`) has no pipeline to fingerprint, so the

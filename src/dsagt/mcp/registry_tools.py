@@ -33,12 +33,13 @@ import mcp.types as types
 from dsagt.knowledge import KnowledgeBase
 from dsagt.mcp.server import build_dispatch_server
 from dsagt.observability import (
+    child_span,
     obs,
     registry_install_deps_span,
     registry_reconstruct_pipeline_span,
     registry_save_code_span,
 )
-from dsagt.provenance import CodeUseIndexer, reconstruct_pipeline
+from dsagt.provenance import CodeUseIndexer, contract_staleness, reconstruct_pipeline
 from dsagt.registry import CODES_COLLECTION, CodeRegistry
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,37 @@ async def _handle_reconstruct_pipeline(
         return script
 
 
+async def _handle_check_contract_staleness(
+    arguments: dict,
+    *,
+    runtime_dir: Path,
+) -> str:
+    """Whether the pipeline changed since the sample contract was written.
+
+    Loads ``dataset_contract.yaml`` (validated on load), recomputes the
+    pipeline fingerprint from ``trace_archive/``, and returns the comparison
+    as JSON.  A tool rather than a check inside the ``check-dataset`` code
+    because it reads dsagt's records, which the code, running in the user's
+    environment, does not have the package to read.
+    """
+    from dsagt.contract import CONTRACT_FILENAME, load_contract
+
+    path = Path(arguments.get("contract") or runtime_dir / CONTRACT_FILENAME)
+    if not path.is_absolute():
+        path = runtime_dir / path
+    with child_span("registry.check_contract_staleness"):
+        try:
+            contract = await asyncio.to_thread(load_contract, path)
+            result = await asyncio.to_thread(
+                contract_staleness, contract, runtime_dir / "trace_archive"
+            )
+        except (FileNotFoundError, ValueError, KeyError, OSError) as e:
+            obs.event("staleness_failed", error=str(e)[:256])
+            return json.dumps({"status": "error", "error": str(e)})
+        obs.set("status", result["status"])
+        return json.dumps(result, indent=2)
+
+
 async def _handle_install_dependencies(
     arguments: dict,
     *,
@@ -337,6 +369,9 @@ def _registry_tools_and_handlers(
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
         "reconstruct_pipeline": partial(
             _handle_reconstruct_pipeline, runtime_dir=runtime_dir, kb=kb
+        ),
+        "check_contract_staleness": partial(
+            _handle_check_contract_staleness, runtime_dir=runtime_dir
         ),
         "install_dependencies": partial(
             _handle_install_dependencies, registry=registry
@@ -526,6 +561,26 @@ def _registry_tools_and_handlers(
                         "type": "string",
                         "enum": ["bash", "snakemake", "json"],
                         "default": "bash",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="check_contract_staleness",
+            description=(
+                "Whether the pipeline changed since the sample contract "
+                "(dataset_contract.yaml) was written: recomputes the pipeline "
+                "fingerprint from the execution records and compares it with "
+                "the contract's. Returns status passed, failed, or skipped (a "
+                "standalone contract has no fingerprint), both fingerprints, and "
+                "the current steps and terminal outputs."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "contract": {
+                        "type": "string",
+                        "description": "Contract path, relative to the project (default dataset_contract.yaml)",
                     },
                 },
             },

@@ -47,6 +47,8 @@ The wrapper is the point of code-mediated data access. A direct shell or editor 
 
 The on-disk execution records are the canonical provenance chain. The agent calls `reconstruct_pipeline` to render the trace archive as a reproducible **bash script** (`format="bash"`) or **Snakemake workflow** (`format="snakemake"`). It flushes the latest records into the searchable index first, then walks the dependency graph inferred from each step's input/output files to order the steps.
 
+`format="json"` returns the same records as data, with the dependency graph, the terminal outputs (files no later step consumes), and `pipeline_fingerprint`, a hash of the graph and the terminal outputs. A sample contract stores that fingerprint, and the `check_contract_staleness` tool recomputes it and reports whether the pipeline changed since the contract was written; see [the dataset contract](dataset-contract.md).
+
 ## Try it
 
 ```bash
