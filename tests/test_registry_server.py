@@ -118,6 +118,14 @@ class TestSaveToolSpec:
         assert "1 tools" in text
         assert registry.get_code("my-tool") is not None
 
+    def test_reply_states_the_stored_command(self, server, registry):
+        """The reply carries the wrapped executable, since the agent runs
+        what it reads and the command it supplied has no dsagt-run prefix."""
+        text = call_tool(server, "save_code_spec", {"spec": make_spec("my-tool")})
+        stored = registry.get_code("my-tool")["executable"]
+        assert stored.startswith("dsagt-run --code my-tool -- ")
+        assert f"Run it as: {stored}" in text
+
     def test_update_existing_tool(self, server, registry):
         """Saving a spec with the same name updates rather than duplicates."""
         call_tool(

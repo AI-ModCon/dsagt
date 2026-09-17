@@ -239,6 +239,24 @@ class TestSaveTool:
         tool = empty_registry.get_code("mytool")
         assert tool["executable"] == "dsagt-run --code mytool -- python mytool.py"
 
+    def test_keeps_a_supplied_uv_run_prefix(self, empty_registry):
+        """An executable that already starts with ``uv run`` gets the
+        dsagt-run prefix only; declared dependencies add no second one."""
+        empty_registry.save_tool(
+            {
+                "name": "conv",
+                "description": "Convert.",
+                "executable": "uv run --with pymatgen -- python conv.py",
+                "parameters": {},
+                "dependencies": ["pymatgen"],
+            }
+        )
+        tool = empty_registry.get_code("conv")
+        assert (
+            tool["executable"]
+            == "dsagt-run --code conv -- uv run --with pymatgen -- python conv.py"
+        )
+
     def test_does_not_double_wrap(self, empty_registry):
         """If executable already has dsagt-run, don't wrap again."""
         empty_registry.save_tool(

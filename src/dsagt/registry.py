@@ -93,8 +93,9 @@ def _wrap_executable(name: str, executable: str, deps: list[str] | None = None) 
     """
     if "dsagt-run" in executable:
         return executable
-    inner = f"{_uv_run_prefix(deps or [])}{executable}"
-    return f"dsagt-run --code {name} -- {inner}"
+    # An executable that already carries its own ``uv run`` gets no second one.
+    prefix = "" if executable.startswith("uv run") else _uv_run_prefix(deps or [])
+    return f"dsagt-run --code {name} -- {prefix}{executable}"
 
 
 def code_metadata(spec: dict, source: str) -> dict:

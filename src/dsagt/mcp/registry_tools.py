@@ -165,9 +165,13 @@ async def _handle_save_code_spec(
         tool_count = len(registry.list_codes_raw())
         obs.set("action", action)
         obs.set("registry_size", tool_count)
+        stored = registry.get_code(spec["name"])
         message = (
             f"Tool '{spec['name']}' {action} successfully. "
-            f"Registry now contains {tool_count} tools."
+            f"Registry now contains {tool_count} tools.\n"
+            f"Run it as: {stored['executable']}\n"
+            "The dsagt-run prefix writes the execution record; run this line, "
+            "not the command you supplied."
         )
         deps = spec.get("dependencies", [])
         if deps:
@@ -446,7 +450,16 @@ def _registry_tools_and_handlers(
                                     },
                                     "executable": {
                                         "type": "string",
-                                        "description": "Command to execute",
+                                        "description": (
+                                            "The bare command, for example "
+                                            "'python codes/x/scripts/x.py'. "
+                                            "The registry prepends "
+                                            "'dsagt-run --code <name> --' and, "
+                                            "when dependencies are declared, "
+                                            "'uv run --with <deps> --'; the "
+                                            "reply returns the stored line to "
+                                            "run."
+                                        ),
                                     },
                                     "parameters": {
                                         "type": "object",
