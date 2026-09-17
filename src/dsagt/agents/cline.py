@@ -68,8 +68,7 @@ from pathlib import Path
 
 from .base import (
     AgentSetup,
-    _append_or_write,
-    _DSAGT_MARKER,
+    _write_dsagt_block,
     _load_master_instructions,
     _mcp_env_block,
 )
@@ -98,17 +97,15 @@ class ClineSetup(AgentSetup):
             working_dir / ".cline",
         ]
 
-    def write_static(self, working_dir: Path) -> list[str]:
+    def write_static(self, working_dir: Path, *, auto_assess: bool = True) -> list[str]:
         actions: list[str] = []
         (working_dir / ".cline-data").mkdir(parents=True, exist_ok=True)
-        instructions = _load_master_instructions()
+        instructions = _load_master_instructions(auto_assess)
         if instructions:
             rules_dir = working_dir / ".clinerules"
             rules_dir.mkdir(exist_ok=True)
-            action = _append_or_write(
-                rules_dir / "dsagt_instructions.md",
-                instructions,
-                _DSAGT_MARKER,
+            action = _write_dsagt_block(
+                rules_dir / "dsagt_instructions.md", instructions
             )
             if action:
                 actions.append(action)

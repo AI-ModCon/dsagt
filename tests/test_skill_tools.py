@@ -33,11 +33,7 @@ def _make_skill_server(tmp_path):
         index_dir=tmp_path / "kb_index",
         default_embedder="local",
     )
-    skill_reg = SkillRegistry(
-        source_skills_dir=None,  # package default (empty bundled is fine)
-        runtime_dir=str(runtime_dir),
-        kb=kb,
-    )
+    skill_reg = SkillRegistry(runtime_dir=str(runtime_dir), kb=kb)
     server = create_skill_server(skill_reg, kb, runtime_dir=str(runtime_dir))
     return server, skill_reg, kb
 
@@ -240,6 +236,21 @@ class TestSkillSources:
         assert result["sources"]["k-dense-ai"]["indexed"] == 0
         assert result["other_synced_collections"] == []
         assert "k-dense-ai" in result["note"]
+
+    def test_add_skill_source_passes_force_to_sync(self, mock_kb, monkeypatch):
+        calls = []
+
+        def fake_sync(self, source, *, force=False):
+            calls.append((source, force))
+            return {"slug": "k-dense-ai-scientific-agent-skills", "indexed": 1}
+
+        monkeypatch.setattr("dsagt.skills.SkillRouter.sync", fake_sync)
+        server = create_skill_server(kb=mock_kb)
+        call_tool_json(server, "add_skill_source", {"source": "k-dense-ai"})
+        call_tool_json(
+            server, "add_skill_source", {"source": "k-dense-ai", "force": True}
+        )
+        assert calls == [("k-dense-ai", False), ("k-dense-ai", True)]
 
     def test_add_skill_source_bad_source_errors(self, mock_kb):
         server = create_skill_server(kb=mock_kb)
