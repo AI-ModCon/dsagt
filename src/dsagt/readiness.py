@@ -29,11 +29,13 @@ Parquet, npz), the check is the `aidrin` skill's quality baseline: run it on
 the file before and after the operation, through the registered `aidrin`
 code's `executable` (never bare `aidrin`). Run the baseline directly; do not
 ask the user about intent or confirm a plan for these checks (the skill's full workflow is for assessments the user
-asks for). Save the results as `audit/step_N_pre.aidrin.json` and
-`audit/step_N_post.aidrin.json`, and report the per-metric change to the user
-before proposing the next step. Do not write a custom check for a metric
-AIDRIN provides. A stage with tabular input or output gets this check; every
-other stage keeps the check rule above."""
+asks for). The CLI prints its report to stdout, so redirect it into the audit
+file: `... aidrin data-quality <file> --detail > audit/step_N_pre.aidrin.json`
+before the operation and `> audit/step_N_post.aidrin.json` after it, then
+report the per-metric change to the user before proposing the next step. Do
+not write a custom check for a metric AIDRIN provides. A stage with tabular
+input or output gets this check; every other stage keeps the check rule
+above."""
 
 
 def aidrin_release_tag(version: str) -> str:
