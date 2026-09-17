@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
       
         
         <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1399,7 +1399,7 @@
 </table>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Python 3.12 or 3.13</li>
+<li>Python 3.12</li>
 <li>One of the supported agent platforms above, installed and authenticated against your LLM provider</li>
 <li><a href="https://github.com/astral-sh/uv">uv</a> — only for the development install</li>
 </ul>
@@ -1409,7 +1409,7 @@
 
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python3.12<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>~/.venvs/dsagt<span class="w">          </span><span class="c1"># or: conda create -n dsagt python=3.12 &amp;&amp; conda activate dsagt</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">source</span><span class="w"> </span>~/.venvs/dsagt/bin/activate<span class="w">         </span><span class="c1"># (Windows venv: ~\.venvs\dsagt\Scripts\activate)</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"git+https://github.com/AI-ModCon/dsagt.git"</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;git+https://github.com/AI-ModCon/dsagt.git&quot;</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>dsagt<span class="w"> </span>--version<span class="w">                            </span><span class="c1"># 0.2.0</span>
 </code></pre></div>
 <p>This puts the <code>dsagt</code> CLI on your PATH. Create your first project — <code>dsagt init</code> is interactive (it walks you through the agent platform, project location, packaged knowledge collections, and skill sources) and sets up the knowledge base on first run:</p>
@@ -1420,7 +1420,7 @@
 </code></pre></div>
 <p>Or, if you use a VS Code agent extension, just open the folder as a project in VS Code and start the agent — <code>dsagt init</code> already made the dsagt MCP server available via the native interface (e.g. for Claude, exposed in the project's <code>.mcp.json</code>).</p>
 <p>To upgrade later, reinstall — re-running <code>dsagt init</code> reconfigures an existing project in place:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span><span class="s2">"git+https://github.com/AI-ModCon/dsagt.git"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span><span class="s2">&quot;git+https://github.com/AI-ModCon/dsagt.git&quot;</span>
 </code></pre></div>
 <blockquote>
 <p>Pin to a specific release: e.g. <code>pip install "git+https://github.com/AI-ModCon/dsagt.git@0.2.0"</code>.</p>
@@ -1529,7 +1529,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

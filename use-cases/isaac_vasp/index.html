@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1458,12 +1458,12 @@ sister demo <a href="../isaac_skills_demo/"><code>isaac_skills_demo</code></a>.<
   (<code>uv pip install pymatgen</code>) — the converter uses <code>pymatgen.io.vasp</code>.</li>
 </ul>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pymatgen<span class="w">                 </span><span class="c1"># the converter's one real dependency</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pymatgen<span class="w">                 </span><span class="c1"># the converter&#39;s one real dependency</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dsagt<span class="w"> </span>init<span class="w"> </span>isaac-vasp<span class="w"> </span>--agent<span class="w"> </span>claude
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/isaac-vasp
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts"</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>cp<span class="w"> </span>use_cases/isaac_vasp/vasp_neb_to_isaac.py<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts/"</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/isaac_vasp/neb<span class="w"> </span><span class="s2">"</span><span class="nv">$PROJ</span><span class="s2">/data_neb"</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts&quot;</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>cp<span class="w"> </span>use_cases/isaac_vasp/vasp_neb_to_isaac.py<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts/&quot;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/isaac_vasp/neb<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data_neb&quot;</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isaac-vasp
 </code></pre></div>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
@@ -1481,7 +1481,7 @@ sister demo <a href="../isaac_skills_demo/"><code>isaac_skills_demo</code></a>.<
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Using the registered vasp-neb-to-isaac code, convert the NEB calculation in
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>data_neb/ and write the ISAAC record to data_neb/isaac_neb_record.json. Use the
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>exact dsagt-run command from the spec so the execution is recorded. Then tell me
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>the record's reaction-energy / barrier fields and how many images it summarized.
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>the record&#39;s reaction-energy / barrier fields and how many images it summarized.
 </code></pre></div>
 <p><strong>Expect:</strong> the agent runs <code>dsagt-run --code vasp-neb-to-isaac -- python
 codes/scripts/vasp_neb_to_isaac.py data_neb/ --output data_neb/isaac_neb_record.json</code>,
@@ -1571,7 +1571,7 @@ reference <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/isaac_
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
