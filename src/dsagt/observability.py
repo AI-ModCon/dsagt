@@ -112,9 +112,10 @@ def resolve_tracking_uri(config: dict | None) -> str:
     MLflow client honors a ``sqlite:`` URI directly (auto-creating + migrating
     the DB on first use), so self-logging needs no listener and this never has
     to fail.  SQLite is MLflow's supported serverless backend — the filesystem
-    store (``file:`` / ``./mlruns``) is deprecated as of Feb 2026.  DSAGT emits
-    only traces (no runs/models), so the experiment's default artifact dir is
-    never materialized.
+    store (``file:`` / ``./mlruns``) is deprecated as of Feb 2026.  Spans and
+    their metadata go to the sqlite store; MLflow keeps a span's large inputs
+    and outputs, and the model record a trace hangs off, as files under the
+    experiment's artifact location, ``<project>/mlruns/``.
     """
     uri = os.environ.get("MLFLOW_TRACKING_URI")
     if uri:
@@ -206,6 +207,15 @@ def _quiet_mlflow_chatter() -> None:
     Warnings and errors still surface.
     """
     logging.getLogger("mlflow.tracking.fluent").setLevel(logging.WARNING)
+    # "Flushing the async trace logging queue before program exit" at INFO on
+    # every dsagt-run exit, and "Creating initial MLflow database tables" on
+    # the first process to open a project's store; an agent that redirects a
+    # code's stderr into its output file gets them appended to the JSON.
+    for name in (
+        "mlflow.tracing.export.async_export_queue",
+        "mlflow.store.db.utils",
+    ):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def _bound_remote_retries(tracking_uri: str) -> None:
