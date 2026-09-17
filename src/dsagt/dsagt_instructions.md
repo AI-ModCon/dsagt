@@ -172,6 +172,8 @@ At any point, you can reconstruct the pipeline from execution records:
 - `reconstruct_pipeline(format="bash")` — bash script
 - `reconstruct_pipeline(format="snakemake")` — Snakemake workflow
 
+The script the tool returns lists the recorded runs in the order they ran, with a failed run kept as a comment, and calls each recorded tool directly, without the `dsagt-run` wrapper, so it runs outside a DSAgt project. Save it as returned. Parameterize or trim it only when the user asks; never add the wrapper or configuration scaffolding of your own.
+
 ## PRINCIPLES
 
 1. **Setup first** — Extend KB and register user codes before iterating

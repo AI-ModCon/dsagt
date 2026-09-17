@@ -211,12 +211,45 @@ class TestRenderBash:
 
         assert "depends: fastp" in script
 
-    def test_warns_on_nonzero_exit(self):
-        records = [_make_record("bad", ["bad"], return_code=1)]
+    def test_failed_run_is_kept_as_a_comment(self):
+        """A run that exited non-zero stays on the record as a comment; the
+        script opens with ``set -e``, so a live failed step would stop it."""
+        records = [
+            _make_record("bad", ["bad", "--x"], return_code=1, record_id="r1"),
+            _make_record(
+                "good", ["good"], record_id="r2", timestamp="2024-01-15T11:00:00Z"
+            ),
+        ]
         deps = build_dependency_graph(records)
         script = render_bash(records, deps)
 
-        assert "WARNING: original run exited with code 1" in script
+        assert "#   failed with exit code 1; kept as a comment" in script
+        assert "\n# bad --x\n" in script
+        assert "\ngood\n" in script
+
+    def test_paths_under_the_project_are_relative(self, tmp_path):
+        """Absolute paths inside the project are written relative to it, so
+        the script runs from the project directory or another checkout."""
+        project = tmp_path / "proj"
+        records = [
+            _make_record(
+                "conv",
+                [
+                    "python",
+                    str(project / "codes/conv/x.py"),
+                    str(project / "data/in.csv"),
+                    "/tmp/out.csv",
+                ],
+                input_files=[str(project / "data/in.csv")],
+                output_files=["/tmp/out.csv"],
+            )
+        ]
+        deps = build_dependency_graph(records)
+        script = render_bash(records, deps, project_dir=project)
+
+        assert "python codes/conv/x.py data/in.csv /tmp/out.csv" in script
+        assert "inputs:  data/in.csv" in script
+        assert str(project) not in script
 
     def test_quotes_special_characters(self):
         records = [_make_record("echo", ["echo", "hello world", "it's"])]

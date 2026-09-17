@@ -629,23 +629,52 @@ def build_dependency_graph(records: list[dict]) -> dict[int, list[int]]:
     return deps
 
 
-def render_bash(records: list[dict], deps: dict[int, list[int]]) -> str:
-    """Render the pipeline as a bash script."""
+def _relative_to_project(arg: str, project_dir: Path | None) -> str:
+    """*arg* with a leading *project_dir* removed, so the script runs from the project."""
+    if project_dir is None:
+        return arg
+    root = str(project_dir)
+    if arg == root:
+        return "."
+    if arg.startswith(root + "/"):
+        return arg[len(root) + 1 :]
+    return arg
+
+
+def render_bash(
+    records: list[dict],
+    deps: dict[int, list[int]],
+    project_dir: Path | None = None,
+) -> str:
+    """Render the pipeline as a bash script, in the order the records ran.
+
+    A run that exited non-zero is kept as a comment: the script opens with
+    ``set -e``, so a live failed step would stop it at that point, and the
+    failed attempts are part of the record the reader may want.  Paths under
+    *project_dir* are written relative to it, so the script runs from the
+    project directory or another checkout of the same layout.
+    """
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "",
-        "# Pipeline reconstructed from DSAgt execution records",
+        "# Pipeline reconstructed from DSAgt execution records, in the order they ran",
         "",
     ]
 
     for i, record in enumerate(records):
         code = record["code_name"]
         execution = record["execution"]
-        cmd = execution["exact_command"]
+        cmd = [_relative_to_project(a, project_dir) for a in execution["exact_command"]]
         rc = execution.get("return_code", 0)
-        inputs = execution.get("input_files", [])
-        outputs = execution.get("output_files", [])
+        inputs = [
+            _relative_to_project(f, project_dir)
+            for f in execution.get("input_files", [])
+        ]
+        outputs = [
+            _relative_to_project(f, project_dir)
+            for f in execution.get("output_files", [])
+        ]
 
         lines.append(f"# Step {i + 1}: {code}")
         if inputs:
@@ -655,11 +684,13 @@ def render_bash(records: list[dict], deps: dict[int, list[int]]) -> str:
         if deps[i]:
             dep_names = [records[d]["code_name"] for d in deps[i]]
             lines.append(f"#   depends: {', '.join(dep_names)}")
-        if rc != 0:
-            lines.append(f"#   WARNING: original run exited with code {rc}")
 
         cmd_str = " ".join(_shell_quote(arg) for arg in cmd)
-        lines.append(cmd_str)
+        if rc != 0:
+            lines.append(f"#   failed with exit code {rc}; kept as a comment")
+            lines.append(f"# {cmd_str}")
+        else:
+            lines.append(cmd_str)
         lines.append("")
 
     return "\n".join(lines)
@@ -751,4 +782,4 @@ def reconstruct_pipeline(
 
     if fmt == "snakemake":
         return render_snakemake(records, deps)
-    return render_bash(records, deps)
+    return render_bash(records, deps, project_dir=Path(trace_dir).resolve().parent)
