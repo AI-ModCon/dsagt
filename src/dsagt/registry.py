@@ -489,9 +489,9 @@ class SkillRegistry:
     installs from their upstream repositories, catalog skills added with
     ``install_skill``, and skills the agent authors with ``save_skill`` —
     is a skill-standard directory ``<project>/skills/<name>/``.  The
-    package holds no skills of its own.  Skills are not indexed into a KB:
-    agents auto-discover them natively after ``AgentSetup.setup_skills``
-    mirrors them.
+    package holds no skills of its own.  Installed skills reach the agent
+    through the native mirror ``AgentSetup.setup_skills`` writes, with no KB
+    collection.
     """
 
     def __init__(

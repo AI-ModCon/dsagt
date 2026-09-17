@@ -1,12 +1,15 @@
 # DSAgt
 
+Documentation: **https://ai-modcon.github.io/dsagt** — quick start, capability pages, and use-case walkthroughs.
+
+<!-- md-shared:intro:start -->
 **D**ata**S**mith **Ag**en**t** — AI-assisted data pipeline builder.
 
-![DSAgt architecture](latex/architecture.png)
+![DSAgt architecture](docs/assets/overview.png)
 
-DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It wraps these capabilities around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …).
+DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It exposes these capabilities to a user's existing agent CLI or VS Code extension (Claude Code, OpenCode, Codex, and others).
 
-**Prerequisites:** Python 3.12, and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
+**Prerequisites:** Python 3.12 or later (CI tests 3.12 and 3.13) on Apple Silicon or Linux x86_64 (torch has no NumPy 2 wheel for Intel Macs), and an agent platform (currently supported platforms are listed below) — already installed and authenticated against whatever LLM provider you intend to use.
 
 <!-- md-shared:agents:start -->
 | Agent | Install | Verify |
@@ -17,10 +20,9 @@ DSAgt connects an MCP-compatible AI coding agent to code registration, a semanti
 | [opencode](https://github.com/sst/opencode) | See [opencode docs](https://opencode.ai/docs/) | `opencode --version` |
 | [Cline](https://github.com/cline/cline) | `npm i -g cline` | `cline --version` |
 <!-- md-shared:agents:end -->
+<!-- md-shared:intro:end -->
 
 ## Installation
-
-### For use (no development)
 
 <!-- md-shared:install:start -->
 
@@ -28,7 +30,7 @@ DSAgt connects an MCP-compatible AI coding agent to code registration, a semanti
 python3.12 -m venv ~/.venvs/dsagt          # or: conda create -n dsagt python=3.12 && conda activate dsagt
 source ~/.venvs/dsagt/bin/activate         # (Windows venv: ~\.venvs\dsagt\Scripts\activate)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
-dsagt --version                            # 0.2.0
+dsagt --version                            # 0.2.1
 ```
 
 This puts the `dsagt` CLI on your PATH. Create your first project — `dsagt init` is interactive (it walks you through the agent platform, project location, packaged knowledge collections, and skill sources) and sets up the knowledge base on first run:
@@ -54,23 +56,15 @@ pip install --upgrade "git+https://github.com/AI-ModCon/dsagt.git"
 > Pin to a specific release: e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@0.2.0"`.
 <!-- md-shared:install:end -->
 
-### For development
-
-Clone the repo and use `uv` (editable install with the full test suite) — see [Quick Start](#quick-start) below.
-
 ## Quick Start
 
-Explore DSAgt knowledge ingest, code registration, provenance, and explicit memory using the mock project in [`tests/smoke_test/`](tests/smoke_test/). Uses `claude`; substitute another agent (`goose` / `codex` / `opencode` / `cline`) if you prefer — the prompts are agent-agnostic.
+Explore DSAgt knowledge ingest, code registration, provenance, and explicit memory using the sample files in [`tests/smoke_test/`](tests/smoke_test/). Uses `claude`; substitute another agent (`goose` / `codex` / `opencode` / `cline`) if you prefer — the prompts are agent-agnostic. The same walkthrough is on the site: [Quick Start](https://ai-modcon.github.io/dsagt/quickstart/).
 
 ```bash
-# 0. Install
-git clone https://github.com/AI-ModCon/dsagt.git
-cd dsagt
-uv sync                      # add --all-groups for the test suite
-source .venv/bin/activate    # so `dsagt` is on PATH
-
-# A convenience variable for the demo paths below (not a normal dsagt step)
-export SMOKE_DIR="$(pwd)/tests/smoke_test"
+# 0. Install dsagt (see Installation above), then fetch the sample files:
+curl -sL https://github.com/AI-ModCon/dsagt/archive/refs/heads/main.tar.gz \
+    | tar xz --strip-components=2 dsagt-main/tests/smoke_test
+export SMOKE_DIR="$PWD/smoke_test"   # a convenience variable for the prompts below
 
 # 1. Create a project.  `dsagt init` is interactive — follow the menu to name it
 #    `quickstart`, pick your agent, and choose knowledge collections + skill sources.
@@ -117,7 +111,7 @@ dsagt traces quickstart
 # Runs mlflow ui --backend-store-uri sqlite:///$HOME/dsagt-projects/quickstart/mlflow.db
 ```
 
-The same sequence of project initialization/prompts runs automatically for installation integration testing via `dsagt smoke-test --agent claude` (or `goose` / `codex` / `opencode` / `cline`), which asserts each artifact is present, and concludes cleaning up the smoke-test project artifacts.
+The same sequence runs unattended as `dsagt smoke-test --agent claude` (or `goose` / `codex` / `opencode` / `cline`), which checks each artifact and removes its project afterwards.
 
 ### Knowledge base setup
 
@@ -133,7 +127,7 @@ The default embedder is a local sentence-transformers model (~130 MB of weights 
 
 [`use_cases/`](use_cases/) holds end-to-end domain walkthroughs — each covering data acquisition, code or skill registration, pipeline construction, and agent-driven execution (genomics, cryo-EM, materials science, fusion, combustion CFD, AI data-readiness). Browse one to see how the pieces fit on a concrete pipeline before building your own.
 
-See the **[Use Cases documentation](https://ai-modcon.github.io/dsagt/use-cases/)** for the full catalog, or drop a `README.md` with frontmatter into a `use_cases/<name>/` folder to add your own (it's auto-published to the docs site — see [`hooks/gen_use_cases.py`](hooks/gen_use_cases.py)).
+See the **[Use Cases documentation](https://ai-modcon.github.io/dsagt/use-cases/)** for the full catalog.
 
 ## Project Directory
 
@@ -165,12 +159,14 @@ Projects are registered in `~/dsagt-projects/projects.yaml` so `dsagt info <name
 
 ### MCP Server
 
-DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to once. Its main tool groups are:
+DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to once (every tool: [MCP Servers](https://ai-modcon.github.io/dsagt/mcp-servers/)). Its main tool groups are:
 
-- **Registry** — Code registration and dependency installation. Codes are markdown files with YAML frontmatter under `<project>/codes/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies. The agent discovers codes via `search_registry`.
+- **Registry** — Code registration and dependency installation. Codes are markdown files with YAML frontmatter under `<project>/codes/`. Executables are wrapped with `dsagt-run` for provenance and, when a code declares Python dependencies, `uv run --with`; `uv` installs with dsagt. The agent discovers codes via `search_registry`.
 - **Knowledge** — Semantic search over indexed ChromaDB document collections. Background jobs handle long ingest operations. The agent searches via `kb_search`, ingests via `kb_ingest`, and saves user-confirmed facts via `kb_remember`.
 
 ### Codes and Skills
+
+Pages: [Provenance](https://ai-modcon.github.io/dsagt/provenance/), [Skills](https://ai-modcon.github.io/dsagt/skills/).
 
 **Codes** are CLI executables defined as markdown files with YAML frontmatter in `<project>/codes/`. The agent registers new codes via the MCP server's `save_code_spec`.
 
@@ -179,13 +175,15 @@ DSAGT exposes a single MCP server, **`dsagt-server`**, that an agent connects to
 - **Installed** skills are located in `<project>/skills/` (init installs the base skills `skill-creator`, `datacard-generator`, and `aidrin` from their upstream repositories and leaves a copy alone once it is present; other domain skills like the BaseData Croissant validator are installed from the `genesis` source). These are mirrored into the agent's native skills directory (e.g. `.claude/skills/`, `.agents/skills/`) at install time (and re-mirrored at `dsagt init`/`start`), where the agent auto-discovers and auto-invokes them — no `search_skills` needed (that covers only the corpus below).
 - **Corpus** skills come from external Git repositories — GitHub *or* GitLab — indexed into a searchable corpus the agent browses with `search_skills` but that is **not** loaded into its context (so the corpus can hold thousands of skills). The agent enables a source with `add_skill_source(...)`, finds skills with `search_skills(...)`, then copies one into the project with `install_skill(...)`.
 
-The corpus is **opt-in**: a source must be synced before its skills are searchable. Curated named sources are provided out of the box — `k-dense-ai`, `anthropic`, `antigravity`, `composio`, and `genesis` (the OSTI GENESIS catalog: HPC, HuggingFace, LangChain, OpenAI, plasma-sim, and more) — and any Git URL or `owner/repo` works too. Manage sources from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
+The corpus is **opt-in**: a source must be synced before its skills are searchable. Curated named sources are provided out of the box — `k-dense-ai`, `anthropic`, `antigravity`, `composio`, and `genesis` (the AI-ModCon GENESIS catalog: HPC sites, BaseData, BaseEval, BaseSAFE, AmSC, plasma simulation) — and any Git URL or `owner/repo` works too. Manage sources from the agent with `list_skill_sources` / `add_skill_source` / `search_skills` / `install_skill`.
 
-![DSAgt skills routing](latex/skills-routing.png)
+![DSAgt skills routing](docs/assets/skills-routing.png)
 
-The diagram traces a skill's lifecycle: **discovery** — browse the corpus with `search_skills` for skills the agent doesn't yet have → **install** — `install_skill` copies one into the project → **use** — the agent auto-discovers installed skills natively and invokes them by relevance (and authors new ones with the built-in `skill-creator`). The diagram source is [`latex/skills-routing.tex`](latex/skills-routing.tex).
+The diagram traces a skill's lifecycle: **discovery** — browse the corpus with `search_skills` for skills the agent doesn't yet have → **install** — `install_skill` copies one into the project → **use** — the agent auto-discovers installed skills natively and invokes them by relevance (and authors new ones with `skill-creator`).
 
 ### Knowledge Base
+
+Page: [Knowledge Base](https://ai-modcon.github.io/dsagt/knowledge-base/).
 
 The agent searches these collections semantically:
 
@@ -196,14 +194,14 @@ The agent searches these collections semantically:
 | **Knowledge Collections** | NeMo Curator reference collection; user-ingested docs | `dsagt init` (chosen collections) + agent's `kb_ingest` |
 | **Explicit Memory** | User-confirmed facts | Agent's `kb_remember` (also written to `<project>/.dsagt/explicit_memories.yaml`); the agent fetches via `kb_get_memories` on demand, not auto-loaded at session start |
 | **Code Execution Records** | `dsagt-run` execution traces | `dsagt-run` writes JSON to `<project>/trace_archive/`; indexed for search during the session, and before `reconstruct_pipeline` |
-| **AI-Readiness Check** | AIDRIN quality baseline per stage | **On by default** (the `dsagt init` menu can turn it off): the agent runs the AIDRIN quality baseline before and after every tabular pipeline stage through the registered `aidrin` code, with reports in `audit/`. |
+| **[AI-Readiness Check](https://ai-modcon.github.io/dsagt/readiness/)** | AIDRIN quality baseline per stage | **On by default** (the `dsagt init` menu can turn it off): the agent runs the AIDRIN quality baseline before and after every tabular pipeline stage through the registered `aidrin` code, with reports in `audit/`. |
 | **Episodic Memory** | Captured session turns | **Opt-in** (enabled in the `dsagt init` menu): DSAgt captures each completed turn into `session_memory` during the session (mechanical chunk + embed). Retrieval is recency-weighted. |
-
-The embedding backend is local (sentence-transformers, CPU-side, no API key).
 
 The agent searches via `kb_search` and writes via `kb_ingest` / `kb_remember`. Registered codes have their own `search_registry` route over the same backend. Installed skills are discovered natively by the agent; enabling external skill sources adds one corpus collection per source, which `search_skills` browses for installable skills.
 
 ### Memory
+
+Page: [Memory](https://ai-modcon.github.io/dsagt/memory/).
 
 DSAgt has two memory types, both retrievable via `kb_search` / `kb_get_memories`:
 
@@ -214,7 +212,9 @@ DSAgt has two memory types, both retrievable via `kb_search` / `kb_get_memories`
 
 ### Observability
 
-Self-logging goes to a serverless MLflow SQLite store at `<project>/mlflow.db`. Browse it with `mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db`. The trace view shows:
+Page: [Observability](https://ai-modcon.github.io/dsagt/observability/).
+
+Self-logging goes to a serverless MLflow SQLite store at `<project>/mlflow.db`. Browse it with `dsagt traces <project>`. The trace view shows:
 
 - **Knowledge base operations** — `kb.search` / `kb.embed` / `kb.index_search` / `kb.rerank` span trees with per-phase timing.
 - **Code executions** — `code.execute` spans with exit code, duration, file counts, truncated stderr. Full payload in `trace_archive/<record_id>.json`.
@@ -224,6 +224,8 @@ Self-logging goes to a serverless MLflow SQLite store at `<project>/mlflow.db`. 
 Each launch gets a session id that every span carries, so you can filter the trace view by session. The code-execution records on disk are the provenance record — the agent calls `reconstruct_pipeline` to render them as a reproducible bash script or Snakemake workflow.
 
 ## CLI Reference
+
+Page: [CLI](https://ai-modcon.github.io/dsagt/cli/).
 
 <!-- md-shared:cli:start -->
 | Command | Description |
@@ -235,11 +237,7 @@ Each launch gets a session id that every span carries, so you can filter the tra
 | `dsagt list` | List all projects with agent and path |
 | `dsagt mv <name> <new-location>` | Move a project to a new location |
 | `dsagt rm <name> [-y] [--keep-files]` | Unregister a project (and optionally delete its directory) |
-| `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline]` | End-to-end install verification |
+| `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline] [--all]` | End-to-end install verification; `--all` runs every agent in parallel |
 <!-- md-shared:cli:end -->
 
 For tests, troubleshooting, and other developer-facing material, see [docs/developer.md](docs/developer.md).
-
-## Acknowledgments
-
-This project acknowledges support from the U.S. Department of Energy's Genesis Mission.

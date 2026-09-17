@@ -326,7 +326,7 @@ def test_returned_tool_error_marks_the_trace_as_error(tmp_path, monkeypatch):
 
 class TestPinTraceSource:
     """The trace-source token must be pinned as soon as *this* session's
-    transcript exists — not on the first heartbeat tick (~50 s in), which a
+    transcript exists — not on the first periodic pass (~50 s in), which a
     scripted session never reaches, and never to the previous session's
     transcript, which is what "newest file" resolves to before the agent's
     first message."""

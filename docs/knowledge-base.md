@@ -8,10 +8,10 @@ The knowledge base is DSAgt's catalog of **domain knowledge** — reference corp
 
 | Collection | Source | Populated by |
 |---|---|---|
-| **Reference corpora** | NeMo Curator + AIDRIN (data-curation and AI-data-readiness references) | `dsagt init` (chosen collections) |
+| **Reference corpus** | NeMo Curator (data-curation references) | `dsagt init` (chosen collections) |
 | **Your documents** | Papers, standards, protocols, schemas you ingest | Agent's `kb_ingest` |
 
-The has access to three knowledge base tools: `kb_ingest` (index a file or directory into a named collection — long ingests run in the background), `kb_search` (retrieve across one or more collections), and `kb_list_collections` (see what's indexed).
+The agent has five knowledge base tools: `kb_ingest` (index a file or directory into a named collection; long ingests run in the background), `kb_append` (add documents to an existing collection), `kb_job_status` (poll a background job), `kb_search` (retrieve across one or more collections), and `kb_list_collections` (see what is indexed).
 
 ## Hybrid vector search
 

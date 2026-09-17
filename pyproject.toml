@@ -38,6 +38,7 @@ dependencies = [
     "transformers>=5.0,<6.0",          # sentence-transformers backend
     "rank-bm25>=0.2.2",                # sparse keyword retrieval
     "aidrin>=2026.8.2,<2027",          # AI Data Readiness Inspector CLI; the readiness assessment's check
+    "uv>=0.5",                         # runs codes with declared dependencies (uv run --with) and install_dependencies
 ]
 
 [project.scripts]
@@ -98,7 +99,7 @@ addopts = [
     "--tb=short",
 ]
 markers = [
-    "integration: tests that hit real APIs or start real subprocesses (deselect with -m 'not integration')",
+    "integration: tests that load the local embedder, spawn subprocesses, or install into the venv (deselect with -m 'not integration')",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:importlib._bootstrap",
@@ -122,9 +123,8 @@ target-version = "py312"
 [tool.ruff.lint.per-file-ignores]
 # E402 (imports not at top) is intentional in these modules: __init__.py sets
 # OpenMP/SSL env vars that must be in place before heavy libs import;
-# knowledge.py defers embedding-backend imports; the integration tests guard
-# their imports behind a credentials/skip check.
+# knowledge.py defers embedding-backend imports; the dependency integration
+# test imports after its skip checks.
 "src/dsagt/__init__.py" = ["E402"]
 "src/dsagt/knowledge.py" = ["E402"]
-"tests/test_knowledge_integration.py" = ["E402"]
 "tests/test_dependency_integration.py" = ["E402"]

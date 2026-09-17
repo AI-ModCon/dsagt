@@ -1,7 +1,7 @@
-"""End-to-end episodic-memory integration: heartbeat → session_memory.
+"""End-to-end episodic-memory integration: periodic pass → session_memory.
 
 The full episodic chain with nothing faked: a real Claude transcript on
-disk → ``TraceCollector`` (the heartbeat) → the ``MemoryExtractor`` consumer
+disk → ``TraceCollector`` (the periodic pass) → the ``MemoryExtractor`` consumer
 built by the shared ``memory.episodic_consumers`` wiring → mechanically tagged
 turns embedded into the ``session_memory`` collection of a real
 ``KnowledgeBase`` → retrieved by ``kb.search``.
@@ -42,7 +42,7 @@ def _user(ts, text, uuid):
 
 
 @pytest.mark.integration
-def test_heartbeat_indexes_turn_into_session_memory(tmp_path):
+def test_periodic_pass_indexes_turn_into_session_memory(tmp_path):
     project_dir = tmp_path / "proj"
     (project_dir / ".dsagt").mkdir(parents=True)
 
