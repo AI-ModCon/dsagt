@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/observability/">
+        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/readiness/">
       
       
-        <link rel="prev" href="../memory/">
+        <link rel="prev" href="../observability/">
       
       
-        <link rel="next" href="../readiness/">
+        <link rel="next" href="../mcp-servers/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Observability - DSAgt</title>
+        <title>AI-Readiness Check - DSAgt</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#observability" class="md-skip">
+        <a href="#ai-readiness-check" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Observability
+              AI-Readiness Check
             
           </span>
         </div>
@@ -674,6 +674,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -693,7 +721,7 @@
   <span class="md-ellipsis">
     
   
-    Observability
+    AI-Readiness Check
   
 
     
@@ -711,7 +739,7 @@
   <span class="md-ellipsis">
     
   
-    Observability
+    AI-Readiness Check
   
 
     
@@ -737,10 +765,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#logging-to-a-shared-tracking-server" class="md-nav__link">
+  <a href="#the-setting" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Logging to a shared tracking server
+        The setting
       
     </span>
   </a>
@@ -748,41 +776,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#two-feeds" class="md-nav__link">
+  <a href="#what-the-paragraph-says" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two feeds
+        What the paragraph says
       
     </span>
   </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#trace-coverage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trace Coverage
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Trace Coverage">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#agent-trace-coverage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Agent trace coverage
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -797,38 +797,21 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#demos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Demos
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../readiness/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AI-Readiness Check
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1260,10 +1243,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#logging-to-a-shared-tracking-server" class="md-nav__link">
+  <a href="#the-setting" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Logging to a shared tracking server
+        The setting
       
     </span>
   </a>
@@ -1271,41 +1254,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#two-feeds" class="md-nav__link">
+  <a href="#what-the-paragraph-says" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two feeds
+        What the paragraph says
       
     </span>
   </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#trace-coverage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trace Coverage
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Trace Coverage">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#agent-trace-coverage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Agent trace coverage
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1314,6 +1269,17 @@
     <span class="md-ellipsis">
       
         Try it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#demos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Demos
       
     </span>
   </a>
@@ -1340,73 +1306,78 @@
   
 
 
-<h1 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h1>
-<p>DSAgt logs traces to a <strong>MLflow</strong> via an SQLite file at <code>~/dsagt-projects/&lt;project&gt;/mlflow.db</code>.</p>
-<p><img alt="DSAgt observability" src="../assets/observability.png" /></p>
-<p>To view in the MLflow UI:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;project&gt;<span class="w"> </span><span class="c1"># rund dsagt mlflow ui --backend-store-uri sqlite:///&lt;project&gt;/mlflow.db</span>
+<h1 id="ai-readiness-check">AI-Readiness Check<a class="headerlink" href="#ai-readiness-check" title="Permanent link">&para;</a></h1>
+<p>DSAgt runs <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage. AIDRIN installs with dsagt, and every project gets the <code>aidrin</code> skill and an <code>aidrin</code> code, so each call the agent makes is an execution record in <code>trace_archive/</code> like any other code. A user who asks "is my data AI-ready?" gets the skill's own workflow.</p>
+<p>The pipeline-builder instructions require a paired check around every data operation, with reports in <code>audit/</code>. The AI-readiness check makes that check concrete for tabular files: it is the <code>aidrin</code> skill's quality baseline (completeness, duplicity, outliers), run on a stage's input before the operation and on its output after it, so every stage of a pipeline is measured the same way and the before/after delta is comparable across stages and projects.</p>
+<h2 id="the-setting">The setting<a class="headerlink" href="#the-setting" title="Permanent link">&para;</a></h2>
+<p><code>dsagt init</code> asks "Assess tabular data for AI-readiness before and after each data transform?", default yes. (The automation path turns it off with <code>dsagt init &lt;name&gt; --agent &lt;agent&gt; --no-readiness</code>.) The answer is the one thing the setting controls: when it is yes, the agent's instructions carry one paragraph at the per-operation check rule; when it is no, they do not. The <code>aidrin</code> code and skill are present either way.</p>
+<p>The config records the answer:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">readiness</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">auto_assess</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </code></pre></div>
-<p><code>dsagt info &lt;name&gt;</code> prints the resolved tracking URI and a session/trace summary. The tracking URI is <code>MLFLOW_TRACKING_URI</code> when set in the shell, else the <code>sqlite:///&lt;project&gt;/mlflow.db</code> default. The experiment is <code>dsagt-&lt;8 hex&gt;</code>, hashed from the project directory so two users' <code>demo</code> projects never collide on a shared server; set <code>mlflow.experiment</code> in <code>.dsagt/config.yaml</code> to choose a name. The project name is on the experiment's description and its <code>dsagt.project</code> tag.</p>
-<h2 id="logging-to-a-shared-tracking-server">Logging to a shared tracking server<a class="headerlink" href="#logging-to-a-shared-tracking-server" title="Permanent link">&para;</a></h2>
-<p>Export <code>MLFLOW_TRACKING_URI</code> before <code>dsagt init</code>; the value is written into the agent's MCP config, so the CLI, the MCP server and its <code>dsagt-run</code> children all log there instead of the local file. Credentials are never written into a project or an agent config:</p>
-<ul>
-<li><code>MLFLOW_TRACKING_TOKEN</code> (Bearer) or <code>MLFLOW_TRACKING_USERNAME</code> / <code>_PASSWORD</code> — read by the MLflow client itself.</li>
-<li><code>MLFLOW_TRACKING_API_KEY</code> — for a server behind an API gateway that authenticates on an <code>X-API-Key</code> header (Kong answers <code>WWW-Authenticate: Key</code>); DSAgt adds the header through MLflow's request-header plugin.</li>
-</ul>
-<p><code>dsagt traces</code> prints the remote deep-link in this mode rather than starting a local viewer, and <code>dsagt info</code> reads from the remote store.</p>
-<p>Two consequences of the URL being baked at init:</p>
-<ul>
-<li><strong>Change the server by re-running <code>dsagt init</code>.</strong> Exporting a different <code>MLFLOW_TRACKING_URI</code> later moves the CLI but not the MCP server, whose config still carries the old value.</li>
-<li><strong>codex and cline do not pass the shell to their MCP children</strong>, so a key exported in a terminal never reaches <code>dsagt-server</code> under those agents. Put it in <strong><code>~/.config/dsagt/env</code></strong> instead (<code>KEY=VALUE</code> lines, mode 600): <code>dsagt-server</code> and the <code>dsagt</code> CLI load it at startup for any key the shell did not set. The file is in <code>$HOME</code>, never inside a project or an agent config — the <code>~/.netrc</code> pattern. It works for every agent, and for <code>EMBEDDING_API_KEY</code> too.</li>
-</ul>
-<h2 id="two-feeds">Two feeds<a class="headerlink" href="#two-feeds" title="Permanent link">&para;</a></h2>
-<p>DSAgt reconstructs traces from what the agent writes to disk. Traces come from two places:</p>
-<ol>
-<li><strong>DSAgt spans (live).</strong> DSAgt instruments its own code and emits spans directly to the store as it runs.</li>
-<li><strong>Agent traces (post-hoc).</strong> The MCP server's in-session heartbeat reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — recovering prompts, responses, and tool calls.</li>
-</ol>
-<h2 id="trace-coverage">Trace Coverage<a class="headerlink" href="#trace-coverage" title="Permanent link">&para;</a></h2>
+<h2 id="what-the-paragraph-says">What the paragraph says<a class="headerlink" href="#what-the-paragraph-says" title="Permanent link">&para;</a></h2>
+<p>For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz), the check is the <code>aidrin</code> skill's quality baseline, run through the registered <code>aidrin</code> code before and after the operation. The agent runs the baseline directly, without the skill's intent and plan steps, which are for assessments the user asks for. It saves the results as <code>audit/step_N_pre.aidrin.json</code> and <code>audit/step_N_post.aidrin.json</code>, reports the per-metric change before proposing the next step, and writes no custom check for a metric AIDRIN provides; every other stage keeps the generic check rule.</p>
+<h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
+<p>A three-stage pipeline on AIDRIN's own demo dataset — 525 sensor readings with 25 exact
+duplicates, missing values in every sensor column, and temperature outliers. About ten minutes;
+the only download is a 40 KB CSV.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>init
+</code></pre></div>
+<p>At the menu, name the project <code>assessment-demo</code>, pick your agent, leave the knowledge
+collections and skill sources unchecked (the check needs neither), and keep the
+AI-readiness check on. Then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/dsagt-projects/assessment-demo/data
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-sL<span class="w"> </span>https://raw.githubusercontent.com/idtlab/AIDRIN/develop/demos/messy_sensor_data.csv<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span>-o<span class="w"> </span>~/dsagt-projects/assessment-demo/data/sensors.csv
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>dsagt<span class="w"> </span>start<span class="w"> </span>assessment-demo
+</code></pre></div>
+<p>Then one prompt. Do not mention AIDRIN or checks — the point is what the agent does on its own:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Build a curation pipeline for data/sensors.csv in three steps, one at a time:
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>1. drop exact duplicate rows -&gt; data/dedup.csv
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>2. drop rows with a missing temperature -&gt; data/complete.csv
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>3. drop rows whose temperature is more than 3 standard deviations from the mean -&gt; data/clean.csv
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Confirm the approach with me before each step.
+</code></pre></div>
+<p>At each stage the agent should run the AIDRIN quality baseline on the stage input before the
+operation and on the output after it, write both reports to <code>audit/</code>, and show the metric delta
+before proposing the next step. Expected values on this dataset (pre column measured directly):</p>
 <table>
 <thead>
 <tr>
-<th>Source</th>
-<th>Span type</th>
-<th>Contents</th>
+<th>Stage</th>
+<th>Metric</th>
+<th>pre</th>
+<th>post</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Knowledge base</td>
-<td><code>kb.search</code>, <code>kb.embed</code>, <code>kb.index_search</code>, <code>kb.rerank</code></td>
-<td>Per-phase timing trees</td>
+<td>1 dedup</td>
+<td>duplicity</td>
+<td>0.0476</td>
+<td>0.0</td>
 </tr>
 <tr>
-<td>Code executions</td>
-<td><code>code.execute</code></td>
-<td>Exit code, duration, file counts, truncated stderr. Full payload in <code>trace_archive/&lt;record_id&gt;.json</code></td>
+<td>2 complete</td>
+<td>completeness (<code>temperature</code>)</td>
+<td>0.8457</td>
+<td>1.0</td>
 </tr>
 <tr>
-<td>Registry events</td>
-<td><code>save_code_spec</code>, <code>install_dependencies</code>, <code>reconstruct_pipeline</code></td>
-<td>Span metadata</td>
-</tr>
-<tr>
-<td>Agent traces</td>
-<td>one AGENT subtree per turn (<code>llm</code> / <code>tool_&lt;name&gt;</code> children)</td>
-<td>Prompts, responses, tool calls, and token usage where the transcript carries them</td>
+<td>3 outliers</td>
+<td>outliers (<code>temperature</code>)</td>
+<td>0.0225</td>
+<td>lower</td>
 </tr>
 </tbody>
 </table>
-<h3 id="agent-trace-coverage">Agent trace coverage<a class="headerlink" href="#agent-trace-coverage" title="Permanent link">&para;</a></h3>
-<p>Agent traces are reconstructed from each agent's on-disk session record. A per-agent reader + translator runs for every supported agent (claude, codex, goose, opencode, cline), uniformly. Fidelity is capped by what the transcript persisted (e.g. token counts and timing appear where the agent recorded them).</p>
-<p>Every span carries the project's session id (minted per launch into <code>&lt;project&gt;/.dsagt/state.yaml</code>) for filtering in the MLflow trace view.</p>
-<p>The trace scan runs at periodic intervals (2m) inside the MCP server — At each interval DSAgt reads new transcript records, translates completed turns, and translates the canonical trace format to episodic memory in the knowledge base, and MLflow records in the MLFlow store. </p>
-<h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># follow the prompts: name it `demo`, then pick your agent</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>dsagt<span class="w"> </span>start<span class="w"> </span>demo<span class="w">      </span><span class="c1"># …run a prompt or two, then exit the agent</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;project&gt;
+<p>Afterwards, one more prompt:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Show me the execution records for this session as a table of step, command, and exit code.
 </code></pre></div>
-<p>Open MLflow UI to see both feeds in one store: DSAgt's own <code>kb.*</code> / <code>code.execute</code> spans and the per-turn agent traces recovered from the transcript. <code>dsagt info demo</code> prints the same session/trace summary from the command line.</p>
+<p>The table lists one record per baseline run (two per stage) and one per operation, and
+<code>audit/</code> holds the six reports. Clean up with <code>dsagt rm assessment-demo -y</code>.</p>
+<h2 id="demos">Demos<a class="headerlink" href="#demos" title="Permanent link">&para;</a></h2>
+<p>The <a href="../use-cases/cryoem/">cryo-EM curation demo</a> runs on real scientific data — the check measures the particle-curation step unprompted. The <a href="../use-cases/aidrin-ai-readiness/">AIDRIN tour</a> drives quality, fairness, and privacy metrics on a tabular dataset.</p>
 
 
 

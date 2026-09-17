@@ -703,10 +703,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#built-in-and-authored-skills" class="md-nav__link">
+  <a href="#sources" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Built-in and authored skills
+        Sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#base-and-authored-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Base and authored skills
       
     </span>
   </a>
@@ -776,6 +787,34 @@
     
   
     Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI-Readiness Check
   
 
     
@@ -1021,42 +1060,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../use-cases/aidrin_readiness_gate/" class="md-nav__link">
+      <a href="../use-cases/aidrin-ai-readiness/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    AIDRIN Readiness Gate (Cryo-EM)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../use-cases/aidrin_full_tour/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AIDRIN Full Feature Tour
+    AIDRIN
   
 
     
@@ -1265,10 +1276,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#built-in-and-authored-skills" class="md-nav__link">
+  <a href="#sources" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Built-in and authored skills
+        Sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#base-and-authored-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Base and authored skills
       
     </span>
   </a>
@@ -1308,13 +1330,13 @@
 
 <h1 id="skills">Skills<a class="headerlink" href="#skills" title="Permanent link">&para;</a></h1>
 <p>DSAgt enables an agent to discover and install skills from an external corpus during a session.</p>
-<p>Agent installed and DSAgt core Skills are located in <code>&lt;project&gt;/skills/</code>. Each is a directory containing a <code>SKILL.md</code> file and optional reference documents.</p>
+<p>Installed skills, the three base skills included, are located in <code>&lt;project&gt;/skills/</code>. Each is a directory containing a <code>SKILL.md</code> file and optional reference documents.</p>
 <h2 id="corpus-and-installed-skills">Corpus and installed skills<a class="headerlink" href="#corpus-and-installed-skills" title="Permanent link">&para;</a></h2>
 <p><img alt="DSAgt skill routing" src="../assets/skills-routing.png" /></p>
-<p>Skills fall into two sets — the searchable <strong>corpus</strong> and the project's <strong>installed skills</strong> — and a single MCP service, the <strong>SkillRouter</strong>, routes every skill operation between them:</p>
+<p>Skills fall into two sets — the searchable <strong>corpus</strong> and the project's <strong>installed skills</strong> — and one class, <code>SkillRouter</code>, routes every skill operation between them:</p>
 <ul>
-<li><strong>Corpus</strong> — skills that exist in external repositories but are <em>not yet installed</em>. DSAgt federates many sources (<code>k-dense-ai</code>, <code>anthropic</code>, <code>antigravity</code>, <code>composio</code>, <code>genesis</code>, or any git URL); each is cloned and indexed into its own collection. The agent browses the corpus with <code>search_skills</code> and manages sources with <code>add_skill_source</code> / <code>list_skill_sources</code>.</li>
-<li><strong>Installed skills</strong> — skills drawn into the project's <code>&lt;project&gt;/skills/</code> directory, either installed from the corpus (<code>install_skill</code>) or authored in place (e.g. with the built-in <code>skill-creator</code>). These are mirrored into each agent's <em>native</em> skills directory (<code>.claude/</code>, <code>.agents/</code>, <code>.cline/</code>) at install time (and re-mirrored at <code>dsagt init</code>/<code>start</code>), where the agent auto-discovers and auto-invokes them.</li>
+<li><strong>Corpus</strong> — skills that exist in external repositories but are <em>not yet installed</em>. DSAgt federates many sources (the known names below, or any git URL); each is cloned and indexed into its own collection. The agent browses the corpus with <code>search_skills</code> and manages sources with <code>add_skill_source</code> / <code>list_skill_sources</code>.</li>
+<li><strong>Installed skills</strong> — skills in the project's <code>&lt;project&gt;/skills/</code> directory: the base skills init installs and leaves alone once present (<code>skill-creator</code>, <code>datacard-generator</code>, <code>aidrin</code>), skills installed from the corpus (<code>install_skill</code>), and skills authored in place (with <code>skill-creator</code>). These are mirrored into each agent's <em>native</em> skills directory (<code>.claude/</code>, <code>.agents/</code>, <code>.cline/</code>) at install time (and re-mirrored at <code>dsagt init</code>/<code>start</code>), where the agent auto-discovers and auto-invokes them.</li>
 </ul>
 <h2 id="design-motivation">Design motivation<a class="headerlink" href="#design-motivation" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1326,8 +1348,71 @@
 <p><strong>Federated and provenance-preserving.</strong> Each source is an independent per-source collection, so re-syncing one never disturbs another; installing a skill from the corpus preserves its upstream <code>LICENSE</code>/<code>NOTICE</code> and stamps a <code>PROVENANCE.txt</code> into the installed directory.</p>
 </li>
 </ul>
-<h2 id="built-in-and-authored-skills">Built-in and authored skills<a class="headerlink" href="#built-in-and-authored-skills" title="Permanent link">&para;</a></h2>
-<p>DSAgt provides a <code>skill-creator</code> skill (for scaffolding new <code>SKILL.md</code> skills). Built-in and installed skills are <strong>not</strong> indexed for search — the agent auto-discovers <code>SKILL.md</code> folders natively — so <code>search_skills</code> is reserved for the corpus. Domain skills, including the MODCON <code>datacard-generator</code>, are sourced from the external corpus rather than built in, so they stay current upstream.</p>
+<h2 id="sources">Sources<a class="headerlink" href="#sources" title="Permanent link">&para;</a></h2>
+<p><code>dsagt init</code> enables the <code>genesis</code> source by default. The others are enabled at init (the interactive checkbox, or <code>--include &lt;name&gt;</code>) or during a session with the <code>add_skill_source</code> tool, which also accepts any git URL. A source is a git repository holding <code>SKILL.md</code> directories; discovery is recursive under the configured subdirectory, so a skill added upstream appears after the source is re-synced: <code>add_skill_source</code> with <code>force: true</code> re-clones a cached source.</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Repository</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>genesis</code> (default)</td>
+<td><code>github.com/AI-ModCon/genesis-skills</code>, <code>skills/</code></td>
+<td>HPC job and site skills (<code>slurm</code>, <code>pbs</code>, <code>perlmutter</code>, <code>aurora</code>, <code>frontier</code>); BaseData skills (<code>datacard-generator</code>, <code>croissant-validator</code>, <code>hdmf-schema-builder</code>, <code>well-convert</code>, <code>skill-creator</code>); BaseEval and BaseSAFE skills; plasma simulation (<code>gkeyll</code>, <code>gs2</code>); AmSC skills (Globus Compute, IRI API, data movement); <code>academy</code>, <code>literature-search</code>.</td>
+</tr>
+<tr>
+<td><code>k-dense-ai</code></td>
+<td><code>github.com/K-Dense-AI/scientific-agent-skills</code></td>
+<td>140+ chemistry, biology, medicine, and materials skills.</td>
+</tr>
+<tr>
+<td><code>anthropic</code></td>
+<td><code>github.com/anthropics/skills</code>, <code>skills/</code></td>
+<td>Anthropic document-editing and design skills.</td>
+</tr>
+<tr>
+<td><code>antigravity</code></td>
+<td><code>github.com/sickn33/antigravity-awesome-skills</code></td>
+<td>1,500+ cross-platform agent skills.</td>
+</tr>
+<tr>
+<td><code>composio</code></td>
+<td><code>github.com/ComposioHQ/awesome-claude-skills</code></td>
+<td>Workflow skills for SaaS applications.</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>genesis</code> source is the ModCon aggregation point: skills contributed by ModCon and AmSC teams land there and become searchable on the next sync. The BaseData team's own skills, including <code>skill-creator</code>, are maintained under <code>skills/basedata-skills/</code> in that repository.</p>
+<h2 id="base-and-authored-skills">Base and authored skills<a class="headerlink" href="#base-and-authored-skills" title="Permanent link">&para;</a></h2>
+<p>DSAgt holds no skills of its own. Every <code>dsagt init</code> installs three base skills into <code>&lt;project&gt;/skills/</code> from the repositories that maintain them. A source is cloned once into the shared cache at <code>~/dsagt-projects/.skill_sources/</code> and reused by every later init; a cache held at another branch or tag than the one asked for is re-cloned, and <code>add_skill_source</code> with <code>force</code> re-clones on request.</p>
+<table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>skill-creator</code></td>
+<td><code>genesis</code>, <code>skills/basedata-skills/skill-creator/</code></td>
+</tr>
+<tr>
+<td><code>datacard-generator</code></td>
+<td><code>genesis</code>, <code>skills/basedata-skills/datacard-generator/</code></td>
+</tr>
+<tr>
+<td><code>aidrin</code></td>
+<td><code>github.com/idtlab/AIDRIN</code>, <code>.claude/skills/aidrin/</code>, at the release tag of the installed <code>aidrin</code> package (<code>v2026.08.2</code> for 2026.8.2), so the skill describes the CLI dsagt installs. The <a href="../readiness/">AI-readiness check</a> runs its quality baseline at every tabular stage, and <code>aidrin</code> is registered as a code so every call is recorded.</td>
+</tr>
+</tbody>
+</table>
+<p>The scripts a base skill's workflow runs, and the CLI the <code>aidrin</code> skill documents, are registered as codes at the same init, so the agent runs them through <code>dsagt-run</code> and every run is recorded. The installed <code>aidrin</code> skill shows that CLI in its registered form (<code>dsagt-run --code aidrin -- aidrin …</code>), and its <code>PROVENANCE.txt</code> records the rewrite; the rest of the text is upstream's. <code>datacard-generator</code> registers <code>datacard-introspect</code>, <code>datacard-validate</code>, and <code>datacard-convert-v1</code>; each executes its script in place under <code>&lt;project&gt;/skills/datacard-generator/scripts/</code>, and the two that need PyYAML and Pydantic run under <code>uv run --with</code>.</p>
+<p>Installed skills are <strong>not</strong> indexed for search — the agent auto-discovers <code>SKILL.md</code> folders natively — so <code>search_skills</code> is reserved for the corpus. Other domain skills, such as the BaseData <code>croissant-validator</code>, are installed from the corpus and stay current upstream.</p>
 <p>To manually add a skill, place a new directory under <code>&lt;project&gt;/skills/</code> with a <code>SKILL.md</code> describing the workflow; the next <code>dsagt start</code> mirrors it into the agent's native skill directory, after which the agent auto-discovers and invokes it — no indexing step.</p>
 <h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># follow the prompts: name it `demo`, then pick your agent</span>
