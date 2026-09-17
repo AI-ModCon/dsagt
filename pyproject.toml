@@ -90,8 +90,6 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
-    "--cov=dsagt",
-    "--cov-report=term-missing",
 ]
 markers = [
     "integration: tests that hit real APIs or start real subprocesses (deselect with -m 'not integration')",

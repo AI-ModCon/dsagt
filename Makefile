@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint format docs clean
+.PHONY: help install install-dev test test-cov lint format docs clean
 
 help:
 	@echo "DSAgt - Development Tasks"
@@ -7,6 +7,7 @@ help:
 	@echo "  make install          Sync the project environment with uv"
 	@echo "  make install-dev      Sync all dependency groups with uv"
 	@echo "  make test             Run the non-integration test suite"
+	@echo "  make test-cov         Run it with a coverage report"
 	@echo "  make lint             Run linting checks with ruff"
 	@echo "  make format           Format code with black"
 	@echo "  make docs             Build the documentation site"
@@ -21,6 +22,9 @@ install-dev:
 
 test:
 	uv run --no-sync python -m pytest -m "not integration" -q
+
+test-cov:
+	uv run --no-sync python -m pytest -m "not integration" -q --cov=dsagt --cov-report=term-missing
 
 lint:
 	uv run ruff check src tests
