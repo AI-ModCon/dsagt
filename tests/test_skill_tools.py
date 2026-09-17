@@ -210,6 +210,20 @@ class TestInstallSkill:
         )
         assert "No catalog skill" in text
 
+    def test_install_skill_leaves_an_installed_skill_alone(self, tmp_path):
+        """A skill already in <project>/skills/ is reported as installed and
+        its files are untouched, so edits to it survive."""
+        runtime = tmp_path / "runtime"
+        skill = runtime / "skills" / "datacard-generator"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: datacard-generator\n---\nedited\n")
+        server = create_skill_server(kb=MagicMock(), runtime_dir=str(runtime))
+        text = call_tool_sync(
+            server, "install_skill", {"skill_name": "datacard-generator"}
+        )
+        assert "already installed" in text
+        assert (skill / "SKILL.md").read_text().endswith("edited\n")
+
 
 # ---------------------------------------------------------------------------
 # skill sources (add_skill_source / list_skill_sources)
