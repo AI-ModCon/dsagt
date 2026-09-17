@@ -100,7 +100,7 @@ def test_register_and_run_tool_with_dependency(tmp_path):
 
     # 3. Register the tool with dependencies
     spec = {
-        "name": "cowsay_tool",
+        "name": "cowsay-tool",
         "description": "Print a cow saying a message",
         "executable": f"python {script}",
         "dependencies": ["cowsay"],
@@ -119,7 +119,7 @@ def test_register_and_run_tool_with_dependency(tmp_path):
     assert "Successfully installed" in text
 
     # 4. Verify the spec is in the skill file with dsagt-run wrapping
-    tool = registry.get_code("cowsay_tool")
+    tool = registry.get_code("cowsay-tool")
     assert tool is not None
     assert tool["dependencies"] == ["cowsay"]
     assert "dsagt-run" in tool["executable"]
