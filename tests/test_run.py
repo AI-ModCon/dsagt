@@ -110,19 +110,32 @@ class TestResolveRecordsDir:
         assert _resolve_records_dir("/custom/dir") == Path("/custom/dir")
 
     def test_uses_cwd_dsagt_config(self, tmp_path, monkeypatch):
-        """No --records-dir → reads ``<cwd>/.dsagt/config.yaml`` and uses
-        ``<cwd>/trace_archive``.  Env vars are not consulted; the project
-        dir is the single source of truth."""
+        """No --records-dir and no DSAGT_PROJECT_DIR → the cwd is the
+        project: reads ``<cwd>/.dsagt/config.yaml`` and uses
+        ``<cwd>/trace_archive``."""
+        monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         (tmp_path / ".dsagt").mkdir()
         (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         monkeypatch.chdir(tmp_path)
         assert _resolve_records_dir(None) == tmp_path / "trace_archive"
 
+    def test_project_dir_env_wins_over_cwd(self, tmp_path, monkeypatch):
+        """``DSAGT_PROJECT_DIR`` (exported by ``dsagt start``) names the
+        project even when the command runs from a subdirectory."""
+        project = tmp_path / "proj"
+        (project / ".dsagt").mkdir(parents=True)
+        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (project / "data").mkdir()
+        monkeypatch.setenv("DSAGT_PROJECT_DIR", str(project))
+        monkeypatch.chdir(project / "data")
+        assert _resolve_records_dir(None) == project / "trace_archive"
+
     def test_no_config_in_cwd_raises(self, tmp_path, monkeypatch):
-        """If cwd has no .dsagt/config.yaml, fail clearly — don't walk
-        up the tree, don't fall back to env vars."""
+        """A cwd without .dsagt/config.yaml fails with one line naming the
+        rule; there is no walk up the tree."""
+        monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         monkeypatch.chdir(tmp_path)
-        with pytest.raises(ValueError, match="No .dsagt/config.yaml"):
+        with pytest.raises(ValueError, match="not a dsagt project"):
             _resolve_records_dir(None)
 
 

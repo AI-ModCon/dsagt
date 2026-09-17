@@ -1037,18 +1037,19 @@ class TestResolveRecordsDirProjectAware:
         assert result == Path("/custom")
 
     def test_cwd_with_config(self, tmp_path, monkeypatch):
-        """When cwd contains ``.dsagt/config.yaml``, records dir is
-        ``<cwd>/trace_archive``.  Even if env vars are set to point
-        elsewhere, the config-in-cwd rule wins (env is ignored)."""
+        """With no DSAGT_PROJECT_DIR the cwd is the project. A
+        DSAGT_PROJECT_DIR that names a non-project is an error naming the
+        variable, never a silent fall back to the cwd."""
         from dsagt.provenance import _resolve_records_dir
 
+        monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         (tmp_path / ".dsagt").mkdir()
         (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         monkeypatch.chdir(tmp_path)
-        # Stale env vars must not be consulted.
-        monkeypatch.setenv("DSAGT_PROJECT_DIR", "/stale/proj/dir")
-        monkeypatch.setenv("DSAGT_RECORDS_DIR", "/stale/records/dir")
         assert _resolve_records_dir(None) == tmp_path / "trace_archive"
+        monkeypatch.setenv("DSAGT_PROJECT_DIR", "/stale/proj/dir")
+        with pytest.raises(ValueError, match="DSAGT_PROJECT_DIR"):
+            _resolve_records_dir(None)
 
 
 # ---------------------------------------------------------------------------

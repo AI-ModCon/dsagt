@@ -81,7 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     session_id = args.session or _current_session_tag_from_cwd()
     init_tracing("dsagt-run", session_id=session_id)
 
-    records_dir = _resolve_records_dir(args.records_dir)
+    try:
+        records_dir = _resolve_records_dir(args.records_dir)
+    except ValueError as err:
+        print(f"dsagt-run: {err}", file=sys.stderr)
+        return 1
 
     return run_and_record(
         code_name=args.code,

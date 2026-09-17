@@ -53,21 +53,26 @@ CODE_USE_COLLECTION = "code_use"
 def _resolve_records_dir(explicit: str | None) -> Path:
     """Determine the records directory.
 
-    Priority: explicit ``--records-dir`` flag → ``<cwd>/trace_archive``,
-    where cwd must contain ``.dsagt/config.yaml`` (the project's
-    single-source-of-truth config written by ``dsagt init``).  No env-var
-    chain, no walking up the tree — if the agent's cwd isn't the project
-    dir, that's the bug to fix, not something to recover from silently.
+    Priority: explicit ``--records-dir`` flag → ``$DSAGT_PROJECT_DIR``
+    (exported by ``dsagt start`` and the MCP env block) → the cwd.  The
+    directory must hold ``.dsagt/config.yaml``, the project config
+    ``dsagt init`` writes.  The project is a fixed place, the agent's
+    working directory, so there is no walk up the tree: a ``cd`` into a
+    subdirectory before the command is the error, and the message names it.
     """
     if explicit:
         return Path(explicit)
-    cwd = Path.cwd().resolve()
-    if not (cwd / ".dsagt" / "config.yaml").exists():
+    env_dir = os.environ.get("DSAGT_PROJECT_DIR")
+    if env_dir:
+        project, source = Path(env_dir).resolve(), "DSAGT_PROJECT_DIR"
+    else:
+        project, source = Path.cwd().resolve(), "the working directory"
+    if not (project / ".dsagt" / "config.yaml").exists():
         raise ValueError(
-            f"No .dsagt/config.yaml in cwd ({cwd}); pass --records-dir or "
-            "run dsagt-run from a project directory."
+            f"{source} ({project}) is not a dsagt project: no .dsagt/config.yaml. "
+            "Run dsagt-run from the project directory, or pass --records-dir."
         )
-    return cwd / "trace_archive"
+    return project / "trace_archive"
 
 
 def _current_session_tag_from_cwd() -> str | None:
