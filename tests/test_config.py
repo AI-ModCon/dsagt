@@ -811,6 +811,11 @@ class TestAgentRecord:
         self._write_both(config, working_dir)
 
         assert (working_dir / "AGENTS.md").exists()
+        # Codex loads MCP tools through tool_search; the master instructions
+        # name the tools bare, so AGENTS.md carries the loading note.
+        agents_md = (working_dir / "AGENTS.md").read_text()
+        assert "DSAgt Pipeline Builder" in agents_md
+        assert 'tool_search(query="dsagt")' in agents_md
         assert (working_dir / ".codex-data").is_dir()
         toml = (working_dir / ".codex-data" / "config.toml").read_text()
         assert "[mcp_servers.dsagt.env]" in toml
@@ -827,6 +832,7 @@ class TestAgentRecord:
 
         static_agent_record(config, "claude", working_dir)
         first = (working_dir / "CLAUDE.md").read_text()
+        assert "tool_search" not in first  # the loading note is Codex-only
         # Simulate a user edit
         (working_dir / "CLAUDE.md").write_text(first + "\n\n## My project notes\nfoo")
         edited = (working_dir / "CLAUDE.md").read_text()
