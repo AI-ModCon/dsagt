@@ -131,7 +131,7 @@ The default embedder is a local sentence-transformers model (~130 MB of weights 
 
 ## Use Case Examples
 
-[`use_cases/`](use_cases/) holds end-to-end domain walkthroughs — each covering data acquisition, code registration, pipeline construction, and agent-driven execution against a real dataset (genomics, cryo-EM, materials science, AI data-readiness). Browse one to see how the pieces fit on a concrete pipeline before building your own.
+[`use_cases/`](use_cases/) holds end-to-end domain walkthroughs — each covering data acquisition, code or skill registration, pipeline construction, and agent-driven execution (genomics, cryo-EM, materials science, fusion, combustion CFD, AI data-readiness). Browse one to see how the pieces fit on a concrete pipeline before building your own.
 
 See the **[Use Cases documentation](https://ai-modcon.github.io/dsagt/use-cases/)** for the full catalog, or drop a `README.md` with frontmatter into a `use_cases/<name>/` folder to add your own (it's auto-published to the docs site — see [`hooks/gen_use_cases.py`](hooks/gen_use_cases.py)).
 

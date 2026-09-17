@@ -1,0 +1,8 @@
+# fastp and megahit for the microbial-isolates walkthrough (Bioconda builds).
+name: microbial_isolates
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - fastp
+  - megahit

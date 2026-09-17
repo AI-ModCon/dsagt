@@ -10,32 +10,21 @@ Add a use case by dropping a ``README.md`` with YAML frontmatter into
     summary: One or two sentences shown in the overview table and page.
     status: published                         # omit, or 'draft' to hide it
     order: 10                                 # optional sort key (default 100)
-    guides:                                   # optional walkthrough doc(s)
-      - text: Walkthrough
-        path: demo.md                         # path within the use-case folder
     ---
 
 It then appears in the overview table, gets its own docs page, and lands in
 the "Use Cases" nav group — no edits to mkdocs.yml or the docs tree required.
 
-Each ``guides[].path`` doc (often the README itself, sometimes a dedicated
-walkthrough file) is inlined into the generated page rather than linked out to
-GitHub: its own frontmatter and leading ``# Title`` line are stripped (the
-generated page supplies its own), and every relative link/image is rewritten
-— to another use case's generated page when it points at that use case's
-folder or guide doc, otherwise to a GitHub blob/tree URL, since only ``docs/``
-itself is served by the built site.
-
-Demo-bundle links (a downloadable ``.tar.gz`` snapshot of the use case's
-folder, hosted on Google Drive) come from ``use_cases/links.csv`` (columns:
-folder name, URL) keyed by folder name, and are rendered only on the
-generated docs page (alongside the GitHub source link) — READMEs carry no
-hardcoded copy, so there's nothing to keep in sync.
+The README body is the walkthrough and is inlined into the generated page
+rather than linked out to GitHub: its frontmatter and leading ``# Title`` line
+are stripped (the generated page supplies its own), and every relative
+link/image is rewritten — to another use case's generated page when it points
+at that use case's folder or README, otherwise to a GitHub blob/tree URL, since
+only ``docs/`` itself is served by the built site.
 """
 
 from __future__ import annotations
 
-import csv
 import logging
 import re
 from pathlib import Path
@@ -55,16 +44,6 @@ _LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^()\s]+)(\))")
 # Populated in on_config, consumed in on_files / on_page_markdown within the
 # same build.  Module-level is fine: each build re-runs on_config first.
 _use_cases: list[dict] = []
-
-
-def _load_demo_urls(uc_dir: Path) -> dict[str, str]:
-    csv_path = uc_dir / "links.csv"
-    if not csv_path.is_file():
-        return {}
-    with csv_path.open(encoding="utf-8", newline="") as f:
-        return {
-            name.strip(): url.strip() for name, url in csv.reader(f) if name.strip()
-        }
 
 
 def _parse_frontmatter(text: str) -> dict | None:
@@ -100,13 +79,7 @@ def _strip_leading_h1(text: str) -> str:
     return "\n".join(lines[i:])
 
 
-def _rewrite_link_target(
-    target: str,
-    uc: dict,
-    gh: str,
-    uc_names: set[str],
-    page_by_path: dict[Path, str],
-) -> str:
+def _rewrite_link_target(target: str, uc: dict, gh: str, uc_names: set[str]) -> str:
     if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) or target.startswith("#"):
         return target  # absolute URL (incl. mailto:) or a same-page anchor
     path, sep, fragment = target.partition("#")
@@ -116,23 +89,21 @@ def _rewrite_link_target(
         rel = resolved.relative_to(repo_root)
     except ValueError:
         return target  # escapes the repo entirely — leave it alone
-    if resolved in page_by_path:
-        return f"{page_by_path[resolved]}.md"  # links at another use case's guide page
     use_cases_dir = uc["dir"].parent
     if resolved.parent == use_cases_dir and resolved.name in uc_names:
-        return f"{resolved.name}.md"  # links straight at a sibling use case's folder
+        return f"{resolved.name}.md"  # links at a sibling use case's folder
+    if (
+        resolved.name == "README.md"
+        and resolved.parent.parent == use_cases_dir
+        and resolved.parent.name in uc_names
+    ):
+        return f"{resolved.parent.name}.md"  # links at a sibling's README
     kind = "tree" if resolved.is_dir() else "blob"
     return f"{gh}/{kind}/main/{rel.as_posix()}" + (sep + fragment if sep else "")
 
 
-def _inline_readme(
-    uc: dict,
-    path: str,
-    gh: str,
-    uc_names: set[str],
-    page_by_path: dict[Path, str],
-) -> str:
-    text = (uc["dir"] / path).read_text(encoding="utf-8")
+def _inline_readme(uc: dict, gh: str, uc_names: set[str]) -> str:
+    text = (uc["dir"] / "README.md").read_text(encoding="utf-8")
     text = _strip_leading_h1(_strip_frontmatter(text))
     in_fence = False
     lines = []
@@ -145,9 +116,7 @@ def _inline_readme(
             lines.append(line)
             continue
         line = _LINK_RE.sub(
-            lambda m: m[1]
-            + _rewrite_link_target(m[2], uc, gh, uc_names, page_by_path)
-            + m[3],
+            lambda m: m[1] + _rewrite_link_target(m[2], uc, gh, uc_names) + m[3],
             line,
         )
         lines.append(line)
@@ -159,7 +128,6 @@ def _discover(config) -> list[dict]:
     found: list[dict] = []
     if not uc_dir.is_dir():
         return found
-    demo_urls = _load_demo_urls(uc_dir)
     for folder in sorted(p for p in uc_dir.iterdir() if p.is_dir()):
         readme = folder / "README.md"
         if not readme.is_file():
@@ -184,8 +152,6 @@ def _discover(config) -> list[dict]:
                 "domain": str(fm["domain"]).strip(),
                 "summary": " ".join(str(fm["summary"]).split()),
                 "order": fm.get("order", 100),
-                "guides": fm.get("guides") or [],
-                "demo_url": demo_urls.get(folder.name),
                 "dir": folder.resolve(),
             }
         )
@@ -210,9 +176,7 @@ def on_config(config):
     return config
 
 
-def _render_page(
-    uc: dict, repo_url: str, uc_names: set[str], page_by_path: dict[Path, str]
-) -> str:
+def _render_page(uc: dict, repo_url: str, uc_names: set[str]) -> str:
     gh = (repo_url or "").rstrip("/")
     out = [f"# {uc['title']}", "", f"**Domain:** {uc['domain']}", ""]
     if gh:
@@ -221,31 +185,18 @@ def _render_page(
             f"({gh}/tree/main/use_cases/{uc['name']}/)",
             "",
         ]
-    if uc["demo_url"]:
-        out += [f"**Demo bundle:** [Download `.tar.gz`]({uc['demo_url']})", ""]
-    out += [uc["summary"], ""]
-    for g in uc["guides"]:
-        if not isinstance(g, dict):
-            continue
-        path = g.get("path", "")
-        if path:
-            out += [_inline_readme(uc, path, gh, uc_names, page_by_path), ""]
+    out += [uc["summary"], "", _inline_readme(uc, gh, uc_names), ""]
     return "\n".join(out)
 
 
 def on_files(files, config):
     uc_names = {uc["name"] for uc in _use_cases}
-    page_by_path: dict[Path, str] = {}
-    for uc in _use_cases:
-        for g in uc["guides"]:
-            if isinstance(g, dict) and g.get("path"):
-                page_by_path[(uc["dir"] / g["path"]).resolve()] = uc["name"]
     for uc in _use_cases:
         files.append(
             File.generated(
                 config,
                 f"use-cases/{uc['name']}.md",
-                content=_render_page(uc, config.repo_url, uc_names, page_by_path),
+                content=_render_page(uc, config.repo_url, uc_names),
             )
         )
     return files

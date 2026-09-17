@@ -5,6 +5,7 @@ libraries. Integration tests require the example dataset at DATA_DIR and are
 automatically skipped when it is absent. Tests for m3dc1/fpy-dependent
 functions are additionally skipped when those libraries are not installed.
 """
+import os
 import pytest
 import numpy as np
 import h5py
@@ -23,9 +24,7 @@ from m3dc1_tools import (
     compute_q95,
 )
 
-DATA_DIR = Path("/Users/kparfrey/data/asv/run1/sparc_1425")
-
-
+DATA_DIR = Path(os.environ.get("M3DC1_DATA_DIR", "/Users/kparfrey/data/asv/run1/sparc_1425"))
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

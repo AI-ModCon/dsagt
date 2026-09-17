@@ -13,12 +13,13 @@ Run all tests (requires data):
 """
 
 import numpy as np
+import os
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Fixtures
-SPARC_DIR = Path("/Users/kparfrey/data/asv/run1/sparc_1425")
+SPARC_DIR = Path(os.environ.get("M3DC1_DATA_DIR", "/Users/kparfrey/data/asv/run1/sparc_1425"))
 HAS_DATA = SPARC_DIR.is_dir()
 
 try:

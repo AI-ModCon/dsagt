@@ -1,4 +1,18 @@
-# BlastNet → WELL Conversion: Development Summary
+# BlastNet → WELL Conversion: Development History
+
+The converter in this directory was developed in a DSAgt session (Claude Code
+with Claude Sonnet 4.6) from two documents: the WELL format specification and
+the BlastNet dataset layout, both under [`../docs/`](../docs/). Each version
+was validated against holdout reference files with
+[`../scripts/check_well_output.py`](../scripts/check_well_output.py).
+
+| File | Contents |
+|------|----------|
+| [`convert_to_well_format.py`](convert_to_well_format.py) | v4, the final converter (2D and 3D) |
+| [`versions/`](versions/) | v1–v3 |
+| [`reports/conversion_comparison_report.md`](reports/conversion_comparison_report.md) | v1 vs holdout for `lifted_hydrogen_jet` |
+| [`reports/channelflow_conversion_report.md`](reports/channelflow_conversion_report.md) | v3 vs holdout for `nonreacting_channel_flow` |
+| [`reports/compare_holdout_conversion.md`](reports/compare_holdout_conversion.md) | v4 vs the upstream `convert_to_well_format.py` |
 
 **Date:** 2026-04-24  
 **Working directory:** `minimal_input/`  

@@ -9,14 +9,13 @@ import textwrap
 from pathlib import Path
 
 import numpy as np
+import os
 import pytest
 
 import m3dc1_plots
 from m3dc1_plots import _parse_geqdsk, _save_first_new_fig
 
-CASE_DIR = Path("/Users/kparfrey/data/asv/run1/sparc_1425")
-
-
+CASE_DIR = Path(os.environ.get("M3DC1_DATA_DIR", "/Users/kparfrey/data/asv/run1/sparc_1425"))
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
