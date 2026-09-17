@@ -15,10 +15,10 @@ help:
 	@echo "  make help             Show this help message"
 
 install:
-	uv sync
+	uv sync --locked
 
 install-dev:
-	uv sync --all-groups
+	uv sync --locked --all-groups
 
 test:
 	uv run --no-sync python -m pytest -m "not integration" -q
