@@ -226,7 +226,7 @@ def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
         if name not in managed:
             managed.append(name)
 
-    # Reap skills dsagt placed previously that are gone from the source set.
+    # Reap skills dsagt placed on an earlier run that are gone from the source set.
     for stale in set(previously) - set(managed):
         stale_dir = target_dir / stale
         if stale_dir.is_dir():
@@ -244,7 +244,7 @@ def _build_mcp_servers_dict(env_block: dict | None) -> dict:
     Used by agents that load MCP config from a JSON file.  Claude Code
     uses this shape via ``.mcp.json``
     but builds it inline in :class:`ClaudeSetup.write_dynamic`.  Cline
-    doesn't use this — it requires ``cline mcp add`` to register the server.
+    registers the server through ``cline mcp add``.
     """
     entry: dict = {
         "command": "uv",
@@ -445,10 +445,9 @@ class AgentSetup(ABC):
 
     def vscode_hint(self, project_dir: Path) -> list[str] | None:
         """One-or-two-line hint for users who run this agent as a VS Code
-        extension instead of via the CLI.  Returns ``None`` for agents
-        without a working VS Code extension (most of them — only claude
-        currently have extensions that auto-discover dsagt's
-        per-project files from the workspace root).
+        extension.  Returns ``None`` unless the agent's extension
+        auto-discovers dsagt's per-project files from the workspace root,
+        which claude's does.
 
         ``dsagt init`` prints these lines under "Or with VS Code extension".
         """

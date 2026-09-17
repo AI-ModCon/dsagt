@@ -107,7 +107,7 @@ async def _handle_run_command(arguments: dict) -> str:
     timeout = arguments.get("timeout", 10)
     try:
         # Off the shared event loop: a blocking subprocess.run here would stall
-        # the trace heartbeat and every concurrent tool call for its duration.
+        # the periodic trace pass and every concurrent tool call for its duration.
         result = await asyncio.to_thread(
             partial(
                 subprocess.run,
@@ -256,8 +256,8 @@ async def _handle_reconstruct_pipeline(
     trace_dir = runtime_dir / "trace_archive"
     # Index the session's tool-use first: reconstruct is the moment the pipeline
     # is "done enough" to review, so make the just-run executions searchable now
-    # rather than waiting on the heartbeat.  Idempotent + file-locked, so this
-    # is safe to fire alongside the heartbeat's own CodeUseIndexer.
+    # rather than waiting on the periodic pass.  Idempotent + file-locked, so this
+    # is safe to fire alongside the periodic pass's own CodeUseIndexer.
     if kb is not None:
         try:
             await asyncio.to_thread(CodeUseIndexer(kb, runtime_dir).tick)
@@ -554,8 +554,8 @@ def create_registry_server(
     """Create a standalone MCP server exposing only the registry/exec/provenance tools.
 
     Test-facing API: tests call with a mock registry and drive the server via
-    ``call_tool_sync()``.  The merged ``dsagt-server`` uses
-    :func:`_registry_tools_and_handlers` directly instead of this wrapper.
+    ``call_tool_sync()``.  The merged ``dsagt-server`` composes
+    :func:`_registry_tools_and_handlers` itself.
     """
     tools, handlers = _registry_tools_and_handlers(registry, kb)
     return build_dispatch_server(

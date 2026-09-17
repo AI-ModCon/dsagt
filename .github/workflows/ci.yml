@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dev tools
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
       - name: Ruff
         run: uv run ruff check src tests
       - name: Black
@@ -37,8 +37,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install (all groups)
-        run: uv sync --all-groups
+        run: uv sync --locked --all-groups
       # `python -m pytest`, not bare `pytest`, per CLAUDE.md.  Integration tests
-      # need real EMBEDDING_*/LLM_* credentials and are excluded here.
+      # load the local embedder, spawn subprocesses, or install into the venv.
       - name: Tests (non-integration)
         run: uv run --no-sync python -m pytest -m "not integration" -q

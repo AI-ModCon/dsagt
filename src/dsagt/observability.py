@@ -18,7 +18,7 @@ it, not by accident:
     ``start_time_ns`` param), so replay *must* use ``start_span_no_context``;
     live *should* use ``start_span`` (no_context establishes no active span,
     which would kill the ``obs`` proxy and auto-nesting).  Hence two paths, one
-    store — neither is a historical leftover.
+    store.
 
 Layout (top → bottom)
 ---------------------
@@ -213,7 +213,7 @@ def _bound_remote_retries(tracking_uri: str) -> None:
 
     The client defaults — 7 retries at backoff 2, 120 s per request — mean a
     hung server stalls a single call for minutes, and the unattended paths
-    (``dsagt-run`` cold start, the heartbeat) make several.  Tracing is
+    (``dsagt-run`` cold start, the periodic pass) make several.  Tracing is
     best-effort; a few seconds is the most it may cost a tool call.
     ``setdefault``, so an explicit setting in the environment wins.
     """
@@ -308,9 +308,9 @@ def init_tracing(
     except (
         Exception
     ) as e:  # noqa: BLE001 — a store problem must not take the server down
-        # Tracing is best-effort; the MCP tools are not.  A server that cannot
-        # reach or use its store still has to serve the agent — untraced, with
-        # the cause on the log so the operator can fix the store.
+        # The MCP tools serve regardless of tracing: a server that cannot
+        # reach or use its store still serves the agent, untraced, with the
+        # cause on the log so the operator can fix the store.
         logger.error(
             "%s: tracing disabled — cannot use experiment %r at %s: %s",
             service_name,
@@ -410,7 +410,7 @@ REDACTED_KEYS = frozenset(
 # prose survives: `Bearer`/`Basic` only after `Authorization:`, and a key
 # label only when its value looks like a token (16+ token characters), so
 # "a basic example", "the bearer of bad news" and "max_token: 5" pass through
-# untouched.  This masks the common shapes; it is not a secrets scanner.
+# untouched.  This masks the common shapes.
 _SECRET_IN_TEXT = re.compile(
     r"(?i)"
     r"(authorization\s*[=:]\s*(?:bearer|basic)\s+)[^\s&\"']+"

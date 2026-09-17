@@ -407,8 +407,8 @@ def _load_traces(tracking_uri: str, experiment: str):
     Reads whichever store the project logs to — the serverless
     ``sqlite:///<pdir>/mlflow.db`` by default, or the shared tracking server
     named by ``MLFLOW_TRACKING_URI``.  Separate from the main reporting logic
-    so the caller can decide what to print when the experiment doesn't exist
-    yet (new project, never run).
+    so the caller can decide what to print for a new project that has never
+    run.
     """
     import mlflow
 
@@ -426,8 +426,8 @@ def _load_traces(tracking_uri: str, experiment: str):
 def _report(project_name: str, config: dict, traces) -> dict:
     """Build the structured report dict.  CLI formats it; --json prints it."""
     agent_header = config.get("agent", "-")
-    # BYOA: dsagt doesn't record the agent's LLM model (the agent talks to its
-    # provider directly), so surface the embedding model dsagt configures.
+    # The agent talks to its provider directly, so the model dsagt can name is
+    # the embedding model it configures.
     model_header = config.get("embedding", {}).get("model", "-")
 
     if traces is None or traces.empty:

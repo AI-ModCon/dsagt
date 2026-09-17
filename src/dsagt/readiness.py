@@ -32,8 +32,8 @@ ask the user about intent or confirm a plan for these checks (the skill's full w
 asks for). Save the results as `audit/step_N_pre.aidrin.json` and
 `audit/step_N_post.aidrin.json`, and report the per-metric change to the user
 before proposing the next step. Do not write a custom check for a metric
-AIDRIN provides. Stages whose input and output are not tabular keep the check
-rule above."""
+AIDRIN provides. A stage with tabular input or output gets this check; every
+other stage keeps the check rule above."""
 
 
 def aidrin_release_tag(version: str) -> str:

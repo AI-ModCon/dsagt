@@ -2,16 +2,16 @@
 
 This guide walks through knowledge ingest, code registration, provenance, and explicit memory using the mock project in [`tests/smoke_test/`](https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/). The examples use `claude`; substitute another agent (`goose`, `codex`, `opencode`, `cline`) if you prefer — the prompts are agent-agnostic.
 
-DSAgt is **BYOA**: your agent talks to its own LLM provider directly, and the trace store is a serverless SQLite file per project.
-
 ## Setup
 
 ```bash
-# Install (any Python 3.12 environment)
+# Install (Python 3.12 or later on Apple Silicon or Linux x86_64; CI tests 3.12 and 3.13)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
 
-# Set a convenience variable for the smoke test directory (not a normal dsagt step)
-export SMOKE_DIR="$(pwd)/tests/smoke_test"
+# Fetch the sample files and set a convenience variable for the prompts below
+curl -sL https://github.com/AI-ModCon/dsagt/archive/refs/heads/main.tar.gz \
+    | tar xz --strip-components=2 dsagt-main/tests/smoke_test
+export SMOKE_DIR="$PWD/smoke_test"
 
 # 1. Create a project.  `dsagt init` is interactive — follow the menu to name it
 #    `quickstart`, pick your agent, and choose knowledge collections + skill sources.
@@ -54,27 +54,5 @@ ls ~/dsagt-projects/quickstart/{codes,trace_archive}
 cat ~/dsagt-projects/quickstart/.dsagt/explicit_memories.yaml
 
 # Traces land in a serverless SQLite store.  Browse them with:
-mlflow ui --backend-store-uri sqlite:///$HOME/dsagt-projects/quickstart/mlflow.db
+dsagt traces quickstart
 ```
-
-## Non-Interactive Smoke Test
-
-The same flow runs non-interactively and asserts each artifact is present:
-
-```bash
-dsagt smoke-test --agent claude
-```
-
-## Knowledge Base Setup
-
-`dsagt init` sets up the project's knowledge base with three kinds of collection:
-
-- **Code Specs** — DSAgt's built-in code specs, always set up so the agent finds them via `search_registry` from the first session.
-- **Skill Corpus** — the skill sources you chose at init (default `genesis`), cloned and indexed so `search_skills` returns installable skills.
-- **Knowledge Collections** — optional reference document sets you chose at init (`nemo_curator`, `aidrin`).
-
-`--include` / `--exclude` (asset names, or `all`) select the set non-interactively. The default embedder is a local sentence-transformers model (~130 MB, CPU-side, no API key).
-
-## Optional: Episodic Memory
-
-Answer **yes** to "Enable episodic memory?" in the `dsagt init` prompts to have the MCP server capture each session turn into a searchable `session_memory` collection. Capture is mechanical (chunk + embed) and reuses the local embedder, so there's nothing extra to download. See [Memory → Episodic Memory](memory.md#episodic-memory).
