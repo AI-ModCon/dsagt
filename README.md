@@ -198,3 +198,7 @@ Page: [CLI](https://ai-modcon.github.io/dsagt/cli/).
 <!-- md-shared:cli:end -->
 
 For tests, troubleshooting, and other developer-facing material, see [docs/developer.md](docs/developer.md).
+
+## Acknowledgments
+
+This project acknowledges support from the U.S. Department of Energy's Genesis Mission.
