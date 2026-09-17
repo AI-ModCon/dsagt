@@ -1336,7 +1336,7 @@
 <p>Skills fall into two sets — the searchable <strong>corpus</strong> and the project's <strong>installed skills</strong> — and one class, <code>SkillRouter</code>, routes every skill operation between them:</p>
 <ul>
 <li><strong>Corpus</strong> — skills that exist in external repositories but are <em>not yet installed</em>. DSAgt federates many sources (the known names below, or any git URL); each is cloned and indexed into its own collection. The agent browses the corpus with <code>search_skills</code> and manages sources with <code>add_skill_source</code> / <code>list_skill_sources</code>.</li>
-<li><strong>Installed skills</strong> — skills in the project's <code>&lt;project&gt;/skills/</code> directory: the base skills init installs and leaves alone once present (<code>skill-creator</code>, <code>datacard-generator</code>, <code>aidrin</code>), skills installed from the corpus (<code>install_skill</code>), and skills authored in place (with <code>skill-creator</code>). These are mirrored into each agent's <em>native</em> skills directory (<code>.claude/</code>, <code>.agents/</code>, <code>.cline/</code>) at install time (and re-mirrored at <code>dsagt init</code>/<code>start</code>), where the agent auto-discovers and auto-invokes them.</li>
+<li><strong>Installed skills</strong> — the skills in <code>&lt;project&gt;/skills/</code>: the base skills (<code>skill-creator</code>, <code>datacard-generator</code>, <code>aidrin</code>), skills installed from the corpus with <code>install_skill</code>, and skills the agent authors with <code>skill-creator</code>. dsagt places a copy of each in the agent's normal skills directory for the project, so the agent finds them the way it finds any skill.</li>
 </ul>
 <h2 id="design-motivation">Design motivation<a class="headerlink" href="#design-motivation" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1386,9 +1386,9 @@
 </tr>
 </tbody>
 </table>
-<p>The <code>genesis</code> source is the ModCon aggregation point: skills contributed by ModCon and AmSC teams land there and become searchable on the next sync. The BaseData team's own skills, including <code>skill-creator</code>, are maintained under <code>skills/basedata-skills/</code> in that repository.</p>
+<p>The <code>genesis</code> source is the ModCon aggregation point: skills contributed by ModCon and AmSC teams are located there and become searchable on the next sync.</p>
 <h2 id="base-and-authored-skills">Base and authored skills<a class="headerlink" href="#base-and-authored-skills" title="Permanent link">&para;</a></h2>
-<p>DSAgt holds no skills of its own. Every <code>dsagt init</code> installs three base skills into <code>&lt;project&gt;/skills/</code> from the repositories that maintain them. A source is cloned once into the shared cache at <code>~/dsagt-projects/.skill_sources/</code> and reused by every later init; a cache held at another branch or tag than the one asked for is re-cloned, and <code>add_skill_source</code> with <code>force</code> re-clones on request.</p>
+<p>Every <code>dsagt init</code> installs three base skills into <code>&lt;project&gt;/skills/</code> from the repositories that maintain them. A source is cloned once into the shared cache at <code>~/dsagt-projects/.skill_sources/</code> and reused by every later init; a cache held at another branch or tag than the one asked for is re-cloned, and <code>add_skill_source</code> with <code>force</code> re-clones on request.</p>
 <table>
 <thead>
 <tr>

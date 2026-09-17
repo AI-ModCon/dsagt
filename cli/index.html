@@ -830,45 +830,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Project Management">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#deprecated-dsagt-init-flags-backcompat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deprecated dsagt init flags (backcompat)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#project-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Project Location
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#viewing-traces" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Viewing traces
-      
-    </span>
-  </a>
-  
 </li>
       
     </ul>
@@ -1252,45 +1213,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Project Management">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#deprecated-dsagt-init-flags-backcompat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deprecated dsagt init flags (backcompat)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#project-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Project Location
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#viewing-traces" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Viewing traces
-      
-    </span>
-  </a>
-  
 </li>
       
     </ul>
@@ -1355,50 +1277,11 @@
 <td>Unregister a project (and optionally delete its directory)</td>
 </tr>
 <tr>
-<td><code>dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline]</code></td>
-<td>End-to-end install verification</td>
+<td><code>dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline] [--all]</code></td>
+<td>End-to-end install verification; <code>--all</code> runs every agent in parallel</td>
 </tr>
 </tbody>
 </table>
-<h3 id="deprecated-dsagt-init-flags-backcompat">Deprecated <code>dsagt init</code> flags (backcompat)<a class="headerlink" href="#deprecated-dsagt-init-flags-backcompat" title="Permanent link">&para;</a></h3>
-<p>The pre-menu flags still work — the automation/CI path — but are <strong>deprecated</strong> in favor of the interactive menu. Each one skips its corresponding prompt:</p>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Prompt it replaces</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>&lt;name&gt;</code> (positional)</td>
-<td>Project name</td>
-</tr>
-<tr>
-<td><code>--agent &lt;platform&gt;</code></td>
-<td>Agent platform</td>
-</tr>
-<tr>
-<td><code>--location &lt;path&gt;</code></td>
-<td>Project location</td>
-</tr>
-<tr>
-<td><code>--include … \| --exclude …</code></td>
-<td>Knowledge collections / skill sources</td>
-</tr>
-<tr>
-<td><code>--episodic</code></td>
-<td>"Enable episodic memory?"</td>
-</tr>
-</tbody>
-</table>
-<p>New usage should prefer bare <code>dsagt init</code> and the menu.</p>
-<h2 id="project-location">Project Location<a class="headerlink" href="#project-location" title="Permanent link">&para;</a></h2>
-<p>The default project location is <code>~/dsagt-projects/&lt;name&gt;/</code>. </p>
-<h2 id="viewing-traces">Viewing traces<a class="headerlink" href="#viewing-traces" title="Permanent link">&para;</a></h2>
-<p>The trace store is a serverless SQLite file — browse it with <code>dsagt traces</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;name&gt;<span class="w">   </span><span class="c1"># runs: mlflow ui --backend-store-uri sqlite:///&lt;project-path&gt;/mlflow.db</span>
-</code></pre></div>
 
 
 

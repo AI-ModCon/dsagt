@@ -1307,7 +1307,7 @@
 
 
 <h1 id="ai-readiness-check">AI-Readiness Check<a class="headerlink" href="#ai-readiness-check" title="Permanent link">&para;</a></h1>
-<p>DSAgt runs <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage. AIDRIN installs with dsagt, and every project gets the <code>aidrin</code> skill and an <code>aidrin</code> code, so each call the agent makes is an execution record in <code>trace_archive/</code> like any other code. A user who asks "is my data AI-ready?" gets the skill's own workflow.</p>
+<p>DSAgt is configured at init to run <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage; uncheck it on the menu to turn it off. AIDRIN installs with dsagt, and every project gets the <code>aidrin</code> skill and an <code>aidrin</code> code, so each call the agent makes is an execution record in <code>trace_archive/</code> like any other code. A user who asks "is my data AI-ready?" gets the skill's own workflow.</p>
 <p>The pipeline-builder instructions require a paired check around every data operation, with reports in <code>audit/</code>. The AI-readiness check makes that check concrete for tabular files: it is the <code>aidrin</code> skill's quality baseline (completeness, duplicity, outliers), run on a stage's input before the operation and on its output after it, so every stage of a pipeline is measured the same way and the before/after delta is comparable across stages and projects.</p>
 <h2 id="the-setting">The setting<a class="headerlink" href="#the-setting" title="Permanent link">&para;</a></h2>
 <p><code>dsagt init</code> asks "Assess tabular data for AI-readiness before and after each data transform?", default yes. (The automation path turns it off with <code>dsagt init &lt;name&gt; --agent &lt;agent&gt; --no-readiness</code>.) The answer is the one thing the setting controls: when it is yes, the agent's instructions carry one paragraph at the per-operation check rule; when it is no, they do not. The <code>aidrin</code> code and skill are present either way.</p>
@@ -1377,7 +1377,7 @@ before proposing the next step. Expected values on this dataset (pre column meas
 <p>The table lists one record per baseline run (two per stage) and one per operation, and
 <code>audit/</code> holds the six reports. Clean up with <code>dsagt rm assessment-demo -y</code>.</p>
 <h2 id="demos">Demos<a class="headerlink" href="#demos" title="Permanent link">&para;</a></h2>
-<p>The <a href="../use-cases/cryoem/">cryo-EM curation demo</a> runs on real scientific data — the check measures the particle-curation step unprompted. The <a href="../use-cases/aidrin-ai-readiness/">AIDRIN tour</a> drives quality, fairness, and privacy metrics on a tabular dataset.</p>
+<p>The <a href="../use-cases/cryoem/">cryo-EM curation demo</a> runs on real scientific data — the check measures the particle-curation step unprompted. The <a href="../use-cases/aidrin-ai-readiness/">AIDRIN example</a> drives quality, fairness, and privacy metrics on a tabular dataset.</p>
 
 
 

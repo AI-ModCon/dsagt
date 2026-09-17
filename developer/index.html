@@ -1158,17 +1158,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#tests" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1202,6 +1191,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#pull-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pull requests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic-coding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agentic coding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#codebase-orientation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1217,6 +1228,28 @@
     <span class="md-ellipsis">
       
         Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aillm-assisted-contributions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AI/LLM-assisted contributions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporting issues
       
     </span>
   </a>
@@ -1258,17 +1291,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#tests" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1302,6 +1324,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#pull-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pull requests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic-coding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agentic coding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#codebase-orientation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1317,6 +1361,28 @@
     <span class="md-ellipsis">
       
         Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aillm-assisted-contributions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AI/LLM-assisted contributions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporting issues
       
     </span>
   </a>
@@ -1344,26 +1410,23 @@
 
 
 <h1 id="developer-guide">Developer Guide<a class="headerlink" href="#developer-guide" title="Permanent link">&para;</a></h1>
-<p>How the DSAgt codebase is set up and how to work in it. For contribution
-mechanics (branch/PR flow, commit style), see
-<a href="https://github.com/AI-ModCon/dsagt/blob/main/.github/CONTRIBUTING.md">CONTRIBUTING.md</a>.</p>
-<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<p>DSAgt develops on <a href="https://github.com/astral-sh/uv">uv</a> with Python 3.12:</p>
+<!-- Shared with .github/CONTRIBUTING.md. Edit there, not here. -->
+
+<p>We recommend setting up a dsagt virtual environment with <a href="https://github.com/astral-sh/uv">uv</a> with Python 3.12 or later; CI tests 3.12 and 3.13:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/AI-ModCon/dsagt.git
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">cd</span><span class="w"> </span>dsagt
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-groups<span class="w">          </span><span class="c1"># runtime + dev + docs dependencies</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nb">source</span><span class="w"> </span>.venv/bin/activate<span class="w">      </span><span class="c1"># so dsagt / dsagt-run / dsagt-server are on PATH</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-groups<span class="w"> </span>--all-extras<span class="w">   </span><span class="c1"># plus the walkthrough extras (vasp-dft, combustion-simulation, tokamak-stability, plasma-turbulence)</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nb">source</span><span class="w"> </span>.venv/bin/activate<span class="w">      </span><span class="c1"># so dsagt / dsagt-run / dsagt-server are on PATH</span>
 </code></pre></div>
+<p><code>uv.lock</code> is tracked. After a change to <code>pyproject.toml</code>, run <code>uv lock</code> and
+commit the lock with it; CI syncs with <code>uv sync --locked</code>, which fails on a
+lock that does not match.</p>
 <h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
-<p>Use <code>python -m pytest</code>, not bare <code>pytest</code> (the bare binary can resolve the wrong
-interpreter):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not integration&quot;</span><span class="w"> </span>-q<span class="w">   </span><span class="c1"># unit suite (~640 tests)</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/test_config.py<span class="w"> </span>-q<span class="w">   </span><span class="c1"># a single file</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span>integration<span class="w"> </span>-v<span class="w">         </span><span class="c1"># integration (needs creds)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not integration&quot;</span><span class="w"> </span>-q<span class="w">   </span><span class="c1"># unit suite</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/test_config.py<span class="w"> </span>-q<span class="w">   </span><span class="c1"># a single file</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span>integration<span class="w"> </span>-v<span class="w">         </span><span class="c1"># integration (needs creds)</span>
 </code></pre></div>
-<p>Integration tests hit real embedding/LLM providers and need <code>EMBEDDING_*</code> /
-<code>LLM_*</code> credentials in the environment; they're excluded from CI and the default
-local run.</p>
 <h2 id="lint-format">Lint &amp; format<a class="headerlink" href="#lint-format" title="Permanent link">&para;</a></h2>
 <p>CI enforces both on <code>src/</code> and <code>tests/</code> (scientific scripts under <code>use_cases/</code>
 are exempt):</p>
@@ -1377,20 +1440,91 @@ site with <code>--strict</code> on every PR and deploys it to GitHub Pages from 
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>serve<span class="w">             </span><span class="c1"># live preview at http://127.0.0.1:8000</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--strict<span class="w">    </span><span class="c1"># what CI runs</span>
 </code></pre></div>
+<h2 id="pull-requests">Pull requests<a class="headerlink" href="#pull-requests" title="Permanent link">&para;</a></h2>
+<ul>
+<li>One concern per pull request. A small, focused pull request receives full
+  and timely review; a monolithic refactor invites a cursory one and occludes important changes.</li>
+<li>Code an agent wrote gets a human review before it merges, the same as any
+  other code.</li>
+<li>Work on a branch off <code>main</code>. Describe the intent, not the diff. Update
+  <code>docs/</code> and <code>CHANGELOG.md</code> in the same pull request when behavior changes.</li>
+<li><code>ruff check</code>, <code>black --check</code>, and the unit suite pass before review.</li>
+<li>This is pre-1.0 code: prefer clean removal over a compatibility shim.</li>
+</ul>
+<h2 id="agentic-coding">Agentic coding<a class="headerlink" href="#agentic-coding" title="Permanent link">&para;</a></h2>
+<p><code>CLAUDE.md</code> at the repository root is the contract an agent works to here:
+what the project is, the commands, the glossary, and the invariants. How the
+agent gets from that contract to a change is the developer's own tooling. If
+you have no skills corpus of your own for coding, or want one in dsagt's
+register, five skills under <code>basedata_aaron/</code> in
+<a href="https://github.com/AI-ModCon/dev_skills">AI-ModCon/dev_skills</a> are one
+option:</p>
+<table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Load it when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>coding</code></td>
+<td>writing or changing code, removing code, committing</td>
+</tr>
+<tr>
+<td><code>documentation</code></td>
+<td>writing a docstring, comment, README, or plan; deciding where a fact is recorded</td>
+</tr>
+<tr>
+<td><code>cleanup</code></td>
+<td>aligning documents and memories with the code</td>
+</tr>
+<tr>
+<td><code>autodocs</code></td>
+<td>adding a page or a collection to this site</td>
+</tr>
+<tr>
+<td><code>write-like-aaron</code></td>
+<td>any prose: docs, comments, commit messages, pull-request descriptions</td>
+</tr>
+</tbody>
+</table>
+<p>Copy a skill directory into the agent's skills directory (for Claude Code,
+<code>~/.claude/skills/&lt;name&gt;/</code> for every project, or <code>.claude/skills/&lt;name&gt;/</code> in
+this checkout) and the agent loads it when its description matches the task.</p>
 <h2 id="codebase-orientation">Codebase orientation<a class="headerlink" href="#codebase-orientation" title="Permanent link">&para;</a></h2>
-<p>The <a href="../architecture/">Architecture</a> page is the map of the system — the
+<p>The <a href="https://ai-modcon.github.io/dsagt/architecture/">Architecture</a> page explains in more detail the components of DSAgt — the
 capabilities, the single <code>dsagt-server</code> MCP layout, and the observability and
-memory design. <code>CLAUDE.md</code> at the repo root records the house coding and prose
-conventions (it doubles as instructions for AI coding agents working in the
-repo); read it before a substantial change.</p>
+memory design. <code>CLAUDE.md</code> contains helpful information for the human as well as agent developer.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <p><strong>Agent command not found.</strong> The agent CLI isn't installed or isn't on PATH —
-see the <a href="../#supported-agents">supported agents</a>.</p>
+see the <a href="https://ai-modcon.github.io/dsagt/#supported-agents">supported agents</a>.</p>
 <p><strong>MCP server not connecting.</strong> Confirm the entry point resolves:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>which<span class="w"> </span>dsagt-server
 </code></pre></div>
 <p>If it's missing, reinstall:
 <code>pip install --force-reinstall "git+https://github.com/AI-ModCon/dsagt.git"</code>.</p>
+<h2 id="aillm-assisted-contributions">AI/LLM-assisted contributions<a class="headerlink" href="#aillm-assisted-contributions" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Remain accountable.</strong> You are responsible for the accuracy, quality, and
+  consequences of anything you submit, regardless of how it was produced. Using
+  an AI tool does not transfer that responsibility to the tool.</li>
+<li><strong>Understand your work.</strong> Review AI-generated code line by line before
+  submitting it. You are responsible for its correctness, security, and scope,
+  and for confirming it doesn't breach copyright.</li>
+<li><strong>Disclose it.</strong> If AI/LLM tools were used to generate a substantial part of
+  a PR, say so in the PR description.</li>
+<li><strong>Human review is mandatory.</strong> An LLM review can supplement a human
+  reviewer, but every PR needs a human reviewer who is accountable for the
+  review.</li>
+<li><strong>No proprietary or personal data to AI tools.</strong> Never send proprietary data,
+  credentials, or personal information to a code generator or AI tool.</li>
+</ul>
+<h2 id="reporting-issues">Reporting issues<a class="headerlink" href="#reporting-issues" title="Permanent link">&para;</a></h2>
+<p>Open a GitHub issue with steps to reproduce, expected and actual behavior, the
+OS and Python version, and the agent platform involved. For a security issue,
+follow <a href="https://github.com/AI-ModCon/dsagt/blob/main/.github/SECURITY.md">SECURITY.md</a>
+instead of opening a public issue.</p>
 
 
 

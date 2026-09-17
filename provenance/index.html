@@ -636,10 +636,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#execution-capture" class="md-nav__link">
+  <a href="#execution-record" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Execution capture
+        Execution record
       
     </span>
   </a>
@@ -1254,10 +1254,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#execution-capture" class="md-nav__link">
+  <a href="#execution-record" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Execution capture
+        Execution record
       
     </span>
   </a>
@@ -1307,10 +1307,10 @@
 
 
 <h1 id="provenance">Provenance<a class="headerlink" href="#provenance" title="Permanent link">&para;</a></h1>
-<p>DSAgt makes every data operation a reproducible, auditable step. The agent registers a <strong>code</strong> — a CLI executable — and every run of that code is wrapped for provenance capture, so the whole pipeline can later be reconstructed from the record.</p>
+<p>DSAgt records data operations as reproducible, auditable steps. The agent registers a <strong>code</strong> — a CLI executable — and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.</p>
 <p><img alt="DSAgt provenance" src="../assets/provenance.png" /></p>
 <h2 id="codes">Codes<a class="headerlink" href="#codes" title="Permanent link">&para;</a></h2>
-<p>Codes are CLI executables defined as markdown files with YAML frontmatter under <code>&lt;project&gt;/codes/</code>. The agent registers new codes via the MCP server's <code>save_code_spec</code> tool and finds existing ones via <code>search_registry</code>.</p>
+<p>Registered codes are CLI executables defined as skills. The agent registers new codes via the MCP server's <code>save_code_spec</code> tool and finds existing ones via <code>search_registry</code>.</p>
 <p><img alt="DSAgt code registry" src="../assets/code-registry.png" /></p>
 <p>A code spec includes:</p>
 <ul>
@@ -1335,7 +1335,7 @@
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>Run this registered code with the exact shell command below…
 </code></pre></div>
 <p>DSAgt wraps every registered code with <code>dsagt-run</code> for provenance capture and <code>uv run --with</code> for Python dependencies, so the agent can call any code without managing environments manually. It provides one built-in code, <code>scan-directory</code>, indexed for search by <code>dsagt init</code>.</p>
-<h2 id="execution-capture">Execution capture<a class="headerlink" href="#execution-capture" title="Permanent link">&para;</a></h2>
+<h2 id="execution-record">Execution record<a class="headerlink" href="#execution-record" title="Permanent link">&para;</a></h2>
 <p>Every registered code runs through the <code>dsagt-run</code> wrapper. For each call it records the command, arguments, exit code, duration, input/output file counts, and truncated stderr to <code>&lt;project&gt;/trace_archive/&lt;record_id&gt;.json</code>, and emits a <code>code.execute</code> span to the <a href="../observability/">trace store</a>. The MCP server incrementally indexes those records into the <code>code_use</code> collection, so past executions are searchable.</p>
 <p>The wrapper is the point of code-mediated data access. A direct shell or editor call isn't recordless — the agent's transcript still captures whatever it chose to report about the command and its stdout/stderr — but that's a partial, agent-curated account, not the structured <code>dsagt-run</code> record of exit code, timing, and input/output files. Only the wrapped record carries what <code>reconstruct_pipeline</code> needs, so a direct call still breaks reconstruction.</p>
 <h2 id="pipeline-reconstruction">Pipeline reconstruction<a class="headerlink" href="#pipeline-reconstruction" title="Permanent link">&para;</a></h2>
@@ -1365,7 +1365,7 @@
 </ol>
 <p>Afterwards, inspect the trail:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ls<span class="w"> </span>~/dsagt-projects/demo/<span class="o">{</span>codes,trace_archive<span class="o">}</span><span class="w">          </span><span class="c1"># the specs + execution records</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>mlflow<span class="w"> </span>ui<span class="w"> </span>--backend-store-uri<span class="w"> </span>sqlite:///<span class="nv">$HOME</span>/dsagt-projects/demo/mlflow.db<span class="w">   </span><span class="c1"># code.execute spans</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>demo<span class="w">                                        </span><span class="c1"># code.execute spans in the MLflow viewer</span>
 </code></pre></div>
 
 

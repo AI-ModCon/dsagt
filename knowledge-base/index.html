@@ -1342,8 +1342,8 @@
 </thead>
 <tbody>
 <tr>
-<td><strong>Reference corpora</strong></td>
-<td>NeMo Curator + AIDRIN (data-curation and AI-data-readiness references)</td>
+<td><strong>Reference corpus</strong></td>
+<td>NeMo Curator (data-curation references)</td>
 <td><code>dsagt init</code> (chosen collections)</td>
 </tr>
 <tr>
@@ -1353,7 +1353,7 @@
 </tr>
 </tbody>
 </table>
-<p>The has access to three knowledge base tools: <code>kb_ingest</code> (index a file or directory into a named collection — long ingests run in the background), <code>kb_search</code> (retrieve across one or more collections), and <code>kb_list_collections</code> (see what's indexed).</p>
+<p>The agent has five knowledge base tools: <code>kb_ingest</code> (index a file or directory into a named collection; long ingests run in the background), <code>kb_append</code> (add documents to an existing collection), <code>kb_job_status</code> (poll a background job), <code>kb_search</code> (retrieve across one or more collections), and <code>kb_list_collections</code> (see what is indexed).</p>
 <h2 id="hybrid-vector-search">Hybrid vector search<a class="headerlink" href="#hybrid-vector-search" title="Permanent link">&para;</a></h2>
 <p>Retrieval is <strong>hybrid</strong> — dense semantic embeddings fused with sparse BM25 keyword matching — by default per collection for focused retrieval:</p>
 <ul>
