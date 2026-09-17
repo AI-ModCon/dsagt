@@ -145,7 +145,9 @@ def _generate_code_body(spec: dict) -> str:
         f"\n# {spec['name']}\n\n",
         "Run this registered code with the exact shell command below — copy "
         "it byte-for-byte (the `dsagt-run` prefix writes the execution "
-        "record to `trace_archive/`):\n\n```bash\n",
+        "record to `trace_archive/` when the process exits, so run it in the "
+        "foreground and wait; a long run goes to a subagent, never to a "
+        "background task):\n\n```bash\n",
         f"{spec['executable']} [options]\n",
         "```\n\n",
         f"{spec['description']}\n\n## Parameters\n\n",
