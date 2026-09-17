@@ -6,7 +6,7 @@
 
 DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It wraps these capabilities around a user's existing agent CLI or VS Code extension (Claude Code, Goose, Codex, …).
 
-**Prerequisites:** Python 3.12 or 3.13, and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
+**Prerequisites:** Python 3.12, and one of the supported agent platforms below — already installed and authenticated against whatever LLM provider you intend to use.
 
 <!-- md-shared:agents:start -->
 | Agent | Install | Verify |
@@ -238,3 +238,7 @@ Each launch gets a session id that every span carries, so you can filter the tra
 <!-- md-shared:cli:end -->
 
 For tests, troubleshooting, and other developer-facing material, see [docs/developer.md](docs/developer.md).
+
+## Acknowledgments
+
+This project acknowledges support from the U.S. Department of Energy's Genesis Mission.

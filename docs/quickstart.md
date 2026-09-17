@@ -7,7 +7,7 @@ DSAgt is **BYOA**: your agent talks to its own LLM provider directly, and the tr
 ## Setup
 
 ```bash
-# Install (any Python 3.12/3.13 environment)
+# Install (any Python 3.12 environment)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
 
 # Set a convenience variable for the smoke test directory (not a normal dsagt step)
