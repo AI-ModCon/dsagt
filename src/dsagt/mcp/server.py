@@ -368,7 +368,7 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     leakage guard that the two former server mains duplicated near-verbatim.
     """
     # embedding is a backfilled code default (not a written config choice);
-    # chunk_size / rerank default in KnowledgeBase itself.
+    # chunk_size default in KnowledgeBase itself.
     emb_config = config.get("embedding", {})
 
     backend = (emb_config.get("backend") or "local").lower()

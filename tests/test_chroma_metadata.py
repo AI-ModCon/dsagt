@@ -225,7 +225,6 @@ class TestKnowledgeBaseSearchWhere:
             "fastp quality",
             collection="mem",
             top_k=4,
-            rerank=False,
         )
         assert len(results) > 0
 
@@ -235,7 +234,6 @@ class TestKnowledgeBaseSearchWhere:
             "quality filtering",
             collection="mem",
             top_k=4,
-            rerank=False,
             where={"tool_name": "fastp"},
         )
         # All results should be fastp entries
@@ -248,7 +246,6 @@ class TestKnowledgeBaseSearchWhere:
             "assembly",
             collection="mem",
             top_k=4,
-            rerank=False,
             where={"session_id": "s2"},
         )
         for r in results:
@@ -334,7 +331,6 @@ class TestAddEntries:
             "quick fox",
             collection="test_search",
             top_k=2,
-            rerank=False,
         )
         assert len(results) > 0
 
@@ -421,7 +417,6 @@ class TestAddEntriesFilteredSearch:
                 "quality filtering",
                 collection="executions",
                 top_k=4,
-                rerank=False,
                 where={"tool_name": "fastp"},
             )
             for r in fastp_results:
@@ -432,7 +427,6 @@ class TestAddEntriesFilteredSearch:
                 "assembly",
                 collection="executions",
                 top_k=4,
-                rerank=False,
                 where={"session_id": "s1"},
             )
             for r in s1_results:
@@ -443,7 +437,6 @@ class TestAddEntriesFilteredSearch:
                 "megahit",
                 collection="executions",
                 top_k=4,
-                rerank=False,
                 where={"$and": [{"tool_name": "megahit"}, {"return_code": 1}]},
             )
             for r in failed:

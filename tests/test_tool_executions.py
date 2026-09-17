@@ -511,7 +511,6 @@ class TestIndexAndSearch:
                 "quality filtering parameters",
                 collection=COLLECTION_NAME,
                 top_k=10,
-                rerank=False,
                 where={"code_name": "fastp"},
             )
             for r in results:
@@ -538,7 +537,6 @@ class TestIndexAndSearch:
                 "fastp",
                 collection=COLLECTION_NAME,
                 top_k=10,
-                rerank=False,
                 where={"session_id": "s1"},
             )
             for r in results:
@@ -565,7 +563,6 @@ class TestIndexAndSearch:
                 "tool execution",
                 collection=COLLECTION_NAME,
                 top_k=10,
-                rerank=False,
                 where={"return_code": 1},
             )
             for r in results:

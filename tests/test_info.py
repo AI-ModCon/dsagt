@@ -418,7 +418,7 @@ def test_config_sources_skips_internal_sections(tmp_path, monkeypatch):
     _write_project(
         tmp_path,
         monkeypatch,
-        "project: proj\nagent: goose\nknowledge:\n  chunk_size: 1024\n  rerank: false\nskills:\n  populate_native: true\n",
+        "project: proj\nagent: goose\nknowledge:\n  chunk_size: 1024\nskills:\n  populate_native: true\n",
     )
 
     paths = {r["path"] for r in _config_sources("proj")}

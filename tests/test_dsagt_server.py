@@ -26,7 +26,6 @@ def _make_merged_server(tmp_path: Path):
     kb = MagicMock()
     kb.index_dir = tmp_path / "kb_index"
     kb.index_dir.mkdir()
-    kb.default_rerank = True
     kb.collections = []
     runtime = str(tmp_path / "runtime")
     reg = CodeRegistry(runtime_dir=runtime, kb=None)
@@ -277,7 +276,7 @@ class TestBuildKbFromConfig:
     def _cfg(self, **embedding):
         return {
             "embedding": embedding,
-            "knowledge": {"chunk_size": 1024, "rerank": False},
+            "knowledge": {"chunk_size": 1024},
         }
 
     def test_invalid_backend_raises(self, tmp_path):

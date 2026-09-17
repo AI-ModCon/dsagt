@@ -20,7 +20,6 @@ Retrieval is **hybrid** — dense semantic embeddings fused with sparse BM25 key
 - **Semantic embeddings** catch paraphrase and synonymy: a query about "missing values" finds a passage on "null rates" even with no shared words.
 - **BM25 keyword matching** catches the exact terms embeddings tend to under-rank — identifiers, gene names, parameter flags, standard names — where a literal match matters.
 - **Per-collection partitioning** scopes a search to a domain, so a materials-science query isn't diluted by genomics references.
-- **Optional cross-encoder reranking** re-scores the top candidates for precision when it's worth the extra pass.
 
 The default embedder is a local sentence-transformers model (~130 MB).
 ## Shared vector store

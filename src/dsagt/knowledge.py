@@ -36,7 +36,7 @@ References:
   - Code agents drop vector indexing for agentic grep —
     https://www.mindstudio.ai/blog/is-rag-dead-what-ai-agents-use-instead ;
     https://vadim.blog/claude-code-no-indexing/
-  - Hybrid BM25 + dense + reranking, the highest-impact RAG upgrade —
+  - Hybrid BM25 + dense retrieval —
     https://www.digitalapplied.com/blog/hybrid-search-bm25-vector-reranking-reference-2026
   - "When More Documents Hurt RAG": vector-search dilution, fixed by
     domain-scoped retrieval — https://arxiv.org/abs/2606.11350
@@ -123,7 +123,6 @@ import numpy as np
 from dsagt.observability import (
     kb_embed_span,
     kb_index_search_span,
-    kb_rerank_span,
     obs,
     traced,
 )
@@ -1183,7 +1182,7 @@ class KnowledgeBase:
     Chroma store) and its job is to **fuse their collections**: collection→store
     routing plus rank-fusion across collections.  It also owns the document
     ingestion pipeline (collect / parse / chunk → ``VectorStore.add_chunks``) and
-    cross-collection reranking.  This is the shared substrate every KB consumer
+    cross-collection fusion.  This is the shared substrate every KB consumer
     (retrieval, memory, provenance, skills) calls into.
 
     Quick-start
@@ -1218,8 +1217,6 @@ class KnowledgeBase:
         index_dir: str | Path,
         chunk_size: int = 1024,
         chunk_overlap: int = 128,
-        rerank_model: str = "BAAI/bge-reranker-v2-m3",
-        default_rerank: bool = False,
         recency_half_life_days: float | None = None,
         # Internal store's embedder (one per store, fixed at construction).
         # Explicit args — callers unpack their config here, no kwargs dict.
@@ -1232,8 +1229,6 @@ class KnowledgeBase:
         self.index_dir = Path(index_dir)
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.rerank_model = rerank_model
-        self.default_rerank = default_rerank
         # Episodic recency weighting (session_memory only); None = off.
         self._recency_half_life_days = recency_half_life_days
 
@@ -1261,8 +1256,6 @@ class KnowledgeBase:
         # and surface it in the result dict so users notice when a non-zero
         # number of files are silently being dropped.
         self._chunk_skip_count: int = 0
-
-        self._reranker = None
 
     # -- store routing -------------------------------------------------------
 
@@ -1483,14 +1476,13 @@ class KnowledgeBase:
 
     # -- federated search ----------------------------------------------------
 
-    @traced("kb.search", capture=["collection", "top_k", "rerank"])
+    @traced("kb.search", capture=["collection", "top_k"])
     def search(
         self,
         query: str,
         collection: str | None = None,
         collections: list[str] | None = None,
         top_k: int = 5,
-        rerank: bool | None = None,
         where: dict | None = None,
         where_document: dict | None = None,
     ) -> list[dict]:
@@ -1499,28 +1491,24 @@ class KnowledgeBase:
         A single collection routes straight to its store's hybrid search.
         Multiple collections fan out — each store searched, then the per-
         collection rankings fused by Reciprocal Rank Fusion (rank-only, so
-        different embedding spaces compose correctly).  Optional cross-encoder
-        rerank runs over the fused candidates.
+        different embedding spaces compose correctly).
 
         Missing collections are skipped with a warning; the search fails only
         when *every* requested collection is absent.
         """
-        if rerank is None:
-            rerank = self.default_rerank
-
         targets = collections or ([collection] if collection else [])
         if not targets:
             raise ValueError("Provide 'collection' or 'collections'")
 
         obs.set_inputs({"query": query, "collections": targets, "top_k": top_k})
 
-        # Oversample per-collection pools when reranking, fusing >1 collection,
-        # or recency-weighting (so a recent fact can be lifted from deep in the
+        # Oversample per-collection pools when fusing >1 collection or
+        # recency-weighting (so a recent fact can be lifted from deep in the
         # pool, not merely reordered within an already-cut top_k).
         recency_target = bool(
             self._recency_half_life_days and targets == [_RECENCY_COLLECTION]
         )
-        oversample = rerank or len(targets) > 1 or recency_target
+        oversample = len(targets) > 1 or recency_target
         candidate_k = max(top_k * 10, 50) if oversample else top_k
 
         per_coll: list[list[dict]] = []
@@ -1551,16 +1539,12 @@ class KnowledgeBase:
         fused = per_coll[0] if len(per_coll) == 1 else _rrf_across(per_coll)
 
         # Episodic recency: a recent corrected fact outranks a stale one without
-        # any contradiction detection — recency is the ranker for session_memory
-        # (mutually exclusive with the cross-encoder; the two are alternative
-        # rerankers and recency is the one that matters for a time-ordered log).
+        # any contradiction detection — recency is the ranker for session_memory,
+        # the one that matters for a time-ordered log.
         if recency_target and fused:
             final = _apply_recency(fused, self._recency_half_life_days, time.time())[
                 :top_k
             ]
-        elif rerank and fused:
-            with kb_rerank_span(self.rerank_model, len(fused)):
-                final = self._rerank(query, fused, top_k)
         else:
             final = fused[:top_k]
 
@@ -1572,16 +1556,6 @@ class KnowledgeBase:
             }
         )
         return final
-
-    def _rerank(self, query: str, results: list[dict], top_k: int) -> list[dict]:
-        if self._reranker is None:
-            from sentence_transformers import CrossEncoder
-
-            self._reranker = CrossEncoder(self.rerank_model, max_length=512)
-        pairs = [[query, r["chunk"]["text"]] for r in results]
-        scores = self._reranker.predict(pairs, show_progress_bar=False)
-        ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
-        return [{**r, "rerank_score": float(s)} for r, s in ranked[:top_k]]
 
     # -- file discovery + chunking ------------------------------------------
 

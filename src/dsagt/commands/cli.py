@@ -175,7 +175,7 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
     skill-catalog *sources*, and the episodic-memory opt-in.  The bundled
     ``tools`` collection is always provisioned.
     Project name + folder location are resolved by the caller.  Embedding /
-    chunk_size / rerank are code defaults, not init choices.
+    chunk_size is a code default, not init choices.
 
     Interactive: questionary select/checkbox menus + y/N, pre-filled with the
     project's current choices on re-init.  Non-interactive (no TTY): drive from

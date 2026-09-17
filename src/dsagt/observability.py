@@ -683,7 +683,7 @@ def child_span(name: str, *, span_type: str | None = None, **attrs: Any):
     """Open a child span with arbitrary attributes.
 
     Use this from inside a ``@traced`` method to break a method into sub-phases
-    (e.g. embed / index_search / rerank inside kb.search).  Prefer the typed
+    (e.g. embed / index_search inside kb.search).  Prefer the typed
     factories below when one exists for your operation.
     """
     with open_span(name, span_type=span_type) as span:
@@ -733,15 +733,6 @@ def kb_index_search_span(vector_db: str | None, k: int, filtered: bool):
         vector_db=vector_db,
         k=k,
         filtered=filtered,
-    )
-
-
-def kb_rerank_span(model: str | None, n_pairs: int):
-    """Span around the cross-encoder rerank pass."""
-    return child_span(
-        "kb.rerank",
-        model=model,
-        n_pairs=n_pairs,
     )
 
 

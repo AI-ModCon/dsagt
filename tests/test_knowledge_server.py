@@ -75,7 +75,6 @@ def mock_kb(tmp_path):
     kb = MagicMock()
     kb.index_dir = tmp_path / "kb_index"
     kb.index_dir.mkdir()
-    kb.default_rerank = True
     kb.list_collections.return_value = [
         {"name": "docs", "description": "Project documentation"},
         {"name": "papers", "description": "Research papers"},
@@ -96,7 +95,7 @@ def mock_kb(tmp_path):
 
 @pytest.fixture
 def server(mock_kb):
-    """Knowledge server with mocked KB (reranking enabled via mock_kb.default_rerank)."""
+    """Knowledge server with mocked KB."""
     return create_knowledge_server(mock_kb)
 
 
@@ -159,7 +158,7 @@ class TestSearch:
         assert first["chunk_index"] == 0
 
     def test_search_passes_parameters(self, server, mock_kb):
-        """Search forwards top_k and rerank to the knowledge base."""
+        """Search forwards top_k to the knowledge base."""
         call_tool(
             server,
             "kb_search",
@@ -167,7 +166,6 @@ class TestSearch:
                 "query": "test",
                 "collection": "docs",
                 "top_k": 10,
-                "rerank": False,
             },
         )
 
@@ -176,13 +174,12 @@ class TestSearch:
             collection="docs",
             collections=None,
             top_k=10,
-            rerank=False,
             where=None,
             where_document=None,
         )
 
     def test_search_defaults(self, server, mock_kb):
-        """Search uses default top_k=5 and server's use_rerank setting."""
+        """Search uses default top_k=5."""
         call_tool(
             server,
             "kb_search",
@@ -197,7 +194,6 @@ class TestSearch:
             collection="docs",
             collections=None,
             top_k=5,
-            rerank=None,  # agent didn't specify → kb.default_rerank resolves it
             where=None,
             where_document=None,
         )
@@ -217,23 +213,6 @@ class TestSearch:
 
         assert result["status"] == "error"
         assert "not found" in result["error"]
-
-    def test_search_rerank_score_forwarded(self, server, mock_kb):
-        """Rerank scores from the KB are included in the response."""
-        mock_kb.search.return_value = [
-            {**make_search_result("text", "file.md"), "rerank_score": 0.99},
-        ]
-
-        result = call_tool(
-            server,
-            "kb_search",
-            {
-                "query": "test",
-                "collection": "docs",
-            },
-        )
-
-        assert result["results"][0]["rerank_score"] == 0.99
 
 
 # ---------------------------------------------------------------------------
@@ -744,10 +723,8 @@ class TestSetupRuntimeKb:
 class TestOpenMPWorkaround:
     """Importing the knowledge tools module must set KMP_DUPLICATE_LIB_OK to
     prevent a fatal OpenMP crash when multiple native deps (e.g. ChromaDB and
-    sentence-transformers / PyTorch) both bundle libomp.
-
-    Without this, kb_search with rerank=true kills
-    the server process, producing 'transport closed' in MCP clients."""
+    a local embedding runtime) both bundle libomp; the crash killed the server
+    process, producing 'transport closed' in MCP clients."""
 
     def test_kmp_duplicate_lib_ok_is_set(self):
         """KMP_DUPLICATE_LIB_OK is set after importing dsagt.mcp.knowledge_tools."""
@@ -756,36 +733,6 @@ class TestOpenMPWorkaround:
         import dsagt.mcp.knowledge_tools  # noqa: F401
 
         assert os.environ.get("KMP_DUPLICATE_LIB_OK") == "TRUE"
-
-
-# ---------------------------------------------------------------------------
-# Regression: rerank schema default must match server config
-# ---------------------------------------------------------------------------
-
-
-class TestRerankSchemaDefault:
-    """The kb_search schema's rerank parameter carries no default of True:
-    that default makes agents request reranking on a server started
-    without --rerank, which triggers the OpenMP crash."""
-
-    def _get_rerank_default(self, server):
-        """Extract the rerank default from the kb_search tool schema."""
-        handler = server.get_request_handler("tools/list").handler
-        result = asyncio.run(handler(None, None))
-        for tool in result.tools:
-            if tool.name == "kb_search":
-                return tool.input_schema["properties"]["rerank"]["default"]
-        raise AssertionError("kb_search tool not found")
-
-    def test_rerank_default_from_kb(self, mock_kb):
-        """Schema advertises rerank default matching kb.default_rerank."""
-        mock_kb.default_rerank = False
-        server = create_knowledge_server(mock_kb)
-        assert self._get_rerank_default(server) is False
-
-        mock_kb.default_rerank = True
-        server = create_knowledge_server(mock_kb)
-        assert self._get_rerank_default(server) is True
 
 
 # ---------------------------------------------------------------------------
@@ -820,7 +767,6 @@ class TestKbSearchMultiCollection:
             collection=None,
             collections=["docs", "papers"],
             top_k=5,
-            rerank=None,
             where=None,
             where_document=None,
         )

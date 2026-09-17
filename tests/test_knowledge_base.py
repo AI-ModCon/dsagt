@@ -4,12 +4,10 @@ Tests for KnowledgeBase and APIEmbedder.
 APIEmbedder tests mock the client's httpx POST to avoid network
 calls.  KnowledgeBase tests mock Embedder.create with deterministic vectors
 and use real ChromaDB indexes and llama-index chunking on temp files.
-Reranking is mocked since sentence-transformers is a heavy dependency.
 """
 
 import json
 import os
-import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -815,7 +813,6 @@ class TestKnowledgeBaseSearch:
             "installation instructions",
             collection="test_docs",
             top_k=3,
-            rerank=False,
         )
 
         assert len(results) > 0
@@ -832,7 +829,6 @@ class TestKnowledgeBaseSearch:
             "test",
             collection="test_docs",
             top_k=1,
-            rerank=False,
         )
         assert len(results) <= 1
 
@@ -840,32 +836,6 @@ class TestKnowledgeBaseSearch:
         """Searching a nonexistent collection raises ValueError."""
         with pytest.raises(ValueError, match="not found"):
             kb_with_data.search("query", collection="nonexistent")
-
-    def test_search_with_rerank(self, kb_with_data):
-        """Search with reranking adds rerank_score to results."""
-        mock_reranker = MagicMock()
-        # Return descending scores so we can verify ordering
-        mock_reranker.predict.return_value = np.array([0.9, 0.5, 0.1])
-
-        mock_st = MagicMock()
-        mock_st.CrossEncoder.return_value = mock_reranker
-
-        with patch.dict(sys.modules, {"sentence_transformers": mock_st}):
-            # Ensure the lazy import triggers
-            kb_with_data._reranker = None
-
-            results = kb_with_data.search(
-                "hello function",
-                collection="test_docs",
-                top_k=3,
-                rerank=True,
-            )
-
-        assert len(results) > 0
-        assert all("rerank_score" in r for r in results)
-        # Should be sorted by rerank score descending
-        scores = [r["rerank_score"] for r in results]
-        assert scores == sorted(scores, reverse=True)
 
     def test_search_collection_isolation(self, tmp_path):
         """Searching one collection does not return results from another."""
@@ -887,9 +857,7 @@ class TestKnowledgeBaseSearch:
             kb.ingest(folder_a)
             kb.ingest(folder_b)
 
-            results = kb.search(
-                "rockets", collection="collection_a", top_k=5, rerank=False
-            )
+            results = kb.search("rockets", collection="collection_a", top_k=5)
             sources = [r["chunk"]["metadata"]["collection"] for r in results]
             assert all(s == "collection_a" for s in sources)
 
@@ -1175,7 +1143,7 @@ class TestFederatedSearch:
             kb.close()
 
     def test_single_collection_routes_to_store(self, kb):
-        results = kb.search("quality", collection="coll_a", top_k=5, rerank=False)
+        results = kb.search("quality", collection="coll_a", top_k=5)
         assert results
         assert all(r["chunk"]["metadata"]["collection"] == "coll_a" for r in results)
 
@@ -1184,7 +1152,6 @@ class TestFederatedSearch:
             "quality filtering",
             collections=["coll_a", "coll_b"],
             top_k=10,
-            rerank=False,
         )
         seen = {r["chunk"]["metadata"]["collection"] for r in results}
         assert seen == {"coll_a", "coll_b"}
@@ -1197,9 +1164,7 @@ class TestFederatedSearch:
             kb.search("x", collection="nope", top_k=5)
 
     def test_partial_missing_skips_and_returns_found(self, kb):
-        results = kb.search(
-            "quality", collections=["coll_a", "nope"], top_k=5, rerank=False
-        )
+        results = kb.search("quality", collections=["coll_a", "nope"], top_k=5)
         assert results
         assert all(r["chunk"]["metadata"]["collection"] == "coll_a" for r in results)
 
@@ -1242,7 +1207,6 @@ class TestHybridSearch:
             "installation",
             collection="test_docs",
             top_k=3,
-            rerank=False,
         )
         assert len(results) > 0
 

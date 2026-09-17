@@ -392,7 +392,7 @@ def test_kb_search_emits_three_child_spans(_reset_tracing, tmp_path):
         # Seed a collection so search has something to load.
         kb.add_entries(texts=["hello world", "goodbye"], collection="tcoll")
 
-        results = kb.search("hello", collection="tcoll", top_k=2, rerank=False)
+        results = kb.search("hello", collection="tcoll", top_k=2)
         assert isinstance(results, list)
 
     # The last trace is the search (add_entries is an earlier trace).
@@ -400,8 +400,6 @@ def test_kb_search_emits_three_child_spans(_reset_tracing, tmp_path):
     assert "kb.search" in spans
     assert "kb.embed" in spans
     assert "kb.index_search" in spans
-    # No rerank requested, so no rerank span.
-    assert "kb.rerank" not in spans
 
     parent = spans["kb.search"]
     embed = spans["kb.embed"]
@@ -413,7 +411,6 @@ def test_kb_search_emits_three_child_spans(_reset_tracing, tmp_path):
     # Captured args + obs.set('hits', ...) on the parent.
     assert parent.attributes["collection"] == "tcoll"
     assert parent.attributes["top_k"] == 2
-    assert parent.attributes["rerank"] is False
     assert "hits" in parent.attributes
     assert "duration_ms" in parent.attributes
 
@@ -429,7 +426,7 @@ def test_kb_search_local_backend_same_span_shape(_reset_tracing, tmp_path):
     """The local embedding backend should emit the same span tree."""
     with _kb_with_mocked_embedder(tmp_path, backend="local", model="bge-base") as kb:
         kb.add_entries(texts=["hello world"], collection="tcoll")
-        kb.search("hello", collection="tcoll", top_k=1, rerank=False)
+        kb.search("hello", collection="tcoll", top_k=1)
 
     spans = _spans_by_name()
     assert "kb.search" in spans

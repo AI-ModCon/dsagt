@@ -1158,7 +1158,7 @@ class TestConfigFlow:
     def test_default_config_mirrors_init_choices(self):
         """The written config holds only the init choices: project, agent,
         knowledge.collections, skills.sources.  The bundled ``tools`` collection
-        is always provisioned (not a choice); embedding / chunk_size / rerank
+        is always provisioned (not a choice); embedding / chunk_size
         are code defaults backfilled on read, never written."""
         content = default_config_content("test", "claude")
         parsed = yaml.safe_load(content)
