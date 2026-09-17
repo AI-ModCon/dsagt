@@ -522,6 +522,9 @@ class TestInitProject:
         """Serverless: init_project returns just the project dir — no port."""
         pdir = init_project("myproj", "goose")
         assert pdir.exists()
+        # The instructions send every check report to audit/, so it exists
+        # before the first code runs.
+        assert (pdir / "audit").is_dir()
         config = load_config("myproj")
         assert "mlflow" not in config
 

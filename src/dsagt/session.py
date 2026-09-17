@@ -711,7 +711,7 @@ def init_project(
 
     pdir.mkdir(parents=True, exist_ok=True)
     # ``mlflow.db`` is created lazily by the MLflow client on first span.
-    for subdir in ("trace_archive", "skills", CONFIG_DIRNAME):
+    for subdir in ("trace_archive", "skills", "audit", CONFIG_DIRNAME):
         (pdir / subdir).mkdir(parents=True, exist_ok=True)
 
     # Bundled codes are copied into <project>/codes/ so every available
