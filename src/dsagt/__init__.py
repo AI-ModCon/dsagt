@@ -25,6 +25,10 @@ _os.environ.setdefault("MKL_NUM_THREADS", _default_threads)
 # sentence-transformers' tokenizer is used after a fork (e.g. under
 # pytest-xdist or DataLoader workers).
 _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# mlflow logs a three-line agent-directed hint on import whenever a coding
+# agent's environment marker is set, which is every dsagt process an agent
+# launches; dsagt-run under an agent printed it on every call.
+_os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 # uv bundles its own OpenSSL that does not read the macOS Security keychain.
 # On networks with an SSL-intercepting proxy (e.g. Zscaler), the corporate
 # root CA lives only in the keychain, so HTTPS downloads (HuggingFace model
