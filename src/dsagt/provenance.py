@@ -23,6 +23,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -111,6 +112,44 @@ def _child_env() -> dict[str, str]:
     return env
 
 
+def _pump(source, sink, lines: list[str]) -> None:
+    """Copy *source* to *sink* line by line, keeping every line in *lines*."""
+    for line in iter(source.readline, ""):
+        lines.append(line)
+        sink.write(line)
+        sink.flush()
+
+
+def _run_streaming(command: list[str]) -> tuple[int, str, str]:
+    """Run *command*, echoing its output as it arrives, and return the exit
+    code with the full stdout and stderr.
+
+    The child's two pipes are read on two threads, so a command that fills
+    one while the other is being read cannot block.  Undecodable bytes are
+    replaced, so a stray byte in a tool's log cannot lose the record of
+    the run.  Raises ``FileNotFoundError`` when the executable is absent.
+    """
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        env=_child_env(),
+    )
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+    readers = [
+        threading.Thread(target=_pump, args=(proc.stdout, sys.stdout, out_lines)),
+        threading.Thread(target=_pump, args=(proc.stderr, sys.stderr, err_lines)),
+    ]
+    for reader in readers:
+        reader.start()
+    for reader in readers:
+        reader.join()
+    return proc.wait(), "".join(out_lines), "".join(err_lines)
+
+
 def run_and_record(
     code_name: str,
     command: list[str],
@@ -120,7 +159,12 @@ def run_and_record(
     input_files: list[str] | None = None,
     output_files: list[str] | None = None,
 ) -> int:
-    """Execute a command, write an execution record, return the exit code."""
+    """Execute a command, write an execution record, return the exit code.
+
+    The command's output is echoed as it arrives and kept in full for the
+    record, so a slow code shows progress and the record still holds
+    everything it printed.
+    """
     from dsagt.observability import obs, code_execute_span, truncate
 
     record_id = record_id or uuid.uuid4().hex[:12]
@@ -136,15 +180,7 @@ def run_and_record(
         start_perf = time.perf_counter()
 
         try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                env=_child_env(),
-            )
-            return_code = result.returncode
-            stdout = result.stdout
-            stderr = result.stderr
+            return_code, stdout, stderr = _run_streaming(command)
         except FileNotFoundError:
             return_code = 127
             stdout = ""
@@ -218,12 +254,6 @@ def run_and_record(
     }
 
     _write_record(record, records_dir)
-
-    if stdout:
-        sys.stdout.write(stdout)
-    if stderr:
-        sys.stderr.write(stderr)
-
     return return_code
 
 

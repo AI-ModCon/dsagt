@@ -20,6 +20,7 @@ test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
 import asyncio
 import json
 import logging
+import shlex
 import subprocess
 import sys
 from functools import partial
@@ -102,7 +103,9 @@ async def _handle_http_request(arguments: dict) -> str:
 
 
 async def _handle_run_command(arguments: dict) -> str:
-    command = arguments["command"]
+    # A code spec's executable is a multi-word string ("dsagt-run --code x --
+    # uv run -- python script.py"); agents pass it whole, so split it.
+    command = shlex.split(arguments["command"])
     args = arguments.get("args", [])
     timeout = arguments.get("timeout", 10)
     try:
@@ -111,7 +114,7 @@ async def _handle_run_command(arguments: dict) -> str:
         result = await asyncio.to_thread(
             partial(
                 subprocess.run,
-                [command] + args,
+                command + args,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -120,7 +123,7 @@ async def _handle_run_command(arguments: dict) -> str:
     except subprocess.TimeoutExpired:
         return f"Command timed out after {timeout} seconds"
     except FileNotFoundError:
-        return f"Command '{command}' not found"
+        return f"Command '{command[0]}' not found"
 
     output = ""
     if result.stdout:
@@ -380,7 +383,11 @@ def _registry_tools_and_handlers(
         ),
         types.Tool(
             name="run_command",
-            description="Execute a command to get help/usage information",
+            description=(
+                "Run a command to read its --help or usage text. Not for "
+                "executing registered codes: run those from your shell with "
+                "the spec's executable string so dsagt-run records them."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {

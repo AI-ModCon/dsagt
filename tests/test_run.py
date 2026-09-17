@@ -308,6 +308,45 @@ class TestRunAndRecord:
             data["execution"]["timestamp_start"] <= data["execution"]["timestamp_end"]
         )
 
+    def test_output_is_echoed_while_the_command_runs(self, tmp_path, monkeypatch):
+        """A line the command prints is echoed before the command exits, so a
+        slow code shows progress instead of looking hung until it finishes."""
+        import sys
+        import time
+
+        class TimedWriter:
+            def __init__(self):
+                self.first_write_at = None
+
+            def write(self, text):
+                if self.first_write_at is None and text.strip():
+                    self.first_write_at = time.monotonic()
+
+            def flush(self):
+                pass
+
+        writer = TimedWriter()
+        monkeypatch.setattr(sys, "stdout", writer)
+        run_and_record(
+            code_name="slow",
+            command=[
+                sys.executable,
+                "-c",
+                "import time; print('started', flush=True); "
+                "time.sleep(1.0); print('done')",
+            ],
+            records_dir=tmp_path,
+            record_id="test-008",
+        )
+        finished_at = time.monotonic()
+
+        assert writer.first_write_at is not None
+        assert (
+            finished_at - writer.first_write_at >= 0.9
+        ), "the first line was echoed only after the command exited"
+        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+        assert data["execution"]["stdout"] == "started\ndone\n"
+
     def test_auto_generates_record_id(self, tmp_path):
         """Omitting record_id auto-generates one."""
         run_and_record(
