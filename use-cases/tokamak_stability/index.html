@@ -13,10 +13,10 @@
         <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/tokamak_stability/">
       
       
-        <link rel="prev" href="../fusion-fm/">
+        <link rel="prev" href="../vasp_dft/">
       
       
-        <link rel="next" href="../../developer/">
+        <link rel="next" href="../aidrin-ai-readiness/">
       
       
         
@@ -930,14 +930,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../isaac_vasp/" class="md-nav__link">
+      <a href="../vasp_dft/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    VASP / ISAAC
+    VASP DFT → AI-Ready Records
   
 
     
@@ -946,6 +946,230 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tokamak Stability
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tokamak Stability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-register-the-m3d-c1-functions-as-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Register the M3D-C1 functions as codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-explore-the-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Explore the dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-equilibrium-quantities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Equilibrium quantities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-field-plots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Field plots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-spectra-and-energy-trace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Spectra and energy trace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-repackage-secondary-data-products" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Repackage secondary data products
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-reconstruct-the-session-as-a-rerunnable-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Reconstruct the session as a rerunnable script
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1014,14 +1238,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../isaac_skills_demo/" class="md-nav__link">
+      <a href="../plasma_turbulence/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Skill-Driven VASP → ISAAC Conversion
+    Plasma Turbulence Training Data (XGC)
   
 
     
@@ -1042,14 +1266,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../fusion-fm/" class="md-nav__link">
+      <a href="../combustion_simulation/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Fusion Foundation Model (XGC)
+    BlastNet → WELL Conversion
   
 
     
@@ -1058,44 +1282,6 @@
   
 
       </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Tokamak Stability
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-      
     </li>
   
 
@@ -1155,6 +1341,163 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-register-the-m3d-c1-functions-as-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Register the M3D-C1 functions as codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-explore-the-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Explore the dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-equilibrium-quantities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Equilibrium quantities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-field-plots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Field plots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-spectra-and-energy-trace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Spectra and energy trace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-repackage-secondary-data-products" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Repackage secondary data products
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-reconstruct-the-session-as-a-rerunnable-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Reconstruct the session as a rerunnable script
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1171,10 +1514,185 @@
 
 
 <h1 id="tokamak-stability">Tokamak Stability<a class="headerlink" href="#tokamak-stability" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> Fusion energy - explore finite-element simulation data</p>
+<p><strong>Domain:</strong> Fusion energy — M3D-C1 finite-element simulation data</p>
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/tokamak_stability/"><code>use_cases/tokamak_stability/</code></a></p>
-<p><strong>Demo bundle:</strong> <a href="https://drive.google.com/uc?export=download&amp;id=1Czzwec9go5JV7tCCli8YJcVOKJqirFgb">Download <code>.tar.gz</code></a></p>
-<p>Register tools for reading, analyzing, and visualizing data from the M3D-C1 finite-element code. Use DSAgt to explore an example dataset, produce a range of plots, and generate and repackage secondary data products. Save the pipeline as a script that can be rerun across other similar datasets.</p>
+<p>Register codes for reading, analyzing, and visualizing data from the M3D-C1 finite-element code, then use DSAgt to explore an example linear-MHD dataset, produce plots and spectra, repackage secondary data products as HDF5, and reconstruct the session as a script that reruns on other datasets.</p>
+<blockquote>
+<p><strong>Estimated time:</strong> involved / not a 10-minute demo. Setup is the cost:
+building the <strong>fusion-io</strong> C/C++ library from source (scripted, but its
+compilers and libraries must be installed first). Budget roughly an hour
+for first-time setup; the agent session itself is ~15 minutes once the
+dependencies and data are in place.</p>
+</blockquote>
+<p>This guide uses DSAgt to investigate the stability properties of a tokamak
+configuration from linear MHD simulation output produced by the
+<a href="https://sites.google.com/pppl.gov/m3d-c1">M3D-C1</a> unstructured-mesh
+finite-element code. The Python modules under <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/tokamak_stability/scripts"><code>scripts/</code></a> — <code>hdf5.py</code>,
+<code>m3dc1_tools.py</code>, <code>m3dc1_plots.py</code>, and the <code>m3dc1/</code> wrapper package — provide
+the functions for reading M3D-C1 HDF5 output, evaluating fields from their
+basis-function coefficients, computing equilibrium and spectral quantities, and
+plotting. The agent registers those functions as codes under the guidance of
+the <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/tokamak_stability/skills/m3dc1-skill/SKILL.md"><code>m3dc1-skill</code></a>, which documents the APIs and
+the conventions the codes must follow.</p>
+<p>The example dataset, a single M3D-C1 simulation output, is courtesy of Alvaro
+Sanchez-Villar (PPPL). The session below has been tested with Claude Code.</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>DSAgt installed with the <code>tokamak-stability</code> extra
+  (<code>pip install "dsagt[tokamak-stability] @ git+https://github.com/AI-ModCon/dsagt.git"</code>),
+  which brings <code>h5py</code> and <code>matplotlib</code>; <code>numpy</code> comes with dsagt.</li>
+<li>An agent platform installed and <strong>already authenticated</strong>.</li>
+<li>The <a href="https://github.com/nferraro/fusion-io">fusion-io</a> library and its Python
+  bindings, built from source by <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/tokamak_stability/scripts/setup_env.sh"><code>scripts/setup_env.sh</code></a>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>bash<span class="w"> </span>use_cases/tokamak_stability/scripts/setup_env.sh
+</code></pre></div>
+<p>The build needs git, cmake, pkg-config, C/C++/Fortran compilers, MPI, HDF5,
+  NetCDF, and LAPACK already installed (macOS: <code>brew install cmake pkgconf gcc
+  open-mpi hdf5 netcdf</code>; Debian: <code>apt install cmake pkg-config gfortran
+  libopenmpi-dev libhdf5-dev libnetcdf-dev liblapack-dev</code>); the
+  script names whatever is missing and stops. It installs under
+  <code>~/dsagt-projects/.tools/tokamak_stability/fusion-io/</code> and prints the
+  <code>FIO_INSTALL_DIR</code>, <code>PATH</code>, <code>PYTHONPATH</code>, and library-path exports to add to
+  your shell before starting the session.</p>
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>init
+</code></pre></div>
+<p>At the menu, name the project <code>tokamak-stability</code> and pick your agent; the
+defaults are fine for the rest. Then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/tokamak-stability
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills&quot;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># Demo data (one M3D-C1 simulation output) from the DSAgt use-case data folder:</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=1qo-ZG_GoGlZ_X2BjR1fE8zZW3s9K6mTu&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>-o<span class="w"> </span>tokamak_stability.tar.gz
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tokamak_stability.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data&quot;</span><span class="w"> </span>--strip-components<span class="o">=</span><span class="m">1</span><span class="w"> </span>tokamak_stability/m3dc1_data
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/tokamak_stability/scripts<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/scripts&quot;</span><span class="w">     </span><span class="c1"># the modules, the m3dc1 package, and their tests</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/tokamak_stability/skills/m3dc1-skill<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span><span class="nv">$PROJ</span>/scripts:<span class="nv">$PYTHONPATH</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="nb">export</span><span class="w"> </span><span class="nv">M3DC1_DATA_DIR</span><span class="o">=</span><span class="nv">$PROJ</span>/data/m3dc1_data
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/scripts/tests&quot;</span><span class="w"> </span>-q<span class="w">      </span><span class="c1"># all 91 pass with fusion-io and the data in place</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>dsagt<span class="w"> </span>start<span class="w"> </span>tokamak-stability<span class="w">                  </span><span class="c1"># mirrors the skill into the agent&#39;s native skills dir</span>
+</code></pre></div>
+<p>The tarball is also available from <a href="https://osf.io/gak3v/files/">OSF</a>. The
+integration tests need fusion-io and the data directory named by
+<code>M3DC1_DATA_DIR</code>; failures naming <code>fpy</code> or <code>write_neo_input</code> mean the
+fusion-io install is not on the path.</p>
+<h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
+<p>Paste these prompts one at a time. Plots go to <code>plots/</code> and new data products
+to <code>processed_data/</code> under the project directory by default; the skill tells the
+agent so, and you can redirect either in a prompt.</p>
+<h3 id="1-register-the-m3d-c1-functions-as-codes">1. Register the M3D-C1 functions as codes<a class="headerlink" href="#1-register-the-m3d-c1-functions-as-codes" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>The directory scripts/ contains three Python modules with functions for
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>M3D-C1 HDF5 datasets — hdf5.py, m3dc1_tools.py, and m3dc1_plots.py — plus the
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>m3dc1 wrapper package they use. Before using or registering any of them, read
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>the m3dc1-skill (skills/m3dc1-skill/SKILL.md) and its references for the
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>calling conventions, input/output formats, and examples. Then register the
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>functions as codes and print a summary here.
+</code></pre></div>
+<p>Creating and registering the codes may take several minutes. <strong>Verify:</strong>
+<code>Search the registry for M3D-C1 codes.</code> The skill requires that codes wrapping
+functions that call into fusion-io write their JSON result to an
+<code>--output-json</code> file rather than stdout; check one such spec (for example the
+Miller-geometry code) carries that option.</p>
+<h3 id="2-explore-the-dataset">2. Explore the dataset<a class="headerlink" href="#2-explore-the-dataset" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Using your codes, tell me about the data in data/m3dc1_data/.
+</code></pre></div>
+<p><strong>Expect:</strong> case metadata, the available time snapshots, and the scalar traces,
+read through the registered codes (with <code>dsagt-run</code> records in <code>trace_archive/</code>).</p>
+<h3 id="3-equilibrium-quantities">3. Equilibrium quantities<a class="headerlink" href="#3-equilibrium-quantities" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>What are the Miller parameters for this configuration?
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>What&#39;s the safety factor?
+</code></pre></div>
+<p><strong>Expect:</strong> the agent runs the Miller-geometry and q-profile codes and reports
+the parameters and q95.</p>
+<h3 id="4-field-plots">4. Field plots<a class="headerlink" href="#4-field-plots" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Make plots of the t=1 fields of the electron temperature, all components of the
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>current density, and the perturbations of the density and magnetic flux.
+</code></pre></div>
+<p><strong>Expect:</strong> PNG files under <code>plots/</code>, produced by evaluating the fields on a
+grid rather than plotting raw coefficients (the skill says which the user means).</p>
+<h3 id="5-spectra-and-energy-trace">5. Spectra and energy trace<a class="headerlink" href="#5-spectra-and-energy-trace" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Create plots of the standard poloidal spectra and the kinetic energy trace.
+</code></pre></div>
+<h3 id="6-repackage-secondary-data-products">6. Repackage secondary data products<a class="headerlink" href="#6-repackage-secondary-data-products" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Save the poloidal spectral data for the pressure field in an HDF5 file
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>processed_data/pressure_spectrum.h5.
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Extract the electron temperature and electron density data at t=1 and place
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>them in an HDF5 file processed_data/electrons.h5.
+</code></pre></div>
+<p><strong>Expect:</strong> both files under <code>processed_data/</code>, written by registered codes
+(the agent registers a spectrum-computing code for the first if none exists,
+and uses the grid-evaluation code for the second), with the evaluated field
+values rather than basis coefficients.</p>
+<h3 id="7-reconstruct-the-session-as-a-rerunnable-script">7. Reconstruct the session as a rerunnable script<a class="headerlink" href="#7-reconstruct-the-session-as-a-rerunnable-script" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Reconstruct the pipeline from the execution records as a bash script, with the
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>data directory set as a variable at the top so it can be rerun on other M3D-C1
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>datasets. Save it as dsagt_session_script.sh.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>reconstruct_pipeline</code> renders the <code>trace_archive/</code> records in
+dependency order. The skill asks the agent to check your default shell first,
+since the fusion-io environment variables may be set only in that shell's
+startup files.</p>
+<h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Code registry contains specs for the M3D-C1 reading, analysis, plotting, and
+   HDF5 repackaging functions; those wrapping fusion-io calls take <code>--output-json</code>.</li>
+<li><code>plots/</code> holds the field, spectrum, and energy-trace plots.</li>
+<li><code>processed_data/</code> holds <code>pressure_spectrum.h5</code> and <code>electrons.h5</code>.</li>
+<li><code>trace_archive/</code> holds one execution record per code run, and no stray
+   temporary JSON files remain in the project.</li>
+<li><code>dsagt_session_script.sh</code> reruns the session against a data directory set at
+   the top of the script.</li>
+<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture every code
+   execution and agent turn — <code>dsagt traces tokamak-stability</code>.</li>
+</ol>
+<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>DSAgt Capability</th>
+<th>Steps</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Module tests as an environment check before the session</td>
+<td>Setup</td>
+</tr>
+<tr>
+<td>Skill-guided code creation from Python modules</td>
+<td>1</td>
+</tr>
+<tr>
+<td>Registry search</td>
+<td>1</td>
+</tr>
+<tr>
+<td>Code execution with provenance through <code>dsagt-run</code></td>
+<td>2–6</td>
+</tr>
+<tr>
+<td>Handling codes whose stdout is unusable (file-based JSON results)</td>
+<td>1, 3</td>
+</tr>
+<tr>
+<td>Plot and data-product generation into project subdirectories</td>
+<td>4–6</td>
+</tr>
+<tr>
+<td>Pipeline reconstruction with a parameterized input</td>
+<td>7</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>tokamak-stability<span class="w"> </span>-y
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>rm<span class="w"> </span>tokamak_stability.tar.gz
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>rm<span class="w"> </span>-rf<span class="w"> </span>~/dsagt-projects/.tools/tokamak_stability<span class="w">      </span><span class="c1"># the fusion-io build</span>
+</code></pre></div>
 
 
 

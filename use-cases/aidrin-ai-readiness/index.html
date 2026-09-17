@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/aidrin-ai-readiness/">
       
       
-        <link rel="prev" href="../isaac_vasp/">
+        <link rel="prev" href="../tokamak_stability/">
       
       
         <link rel="next" href="../genesis_skills/">
@@ -930,14 +930,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../isaac_vasp/" class="md-nav__link">
+      <a href="../vasp_dft/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    VASP / ISAAC
+    VASP DFT → AI-Ready Records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tokamak_stability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tokamak Stability
   
 
     
@@ -967,6 +995,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AIDRIN
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -983,6 +1029,163 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#applied-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Applied Metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-confirm-the-aidrin-skill-is-installed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Confirm the AIDRIN skill is installed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-run-the-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run the metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-optional-batch-several-metrics-from-one-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. (Optional) Batch several metrics from one config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-generate-a-datacard-from-the-assessment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Generate a datacard from the assessment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-review-the-execution-records" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Review the execution records
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1024,14 +1227,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../isaac_skills_demo/" class="md-nav__link">
+      <a href="../plasma_turbulence/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Skill-Driven VASP → ISAAC Conversion
+    Plasma Turbulence Training Data (XGC)
   
 
     
@@ -1052,42 +1255,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../fusion-fm/" class="md-nav__link">
+      <a href="../combustion_simulation/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Fusion Foundation Model (XGC)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tokamak_stability/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Tokamak Stability
+    BlastNet → WELL Conversion
   
 
     
@@ -1155,6 +1330,152 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#applied-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Applied Metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-confirm-the-aidrin-skill-is-installed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Confirm the AIDRIN skill is installed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-run-the-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run the metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-optional-batch-several-metrics-from-one-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. (Optional) Batch several metrics from one config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-generate-a-datacard-from-the-assessment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Generate a datacard from the assessment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-review-the-execution-records" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Review the execution records
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1174,6 +1495,277 @@
 <p><strong>Domain:</strong> AI data readiness — <code>aidrin</code> metrics (quality, fairness, privacy) on UCI Adult</p>
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/aidrin-ai-readiness/"><code>use_cases/aidrin-ai-readiness/</code></a></p>
 <p>Apply AIDRIN through DSAgt to a single tabular dataset (UCI Adult) — 15 metrics spanning data-quality, impact-on-AI, fairness-and-bias, and data-governance.</p>
+<blockquote>
+<p><strong>Estimated time:</strong> ~15 minutes</p>
+</blockquote>
+<p>This tutorial demonstrates <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) on a single tabular dataset — metrics from all four of AIDRIN's
+categories, with execution provenance.
+For how the <code>aidrin</code> skill and code are set up and what rules the agent follows, see the
+<a href="https://github.com/AI-ModCon/dsagt/blob/main/docs/readiness.md">AI-Readiness Check</a> page.</p>
+<p>The dataset is the <strong>UCI Adult</strong> census extract included with AIDRIN
+(<code>examples/sample_data/csv/adult.csv</code>). The demonstrated AIDRIN metrics rely on: a record <strong>ID</strong>, quasi-identifiers (<code>age</code>, <code>sex</code>, <code>race</code>), sensitive attributes (<code>sex</code>,
+<code>race</code>), and a prediction <strong>target</strong> (<code>income</code>).</p>
+<h2 id="applied-metrics">Applied Metrics<a class="headerlink" href="#applied-metrics" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Metrics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>data-quality</td>
+<td><code>completeness</code>, <code>duplicity</code>, <code>outliers</code></td>
+</tr>
+<tr>
+<td>impact-of-data-on-AI</td>
+<td><code>correlations</code>, <code>feature-relevance</code></td>
+</tr>
+<tr>
+<td>fairness-and-bias</td>
+<td><code>class-imbalance</code>, <code>statistical-rates</code>, <code>representation-rate</code></td>
+</tr>
+<tr>
+<td>data-governance</td>
+<td><code>k-anonymity</code>, <code>l-diversity</code>, <code>t-closeness</code>, <code>entropy-risk</code>, <code>single-attribute-risk</code>, <code>multiple-attribute-risk</code>, <code>differential-privacy</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>DSAgt installed and an agent platform installed and <strong>already
+  authenticated</strong></li>
+<li>Python 3.12 or later</li>
+</ul>
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init
+</code></pre></div>
+<p>At the menu, name the project <code>aidrin</code>, pick your agent, and keep the defaults. Then fetch the
+sample dataset into the project and start the session:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/aidrin
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data&quot;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>curl<span class="w"> </span>-sL<span class="w"> </span>https://raw.githubusercontent.com/idtlab/AIDRIN/v2026.08.2/examples/sample_data/csv/adult.csv<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span>-o<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data/adult.csv&quot;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>dsagt<span class="w"> </span>start<span class="w"> </span>aidrin
+</code></pre></div>
+<h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
+<p>Paste these prompts one at a time.</p>
+<h3 id="1-confirm-the-aidrin-skill-is-installed">1. Confirm the AIDRIN skill is installed<a class="headerlink" href="#1-confirm-the-aidrin-skill-is-installed" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Using the aidrin skill, list the readiness metrics AIDRIN provides.
+</code></pre></div>
+<p><strong>Verify:</strong> the agent reads <code>skills/aidrin/SKILL.md</code> and its <code>reference/metrics.md</code> and lists the metrics by category; it may also run <code>aidrin list</code> through <code>dsagt-run</code>.</p>
+<h3 id="2-run-the-metrics">2. Run the metrics<a class="headerlink" href="#2-run-the-metrics" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Using the aidrin skill, run a readiness assessment on data/adult.csv. Cover these
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>four categories:
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>(1) data-quality: completeness, duplicity, outliers;
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>(2) impact-of-data-on-AI: correlations on &quot;age,education.num,sex,race&quot;, and feature-relevance with
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    categorical columns &quot;workclass,education,sex,race&quot;, numerical columns
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    &quot;age,education.num,hours.per.week&quot;, target income;
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>(3) fairness-and-bias: class-imbalance on income, statistical-rates on income with sensitive
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    attribute sex, representation-rate on &quot;sex,race&quot;;
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>(4) data-governance: k-anonymity on &quot;age,sex,race&quot;, l-diversity on &quot;age,sex,race&quot; with sensitive
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    column income, t-closeness on &quot;age,sex,race&quot; with sensitive column income, entropy-risk on
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    &quot;age,sex,race&quot;, single-attribute-risk with id-column ID and eval-columns &quot;age,sex,race&quot;,
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    multiple-attribute-risk with id-column ID and eval-columns &quot;age,sex,race&quot;, and
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    differential-privacy on &quot;age,hours.per.week&quot; with epsilon 1.0.
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>Then give me a readiness verdict organized by the four categories.
+</code></pre></div>
+<p><strong>Expect</strong> — the exact commands and representative results (positional args; JSON to stdout):</p>
+<p><strong>Data quality</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aidrin run completeness data/adult.csv</code></td>
+<td>overall <code>1.0</code></td>
+</tr>
+<tr>
+<td><code>aidrin run duplicity data/adult.csv</code></td>
+<td><code>0.0</code></td>
+</tr>
+<tr>
+<td><code>aidrin run outliers data/adult.csv</code></td>
+<td>overall <code>≈0.050</code> (<code>hours.per.week</code> ≈0.277)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Impact on AI</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aidrin run correlations data/adult.csv "age,education.num,sex,race"</code></td>
+<td>Theil's U + Pearson matrices</td>
+</tr>
+<tr>
+<td><code>aidrin run feature-relevance data/adult.csv "workclass,education,sex,race" "age,education.num,hours.per.week" income</code></td>
+<td>Pearson-to-target (e.g. <code>education.num</code> ≈0.34, <code>age</code> ≈0.23)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Fairness &amp; bias</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aidrin run class-imbalance data/adult.csv income</code></td>
+<td>imbalance degree <code>≈0.52</code></td>
+</tr>
+<tr>
+<td><code>aidrin run statistical-rates data/adult.csv income sex</code></td>
+<td>Female <code>&gt;50K</code> ≈11% vs Male ≈31%</td>
+</tr>
+<tr>
+<td><code>aidrin run representation-rate data/adult.csv "sex,race"</code></td>
+<td>Male:Female ≈2.0, White:Black ≈8.9</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Data governance / privacy</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aidrin run k-anonymity data/adult.csv "age,sex,race"</code></td>
+<td><code>k = 1</code></td>
+</tr>
+<tr>
+<td><code>aidrin run l-diversity data/adult.csv "age,sex,race" income</code></td>
+<td><code>l = 1</code></td>
+</tr>
+<tr>
+<td><code>aidrin run t-closeness data/adult.csv "age,sex,race" income</code></td>
+<td><code>t ≈ 0.76</code></td>
+</tr>
+<tr>
+<td><code>aidrin run entropy-risk data/adult.csv "age,sex,race"</code></td>
+<td><code>≈0.06</code></td>
+</tr>
+<tr>
+<td><code>aidrin run single-attribute-risk data/adult.csv ID "age,sex,race"</code></td>
+<td>per-attribute risk stats</td>
+</tr>
+<tr>
+<td><code>aidrin run multiple-attribute-risk data/adult.csv ID "age,sex,race"</code></td>
+<td>joint re-identification risk</td>
+</tr>
+<tr>
+<td><code>aidrin run differential-privacy data/adult.csv "age,hours.per.week" 1.0</code></td>
+<td>noised mean/variance per column</td>
+</tr>
+</tbody>
+</table>
+<p>The agent should produce a four-part verdict: <strong>quality</strong> is clean (complete, no duplicates,
+moderate <code>hours.per.week</code> outliers); <strong>impact</strong> shows <code>education.num</code>/<code>age</code> as the strongest income
+predictors; <strong>fairness</strong> flags a large gender gap in the target (men ~2.8× more likely <code>&gt;50K</code>); and
+<strong>governance</strong> flags severe re-identification risk (<code>k = 1</code>, <code>l = 1</code>) on the <code>age,sex,race</code>
+quasi-identifiers — bin or suppress before sharing.</p>
+<h3 id="3-optional-batch-several-metrics-from-one-config">3. (Optional) Batch several metrics from one config<a class="headerlink" href="#3-optional-batch-several-metrics-from-one-config" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Write an aidrin batch config (YAML) that runs completeness, class-imbalance, statistical-rates, and
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>representation-rate on data/adult.csv with target income and sensitive attribute sex, then run it
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>with the aidrin skill through dsagt-run.
+</code></pre></div>
+<p>The config is one flat mapping, not per-metric blocks; the <code>aidrin</code> skill's
+<code>reference/metrics.md</code> documents the keys. For this step:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">file-path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data/adult.csv</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">file-type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nt">metrics</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">completeness</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">class-imbalance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">statistical-rates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">representation-rate</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">target-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">income</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nt">y-true-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">income</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nt">sensitive-attribute-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sex</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sex</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">race</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<h3 id="4-generate-a-datacard-from-the-assessment">4. Generate a datacard from the assessment<a class="headerlink" href="#4-generate-a-datacard-from-the-assessment" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Use the datacard-generator skill to write a Level 1 datacard for data/adult.csv that incorporates
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>the readiness findings above. Take the values from the dataset and the reports, and note anything
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>unknown rather than asking.
+</code></pre></div>
+<p>The agent invokes the <code>datacard-generator</code> base skill and writes a Genesis Datacard (e.g.
+<code>data/genesis_datacard_*.md</code>) documenting the dataset and its readiness profile.</p>
+<h3 id="5-review-the-execution-records">5. Review the execution records<a class="headerlink" href="#5-review-the-execution-records" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Show me the execution records for this session as a table of metric, command, and exit code.
+</code></pre></div>
+<p>The agent reads the records <code>dsagt-run</code> wrote to <code>trace_archive/</code> and lists one row per
+metric call: the fifteen runs from step 2 and the batch run from step 3, every exit code 0.</p>
+<h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
+<ol>
+<li><code>skills/aidrin/SKILL.md</code> is present, with a <code>PROVENANCE.txt</code> naming the AIDRIN source.</li>
+<li><code>trace_archive/</code> holds one execution record per metric run from step 2.</li>
+<li>Results span the four categories, with the gender-fairness gap and the <code>k = 1</code> / <code>l = 1</code>
+   re-identification risks identified.</li>
+<li>A datacard for the dataset exists (<code>data/genesis_datacard_*.md</code>).</li>
+<li>The agent lists every metric call from the execution records with its command and exit code.</li>
+<li>MLflow traces capture token usage, latency, and the code-execution and MCP tool spans.</li>
+</ol>
+<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>DSAgt Capability</th>
+<th>Steps</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The <code>aidrin</code> base skill and code installed at init</td>
+<td>Setup</td>
+</tr>
+<tr>
+<td>Base-skill use: the <code>aidrin</code> CLI through <code>dsagt-run</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td>Code execution with provenance (execution records in <code>trace_archive/</code>)</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Multi-metric orchestration</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Multi-metric / batch execution</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Base-skill use (<code>datacard-generator</code>)</td>
+<td>4</td>
+</tr>
+<tr>
+<td>Provenance review from the execution records</td>
+<td>5</td>
+</tr>
+<tr>
+<td>Observability (MLflow spans in the serverless <code>mlflow.db</code> store)</td>
+<td>all</td>
+</tr>
+</tbody>
+</table>
+<p>View the traces any time with
+<code>dsagt traces aidrin</code>.</p>
+<h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>aidrin<span class="w"> </span>-y
+</code></pre></div>
 
 
 

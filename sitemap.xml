@@ -61,7 +61,11 @@
          <lastmod>2026-09-17</lastmod>
     </url>
     <url>
-         <loc>https://ai-modcon.github.io/dsagt/use-cases/isaac_vasp/</loc>
+         <loc>https://ai-modcon.github.io/dsagt/use-cases/vasp_dft/</loc>
+         <lastmod>2026-09-17</lastmod>
+    </url>
+    <url>
+         <loc>https://ai-modcon.github.io/dsagt/use-cases/tokamak_stability/</loc>
          <lastmod>2026-09-17</lastmod>
     </url>
     <url>
@@ -73,15 +77,11 @@
          <lastmod>2026-09-17</lastmod>
     </url>
     <url>
-         <loc>https://ai-modcon.github.io/dsagt/use-cases/isaac_skills_demo/</loc>
+         <loc>https://ai-modcon.github.io/dsagt/use-cases/plasma_turbulence/</loc>
          <lastmod>2026-09-17</lastmod>
     </url>
     <url>
-         <loc>https://ai-modcon.github.io/dsagt/use-cases/fusion-fm/</loc>
-         <lastmod>2026-09-17</lastmod>
-    </url>
-    <url>
-         <loc>https://ai-modcon.github.io/dsagt/use-cases/tokamak_stability/</loc>
+         <loc>https://ai-modcon.github.io/dsagt/use-cases/combustion_simulation/</loc>
          <lastmod>2026-09-17</lastmod>
     </url>
 </urlset>
