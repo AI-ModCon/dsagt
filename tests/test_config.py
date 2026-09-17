@@ -488,10 +488,21 @@ class TestInitProject:
 
         with patch("dsagt.skills.install_base_skills", fake_install):
             pdir = init_project("base", "claude", exclude=["all"])
-        # Installed after the knowledge base exists, with the project's KB,
-        # so the base-skill codes are indexed where search_registry looks.
+        # Without the ``codes`` asset there is no copied collection to carry
+        # the base-skill code vectors, so they are embedded into the
+        # project's own KB.
         assert [c[0] for c in calls] == [pdir]
         assert Path(calls[0][1].index_dir) == pdir / "kb_index"
+
+        calls.clear()
+        with (
+            patch("dsagt.skills.install_base_skills", fake_install),
+            patch("dsagt.session._provision_kb", return_value=["codes", "genesis"]),
+        ):
+            pdir = init_project("cached", "claude")
+        # With the ``codes`` asset the copied collection already holds the
+        # vectors: no KB, so init loads no embedding model.
+        assert calls == [(pdir, None)]
 
         def boom(pdir, **_k):
             raise RuntimeError("no network")

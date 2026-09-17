@@ -709,6 +709,22 @@ def test_install_base_skills_finishes_the_others_when_one_fetch_fails(
     assert not (proj / "codes" / "aidrin").exists()
 
 
+def test_base_skill_code_specs_hold_no_project_path():
+    """Every base-skill code spec is project-independent: a script runs by a
+    path relative to the project directory, so one embedding serves every
+    project."""
+    specs = sc.base_skill_code_specs()
+    names = {s["name"] for s in specs}
+    assert {"aidrin", "datacard-introspect", "datacard-validate"} <= names
+    for spec in specs:
+        assert not spec["executable"].startswith("/")
+        assert spec["tags"] and spec["parameters"] is not None
+    introspect = next(s for s in specs if s["name"] == "datacard-introspect")
+    assert introspect["executable"].startswith(
+        "python skills/datacard-generator/scripts/"
+    )
+
+
 def test_register_base_skill_codes_indexes_into_the_kb(tmp_path):
     """With a knowledge base, each registered code is added to the ``codes``
     collection, so ``search_registry`` finds it."""

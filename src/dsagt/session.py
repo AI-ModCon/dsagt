@@ -547,9 +547,9 @@ def _provision_kb(
     include: list[str] | None,
     exclude: list[str] | None,
     embedding: dict | None = None,
-) -> None:
+) -> list[str]:
     """Build the requested KB assets into the shared cache, then copy that
-    set into the project.
+    set into the project.  Returns the resolved asset names.
 
     The first project on a machine pays the one-time build (bundled tools +
     genesis catalog by default); later projects just copy.  The copy is
@@ -570,7 +570,7 @@ def _provision_kb(
     if not assets:
         # ``--exclude all``: a valid project with an empty KB.
         (pdir / "kb_index").mkdir(parents=True, exist_ok=True)
-        return
+        return assets
 
     shared = REGISTRY_DIR / "kb_index"
     first_ever = not shared.exists() or not any(
@@ -623,31 +623,47 @@ def _provision_kb(
 
     if pending:
         print("  Knowledge base ready.", flush=True)
+    return assets
 
 
-def _provision_base_skills(pdir: Path, embedding: dict | None) -> None:
+def _provision_base_skills(
+    pdir: Path, embedding: dict | None, *, index_codes: bool
+) -> None:
     """Install the base skills (``skills.base_skills``) from their upstream
-    repositories into ``<project>/skills/`` and register their codes into
-    the project's knowledge base.
+    repositories into ``<project>/skills/`` and register their codes.
 
-    Runs after the knowledge base is provisioned so the codes land in the
-    ``codes`` collection ``search_registry`` searches.  A failed fetch is
-    printed, not raised: the project works without the skills, and a re-run
-    of ``dsagt init`` installs them once the network is available.
+    The base-skill code vectors come with the copied ``codes`` collection,
+    embedded once by the shared knowledge-base build, so this step loads no
+    embedding model.  *index_codes* is for a project provisioned without the
+    ``codes`` asset, which has no copied collection to carry them: the specs
+    are then embedded into the project's own knowledge base.  A failed fetch
+    is printed, not raised: the project works without the skills, and a
+    re-run of ``dsagt init`` installs them once the network is available.
     """
-    from dsagt.skills import install_base_skills
+    from dsagt.skills import base_skills, install_base_skills
 
-    kb = kb_from_config(
-        {"project_dir": str(pdir), "embedding": embedding or DEFAULTS["embedding"]}
-    )
+    names = ", ".join(entry["name"] for entry in base_skills())
+    print(f"Installing base skills ({names}) …", flush=True)
+    kb = None
+    if index_codes:
+        print("  Indexing base-skill codes …", flush=True)
+        kb = kb_from_config(
+            {"project_dir": str(pdir), "embedding": embedding or DEFAULTS["embedding"]}
+        )
     try:
-        install_base_skills(pdir, kb=kb)
+        results = install_base_skills(pdir, kb=kb)
     except Exception as e:  # noqa: BLE001 — offline init must still complete
         print(
             f"  Warning: could not install the base skills ({e}).  Re-run "
             "`dsagt init` with network access to install them.",
             flush=True,
         )
+        return
+    print(
+        "  Base skills ready: "
+        + ", ".join(f"{r['name']} ({r['action']})" for r in results),
+        flush=True,
+    )
 
 
 def init_project(
@@ -706,9 +722,9 @@ def init_project(
 
     CodeRegistry(runtime_dir=pdir).ensure_bundled_copies()
 
-    _provision_kb(pdir, include, exclude, embedding=embedding)
+    assets = _provision_kb(pdir, include, exclude, embedding=embedding)
 
-    _provision_base_skills(pdir, embedding)
+    _provision_base_skills(pdir, embedding, index_codes="codes" not in assets)
 
     write_config_file(
         pdir,

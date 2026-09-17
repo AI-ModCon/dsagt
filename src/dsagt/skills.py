@@ -861,30 +861,51 @@ def register_base_skill_codes(project_dir: str | Path, *, kb=None) -> list[str]:
     return actions
 
 
+def base_skill_code_specs() -> list[dict]:
+    """The code spec of every ``codes`` entry of :func:`base_skills`.
+
+    A ``script`` entry's executable is ``python skills/<skill>/<script>``,
+    relative to the project directory, which is the agent's cwd; an
+    ``executable`` entry runs a command on the path.  A spec holds no
+    project path, so the shared knowledge-base build embeds each once and
+    every project's copied ``codes`` collection carries it.
+    """
+    return [
+        _code_spec(entry, code)
+        for entry in base_skills()
+        for code in entry.get("codes", ())
+    ]
+
+
+def _code_spec(entry: dict, code: dict) -> dict:
+    if "script" in code:
+        executable = f"python {Path('skills') / entry['name'] / code['script']}"
+    else:
+        executable = code["executable"]
+    spec = {
+        "name": code["name"],
+        "description": code["description"],
+        "executable": executable,
+        "parameters": code["parameters"],
+        "tags": [entry["name"]],
+    }
+    if code.get("dependencies"):
+        spec["dependencies"] = list(code["dependencies"])
+    return spec
+
+
 def _register_skill_codes(registry, project_dir: Path, entry: dict) -> list[str]:
     """Register one base skill's ``codes`` entries through *registry*."""
     actions: list[str] = []
     for code in entry.get("codes", ()):
         if "script" in code:
-            script = Path("skills") / entry["name"] / code["script"]
-            if not (project_dir / script).exists():
+            script = project_dir / "skills" / entry["name"] / code["script"]
+            if not script.exists():
                 raise FileNotFoundError(
                     f"base skill {entry['name']!r} has no {code['script']} in "
                     f"{project_dir / 'skills' / entry['name']}"
                 )
-            executable = f"python {script}"
-        else:
-            executable = code["executable"]
-        spec = {
-            "name": code["name"],
-            "description": code["description"],
-            "executable": executable,
-            "parameters": code["parameters"],
-            "tags": [entry["name"]],
-        }
-        if code.get("dependencies"):
-            spec["dependencies"] = list(code["dependencies"])
-        actions.append(f"{registry.save_tool(spec)} {code['name']}")
+        actions.append(f"{registry.save_tool(_code_spec(entry, code))} {code['name']}")
     return actions
 
 

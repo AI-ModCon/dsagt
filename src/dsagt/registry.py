@@ -50,11 +50,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Single project-local collection holding both bundled (package-shipped)
-#: and registered (agent-saved) codes.  Bundled entries carry
-#: ``metadata.source = "bundled"`` and ``metadata.dsagt_version`` so
-#: they can be evicted and refreshed on dsagt upgrade without touching
-#: agent-registered entries.
+#: Single project-local collection holding the bundled (package) codes, the
+#: base-skill codes, and the registered (agent-saved) codes.  The first two
+#: are embedded once by the shared knowledge-base build and copied into the
+#: project at init; ``metadata.source`` says which kind an entry is.
 CODES_COLLECTION = "codes"
 
 #: External skill catalogs (fetched from GitHub repos) live in their own
@@ -96,6 +95,42 @@ def _wrap_executable(name: str, executable: str, deps: list[str] | None = None) 
         return executable
     inner = f"{_uv_run_prefix(deps or [])}{executable}"
     return f"dsagt-run --code {name} -- {inner}"
+
+
+def code_metadata(spec: dict, source: str) -> dict:
+    """The ``codes`` collection metadata for a spec whose executable is wrapped.
+
+    *source* says who put the entry there: ``registered`` for an agent-saved
+    code, ``bundled`` for a package code, ``base-skill`` for a code a base
+    skill declares.  One builder so an entry embedded by the shared
+    knowledge-base build and one indexed by :meth:`CodeRegistry.save_tool`
+    have the same shape.
+    """
+    return {
+        "code_name": spec["name"],
+        "tags": ",".join(spec.get("tags", [])),
+        "executable": spec["executable"],
+        "has_dependencies": str(bool(spec.get("dependencies"))),
+        "source": source,
+    }
+
+
+def render_code_spec(spec: dict) -> str:
+    """Render a code's SKILL.md text from its spec.
+
+    The executable is wrapped with ``dsagt-run`` and, when the spec declares
+    dependencies, ``uv run --with``; the frontmatter is the wrapped spec and
+    the body is generated from it.  :meth:`CodeRegistry.save_tool` writes
+    this text for a new code, and the shared knowledge-base build embeds the
+    same text for the base-skill codes, so the ``codes`` collection a project
+    copies at init matches the files init writes.
+    """
+    wrapped = dict(spec)
+    wrapped["executable"] = _wrap_executable(
+        spec["name"], spec["executable"], spec.get("dependencies")
+    )
+    frontmatter = yaml.dump(wrapped, default_flow_style=False, sort_keys=False)
+    return f"---\n{frontmatter}---\n{_generate_code_body(wrapped)}"
 
 
 def _generate_code_body(spec: dict) -> str:
@@ -427,8 +462,8 @@ class CodeRegistry:
         action = "updated" if path.exists() else "added"
         code_dir.mkdir(parents=True, exist_ok=True)
 
-        spec = dict(spec)
-        spec["executable"] = _wrap_executable(
+        wrapped = dict(spec)
+        wrapped["executable"] = _wrap_executable(
             spec["name"],
             spec["executable"],
             spec.get("dependencies"),
@@ -437,19 +472,18 @@ class CodeRegistry:
         # Preserve existing body when updating so hand-edited docs survive
         body = ""
         if path.exists():
-            text = path.read_text()
-            parts = text.split("---", 2)
+            parts = path.read_text().split("---", 2)
             if len(parts) == 3:
                 body = parts[2]
 
-        if not body:
-            body = _generate_code_body(spec)
-
-        frontmatter = yaml.dump(spec, default_flow_style=False, sort_keys=False)
-        path.write_text(f"---\n{frontmatter}---\n{body}")
+        if body:
+            frontmatter = yaml.dump(wrapped, default_flow_style=False, sort_keys=False)
+            path.write_text(f"---\n{frontmatter}---\n{body}")
+        else:
+            path.write_text(render_code_spec(spec))
 
         if self._kb:
-            self._index_code(spec, path)
+            self._index_code(wrapped, path)
 
         return action
 
@@ -461,18 +495,10 @@ class CodeRegistry:
         cannot recover from (it would write a duplicate next time it
         searched).  Atomic registration: in the index or not registered.
         """
-        text = tool_path.read_text()
-        metadata = {
-            "code_name": spec["name"],
-            "tags": ",".join(spec.get("tags", [])),
-            "executable": spec["executable"],
-            "has_dependencies": str(bool(spec.get("dependencies"))),
-            "source": "registered",  # vs "bundled" — see ensure_bundled_*
-        }
         self._kb.add_entries(
-            texts=[text],
+            texts=[tool_path.read_text()],
             collection=CODES_COLLECTION,
-            metadatas=[metadata],
+            metadatas=[code_metadata(spec, "registered")],
         )
 
 

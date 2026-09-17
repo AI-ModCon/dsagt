@@ -480,3 +480,24 @@ class TestRenderArguments:
         params = {"x": {"type": "string", "cli": "positional:abc"}}
         with pytest.raises(ValueError, match="integer"):
             render_arguments(params, {"x": "val"})
+
+
+def test_save_tool_writes_the_rendered_spec(tmp_path):
+    """A new code's SKILL.md is exactly ``render_code_spec`` of its spec, so
+    the shared knowledge-base build, which embeds that rendering for the
+    base-skill codes, holds the text a project's file has."""
+    from dsagt.registry import CodeRegistry, render_code_spec
+
+    spec = {
+        "name": "count-rows",
+        "description": "Count the rows of a CSV file.",
+        "executable": "python skills/x/scripts/count.py",
+        "parameters": {"path": {"type": "string", "required": True}},
+        "tags": ["x"],
+        "dependencies": ["pandas"],
+    }
+    registry = CodeRegistry(runtime_dir=tmp_path)
+    assert registry.save_tool(spec) == "added"
+    written = (tmp_path / "codes" / "count-rows" / "SKILL.md").read_text()
+    assert written == render_code_spec(spec)
+    assert "dsagt-run --code count-rows -- uv run --with pandas -- python" in written

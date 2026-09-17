@@ -40,7 +40,7 @@ uv run mkdocs build --strict                                # docs, what CI runs
 
 - Provenance rides in the code spec's `executable` string (`dsagt-run --code <name> -- ...`), so a run through the agent's own shell is still recorded. The server offers no execute-by-name tool: the agent's shell is always available, and a server-side dispatch misses every run made outside it.
 - The package holds no skill directories. A base skill is an entry in `skills.base_skills` whose directory is maintained upstream (the genesis catalog's `skills/basedata-skills/`, idtlab/AIDRIN).
-- `dsagt init` is the one place collections are provisioned; `dsagt-server` opens only `<project>/kb_index`.
+- `dsagt init` is the one place collections are provisioned; `dsagt-server` opens only `<project>/kb_index`. The shared `kb_index/codes` collection holds the bundled tools and the base-skill codes, embedded once and stamped (`setup_core_kb.CODES_STAMP_FILE`); init copies it and loads no embedding model.
 - A tool is registered on `dsagt-server` only when its handler is complete end to end; internal scaffolding for an unfinished path stays unregistered.
 - `dsagt-server` derives its project from its cwd and behaves the same from a bare launch or `dsagt start`. The MCP-config env block carries routing only. dsagt never reads or writes an LLM-provider credential (`ANTHROPIC_*`, `OPENAI_*`, `GOOSE_*`); its own service credentials, the trace store's `MLFLOW_TRACKING_API_KEY` or `_TOKEN` and the embedding backend's `EMBEDDING_API_KEY`, are read from the shell or `~/.config/dsagt/env` (`session.load_user_env`) and never written into a project or an agent config.
 - Agent traces come from the on-disk transcript through the periodic pass, the same way for all five agents.

@@ -226,3 +226,59 @@ class TestEnsureAssetsTools:
             second = ensure_assets(["codes"], tmp_path)
         assert second["skipped"] == ["codes"]
         assert second["built"] == []
+
+    def test_rebuilds_when_the_stamp_differs(self, tmp_path):
+        """The collection is rebuilt when its stamp is not the digest of the
+        current dsagt version and entry texts, so an upgrade or a changed
+        base-skill code refreshes the cache without a manual wipe."""
+        from dsagt.commands.setup_core_kb import CODES_STAMP_FILE
+
+        with patch(
+            "dsagt.knowledge.Embedder.create", return_value=self._fake_embedder()
+        ):
+            ensure_assets(["codes"], tmp_path)
+            stamp = tmp_path / "codes" / CODES_STAMP_FILE
+            assert len(stamp.read_text().strip()) == 64
+            stamp.write_text("stale\n")
+            # A rebuild happens in a fresh ``dsagt init`` process; chromadb
+            # caches one client per path within a process, so the cache is
+            # cleared here to stand in for that process boundary.
+            from chromadb.api.shared_system_client import SharedSystemClient
+
+            SharedSystemClient.clear_system_cache()
+            third = ensure_assets(["codes"], tmp_path)
+        assert third["built"] == ["codes"]
+        assert len(stamp.read_text().strip()) == 64
+
+    def test_build_holds_bundled_and_base_skill_codes(self, tmp_path):
+        """The shared ``codes`` collection carries the package codes and the
+        base-skill codes, each tagged by source, so a project that copies it
+        needs no embedding at init."""
+        from dsagt.commands.setup_core_kb import _build_bundled_tools
+        from dsagt.registry import render_code_spec
+        from dsagt.skills import base_skill_code_specs
+
+        class FakeKB:
+            def __init__(self):
+                self.texts = []
+                self.metadatas = []
+
+            def add_entries(self, *, texts, collection, metadatas):
+                assert collection == "codes"
+                self.texts += texts
+                self.metadatas += metadatas
+
+        (tmp_path / "codes").mkdir()
+        kb = FakeKB()
+        n = _build_bundled_tools(kb, tmp_path)
+        assert n == len(kb.texts)
+        by_source = {}
+        for m in kb.metadatas:
+            by_source.setdefault(m["source"], set()).add(m["code_name"])
+        assert {"aidrin", "datacard-introspect", "datacard-validate"} <= by_source[
+            "base-skill"
+        ]
+        assert by_source["bundled"]
+        expected = {render_code_spec(s) for s in base_skill_code_specs()}
+        assert expected <= set(kb.texts)
+        assert all("dsagt_version" in m for m in kb.metadatas)
