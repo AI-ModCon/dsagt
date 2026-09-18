@@ -593,3 +593,376 @@ class TestChildEnv:
         assert exit_code == 0
         (record,) = tmp_path.glob("*.json")
         assert "found" in json.loads(record.read_text())["execution"]["stdout"]
+
+
+# ---------------------------------------------------------------------------
+# A run ended by a signal
+# ---------------------------------------------------------------------------
+
+
+class TestSignal:
+
+    def test_a_terminated_run_still_writes_its_record(self, tmp_path):
+        """SIGTERM to dsagt-run reaches the child and the record says so."""
+        import os
+        import signal
+        import subprocess
+        import sys
+        import time
+
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "dsagt.commands.run_code",
+                "--code",
+                "sleeper",
+                "--records-dir",
+                str(tmp_path),
+                "--",
+                "sleep",
+                "30",
+            ],
+            cwd=str(tmp_path),
+        )
+        time.sleep(1.5)
+        os.kill(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=10)
+        records = list(tmp_path.glob("*.json"))
+        assert len(records) == 1
+        record = json.loads(records[0].read_text())
+        assert record["execution"]["return_code"] == -signal.SIGTERM
+        assert "SIGTERM" in record["execution"]["stderr"]
+        assert proc.returncode != 0
+
+
+# ---------------------------------------------------------------------------
+# File hashes and argument-derived files
+# ---------------------------------------------------------------------------
+
+
+class TestFileHashes:
+
+    def test_inputs_and_outputs_are_hashed(self, tmp_path, monkeypatch):
+        import hashlib
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "in.txt").write_text("alpha\n")
+        main(
+            [
+                "--code",
+                "copy",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--input-files",
+                "in.txt",
+                "--output-files",
+                "out.txt",
+                "--",
+                "cp",
+                "in.txt",
+                "out.txt",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        digest = hashlib.sha256(b"alpha\n").hexdigest()
+        assert record["execution"]["file_hashes"] == {
+            "in.txt": digest,
+            "out.txt": digest,
+        }
+
+    def test_a_missing_output_has_no_hash(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        main(
+            [
+                "--code",
+                "t",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--output-files",
+                "never.txt",
+                "--",
+                "true",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["file_hashes"] == {}
+
+
+class TestArgumentDerivedFiles:
+    """With no spec roles, an argument that is a file is an input, and one
+    that exists only after the run is an output."""
+
+    def test_a_spec_with_no_roles_falls_back_to_the_arguments(
+        self, tmp_path, monkeypatch
+    ):
+        from dsagt.registry import CodeRegistry
+
+        project = tmp_path / "proj"
+        (project / "trace_archive").mkdir(parents=True)
+        CodeRegistry(runtime_dir=project).save_tool(
+            {
+                "name": "aidrin",
+                "description": "d",
+                "executable": "cat",
+                "parameters": {
+                    "args": {"type": "string", "required": True, "cli": "positional"}
+                },
+            }
+        )
+        (project / "data").mkdir()
+        (project / "data" / "t.csv").write_text("a,b\n1,2\n")
+        monkeypatch.chdir(project)
+        main(
+            [
+                "--code",
+                "aidrin",
+                "--records-dir",
+                str(project / "trace_archive"),
+                "--",
+                "cat",
+                "data/t.csv",
+            ]
+        )
+        record = json.loads(
+            next((project / "trace_archive").glob("*.json")).read_text()
+        )
+        assert record["execution"]["input_files"] == ["data/t.csv"]
+        assert record["execution"]["output_files"] == []
+        assert set(record["execution"]["file_hashes"]) == {"data/t.csv"}
+
+
+class TestRolesAndArgumentsPerSide:
+
+    def test_arguments_fill_the_side_the_roles_leave_empty(self, tmp_path, monkeypatch):
+        """fastp's spec names -i and -o; the agent ran --in1/--out1. The role
+        match gives nothing on either side, and the scan fills both."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "in.fq").write_text("@r\nA\n+\nF\n")
+        main(
+            [
+                "--code",
+                "fastp",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--",
+                "cp",
+                "in.fq",
+                "out.fq",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["input_files"] == ["in.fq"]
+        assert record["execution"]["output_files"] == ["out.fq"]
+
+    def test_role_inputs_keep_and_outputs_come_from_the_scan(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "in.fq").write_text("x\n")
+        main(
+            [
+                "--code",
+                "t",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--input-files",
+                "in.fq",
+                "--",
+                "cp",
+                "in.fq",
+                "out.fq",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["input_files"] == ["in.fq"]
+        assert record["execution"]["output_files"] == ["out.fq"]
+
+
+class TestNestedRuns:
+
+    def test_a_nested_run_carries_its_parent_and_the_reconstruction_skips_it(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+        import sys
+
+        from dsagt.provenance import load_pipeline_records
+
+        monkeypatch.chdir(tmp_path)
+        records = tmp_path / "records"
+        inner = f"{sys.executable} -m dsagt.commands.run_code --code inner --records-dir {records} -- echo inner"
+        script = tmp_path / "loop.sh"
+        script.write_text(f"#!/bin/bash\n{inner}\n")
+        monkeypatch.delenv("DSAGT_RUN_PARENT", raising=False)
+        rc = main(
+            ["--code", "loop", "--records-dir", str(records), "--", "bash", str(script)]
+        )
+        assert rc == 0
+        by_name = {
+            r.get("code_name"): r
+            for r in (json.loads(p.read_text()) for p in records.glob("*.json"))
+        }
+        outer, child = by_name["loop"], by_name["inner"]
+        assert "parent_record_id" not in outer
+        assert child["parent_record_id"] == outer["record_id"]
+        assert [r["code_name"] for r in load_pipeline_records(records)] == ["loop"]
+        assert "DSAGT_RUN_PARENT" not in os.environ
+
+
+class TestRolesTolerateTheUvWrapper:
+
+    def test_a_command_without_the_wrapper_still_matches_the_spec(self):
+        from dsagt.provenance import file_roles_from_command
+
+        spec = {
+            "executable": "dsagt-run --code c -- uv run --with h5py -- python skills/c/scripts/c.py",
+            "parameters": {
+                "case": {"cli": "--case", "role": "input"},
+                "out": {"cli": "--out", "role": "output"},
+            },
+        }
+        with_wrapper = [
+            "uv",
+            "run",
+            "--with",
+            "h5py",
+            "--",
+            "python",
+            "skills/c/scripts/c.py",
+            "--case",
+            "d",
+            "--out",
+            "o.json",
+        ]
+        without = ["python", "skills/c/scripts/c.py", "--case", "d", "--out", "o.json"]
+        assert file_roles_from_command(spec, with_wrapper) == (["d"], ["o.json"])
+        assert file_roles_from_command(spec, without) == (["d"], ["o.json"])
+
+
+class TestArgumentScanDetails:
+
+    def test_a_directory_is_an_input_and_the_interpreted_script_is_not(
+        self, tmp_path, monkeypatch
+    ):
+        from dsagt.provenance import files_from_arguments
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "case").mkdir()
+        (tmp_path / "tool.py").write_text("print(1)\n")
+        (tmp_path / "t.csv").write_text("a\n")
+        assert files_from_arguments(
+            ["python", "tool.py", "case", "t.csv", "--n", "3"]
+        ) == [
+            "case",
+            "t.csv",
+        ]
+        assert files_from_arguments(["mytool", "tool.py", "case"]) == [
+            "tool.py",
+            "case",
+        ]
+
+
+class TestFindingsFromThe0919Runs:
+
+    def test_a_rewritten_output_is_an_output_on_every_run(self, tmp_path, monkeypatch):
+        """With no roles, the second run of a converter found its output
+        already present, listed it as an input, and named no output."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "in.txt").write_text("a")
+        write = "import sys, time; open(sys.argv[2], 'w').write(str(time.time()))"
+        records = tmp_path / "trace_archive"
+        for _ in range(2):
+            run_and_record(
+                "",
+                [sys.executable, "-c", write, "in.txt", "out.txt"],
+                records,
+                log_trace=None,
+            )
+        runs = [json.loads(p.read_text())["execution"] for p in records.glob("*.json")]
+        second = max(runs, key=lambda e: e["timestamp_start"])
+        assert "out.txt" in second["output_files"]
+        assert (
+            second["file_hashes"]["out.txt"]
+            == __import__("hashlib")
+            .sha256((tmp_path / "out.txt").read_bytes())
+            .hexdigest()
+        )
+
+    def test_a_failed_run_names_no_output_it_did_not_write(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        records = tmp_path / "trace_archive"
+        rc = run_and_record(
+            "plot", ["false"], records, output_files=["plots/p.png"], log_trace=None
+        )
+        assert rc != 0
+        [path] = records.glob("*.json")
+        assert json.loads(path.read_text())["execution"]["output_files"] == []
+
+    def test_the_children_of_a_killed_parent_stay_in_the_reconstruction(self, tmp_path):
+        from dsagt.provenance import load_pipeline_records
+
+        def record(record_id, rc, parent=None):
+            raw = {
+                "record_id": record_id,
+                "code_name": "",
+                "execution": {
+                    "exact_command": ["true"],
+                    "return_code": rc,
+                    "timestamp_start": record_id,
+                },
+            }
+            if parent:
+                raw["parent_record_id"] = parent
+            (tmp_path / f"{record_id}.json").write_text(json.dumps(raw))
+
+        record("a-loop-killed", -15)
+        record("b-child", 0, parent="a-loop-killed")
+        record("c-loop-done", 0)
+        record("d-child", 0, parent="c-loop-done")
+        kept = [r["record_id"] for r in load_pipeline_records(tmp_path)]
+        assert kept == ["a-loop-killed", "b-child", "c-loop-done"]
+
+
+def test_a_moved_input_is_not_an_output(tmp_path, monkeypatch):
+    """aidrin, codex: `mv a b` recorded a as an output with no hash."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.csv").write_text("x\n")
+    records = tmp_path / "trace_archive"
+    run_and_record("move", ["mv", "a.csv", "b.csv"], records, log_trace=None)
+    [path] = records.glob("*.json")
+    execution = json.loads(path.read_text())["execution"]
+    assert execution["input_files"] == ["a.csv"]
+    assert execution["output_files"] == ["b.csv"]
+    assert set(execution["file_hashes"]) == {"a.csv", "b.csv"}
+
+
+def test_a_run_without_a_code_name_is_refused(tmp_path, capsys):
+    assert main(["--records-dir", str(tmp_path), "--", "true"]) == 2
+    assert "--code <name> is required" in capsys.readouterr().err
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_the_script_behind_a_uv_wrapper_is_neither_input_nor_output(
+    tmp_path, monkeypatch
+):
+    """Every datacard-validate record listed validate_datacard.py as an output:
+    a code with dependencies runs as `uv run --with ... -- python x.py`, and the
+    interpreter's script was looked for only when the command began with python."""
+    from dsagt.provenance import files_from_arguments, new_files_from_arguments
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "validate.py").write_text("pass\n")
+    (tmp_path / "card.md").write_text("x\n")
+    command = [
+        "uv",
+        "run",
+        "--with",
+        "pyyaml",
+        "--",
+        "python",
+        "validate.py",
+        "card.md",
+    ]
+    assert files_from_arguments(command) == ["card.md"]
+    assert new_files_from_arguments(command, ["card.md"]) == []

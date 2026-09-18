@@ -264,6 +264,41 @@ class TestRenderBash:
 # ---------------------------------------------------------------------------
 
 
+class TestRenderBashReplays:
+    """The script runs on a fresh copy of the project."""
+
+    def test_output_directories_are_created_at_the_top(self):
+        records = [
+            _make_record(
+                "plot", ["plot"], output_files=["plots/a.png"], record_id="r1"
+            ),
+            _make_record(
+                "convert",
+                ["convert"],
+                output_files=["processed_data/tmp/x.json", "plots/b.png"],
+                record_id="r2",
+            ),
+        ]
+        script = render_bash(records, build_dependency_graph(records))
+        head = script.split("# Step 1")[0]
+        assert "mkdir -p plots processed_data/tmp" in head
+
+    def test_a_repeated_output_is_removed_before_the_step_that_rewrites_it(self):
+        records = [
+            _make_record(
+                "conv", ["conv", "a"], output_files=["out.json"], record_id="r1"
+            ),
+            _make_record(
+                "conv", ["conv", "b"], output_files=["out.json"], record_id="r2"
+            ),
+        ]
+        script = render_bash(records, build_dependency_graph(records))
+        first, second = script.split("# Step 2")
+        assert "rm -f out.json" not in first
+        assert "rm -f out.json\nconv b" in second
+
+
+
 class TestRenderSnakemake:
 
     def test_basic_workflow(self):

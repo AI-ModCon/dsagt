@@ -260,6 +260,7 @@ async def _handle_reconstruct_pipeline(
     kb: KnowledgeBase | None = None,
 ) -> str:
     fmt = arguments.get("format", "bash")
+    output = arguments.get("output")
     trace_dir = runtime_dir / "trace_archive"
     # Index the session's tool-use first: reconstruct is the moment the pipeline
     # is "done enough" to review, so make the just-run executions searchable now
@@ -277,6 +278,16 @@ async def _handle_reconstruct_pipeline(
             obs.event("reconstruct_failed", error=str(e)[:256])
             return f"Error reconstructing pipeline: {e}"
         obs.set("output_chars", len(script))
+        if output:
+            # A project-relative path; the agent otherwise copies the script
+            # by hand from the reply, which one run did from its own
+            # transcript after a context compaction.
+            target = runtime_dir / output
+            if not target.resolve().is_relative_to(runtime_dir.resolve()):
+                return f"Error: output must be a path under the project, got {output!r}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(script)
+            return f"Saved to {output}\n\n{script}"
         return script
 
 
@@ -554,7 +565,9 @@ def _registry_tools_and_handlers(
                 "exited non-zero is kept as a comment, and paths under the "
                 "project are relative to it. The script calls each recorded tool "
                 "directly, without the dsagt-run wrapper, so it runs outside a "
-                "DSAgt project; present it to the user as returned."
+                "DSAgt project; it creates the recorded output directories first "
+                "and writes a recorded stdout file with a redirect. Present it to "
+                "the user as returned, and pass output to save it."
             ),
             inputSchema={
                 "type": "object",
@@ -563,6 +576,11 @@ def _registry_tools_and_handlers(
                         "type": "string",
                         "enum": ["bash", "snakemake"],
                         "default": "bash",
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Project-relative path to save the script "
+                        "to, e.g. audit/pipeline.sh; the reply says where it went.",
                     },
                 },
             },

@@ -469,3 +469,35 @@ class TestPinTraceSourceResume:
 
         TestPinTraceSource()._run(Collector(), tmp_path)
         assert read_state(tmp_path)["sessions"][-1]["trace_source"] == str(same)
+
+
+def test_reconstruct_pipeline_saves_to_a_project_path(tmp_path):
+    """``output`` writes the script under the project and the reply names it."""
+    server = _make_merged_server(tmp_path)
+    trace_dir = tmp_path / "runtime" / "trace_archive"
+    trace_dir.mkdir(parents=True)
+    (trace_dir / "echo_r1.json").write_text(
+        json.dumps(
+            {
+                "record_id": "r1",
+                "code_name": "echo",
+                "session_id": "s1",
+                "execution": {
+                    "exact_command": ["echo", "hi"],
+                    "return_code": 0,
+                    "stdout": "hi\n",
+                    "stderr": "",
+                    "timestamp_start": "2026-01-01T00:00:00Z",
+                    "timestamp_end": "2026-01-01T00:00:01Z",
+                    "input_files": [],
+                    "output_files": [],
+                },
+            }
+        )
+    )
+    out = _call(server, "reconstruct_pipeline", {"output": "audit/pipeline.sh"})
+    assert out.startswith("Saved to audit/pipeline.sh")
+    saved = (tmp_path / "runtime" / "audit" / "pipeline.sh").read_text()
+    assert "echo hi" in saved
+    outside = _call(server, "reconstruct_pipeline", {"output": "../escape.sh"})
+    assert outside.startswith("Error: output must be a path under the project")
