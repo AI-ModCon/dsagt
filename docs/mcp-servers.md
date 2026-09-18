@@ -4,6 +4,10 @@ DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, 
 
 The 18 tools split across four concerns, all on the one process.
 
+## The server's environment
+
+The per-agent MCP config carries an `env` block with two kinds of variable: routing (the project name and directory, the trace store URI, the embedding backend) and the launching shell's activated environment (`PATH`, `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHONPATH`, the library paths, the `module` variables, plus any names listed under `mcp.env_passthrough` in `.dsagt/config.yaml`). Codex and Cline start the server from that block alone, so it is what makes the server's Python the one with the user's packages. The block is written at `dsagt init` and `dsagt start`; after changing the activated environment, run `dsagt start` (or re-init) so the block matches. A credential never enters the block: a name ending in `_KEY`, `_TOKEN`, or `_SECRET`, or containing `SECRET` or `PASSW`, is refused, and dsagt's own service credentials come from the shell or `~/.config/dsagt/env`.
+
 ## Registry tools (6)
 
 Code registration, execution helpers, dependency installation, and pipeline reconstruction. See [Provenance](provenance.md) for how registered codes are captured.

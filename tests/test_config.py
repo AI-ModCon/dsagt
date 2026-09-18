@@ -1358,3 +1358,60 @@ class TestLoadUserEnv:
         from dsagt.session import load_user_env
 
         assert load_user_env(tmp_path / "absent") == []
+
+
+class TestMcpEnvBlockShellPassthrough:
+    """The block carries the launching shell's activated environment, never a
+    credential."""
+
+    def _config(self):
+        return {"project": "p", "project_dir": "/p", "embedding": {"backend": "local"}}
+
+    def test_activated_environment_is_copied(self):
+        from dsagt.agents import _mcp_env_block
+
+        environ = {
+            "PATH": "/venv/bin:/usr/bin",
+            "VIRTUAL_ENV": "/venv",
+            "PYTHONPATH": "/fio/lib",
+            "DYLD_LIBRARY_PATH": "/fio/lib",
+            "HOME": "/Users/x",
+            "ANTHROPIC_API_KEY": "sk-x",
+            "MLFLOW_TRACKING_API_KEY": "k",
+        }
+        block = _mcp_env_block(self._config(), environ)
+        assert block["PATH"] == "/venv/bin:/usr/bin"
+        assert block["VIRTUAL_ENV"] == "/venv"
+        assert block["PYTHONPATH"] == "/fio/lib"
+        assert block["DYLD_LIBRARY_PATH"] == "/fio/lib"
+        assert "HOME" not in block
+        assert "ANTHROPIC_API_KEY" not in block
+        assert "MLFLOW_TRACKING_API_KEY" not in block
+
+    def test_config_names_extra_variables(self):
+        from dsagt.agents import _mcp_env_block
+
+        config = {**self._config(), "mcp": {"env_passthrough": ["SITE_MODULES"]}}
+        block = _mcp_env_block(config, {"SITE_MODULES": "/opt/mods", "PATH": "/bin"})
+        assert block["SITE_MODULES"] == "/opt/mods"
+
+    @pytest.mark.parametrize(
+        "name", ["MY_KEY", "HF_TOKEN", "DB_SECRET", "DBPASSWORD", "SECRET_THING"]
+    )
+    def test_a_credential_name_is_refused(self, name):
+        from dsagt.agents import _mcp_env_block
+
+        config = {**self._config(), "mcp": {"env_passthrough": [name]}}
+        with pytest.raises(ValueError, match="credential"):
+            _mcp_env_block(config, {name: "x"})
+
+    def test_the_block_never_holds_a_credential_name(self, monkeypatch):
+        """Whatever the shell has, the block's names pass the credential test."""
+        from dsagt.agents import _mcp_env_block
+        from dsagt.agents.base import _CREDENTIAL_NAME
+
+        for name in ("PATH", "VIRTUAL_ENV", "OPENAI_API_KEY", "EMBEDDING_API_KEY"):
+            monkeypatch.setenv(name, "v")
+        block = _mcp_env_block(self._config())
+        assert block
+        assert not any(_CREDENTIAL_NAME.search(k) for k in block)
