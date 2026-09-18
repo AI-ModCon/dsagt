@@ -765,21 +765,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-setting" class="md-nav__link">
+  <a href="#ai-readiness-check_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The setting
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-the-paragraph-says" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What the paragraph says
+        AI-readiness check
       
     </span>
   </a>
@@ -1243,21 +1232,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-setting" class="md-nav__link">
+  <a href="#ai-readiness-check_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The setting
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-the-paragraph-says" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What the paragraph says
+        AI-readiness check
       
     </span>
   </a>
@@ -1307,36 +1285,45 @@
 
 
 <h1 id="ai-readiness-check">AI-Readiness Check<a class="headerlink" href="#ai-readiness-check" title="Permanent link">&para;</a></h1>
-<p>DSAgt is configured at init to run <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage; uncheck it on the menu to turn it off. AIDRIN installs with dsagt, and every project gets the <code>aidrin</code> skill and an <code>aidrin</code> code, so each call the agent makes is an execution record in <code>trace_archive/</code> like any other code. A user who asks "is my data AI-ready?" gets the skill's own workflow.</p>
-<p>The pipeline-builder instructions require a paired check around every data operation, with reports in <code>audit/</code>. The AI-readiness check makes that check concrete for tabular files: it is the <code>aidrin</code> skill's quality baseline (completeness, duplicity, outliers), run on a stage's input before the operation and on its output after it, so every stage of a pipeline is measured the same way and the before/after delta is comparable across stages and projects.</p>
-<h2 id="the-setting">The setting<a class="headerlink" href="#the-setting" title="Permanent link">&para;</a></h2>
-<p><code>dsagt init</code> asks "Assess tabular data for AI-readiness before and after each data transform?", default yes. (The automation path turns it off with <code>dsagt init &lt;name&gt; --agent &lt;agent&gt; --no-readiness</code>.) The answer is the one thing the setting controls: when it is yes, the agent's instructions carry one paragraph at the per-operation check rule; when it is no, they do not. The <code>aidrin</code> code and skill are present either way.</p>
-<p>The config records the answer:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">readiness</span><span class="p">:</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">auto_assess</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</code></pre></div>
-<h2 id="what-the-paragraph-says">What the paragraph says<a class="headerlink" href="#what-the-paragraph-says" title="Permanent link">&para;</a></h2>
-<p>For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz), the check is the <code>aidrin</code> skill's quality baseline, run through the registered <code>aidrin</code> code before and after the operation. The agent runs the baseline directly, without the skill's intent and plan steps, which are for assessments the user asks for. It saves the results as <code>audit/step_N_pre.aidrin.json</code> and <code>audit/step_N_post.aidrin.json</code>, reports the per-metric change before proposing the next step, and writes no custom check for a metric AIDRIN provides; every other stage keeps the generic check rule.</p>
+<p>DSAgt is configured at init to run <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage; uncheck it on the menu to turn it off. AIDRIN installs with dsagt, and every project gets the <code>aidrin</code> skill and an <code>aidrin</code> code, so each call the agent makes is an execution record in <code>trace_archive/</code> like any other code. A user who asks "is my data AI-ready?" gets the AIDRIN skill's workflow.</p>
+<p>The DSAgt instructions request assessments for the effects of data transformations for the downstream application, with reports in <code>audit/</code>. For tabular files that check is the <code>aidrin</code> skill's quality baseline (completeness, duplicity, outliers), run on the stage's input before the operation and on its output after it. Every stage is measured the same way, so the before/after delta is comparable across stages and projects.</p>
+<p><code>dsagt init</code> asks "Assess tabular data for AI-readiness before and after each data transform?", default yes; when it is yes, the agent's instructions carry one paragraph at the per-operation check rule; when it is no, they do not. The <code>aidrin</code> code and skill are present either way.</p>
+<p>The inserted paragraph:</p>
+<blockquote>
+<h4 id="ai-readiness-check_1">AI-readiness check<a class="headerlink" href="#ai-readiness-check_1" title="Permanent link">&para;</a></h4>
+<p>For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5,
+Parquet, npz), the check is the <code>aidrin</code> skill's quality baseline: run it on
+the file before and after the operation, through the registered <code>aidrin</code>
+code's <code>executable</code> (never bare <code>aidrin</code>). Run the baseline directly; do not
+ask the user about intent or confirm a plan for these checks (the skill's full workflow is for assessments the user
+asks for). The CLI prints its report to stdout, so redirect it into the audit
+file: <code>... aidrin data-quality &lt;file&gt; --detail &gt; audit/step_N_pre.aidrin.json</code>
+before the operation and <code>&gt; audit/step_N_post.aidrin.json</code> after it, then
+report the per-metric change to the user before proposing the next step. Do
+not write a custom check for a metric AIDRIN provides. A stage with tabular
+input or output gets this check; every other stage keeps the check rule
+above.</p>
+</blockquote>
 <h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
 <p>A three-stage pipeline on AIDRIN's own demo dataset — 525 sensor readings with 25 exact
 duplicates, missing values in every sensor column, and temperature outliers. About ten minutes;
 the only download is a 40 KB CSV.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>init
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init
 </code></pre></div>
 <p>At the menu, name the project <code>assessment-demo</code>, pick your agent, leave the knowledge
 collections and skill sources unchecked (the check needs neither), and keep the
 AI-readiness check on. Then:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/dsagt-projects/assessment-demo/data
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-sL<span class="w"> </span>https://raw.githubusercontent.com/idtlab/AIDRIN/develop/demos/messy_sensor_data.csv<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span>-o<span class="w"> </span>~/dsagt-projects/assessment-demo/data/sensors.csv
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>dsagt<span class="w"> </span>start<span class="w"> </span>assessment-demo
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/dsagt-projects/assessment-demo/data
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-sL<span class="w"> </span>https://raw.githubusercontent.com/idtlab/AIDRIN/develop/demos/messy_sensor_data.csv<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span>-o<span class="w"> </span>~/dsagt-projects/assessment-demo/data/sensors.csv
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>dsagt<span class="w"> </span>start<span class="w"> </span>assessment-demo
 </code></pre></div>
 <p>Then one prompt. Do not mention AIDRIN or checks — the point is what the agent does on its own:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Build a curation pipeline for data/sensors.csv in three steps, one at a time:
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>1. drop exact duplicate rows -&gt; data/dedup.csv
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>2. drop rows with a missing temperature -&gt; data/complete.csv
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>3. drop rows whose temperature is more than 3 standard deviations from the mean -&gt; data/clean.csv
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Confirm the approach with me before each step.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Build a curation pipeline for data/sensors.csv in three steps, one at a time:
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>1. drop exact duplicate rows -&gt; data/dedup.csv
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>2. drop rows with a missing temperature -&gt; data/complete.csv
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>3. drop rows whose temperature is more than 3 standard deviations from the mean -&gt; data/clean.csv
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>Confirm the approach with me before each step.
 </code></pre></div>
 <p>At each stage the agent should run the AIDRIN quality baseline on the stage input before the
 operation and on the output after it, write both reports to <code>audit/</code>, and show the metric delta
@@ -1372,7 +1359,7 @@ before proposing the next step. Expected values on this dataset (pre column meas
 </tbody>
 </table>
 <p>Afterwards, one more prompt:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Show me the execution records for this session as a table of step, command, and exit code.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Show me the execution records for this session as a table of step, command, and exit code.
 </code></pre></div>
 <p>The table lists one record per baseline run (two per stage) and one per operation, and
 <code>audit/</code> holds the six reports. Clean up with <code>dsagt rm assessment-demo -y</code>.</p>

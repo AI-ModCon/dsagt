@@ -1213,6 +1213,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#where-a-function-lands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where a function lands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#codebase-orientation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1339,6 +1350,17 @@
     <span class="md-ellipsis">
       
         Agentic coding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-a-function-lands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where a function lands
       
     </span>
   </a>
@@ -1492,6 +1514,26 @@ option:</p>
 <p>Copy a skill directory into the agent's skills directory (for Claude Code,
 <code>~/.claude/skills/&lt;name&gt;/</code> for every project, or <code>.claude/skills/&lt;name&gt;/</code> in
 this checkout) and the agent loads it when its description matches the task.</p>
+<h2 id="where-a-function-lands">Where a function lands<a class="headerlink" href="#where-a-function-lands" title="Permanent link">&para;</a></h2>
+<p>The agent reaches dsagt two ways, and each owns one thing:</p>
+<ul>
+<li><strong>MCP tools</strong> (<code>dsagt-server</code>) own dsagt's state: the registry, the
+  knowledge base, memory, skills, and the execution records. A function that
+  reads or writes <code>trace_archive/</code>, <code>kb_index/</code>, <code>.dsagt/</code>, or a contract's
+  fingerprint is a tool.</li>
+<li><strong><code>dsagt-run</code></strong> owns execution in the user's environment: anything that runs
+  the user's code, data, or binaries, wrapped so the run is recorded. The
+  agent invokes it from its own shell, which is the one process that has the
+  user's activated environment (<code>PATH</code>, a venv or conda env, <code>module load</code>)
+  on every platform; codex and cline give the MCP server only the env block
+  dsagt writes.</li>
+<li>The <strong><code>dsagt</code> CLI</strong> is for people. No script or agent invokes it.</li>
+</ul>
+<p>So a built-in code that operates on the user's objects (a <code>Dataset</code>, a data
+file, a binary) runs under <code>dsagt-run</code> in the user's environment and imports
+nothing from the package; when it needs something dsagt holds, the agent
+calls a tool for it beside the code. A function that needs only dsagt's own
+state is a tool. Nothing is both.</p>
 <h2 id="codebase-orientation">Codebase orientation<a class="headerlink" href="#codebase-orientation" title="Permanent link">&para;</a></h2>
 <p>The <a href="https://ai-modcon.github.io/dsagt/architecture/">Architecture</a> page explains in more detail the components of DSAgt — the
 capabilities, the single <code>dsagt-server</code> MCP layout, and the observability and
