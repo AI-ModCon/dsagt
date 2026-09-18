@@ -178,6 +178,33 @@ class TestSearch:
             where_document=None,
         )
 
+    def test_search_where_filter(self, server, mock_kb):
+        """``where`` is the metadata filter; a named shortcut joins it."""
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "assembly",
+                "collection": "code_use",
+                "where": {"code_name": "fastp"},
+            },
+        )
+        assert mock_kb.search.call_args.kwargs["where"] == {"code_name": "fastp"}
+        mock_kb.search.reset_mock()
+        call_tool(
+            server,
+            "kb_search",
+            {
+                "query": "assembly",
+                "collection": "code_use",
+                "where": {"code_name": "fastp"},
+                "return_code": 1,
+            },
+        )
+        assert mock_kb.search.call_args.kwargs["where"] == {
+            "$and": [{"code_name": "fastp"}, {"return_code": 1}]
+        }
+
     def test_search_defaults(self, server, mock_kb):
         """Search uses default top_k=5."""
         call_tool(

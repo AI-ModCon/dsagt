@@ -47,16 +47,13 @@ def test_merged_server_exposes_all_tools(tmp_path):
     """Both concern modules' tools land under one server with no collision."""
     server = _make_merged_server(tmp_path)
     names = _list_tools(server)
-    # 9 registry + 5 knowledge + 2 memory + 5 skill = 21 distinct tools.
+    # 6 registry + 5 knowledge + 2 memory + 5 skill = 18 distinct tools.
     assert set(names) == {
-        # registry / provenance (9)
+        # registry / provenance (6)
         "get_registry",
         "search_registry",
         "save_code_spec",
         "install_dependencies",
-        "run_command",
-        "read_file",
-        "http_request",
         "reconstruct_pipeline",
         "readiness_reports",
         # knowledge (5)
