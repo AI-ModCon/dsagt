@@ -310,7 +310,7 @@ def _registry_tools_and_handlers(
             name="save_code_spec",
             description=(
                 "Register a CLI code: writes a skill-standard spec dir "
-                "(codes/<name>/SKILL.md), mirrored into the agent's native "
+                "(skills/<name>/SKILL.md), mirrored into the agent's native "
                 "skills dir immediately so future sessions auto-discover it"
             ),
             inputSchema={
@@ -348,7 +348,7 @@ def _registry_tools_and_handlers(
                                         "type": "string",
                                         "description": (
                                             "The bare command, for example "
-                                            "'python codes/x/scripts/x.py'. "
+                                            "'python skills/x/scripts/x.py'. "
                                             "The registry prepends "
                                             "'dsagt-run --code <name> --' and, "
                                             "when dependencies are declared, "

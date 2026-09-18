@@ -14,8 +14,7 @@ Project directory layout::
             explicit_memories.yaml, ...   # explicit memory
         trace_archive/      # tool execution records
         mlflow.db           # serverless MLflow SQLite trace store (created lazily)
-        codes/<name>/       # registered codes (skill-standard dirs: SKILL.md + scripts/)
-        skills/             # instruction-based agent skills
+        skills/             # skills and registered codes (a code declares an executable)
         kb_index/           # knowledge base collections
 """
 
@@ -685,6 +684,32 @@ def _provision_base_skills(
     )
 
 
+def _move_codes_into_skills(pdir: Path) -> None:
+    """Move a project's ``codes/<name>/`` directories under ``skills/``.
+
+    Codes and skills share ``skills/``; a project made before that carries
+    its registered codes in ``codes/``, and a re-init moves each one whose
+    name is free so the codes it registered stay registered.  A name that
+    is taken stays in ``codes/`` and is reported.
+    """
+    codes = pdir / "codes"
+    if not codes.is_dir():
+        return
+    for code_dir in sorted(codes.iterdir()):
+        if not (code_dir / "SKILL.md").exists():
+            continue
+        dest = pdir / "skills" / code_dir.name
+        if dest.exists():
+            print(
+                f"  codes/{code_dir.name} left in place: skills/{code_dir.name} exists"
+            )
+            continue
+        shutil.move(str(code_dir), str(dest))
+        print(f"  Moved codes/{code_dir.name} to skills/{code_dir.name}")
+    if not any(codes.iterdir()):
+        codes.rmdir()
+
+
 def init_project(
     project_name: str,
     agent: str,
@@ -730,8 +755,9 @@ def init_project(
 
     pdir.mkdir(parents=True, exist_ok=True)
     # ``mlflow.db`` is created lazily by the MLflow client on first span.
-    for subdir in ("trace_archive", "skills", "codes", "audit", CONFIG_DIRNAME):
+    for subdir in ("trace_archive", "skills", "audit", CONFIG_DIRNAME):
         (pdir / subdir).mkdir(parents=True, exist_ok=True)
+    _move_codes_into_skills(pdir)
 
     assets = _provision_kb(pdir, include, exclude, embedding=embedding)
 

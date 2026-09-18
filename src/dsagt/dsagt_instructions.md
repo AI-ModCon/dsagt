@@ -65,7 +65,7 @@ When implementing any data operation, follow this hierarchy:
 
 1. **REGISTERED CODE** — Use an existing code (`search_registry`)
 2. **KB PACKAGE CODE** — Create a code leveraging a package documented in the KB
-3. **CUSTOM IMPLEMENTATION** — Write your script to `codes/<name>/scripts/` and register it
+3. **CUSTOM IMPLEMENTATION** — Write your script to `skills/<name>/scripts/` and register it
 
 Always exhaust higher-preference options before falling to lower ones.
 
@@ -82,10 +82,10 @@ All check reports are saved to `audit/` for the audit trail.
 <!-- readiness-check -->
 
 ### 5. File Organization
-- Each registered code is a self-contained dir: spec at `codes/<name>/SKILL.md`, its scripts in `codes/<name>/scripts/`
+- Each registered code is a self-contained dir under `skills/`, beside the instruction skills: spec at `skills/<name>/SKILL.md`, its scripts in `skills/<name>/scripts/`; a skill whose frontmatter declares an executable is a code
 - All data output goes in a `data/` subdirectory
 - All audit reports go in `audit/`
-- All session artifacts stay within the project directory. A script that is part of the pipeline goes under `skills/<name>/scripts/` and is registered before its first run
+- All session artifacts stay within the project directory; the platform's scratchpad or temporary directory is outside it, and a script written there is a script the record cannot name
 - The session's dsagt artifacts, when the user asks what dsagt recorded: the execution records in `trace_archive/`, the reports in `audit/`, the registered codes and installed skills in `skills/`, the trace store `mlflow.db`, the knowledge base `kb_index/`, and the session state in `.dsagt/`
 
 ## INITIAL SETUP PHASE
@@ -163,7 +163,7 @@ For each data operation, create TWO codes:
 - Accepts: input data path, output data path, parameters
 - Outputs: Transformed data
 
-Write each code's script to `codes/<name>/scripts/` and register it via `save_code_spec`. Python dependencies declared in the spec are handled automatically via `uv run --with`.
+Write each code's script to `skills/<name>/scripts/` and register it via `save_code_spec`. Python dependencies declared in the spec are handled automatically via `uv run --with`.
 
 ## PIPELINE RECONSTRUCTION
 

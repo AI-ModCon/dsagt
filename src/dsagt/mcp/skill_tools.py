@@ -64,13 +64,26 @@ async def _handle_save_skill(
     except (KeyError, ValueError, OSError) as e:
         return f"Error saving skill: {e}"
     from dsagt.agents import refresh_native_skills
+    from dsagt.skills import register_skill_scripts
 
+    # The skill's scripts are codes from this moment, the same path a base
+    # or catalog skill takes, and the reply gives the stored lines the way
+    # save_code_spec does, so the usage line the agent just wrote is not
+    # what it runs.
+    stored = register_skill_scripts(
+        skill_registry.runtime_dir, spec["name"], kb=skill_registry._kb
+    )
     refresh_native_skills(skill_registry.runtime_dir)
     skill_count = len(skill_registry.list_skills())
-    return (
+    reply = (
         f"Skill '{spec['name']}' {action} successfully. "
         f"Registry now contains {skill_count} skills."
     )
+    if stored:
+        reply += " Its scripts are registered codes; run each as:\n" + "\n".join(
+            f"Run it as: {line}" for line in stored
+        )
+    return reply
 
 
 async def _handle_search_skills(
@@ -97,6 +110,7 @@ async def _handle_install_skill(
     arguments: dict,
     *,
     runtime_dir: Path,
+    kb: KnowledgeBase | None = None,
 ) -> str:
     """Install a catalog skill into ``<project>/skills/<name>/``.
 
@@ -123,14 +137,21 @@ async def _handle_install_skill(
     except LookupError as e:
         return f"Error: {e}"
     from dsagt.agents import refresh_native_skills
+    from dsagt.skills import register_skill_scripts
 
+    stored = register_skill_scripts(runtime_dir, info["name"], kb=kb)
     refresh_native_skills(runtime_dir)
 
     # Bare confirmation by design: the install→use model and the
     # license/PROVENANCE capture are already in the agent's instructions and on
     # disk (PROVENANCE.txt), so repeating them on every install is just noise.
     verb = "Updated" if info["action"] == "updated" else "Installed"
-    return f"{verb} '{info['name']}' → {info['dest_dir']}/"
+    reply = f"{verb} '{info['name']}' → {info['dest_dir']}/"
+    if stored:
+        reply += " Its scripts are registered codes; run each as:\n" + "\n".join(
+            f"Run it as: {line}" for line in stored
+        )
+    return reply
 
 
 async def _handle_add_skill_source(
@@ -249,7 +270,7 @@ def _skill_tools_and_handlers(
         "search_skills": partial(
             _handle_search_skills, kb=kb, skill_registry=skill_registry
         ),
-        "install_skill": partial(_handle_install_skill, runtime_dir=rt),
+        "install_skill": partial(_handle_install_skill, runtime_dir=rt, kb=kb),
         "add_skill_source": partial(_handle_add_skill_source, kb=kb, runtime_dir=rt),
         "list_skill_sources": partial(_handle_list_skill_sources, kb=kb),
     }
