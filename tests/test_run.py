@@ -693,6 +693,23 @@ class TestArgumentDerivedFiles:
     """With no spec roles, an argument that is a file is an input, and one
     that exists only after the run is an output."""
 
+    def test_ad_hoc_run_names_its_files(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "a.csv").write_text("x\n")
+        main(
+            [
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--",
+                "cp",
+                "a.csv",
+                "b.csv",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["input_files"] == ["a.csv"]
+        assert record["execution"]["output_files"] == ["b.csv"]
+
     def test_a_spec_with_no_roles_falls_back_to_the_arguments(
         self, tmp_path, monkeypatch
     ):
