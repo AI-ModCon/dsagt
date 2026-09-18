@@ -814,7 +814,7 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
        previous session so any turns the periodic pass missed before an ungraceful
        shutdown still reach MLflow (and episodic memory).  Pinned to the
        trace-source token recorded in ``state.yaml`` (uniform across agents);
-       session-qualified acks dedupe against the live pass, so only dangling
+       transcript-qualified acks dedupe against the live pass, so only dangling
        turns emit.
     """
     pdir = Path(pdir)
@@ -851,7 +851,7 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
 
     Builds a trace collector pinned to the previous session's recorded
     trace-source token (and tagged with its session id), then runs one
-    ``collect(include_last=True)``.  The collector's session-qualified ack files
+    ``collect(include_last=True)``.  The collector's transcript-qualified ack files
     are shared with the live pass, so already-logged turns are skipped and only
     those lost to an ungraceful shutdown are emitted to MLflow + episodic memory.
     Uniform across agents — JSONL or SQLite — since the pin is the agent's own
