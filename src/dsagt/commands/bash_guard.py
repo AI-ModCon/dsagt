@@ -20,7 +20,9 @@ import re
 import sys
 
 # The segment's command word, after any VAR=value prefixes.
-_PYTHON = re.compile(r"^\s*(?:\w+=\S*\s+)*(?:uv\s+run\s+)?python3?(?=\s|$)")
+_PYTHON = re.compile(
+    r"^\s*(?:\w+=\S*\s+)*(?:(?:uv\s+run\s+)?python3?(?=\s|$)|\.{0,2}/?\S+\.py(?=\s|$))"
+)
 _ALLOWED = re.compile(r"python3?\s+(?:-m\s+pytest|-m\s+pip|--version|--help)\b")
 
 

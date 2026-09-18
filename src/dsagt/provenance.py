@@ -95,6 +95,18 @@ def _current_session_tag_from_cwd() -> str | None:
     return session.current_session_tag(cwd, project)
 
 
+def _without_uv_wrapper(tokens: list[str]) -> list[str]:
+    """*tokens* with a leading ``uv run ... --`` removed.
+
+    A spec with dependencies stores ``uv run --with <deps> -- <command>``;
+    an agent that runs the command without the wrapper still ran this
+    code, and the roles apply to the arguments either way.
+    """
+    if tokens[:2] == ["uv", "run"] and "--" in tokens:
+        return tokens[tokens.index("--") + 1 :]
+    return tokens
+
+
 def file_roles_from_command(
     spec: dict, command: list[str]
 ) -> tuple[list[str], list[str]]:
@@ -119,7 +131,8 @@ def file_roles_from_command(
         if executable.startswith("dsagt-run")
         else executable
     )
-    prefix = shlex.split(inner)
+    prefix = _without_uv_wrapper(shlex.split(inner))
+    command = _without_uv_wrapper(list(command))
     if command[: len(prefix)] != prefix:
         return [], []
     args = command[len(prefix) :]

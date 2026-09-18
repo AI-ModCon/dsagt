@@ -878,3 +878,51 @@ class TestNestedRuns:
         assert child["parent_record_id"] == outer["record_id"]
         assert [r["code_name"] for r in load_pipeline_records(records)] == [""]
         assert "DSAGT_RUN_PARENT" not in os.environ
+
+
+class TestRolesTolerateTheUvWrapper:
+
+    def test_a_command_without_the_wrapper_still_matches_the_spec(self):
+        from dsagt.provenance import file_roles_from_command
+
+        spec = {
+            "executable": "dsagt-run --code c -- uv run --with h5py -- python skills/c/scripts/c.py",
+            "parameters": {
+                "case": {"cli": "--case", "role": "input"},
+                "out": {"cli": "--out", "role": "output"},
+            },
+        }
+        with_wrapper = [
+            "uv",
+            "run",
+            "--with",
+            "h5py",
+            "--",
+            "python",
+            "skills/c/scripts/c.py",
+            "--case",
+            "d",
+            "--out",
+            "o.json",
+        ]
+        without = ["python", "skills/c/scripts/c.py", "--case", "d", "--out", "o.json"]
+        assert file_roles_from_command(spec, with_wrapper) == (["d"], ["o.json"])
+        assert file_roles_from_command(spec, without) == (["d"], ["o.json"])
+
+
+def test_stdout_that_is_also_an_argument_is_refused(tmp_path, capsys):
+    rc = main(
+        [
+            "--records-dir",
+            str(tmp_path),
+            "--stdout",
+            "out.json",
+            "--",
+            "tool",
+            "--output",
+            "out.json",
+        ]
+    )
+    assert rc == 2
+    assert "also an argument" in capsys.readouterr().err
+    assert list(tmp_path.glob("*.json")) == []

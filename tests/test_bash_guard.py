@@ -111,3 +111,8 @@ def test_a_quoted_string_with_an_operator_stays_one_segment():
     assert bare_python_call(command) == (
         "python3 -c 'import pandas as pd; print(pd.read_csv(\"data/x.csv\").shape)'"
     )
+
+
+def test_a_shebang_executed_script_is_refused():
+    assert bare_python_call("./convert.py data/in.csv") is not None
+    assert bare_python_call("scripts/tally.py") is not None

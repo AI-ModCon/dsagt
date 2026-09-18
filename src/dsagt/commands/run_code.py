@@ -91,6 +91,15 @@ def main(argv: list[str] | None = None) -> int:
     if not command:
         print("dsagt-run: no command specified after '--'", file=sys.stderr)
         return 1
+    if args.stdout is not None and args.stdout in command:
+        # The shell would open the file for the redirect and the command
+        # write it too; the replay of such a record truncates the output.
+        print(
+            f"dsagt-run: --stdout {args.stdout} is also an argument of the command; "
+            "a code that writes its own output file needs no --stdout",
+            file=sys.stderr,
+        )
+        return 2
 
     from dsagt.observability import init_tracing
 

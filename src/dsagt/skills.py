@@ -789,17 +789,21 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
     (a fenced example) and after a backtick (an inline command), only where
     the command is followed by whitespace, so ``aidrin-mcp``, ``uv run
     aidrin``, a path segment, and the bare word are untouched.  A line that
-    already carries ``dsagt-run`` is left as it is.  Appends a line to the
-    skill's ``PROVENANCE.txt`` naming the rewrite, so the difference from the
-    upstream text is on record.  Returns the number of lines changed.
+    already carries the stored command is left as it is; a wrapped line that
+    names the script under another code name (a usage line written before
+    the save) takes the stored command.  Appends a line to the skill's
+    ``PROVENANCE.txt`` per pair that changed something, so the difference
+    from the upstream text is on record.  Returns the number of lines changed.
     """
     changed = 0
+    applied: list[tuple[str, str]] = []
     for md in skill_dir.rglob("*.md"):
         out = []
         for line in md.read_text().splitlines(keepends=True):
             new = line
-            if "dsagt-run" not in line:
-                for bare, wrapped in pairs:
+            for bare, wrapped in pairs:
+                before = new
+                if "dsagt-run" not in new:
                     new = re.sub(
                         rf"^(\s*){re.escape(bare)}(?=\s)", rf"\1{wrapped}", new
                     )
@@ -811,12 +815,24 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
                         new = re.sub(
                             rf"(?<=\s)(?<!-- ){re.escape(bare)}(?=\s)", wrapped, new
                         )
+                elif "/" in bare and wrapped not in new:
+                    # A wrapped line whose code name is a guess (the agent
+                    # wrote the usage line before saving) names the right
+                    # script under the wrong name; the stored line replaces
+                    # the whole wrapper.
+                    new = re.sub(
+                        rf"dsagt-run --code \S+ (?:--stdout \S+ )?-- (?:uv run [^\n`]*? -- )?{re.escape(bare)}(?=\s|`|$)",
+                        wrapped,
+                        new,
+                    )
+                if new != before and (bare, wrapped) not in applied:
+                    applied.append((bare, wrapped))
             changed += new != line
             out.append(new)
         md.write_text("".join(out))
-    if changed:
+    if applied:
         with (skill_dir / "PROVENANCE.txt").open("a") as f:
-            for bare, wrapped in pairs:
+            for bare, wrapped in applied:
                 f.write(f"CLI examples rewritten by dsagt: `{bare}` -> `{wrapped}`\n")
     return changed
 
