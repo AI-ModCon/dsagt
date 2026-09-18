@@ -17,35 +17,35 @@ A skill's `scripts/` are registered codes from the moment the skill is installed
 **Run a registered code in the foreground and wait for it to exit.** The execution record is written when the process exits; a turn that ends while the code is still running loses the record, and in a headless session the process itself. A long run is still waited for: raise the shell timeout, or run it in a subagent whose result you wait for before the turn ends. Never launch a registered code as a background shell task or in a background subagent; both end with the turn.
 
 ### 1a. Memory: kb_remember / kb_get_memories Are Mandatory
-**Whenever the user says "remember", "note that", "keep in mind", "for future reference", or otherwise asks you to retain a fact, you MUST call `kb_remember(text=...)` in the same turn.** Mentioning the fact in your response or claiming you have "stored" or "noted" it without making the tool call is a hallucination — the fact is not persisted and a future session will not see it. End-of-session episodic extraction is automatic and unrelated; it is NOT a substitute for explicit memory.
+**Whenever the user says "remember", "note that", "keep in mind", "for future reference", or otherwise asks you to retain a fact, you MUST call `kb_remember(text=...)` in the same turn.** A fact you mention in your response, or claim to have "stored" or "noted", persists only through that call; without it a future session has no record of it. Episodic extraction is a separate, automatic mechanism and does not replace the call.
 
-**Whenever the user says "what do you remember", "recall", or asks you to retrieve a previously-stored fact, you MUST call `kb_get_memories()` first** and answer based on its result, not from in-context message history.
+**Whenever the user says "what do you remember", "recall", or asks you to retrieve a stored fact, you MUST call `kb_get_memories()` first** and answer based on its result, not from in-context message history.
 
 ### 1b. Registered-Code Invocation: Use the `executable` String Verbatim
-**When invoking a registered code, copy the spec's `executable` field byte-for-byte, including any `dsagt-run --code <name> --` prefix.** `save_code_spec` adds that prefix (and `uv run --with <deps> --` when the spec declares dependencies) to the command you supplied and returns the stored line; run the stored line, not the one you typed. The prefix is the wrapper that writes the execution record to `trace_archive/`; bypassing it (e.g. running the bare script directly when the spec says `dsagt-run --code datacard-introspect -- python skills/datacard-generator/scripts/introspect.py`) loses provenance and breaks pipeline reconstruction. If `dsagt-run` errors with "command not found", surface the error rather than working around it. This applies equally to scripts you wrote yourself, including a skill's `scripts/`: once registered, run them through the spec's command, never by path. Run it from the project directory, which is your working directory. When a run fails or surprises you, record what you learned in the code's `SKILL.md` body under a `## Notes` heading, where the next session reads it at invocation; when you change a registered script's arguments, call `save_code_spec` again so the spec matches the script.
+**When invoking a registered code, copy the spec's `executable` field byte-for-byte, including any `dsagt-run --code <name> --` prefix.** `save_code_spec` adds that prefix (and `uv run --with <deps> --` when the spec declares dependencies) to the command you supplied and returns the stored line; run the stored line, not the one you typed. The prefix is the wrapper that writes the execution record to `trace_archive/`; running the bare script (for example `python skills/datacard-generator/scripts/introspect.py` when the spec says `dsagt-run --code datacard-introspect -- python skills/datacard-generator/scripts/introspect.py`) loses provenance and breaks pipeline reconstruction. If `dsagt-run` errors with "command not found", report the error to the user; a run outside the wrapper is unrecorded. This applies equally to scripts you wrote yourself, including a skill's `scripts/`: once registered, run them through the spec's command, never by path. Run it from the project directory, which is your working directory. When a run fails or surprises you, record what you learned in the code's `SKILL.md` body under a `## Notes` heading, where the next session reads it at invocation; when you change a registered script's arguments, call `save_code_spec` again so the spec matches the script.
 
 ### 2. Code and Skill Discovery
 
 Before implementing anything, search for existing capabilities:
 
-- `search_registry(query)` — find registered CLI codes by name, tag, or description (semantic search)
-- `search_skills(query)` — find agent skills (workflows, templates, procedures)
-- `get_registry()` — list all registered codes
+- `search_registry(query)`: find registered CLI codes by name, tag, or description (semantic search)
+- `search_skills(query)`: find agent skills (workflows, templates, procedures)
+- `get_registry()`: list all registered codes
 
-**Skills come in two tiers.** *Installed* skills (in this project) are discovered **natively** by your platform — their names/descriptions are already in your context and you auto-invoke them; you do NOT need `search_skills` to find those. Separately there is a much larger *external catalog* of installable skills (entries marked `[catalog]`), NOT loaded into context.
+**Skills come in two tiers.** *Installed* skills (in this project) are discovered natively by your platform: their names and descriptions are already in your context and you invoke them as you would any skill. Separately there is a much larger *external catalog* of installable skills (entries marked `[catalog]`), which stays out of context until a skill is installed.
 
-**Registered codes also appear among your native skills** (mirrored at registration and at `dsagt start`). A code's SKILL.md is an execution instruction: it opens with the exact shell command to run. When you invoke a code from its native skill entry, copy that command byte-for-byte — the same verbatim-`executable` rule as section 1b.
+**Registered codes also appear among your native skills** (linked at registration and at `dsagt start`). A code's SKILL.md is an execution instruction: it opens with the exact shell command to run. When you invoke a code from its native skill entry, copy that command byte-for-byte, the same verbatim-`executable` rule as section 1b.
 
-**The external catalog is opt-in and starts empty — sources must be synced before `search_skills` can see them.** A blank/weak `search_skills` result usually means the relevant source isn't synced yet, NOT that no such skill exists. So before concluding the catalog has nothing, call `list_skill_sources()` — it reports each known source with its `synced` flag and `indexed` count. The flow:
+**The external catalog is opt-in and starts empty; a source must be synced before `search_skills` can return its skills.** A blank or weak `search_skills` result usually means the relevant source is unsynced. Before concluding the catalog has nothing, call `list_skill_sources()`, which reports each known source with its `synced` flag and `indexed` count. The flow:
 
-1. `list_skill_sources()` — see which sources are already synced vs only `available` (known name + URL, not yet indexed). For materials/chem/bio/DFT skills, the `k-dense-ai` source is the one to enable.
-2. `add_skill_source(source=...)` — sync a source (a known name like `scientific`/`anthropic`, or a GitHub URL). Read-only indexing step; nothing is installed into the project. Only needed for sources whose `synced` is false.
-3. `search_skills(query)` — now browse the synced catalog. Entries marked `[catalog]` are installable.
-4. `install_skill(skill_name=...)` — copy a catalog skill into the project. The install is **complete and immediately usable**: its SKILL.md + scripts land in `skills/<name>/` and are mirrored into your native skills dir on the spot. To use it this session, read `skills/<name>/SKILL.md` and follow it — that is exactly what native invocation does. Future sessions auto-discover it hands-free. Never tell the user a restart or any other action is needed before an installed skill can be used.
+1. `list_skill_sources()`: see which sources are synced and which are only `available` (known name and URL, unindexed). For materials, chemistry, biology, and DFT skills, `k-dense-ai` is the source to enable.
+2. `add_skill_source(source=...)`: sync a source (a known name such as `k-dense-ai` or `anthropic`, or a GitHub URL). This indexes the source; it installs nothing into the project. Needed only for a source whose `synced` is false.
+3. `search_skills(query)`: browse the synced catalog. Entries marked `[catalog]` are installable.
+4. `install_skill(skill_name=...)`: copy a catalog skill into the project. The install is complete and usable at once: its SKILL.md and scripts are written to `skills/<name>/` and linked into your native skills directory. To use it this session, read `skills/<name>/SKILL.md` and follow it, which is what native invocation does. Future sessions discover it natively. Never tell the user a restart or any other action is needed before an installed skill can be used.
 
-To author a brand-new skill instead of installing one, use the `skill-creator` skill installed in every project.
+To author a new skill, use the `skill-creator` skill installed in every project.
 
-**When the user indicates they want a specific code used** — phrasings like "use `foo`", "use `foo` from the registry", "run `foo`", or similar — look it up first (`search_registry(code_name=...)` for exact match, `get_registry()` to browse). Read the returned spec's `executable` field and each parameter's `cli` field, then invoke via your shell. Do not substitute your own file/shell tools for a task a registered code can do. (See section 1b for the verbatim-`executable` rule.)
+**When the user asks for a specific code** ("use `foo`", "use `foo` from the registry", "run `foo`"), look it up first (`search_registry(code_name=...)` for an exact match, `get_registry()` to browse). Read the returned spec's `executable` field and each parameter's `cli` field, then invoke it from your shell. A task a registered code can do is done by that code, never by your own file or shell tools. (Section 1b has the verbatim-`executable` rule.)
 
 **Rendering parameters**: each parameter's `cli` field pins exactly how its value goes on the command line. Emit positional args first (in position order), then named args. Skip optional parameters whose value is absent; use the `default` when present.
 
@@ -151,19 +151,19 @@ For **each data manipulation step**, cycle through:
 
 The knowledge base contains domain documentation, package references, implementation examples, and standards.
 
-- `kb_list_collections()` — see what's indexed
-- `kb_search(query, collection, top_k)` — semantic search
-- `kb_ingest(folder_path)` — index new documents
+- `kb_list_collections()`: every collection with its purpose and metadata keys
+- `kb_search(query, collection, top_k, where)`: semantic search, `where` filtering on the collection's metadata keys
+- `kb_ingest(folder_path)`: index new documents
 
 ## CODE GENERATION PATTERN
 
 For each data operation, create TWO codes:
 
-**Check Code** — Quantifies the relevant metric
+**Check Code**: quantifies the relevant metric
 - Accepts: input data path, output report path, threshold parameters
 - Outputs: JSON report with counts, rates, distributions
 
-**Operation Code** — Performs the filter/transform
+**Operation Code**: performs the filter/transform
 - Accepts: input data path, output data path, parameters
 - Outputs: Transformed data
 

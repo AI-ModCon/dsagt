@@ -88,9 +88,9 @@ class TestWireProtocol:
         assert payload["error"].startswith("Input validation error:")
 
     def test_spawning_a_child_process_leaves_the_wire_clean(self, wire_proc):
-        """``run_command`` spawns ``dsagt-run`` from inside the serving process,
-        whose fd 0/1 the transport owns.  The child must run, and the JSON-RPC
-        stream must survive it — verified by a further call on the same
+        """``install_dependencies`` and the KB ingest spawn child processes
+        from inside the serving process, whose fd 0/1 the transport owns.  The child must run, and the JSON-RPC
+        stream must survive it, verified by a further call on the same
         connection."""
         response = mcp_call_tool(wire_proc, "spawn", {})
         assert json.loads(_tool_text(response)) == {

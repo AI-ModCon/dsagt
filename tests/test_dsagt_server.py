@@ -109,9 +109,9 @@ def test_dispatch_root_span_records_tool_inputs_and_outputs(tmp_path, monkeypatc
 
 
 def test_dispatch_root_span_never_stores_credentials_or_payloads(tmp_path, monkeypatch):
-    """What lands on the root span is written verbatim into ``mlflow.db`` and
-    served by ``dsagt traces`` — so an ``http_request``-style ``headers`` arg
-    must be redacted and a ``read_file``-sized result must be cut to a preview.
+    """What is set on the root span is written verbatim into ``mlflow.db`` and
+    served by ``dsagt traces``, so a ``headers`` argument carrying a bearer
+    token must be redacted and a 100 KB result must be cut to a preview.
     """
     import mlflow
 

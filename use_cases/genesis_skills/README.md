@@ -159,10 +159,10 @@ ls "$PROJ/trace_archive" | wc -l           # at least 3
 5. `trace_archive/` holds at least three execution records: the datacard
    introspection, the datacard validation, and the Croissant validation, each
    run through `dsagt-run`.
-6. MLflow traces (in the serverless `mlflow.db` store) capture the session —
-   `dsagt traces genesis-skills`.
+6. MLflow traces (in the serverless `mlflow.db` store) capture the session;
+   view them with `dsagt traces genesis-skills`.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

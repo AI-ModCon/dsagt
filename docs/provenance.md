@@ -32,16 +32,16 @@ dependencies: []
 tags: [csv, profiling]
 ---
 
-Run this registered code with the exact shell command below…
+Run this registered code with the exact shell command below.
 ```
 
-DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. The base skills' scripts and the `aidrin` CLI are registered as codes at `dsagt init`, indexed for search.
+DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent calls a code by its stored command and the environment is handled for it. The base skills' scripts and the `aidrin` CLI are registered as codes at `dsagt init`, indexed for search.
 
 ## Execution record
 
-Every registered code runs through the `dsagt-run` wrapper. For each call it records the command, arguments, exit code, duration, input/output file counts, and truncated stderr to `<project>/trace_archive/<record_id>.json`, and emits a `code.execute` span to the [trace store](observability.md). The MCP server incrementally indexes those records into the `code_use` collection, so past executions are searchable.
+Every registered code runs through the `dsagt-run` wrapper. For each call it records the command, arguments, exit code, duration, input and output files, and truncated stderr to `<project>/trace_archive/<record_id>.json`, and emits a `code.execute` span to the [trace store](observability.md). The MCP server incrementally indexes those records into the `code_use` collection, so past executions are searchable. A command with no spec runs as `dsagt-run -- <command>`, which records it the same way; `--stdout <path>` saves the command's stdout to a file and records that file as an output.
 
-The wrapper is the point of code-mediated data access. A direct shell or editor call isn't recordless — the agent's transcript still captures whatever it chose to report about the command and its stdout/stderr — but that's a partial, agent-curated account, not the structured `dsagt-run` record of exit code, timing, and input/output files. Only the wrapped record carries what `reconstruct_pipeline` needs, so a direct call still breaks reconstruction.
+The wrapper is the point of code-mediated data access. A direct shell or editor call leaves only what the agent's transcript captures about the command and its output, a partial, agent-curated account; the `dsagt-run` record holds the exit code, timing, and input and output files, which is what `reconstruct_pipeline` reads, so a direct call breaks reconstruction.
 
 ## Pipeline reconstruction
 
@@ -64,6 +64,6 @@ Then, in the agent (replace `$SMOKE_DIR` with the absolute path you exported):
 Afterwards, inspect the trail:
 
 ```bash
-ls ~/dsagt-projects/demo/{codes,trace_archive}          # the specs + execution records
+ls ~/dsagt-projects/demo/{skills,trace_archive}         # the specs + execution records
 dsagt traces demo                                        # code.execute spans in the MLflow viewer
 ```

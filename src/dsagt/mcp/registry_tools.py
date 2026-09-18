@@ -1,22 +1,23 @@
 """MCP tools for the tool registry, execution, and provenance.
 
-The "tool lifecycle" surface of ``dsagt-server``: define a tool spec
-(``save_code_spec``), discover tools (``get_registry`` / ``search_registry``),
+The code-lifecycle surface of ``dsagt-server``: define a code spec
+(``save_code_spec``), discover codes (``get_registry`` / ``search_registry``),
 install a code's dependencies (``install_dependencies``), read the readiness
 reports on record (``readiness_reports``), and reconstruct a reproducible
 pipeline from the recorded executions (``reconstruct_pipeline``).  Execution
 in the user's environment is ``dsagt-run``'s, from the agent's own shell, and
 reads are the agent's own tools, so the server runs nothing for the agent.
 
-Tool specs are saved as markdown files in the runtime tools directory and
-indexed into a ChromaDB collection for semantic search.  Server configuration
-(embedding credentials) flows through env vars (LLM_API_KEY, OPENAI_BASE_URL,
-EMBEDDING_MODEL) set by ``dsagt start``.
+Code specs are saved as ``skills/<name>/SKILL.md`` under the project and
+indexed into a ChromaDB collection for semantic search.  The embedding
+backend's routing (``EMBEDDING_BACKEND``, ``EMBEDDING_MODEL``,
+``EMBEDDING_BASE_URL``) comes from the MCP env block; its key comes from the
+shell or ``~/.config/dsagt/env``.
 
-These definitions + handlers run inside the merged ``dsagt-server`` (see
-:mod:`dsagt.mcp.server`); ``create_registry_server`` is retained only as a
-test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
-``install_skill``) live in :mod:`dsagt.mcp.skill_tools`.
+These definitions and handlers run inside the merged ``dsagt-server`` (see
+:mod:`dsagt.mcp.server`); ``create_registry_server`` is a test-facing
+constructor.  Skill tools (``save_skill`` / ``search_skills`` /
+``install_skill``) are defined in :mod:`dsagt.mcp.skill_tools`.
 """
 
 import asyncio

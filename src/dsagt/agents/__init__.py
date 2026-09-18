@@ -94,8 +94,8 @@ def agent_env(config: dict) -> dict:
          store.  Agent traces come from the on-disk transcript, so routing
          is all the block carries.
       4. Per-agent dsagt-owned runtime env via
-         :meth:`AgentSetup.runtime_env` — per-project state dirs only
-         (``CLINE_DIR``, ``CODEX_HOME``).
+         :meth:`AgentSetup.runtime_env`: per-project state dirs only
+         (``CLINE_MCP_SETTINGS_PATH``, ``CODEX_HOME``).
     """
     pdir = config["project_dir"]
     agent_name = config["agent"]

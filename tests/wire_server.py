@@ -29,7 +29,7 @@ TOOLS = [
     ),
     types.Tool(
         name="spawn",
-        description="Run a chatty child process, as `run_command` does.",
+        description="Run a chatty child process, as install_dependencies does.",
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(

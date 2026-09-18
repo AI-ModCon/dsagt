@@ -1,12 +1,11 @@
 """
 Tests for tool execution record indexing.
 
-Tests render_execution_text, execution_metadata, index_execution_record,
-and index_trace_archive.  KnowledgeBase embedding is mocked.
+Tests render_execution_text, execution_metadata, CodeUseIndexer, and
+index_trace_archive.  KnowledgeBase embedding is mocked.
 
 Records match the output of ``dsagt-run`` (run.py): an ``execution`` block
-with no intent/report.  (The pre-BYOA proxy_callback.py producer, which wrote
-intent/report records, was removed — see scratch/excised_proxy_provenance.py.)
+with no intent/report.
 """
 
 import json

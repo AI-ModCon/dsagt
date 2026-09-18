@@ -194,7 +194,7 @@ store `mlflow.db`, and the session's other outputs.
 5. The agent lists every metric call from the execution records with its command and exit code.
 6. MLflow traces capture token usage, latency, and the code-execution spans.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

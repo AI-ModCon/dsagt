@@ -147,10 +147,10 @@ ITER and NSTX cases.
 3. `data/<case_dir>_npz/` contains `mesh.npz`, `meta.json`, and three step files.
 4. `trace_archive/` holds one execution record per stage.
 5. A reconstructed pipeline script replays steps 2–5 against a parameterized case directory.
-6. MLflow traces (in the serverless `mlflow.db` store) capture the session —
-   `dsagt traces xgc-training`.
+6. MLflow traces (in the serverless `mlflow.db` store) capture the session;
+   view them with `dsagt traces xgc-training`.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|
