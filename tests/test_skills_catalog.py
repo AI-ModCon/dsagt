@@ -3,6 +3,7 @@ the native-skill mirror.  No network: ``clone_github`` is monkeypatched and
 the KB is a lightweight fake that records ``add_entries`` calls."""
 
 import json
+import os
 
 import pytest
 
@@ -801,3 +802,24 @@ def test_a_previous_clone_left_behind_is_not_a_source(tmp_path, monkeypatch):
         cache_dir=cache,
     )
     assert not (cache / "x-y.previous").exists()
+
+
+def test_mirror_is_a_relative_symlink_to_the_live_skill(tmp_path):
+    """The agent reads the live files: a script edited under skills/ is what
+    the mirrored skill runs, with no copy to go stale."""
+    src = _mkskill(tmp_path / "proj" / "skills" / "alpha", "alpha")
+    (src / "scripts").mkdir()
+    (src / "scripts" / "a.py").write_text("print(1)\n")
+    target = tmp_path / "proj" / ".claude" / "skills"
+    _mirror_skills_to(target, [src])
+    link = target / "alpha"
+    assert link.is_symlink()
+    assert not os.path.isabs(os.readlink(link))
+    assert (link / "scripts" / "a.py").read_text() == "print(1)\n"
+    (src / "scripts" / "a.py").write_text("print(2)\n")
+    assert (link / "scripts" / "a.py").read_text() == "print(2)\n"
+    # A second pass replaces the link in place; reaping removes it.
+    _mirror_skills_to(target, [src])
+    assert link.is_symlink()
+    _mirror_skills_to(target, [])
+    assert not link.exists() and not link.is_symlink()
