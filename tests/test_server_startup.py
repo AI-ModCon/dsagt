@@ -53,7 +53,7 @@ class TestServerEntryPoint:
             "project": "test",
             "agent": "claude",
             "embedding": {"backend": "local", "model": "BAAI/bge-small-en-v1.5"},
-            "knowledge": {"chunk_size": 1024, "rerank": False},
+            "knowledge": {"chunk_size": 1024},
         }
         (project / ".dsagt" / "config.yaml").write_text(
             yaml.dump(config, default_flow_style=False)

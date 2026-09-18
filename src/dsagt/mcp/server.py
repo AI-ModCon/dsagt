@@ -21,8 +21,8 @@ cycle.
 
 import os
 
-# Set before any import that may pull in PyTorch / sentence-transformers
-# (e.g. ``dsagt.knowledge`` below): prevents a fatal OpenMP crash when multiple
+# Set before any import that may pull in a native runtime (e.g.
+# ``dsagt.knowledge`` below): prevents a fatal OpenMP crash when multiple
 # libraries each bundle their own libomp.
 os.environ["PYTHONUNBUFFERED"] = "1"
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -408,7 +408,7 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     leakage guard that the two former server mains duplicated near-verbatim.
     """
     # embedding is a backfilled code default (not a written config choice);
-    # chunk_size / rerank default in KnowledgeBase itself.
+    # chunk_size default in KnowledgeBase itself.
     emb_config = config.get("embedding", {})
 
     backend = (emb_config.get("backend") or "local").lower()
@@ -471,8 +471,7 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
         recency_half_life_days=_recency_half_life(config),
     )
     # Background-load the embedder so the model is ready when the agent's first
-    # search / kb call lands (otherwise the first call pays the ~5-10s
-    # sentence-transformers import + construction, which looks like a hang).
+    # search / kb call lands (otherwise the first call pays the model load).
     kb.preload_default_embedder()
     return kb
 

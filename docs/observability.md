@@ -37,7 +37,7 @@ DSAgt reconstructs traces from what the agent writes to disk.
 
 | Source | Span type | Contents |
 |--------|-----------|----------|
-| Knowledge base | `kb.search`, `kb.embed`, `kb.index_search`, `kb.rerank` | Per-phase timing trees |
+| Knowledge base | `kb.search`, `kb.embed`, `kb.index_search` | Per-phase timing trees |
 | Code executions | `code.execute` | Exit code, duration, file counts, truncated stderr. Full payload in `trace_archive/<record_id>.json` |
 | Registry events | `registry.save_code_spec`, `registry.install_dependencies`, `registry.reconstruct_pipeline` | Span metadata |
 | Agent traces | one AGENT subtree per turn (`llm` / `tool_<name>` children) | Prompts, responses, tool calls, and token usage where the transcript carries them |

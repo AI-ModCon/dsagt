@@ -9,8 +9,8 @@ AI-assisted data pipeline builder for MCP-compatible agents.
 __version__ = "0.2.1"
 
 # Cap CPU thread count for embedding / tokenization libraries before any
-# heavy imports happen.  Without this, PyTorch / sentence-transformers /
-# numpy+MKL default to using every available core, which pegs the
+# heavy imports happen.  Without this, onnxruntime / numpy+MKL default to
+# using every available core, which pegs the
 # machine and causes visible system unresponsiveness during embed bursts
 # (kb_ingest, kb_search bursts, init's KB build).  Half the physical
 # cores is a sensible default that leaves headroom for the OS, the
@@ -21,10 +21,13 @@ import os as _os
 _default_threads = str(max(1, (_os.cpu_count() or 4) // 2))
 _os.environ.setdefault("OMP_NUM_THREADS", _default_threads)
 _os.environ.setdefault("MKL_NUM_THREADS", _default_threads)
-# Silence the "tokenizers/parallelism" fork warning that fires when
-# sentence-transformers' tokenizer is used after a fork (e.g. under
-# pytest-xdist or DataLoader workers).
+# Silence the "tokenizers/parallelism" fork warning that fires when the
+# embedder's tokenizer is used after a fork (e.g. under pytest-xdist).
 _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# onnxruntime 1.30 prints "Failed to persist telemetry device ID" to stderr
+# at session creation on macOS, and no logger setting suppresses it; an
+# agent that captures a code's stderr would read it as the code's output.
+_os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 # mlflow logs a three-line agent-directed hint on import whenever a coding
 # agent's environment marker is set, which is every dsagt process an agent
 # launches; dsagt-run under an agent printed it on every call.

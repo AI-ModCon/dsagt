@@ -66,7 +66,6 @@ class TestSearchFilterThreading:
             collection="tool_executions",
             collections=None,
             top_k=5,
-            rerank=None,
             where={"tool_name": "fastp"},
             where_document=None,
         )
@@ -88,7 +87,6 @@ class TestSearchFilterThreading:
             collection="tool_executions",
             collections=None,
             top_k=5,
-            rerank=None,
             where={"session_id": "s3"},
             where_document=None,
         )
@@ -130,7 +128,6 @@ class TestSearchFilterThreading:
             collection="tool_executions",
             collections=None,
             top_k=5,
-            rerank=None,
             where={"return_code": 1},
             where_document=None,
         )
@@ -157,7 +154,6 @@ class TestSearchFilterThreading:
             collection=None,
             collections=["tool_executions", "episodic_memory"],
             top_k=5,
-            rerank=None,
             where={"tool_name": "fastp"},
             where_document=None,
         )

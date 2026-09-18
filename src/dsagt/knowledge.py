@@ -36,7 +36,7 @@ References:
   - Code agents drop vector indexing for agentic grep —
     https://www.mindstudio.ai/blog/is-rag-dead-what-ai-agents-use-instead ;
     https://vadim.blog/claude-code-no-indexing/
-  - Hybrid BM25 + dense + reranking, the highest-impact RAG upgrade —
+  - Hybrid BM25 + dense retrieval —
     https://www.digitalapplied.com/blog/hybrid-search-bm25-vector-reranking-reference-2026
   - "When More Documents Hurt RAG": vector-search dilution, fixed by
     domain-scoped retrieval — https://arxiv.org/abs/2606.11350
@@ -55,7 +55,7 @@ Class map — every edge is ``<branch>─<rel> Class``, where ``<rel>`` is one o
             │                         collection, fused by _rrf_merge
             ├─◇ Embedder «abstract» 1   text → vectors; .create() factory
             │   │                       (one per store; may be shared)
-            │   ├─▷ LocalEmbedder       sentence-transformers, offline
+            │   ├─▷ LocalEmbedder       bge on onnxruntime, offline
             │   └─▷ APIEmbedder         OpenAI /v1/embeddings + rate-limit retry
             ├─◆ ChromaIndex  *          dense leg   (add/search/save/load)
             └─◆ BM25Index    *          sparse leg  (build/search/save/load)
@@ -85,18 +85,10 @@ import warnings as _warnings
 for _noisy in ("pypdf", "pypdf2", "PyPDF2", "pdfminer", "fontTools"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
-for _noisy in (
-    "httpx",
-    "httpcore",
-    "huggingface_hub",
-    "sentence_transformers",
-    "transformers",
-    "transformers_modules",
-):
+for _noisy in ("httpx", "httpcore", "huggingface_hub"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
 
-os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
 _warnings.filterwarnings(
@@ -123,7 +115,6 @@ import numpy as np
 from dsagt.observability import (
     kb_embed_span,
     kb_index_search_span,
-    kb_rerank_span,
     obs,
     traced,
 )
@@ -171,7 +162,6 @@ class Embedder(ABC):
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        device: str | None = None,
     ) -> "Embedder":
         """Factory: construct the one embedder for a store, with explicit args.
 
@@ -181,7 +171,7 @@ class Embedder(ABC):
         """
         backend = (backend or "api").lower()
         if backend == "local":
-            return LocalEmbedder(model=model, device=device)
+            return LocalEmbedder(model=model)
         if backend == "api":
             return APIEmbedder(model=model, base_url=base_url, api_key=api_key)
         raise ValueError(
@@ -197,87 +187,94 @@ class Embedder(ABC):
 
 
 class LocalEmbedder(Embedder):
-    """sentence-transformers, runs fully offline."""
+    """bge on onnxruntime, offline after the first download.
+
+    The model's own repository publishes ``onnx/model.onnx`` and
+    ``tokenizer.json``; those two files, onnxruntime, and tokenizers are the
+    whole runtime, and importing it costs well under a second in every
+    process that embeds.  Pooling is the CLS vector, normalized, which is
+    what the bge models specify; the vectors equal the reference PyTorch
+    implementation's to six decimals, so an index built by either is valid.
+    """
 
     backend = "local"
 
-    #: Default local model.  ``bge-small-en-v1.5`` (33M params, ~130 MB
-    #: on disk, ~250 MB resident) is ~3× faster and ~3× smaller than
-    #: ``bge-base`` for ~2 nDCG@10 points lower MTEB retrieval score — a
-    #: hard-to-notice difference for typical DSAGT KB sizes (single-digit
-    #: thousands of chunks).
-    #: Override via ``embedding.model`` in ``.dsagt/config.yaml`` (e.g.
-    #: ``BAAI/bge-large-en-v1.5`` for higher quality at the cost of
-    #: ~10× memory and ~5× CPU).
+    #: Default local model.  ``bge-small-en-v1.5`` (33M params, 133 MB
+    #: ONNX file) is ~3× faster and ~3× smaller than ``bge-base`` for ~2
+    #: nDCG@10 points lower MTEB retrieval score — a hard-to-notice
+    #: difference for typical DSAGT KB sizes (single-digit thousands of
+    #: chunks).  Override via ``embedding.model`` in ``.dsagt/config.yaml``
+    #: with any model whose repository publishes ``onnx/model.onnx``
+    #: (``BAAI/bge-base-en-v1.5``, ``BAAI/bge-large-en-v1.5``).
     DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 
-    def __init__(
-        self,
-        model: str | None = None,
-        batch_size: int = 256,
-        device: str | None = None,
-    ):
+    MAX_TOKENS = 512
+
+    def __init__(self, model: str | None = None, batch_size: int = 256):
         import sys
-        from sentence_transformers import SentenceTransformer
+
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download, try_to_load_from_cache
+        from huggingface_hub.errors import EntryNotFoundError
+        from tokenizers import Tokenizer
 
         model = model or self.DEFAULT_MODEL
         self.model = model
         self.batch_size = batch_size
-        # Probe the HF cache for the model's config.  If hit, load with
-        # ``local_files_only=True`` so SentenceTransformer skips the
-        # ETag-validation HEAD requests it would otherwise issue against
-        # huggingface.co — those round-trips are anonymous (HF_TOKEN
-        # isn't propagated into MCP-server env blocks for cline /
-        # codex), so they trigger an "unauthenticated requests" warning
-        # surfaced under the agent's debug stream.  Cache miss path stays
-        # online so first-run downloads still work.
-        try:
-            from huggingface_hub import try_to_load_from_cache
-
-            cache_hit = try_to_load_from_cache(model, "config.json") is not None
-        except Exception:
-            cache_hit = False
-        if cache_hit:
-            self._model = SentenceTransformer(
-                model,
-                device=device,
-                local_files_only=True,
-            )
-        else:
+        # A cache hit loads with no network; a miss announces the one-time
+        # download, since the agent's debug stream is where the wait shows.
+        if try_to_load_from_cache(model, "onnx/model.onnx") is None:
             print(
                 f"  Downloading {model} from HuggingFace "
                 "(set HF_TOKEN for faster throughput)...",
                 file=sys.stderr,
                 flush=True,
             )
-            self._model = SentenceTransformer(model, device=device)
-        # Belt-and-suspenders: dsagt/__init__.py sets OMP_NUM_THREADS /
-        # MKL_NUM_THREADS env vars before heavy imports, but PyTorch
-        # also has its own intra-op thread count that ignores those env
-        # vars in some configurations.  Cap explicitly here.
         try:
-            import torch
-
-            torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", "4")))
-        except Exception:  # noqa: BLE001 — best-effort cap, never fatal
-            pass
-        logger.info(
-            "Loaded local embedding model: %s (dim=%d)",
-            model,
-            self._model.get_embedding_dimension(),
+            model_path = hf_hub_download(model, "onnx/model.onnx")
+            tokenizer_path = hf_hub_download(model, "tokenizer.json")
+        except EntryNotFoundError as err:
+            raise ValueError(
+                f"embedding.model {model!r} publishes no onnx/model.onnx; the "
+                "local backend runs a model's ONNX export (BAAI/bge-small-en-v1.5, "
+                "bge-base, bge-large)"
+            ) from err
+        options = ort.SessionOptions()
+        options.log_severity_level = 3
+        options.intra_op_num_threads = int(os.environ.get("OMP_NUM_THREADS", "4"))
+        self._session = ort.InferenceSession(
+            model_path, options, providers=["CPUExecutionProvider"]
         )
+        self._input_names = {i.name for i in self._session.get_inputs()}
+        self._tokenizer = Tokenizer.from_file(tokenizer_path)
+        self._tokenizer.enable_truncation(self.MAX_TOKENS)
+        self._tokenizer.enable_padding(
+            pad_id=self._tokenizer.token_to_id("[PAD]") or 0, pad_token="[PAD]"
+        )
+        self._dim = int(self._session.get_outputs()[0].shape[-1])
+        logger.info("Loaded local embedding model: %s (dim=%d)", model, self._dim)
+
+    def _embed_batch(self, texts: list[str]) -> np.ndarray:
+        encoded = self._tokenizer.encode_batch(texts)
+        ids = np.array([e.ids for e in encoded], dtype=np.int64)
+        inputs = {
+            "input_ids": ids,
+            "attention_mask": np.array(
+                [e.attention_mask for e in encoded], dtype=np.int64
+            ),
+        }
+        if "token_type_ids" in self._input_names:
+            inputs["token_type_ids"] = np.zeros_like(ids)
+        hidden = self._session.run(None, inputs)[0]
+        cls = hidden[:, 0, :]
+        return cls / np.linalg.norm(cls, axis=1, keepdims=True)
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        # Show the progress bar only for non-trivial inputs so single-query
-        # search calls (kb.search → embed([query])) stay silent while large
-        # ingest runs surface tqdm progress.
-        show_bar = len(texts) > self.batch_size
-        return self._model.encode(
-            texts,
-            batch_size=self.batch_size,
-            show_progress_bar=show_bar,
-            normalize_embeddings=True,
-        ).astype(np.float32)
+        batches = [
+            self._embed_batch(texts[i : i + self.batch_size])
+            for i in range(0, len(texts), self.batch_size)
+        ]
+        return np.concatenate(batches).astype(np.float32)
 
 
 # --- rate-limit retry helpers (used by APIEmbedder) ----------------
@@ -887,21 +884,20 @@ class ChromaVectorStore(VectorStore):
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        device: str | None = None,
     ):
         self.index_dir = Path(index_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
         # Embedder is either injected (shareable across stores) or built lazily
-        # from explicit args.  Lazy build keeps the ~5-10s sentence-transformers
-        # load off the hot path (see preload via KnowledgeBase).  backend/model
-        # are kept as lightweight labels so listing never forces a model load.
+        # from explicit args.  Lazy build keeps the model load off the hot path
+        # (see preload via KnowledgeBase).  backend/model are kept as
+        # lightweight labels so listing never forces a model load.
         self._embedder = embedder
         if embedder is not None:
             self._backend, self._model = embedder.backend, embedder.model
         else:
             self._backend, self._model = backend, model
-        self._base_url, self._api_key, self._device = base_url, api_key, device
+        self._base_url, self._api_key = base_url, api_key
         # Serializes embedder construction so a background preload and a
         # foreground first-query call don't race and double-load the model.
         self._embedder_lock = threading.Lock()
@@ -921,7 +917,6 @@ class ChromaVectorStore(VectorStore):
                     model=self._model,
                     base_url=self._base_url,
                     api_key=self._api_key,
-                    device=self._device,
                 )
             return self._embedder
 
@@ -1183,7 +1178,7 @@ class KnowledgeBase:
     Chroma store) and its job is to **fuse their collections**: collection→store
     routing plus rank-fusion across collections.  It also owns the document
     ingestion pipeline (collect / parse / chunk → ``VectorStore.add_chunks``) and
-    cross-collection reranking.  This is the shared substrate every KB consumer
+    cross-collection fusion.  This is the shared substrate every KB consumer
     (retrieval, memory, provenance, skills) calls into.
 
     Quick-start
@@ -1218,8 +1213,6 @@ class KnowledgeBase:
         index_dir: str | Path,
         chunk_size: int = 1024,
         chunk_overlap: int = 128,
-        rerank_model: str = "BAAI/bge-reranker-v2-m3",
-        default_rerank: bool = False,
         recency_half_life_days: float | None = None,
         # Internal store's embedder (one per store, fixed at construction).
         # Explicit args — callers unpack their config here, no kwargs dict.
@@ -1227,13 +1220,10 @@ class KnowledgeBase:
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        device: str | None = None,
     ):
         self.index_dir = Path(index_dir)
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.rerank_model = rerank_model
-        self.default_rerank = default_rerank
         # Episodic recency weighting (session_memory only); None = off.
         self._recency_half_life_days = recency_half_life_days
 
@@ -1246,7 +1236,6 @@ class KnowledgeBase:
             model=model,
             base_url=base_url,
             api_key=api_key,
-            device=device,
         )
         self._stores: list[VectorStore] = [self._store]
 
@@ -1261,8 +1250,6 @@ class KnowledgeBase:
         # and surface it in the result dict so users notice when a non-zero
         # number of files are silently being dropped.
         self._chunk_skip_count: int = 0
-
-        self._reranker = None
 
     # -- store routing -------------------------------------------------------
 
@@ -1293,9 +1280,8 @@ class KnowledgeBase:
     def preload_default_embedder(self) -> None:
         """Kick off internal-store embedder construction in a daemon thread.
 
-        Called at MCP server startup so the heavy load (sentence-transformers
-        import + model load, ~5-10s) happens in parallel with the rest of
-        bootstrap.  Failure is swallowed: it resurfaces with a full traceback
+        Called at MCP server startup so the model load happens in parallel
+        with the rest of bootstrap.  Failure is swallowed: it resurfaces with a full traceback
         on the first real embedding call.
         """
 
@@ -1483,14 +1469,13 @@ class KnowledgeBase:
 
     # -- federated search ----------------------------------------------------
 
-    @traced("kb.search", capture=["collection", "top_k", "rerank"])
+    @traced("kb.search", capture=["collection", "top_k"])
     def search(
         self,
         query: str,
         collection: str | None = None,
         collections: list[str] | None = None,
         top_k: int = 5,
-        rerank: bool | None = None,
         where: dict | None = None,
         where_document: dict | None = None,
     ) -> list[dict]:
@@ -1499,28 +1484,24 @@ class KnowledgeBase:
         A single collection routes straight to its store's hybrid search.
         Multiple collections fan out — each store searched, then the per-
         collection rankings fused by Reciprocal Rank Fusion (rank-only, so
-        different embedding spaces compose correctly).  Optional cross-encoder
-        rerank runs over the fused candidates.
+        different embedding spaces compose correctly).
 
         Missing collections are skipped with a warning; the search fails only
         when *every* requested collection is absent.
         """
-        if rerank is None:
-            rerank = self.default_rerank
-
         targets = collections or ([collection] if collection else [])
         if not targets:
             raise ValueError("Provide 'collection' or 'collections'")
 
         obs.set_inputs({"query": query, "collections": targets, "top_k": top_k})
 
-        # Oversample per-collection pools when reranking, fusing >1 collection,
-        # or recency-weighting (so a recent fact can be lifted from deep in the
+        # Oversample per-collection pools when fusing >1 collection or
+        # recency-weighting (so a recent fact can be lifted from deep in the
         # pool, not merely reordered within an already-cut top_k).
         recency_target = bool(
             self._recency_half_life_days and targets == [_RECENCY_COLLECTION]
         )
-        oversample = rerank or len(targets) > 1 or recency_target
+        oversample = len(targets) > 1 or recency_target
         candidate_k = max(top_k * 10, 50) if oversample else top_k
 
         per_coll: list[list[dict]] = []
@@ -1551,16 +1532,12 @@ class KnowledgeBase:
         fused = per_coll[0] if len(per_coll) == 1 else _rrf_across(per_coll)
 
         # Episodic recency: a recent corrected fact outranks a stale one without
-        # any contradiction detection — recency is the ranker for session_memory
-        # (mutually exclusive with the cross-encoder; the two are alternative
-        # rerankers and recency is the one that matters for a time-ordered log).
+        # any contradiction detection — recency is the ranker for session_memory,
+        # the one that matters for a time-ordered log.
         if recency_target and fused:
             final = _apply_recency(fused, self._recency_half_life_days, time.time())[
                 :top_k
             ]
-        elif rerank and fused:
-            with kb_rerank_span(self.rerank_model, len(fused)):
-                final = self._rerank(query, fused, top_k)
         else:
             final = fused[:top_k]
 
@@ -1572,16 +1549,6 @@ class KnowledgeBase:
             }
         )
         return final
-
-    def _rerank(self, query: str, results: list[dict], top_k: int) -> list[dict]:
-        if self._reranker is None:
-            from sentence_transformers import CrossEncoder
-
-            self._reranker = CrossEncoder(self.rerank_model, max_length=512)
-        pairs = [[query, r["chunk"]["text"]] for r in results]
-        scores = self._reranker.predict(pairs, show_progress_bar=False)
-        ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
-        return [{**r, "rerank_score": float(s)} for r, s in ranked[:top_k]]
 
     # -- file discovery + chunking ------------------------------------------
 

@@ -79,7 +79,7 @@ def state_path(pdir: Path) -> Path:
 # They are code settings, held here as the one definition and filled in for
 # the MCP server and the KB; ``.dsagt/config.yaml`` and the ``dsagt init``
 # prompts carry user choices only.  Embedding is local (BYOA, no
-# credentials).  ``chunk_size`` / ``rerank`` default
+# credentials).  ``chunk_size`` default
 # in :class:`~dsagt.knowledge.KnowledgeBase`; ``skills.populate_native`` in
 # :meth:`AgentSetup.setup_skills`.
 DEFAULTS = {
@@ -200,7 +200,7 @@ def build_config(
     - ``readiness`` — the AI-readiness check setting (``auto_assess``; see
       :mod:`dsagt.readiness`), written when init asked the question.
 
-    Everything else (embedding backend, chunk_size, rerank, populate_native)
+    Everything else (embedding backend, chunk_size, populate_native)
     is a code default backfilled on read — NOT a written choice.  Credentials
     are never here (shell env only); no MLflow port (serverless sqlite store).
     """

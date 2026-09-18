@@ -84,4 +84,4 @@ In Terminal 1's MLflow UI (http://localhost:5001 by default; check the port `dsa
 
 - **claude keychain conflict:** if claude won't auth against your gateway with `ANTHROPIC_BASE_URL` set, run `claude /logout` first to clear the macOS Keychain OAuth that takes precedence over env vars.
 - **opencode transient streaming bug:** `Error: "text part chatcmpl-... not found"` happens occasionally on first run; just re-run.
-- **embedding backend:** defaults to `local` (sentence-transformers, ~130 MB BAAI/bge-small-en-v1.5 downloaded once, no API call). Switch via `embedding.backend: api` in `dsagt_config.yaml` only if you need a hosted embedder.
+- **embedding backend:** defaults to `local` (BAAI/bge-small-en-v1.5 on onnxruntime, a 133 MB ONNX file downloaded once, no API call). Switch via `embedding.backend: api` in `dsagt_config.yaml` only if you need a hosted embedder.

@@ -6,7 +6,7 @@ immediately with a ``job_id``; poll ``kb_job_status`` for completion.
 
 Multi-collection search fans out and rank-fuses *below* this tool boundary, in
 :meth:`dsagt.knowledge.KnowledgeBase.search` — the agent just names collection(s).
-Server configuration (chunk_size, rerank) is read from the project's
+Server configuration (chunk_size) is read from the project's
 .dsagt/config.yaml.  Embedding credentials flow through env vars (EMBEDDING_API_KEY,
 EMBEDDING_BASE_URL, EMBEDDING_MODEL) from the shell or from the per-agent MCP
 config env block that ``dsagt init`` writes.
@@ -20,9 +20,8 @@ constructor.  Explicit-memory tools (``kb_remember`` / etc.) live in
 
 import os
 
-# Prevent fatal OpenMP crash when multiple libraries (PyTorch /
-# sentence-transformers) each bundle their own libomp.  Must precede the
-# ``dsagt.knowledge`` import below.
+# Prevent a fatal OpenMP crash when multiple native libraries each bundle
+# their own libomp.  Must precede the ``dsagt.knowledge`` import below.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import asyncio  # noqa: E402
@@ -115,8 +114,6 @@ async def _handle_kb_search(
 ) -> dict:
     query = arguments["query"]
     top_k = arguments.get("top_k", 5)
-    rerank = arguments.get("rerank")  # None → kb.default_rerank
-
     collection_arg = arguments.get("collection")
     collections_arg = arguments.get("collections")
 
@@ -162,7 +159,6 @@ async def _handle_kb_search(
             collection=collection_arg,
             collections=collections_arg,
             top_k=top_k,
-            rerank=rerank,
             where=where or None,
             where_document=where_document,
         )
@@ -178,7 +174,6 @@ async def _handle_kb_search(
             {
                 "text": r["chunk"]["text"],
                 "score": r["score"],
-                "rerank_score": r.get("rerank_score"),
                 "source_file": r["chunk"]["metadata"].get("source_file", ""),
                 "chunk_index": r["chunk"]["metadata"].get("chunk_index", 0),
                 "metadata": {
@@ -348,8 +343,7 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
     """Build the knowledge-base ``(tool defs, handler map)``.
 
     Combined with the other concern modules' tools under one MCP ``Server`` by
-    :func:`dsagt.mcp.server.create_dsagt_server`.  The rerank default is on
-    ``kb.default_rerank`` (set from ``knowledge.rerank`` in .dsagt/config.yaml).
+    :func:`dsagt.mcp.server.create_dsagt_server`.
     """
     job_tracker = _JobTracker()
 
@@ -401,11 +395,6 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                         "type": "integer",
                         "description": "Number of results to return (default: 5)",
                         "default": 5,
-                    },
-                    "rerank": {
-                        "type": "boolean",
-                        "description": "Use cross-encoder reranking (slower but more accurate). Default from config.",
-                        "default": kb.default_rerank,
                     },
                     "category": {
                         "type": "string",

@@ -200,8 +200,8 @@ def setup_collection(
     """Download sources and ingest a collection.
 
     When *kb* is provided, the existing KnowledgeBase is reused — its
-    embedder cache stays warm so the local sentence-transformers model
-    isn't reloaded per collection.  When None (default for backwards
+    embedder cache stays warm so the local model isn't reloaded per
+    collection.  When None (default for backwards
     compat with direct callers), a fresh KB is constructed and closed
     around this call.
 
@@ -366,9 +366,9 @@ def _model_is_cached(model_id: str) -> bool:
     try:
         from huggingface_hub import try_to_load_from_cache
 
-        # A sentence-transformers model always ships a config.json; a str path
+        # The local embedder loads the repository's ONNX export; a str path
         # back means the file is cached (None / sentinel ⇒ not cached).
-        return isinstance(try_to_load_from_cache(model_id, "config.json"), str)
+        return isinstance(try_to_load_from_cache(model_id, "onnx/model.onnx"), str)
     except Exception:
         return True
 
