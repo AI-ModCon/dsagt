@@ -7,6 +7,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
+- **Ad-hoc runs and `--stdout`.** `dsagt-run -- <command>` with no `--code`
+  records a run without a spec (empty `code_name`, file prefix `adhoc`), so
+  recording is separate from registration and any command that computes
+  from project data is recorded; `dsagt-run --stdout <path>` writes the
+  command's stdout to the file and records it as an output, which the
+  reconstructed script writes with a redirect. A run ended by SIGTERM,
+  SIGINT, or SIGHUP still writes its record with the signal's status.
+- **File hashes in every record.** `execution.file_hashes` holds the SHA-256
+  of each input before the run and each output after it. When a spec has no
+  parameter roles, or the run is ad-hoc, an argument that is an existing
+  file is an input and one that exists only after the run is an output.
+- **`readiness_reports` tool.** The AI-readiness reports on record for a
+  file, newest first, each with whether the file is unchanged since that
+  run; the readiness paragraph says to call it before a check, so an
+  unchanged file is checked once, and defines a table (CSV, Parquet, Excel,
+  JSON records; HDF5 or NumPy only once `aidrin summarize` shows one table).
+- **`reconstruct_pipeline(output=...)`** saves the script under the project;
+  the bash script creates the recorded output directories first and removes
+  a repeated output before the step that rewrites it.
+- **One install path for every skill.** `skills.register_skill_scripts`
+  registers each `scripts/*.py` and `*.sh` of an installed skill as a code
+  (spec from the overrides table or the script's argparse calls) and
+  rewrites the skill's bare invocations to the stored `dsagt-run` line;
+  `dsagt init`, `install_skill`, and `save_skill` call it and reply with the
+  stored lines.
+- **`dsagt-bash-guard`.** The claude setup writes a `PreToolUse` hook into
+  `.claude/settings.json` that refuses a bare `python` call from the Bash
+  tool with the recorded form to use.
+- **`kb_list_collections` and `kb_search(where=...)`.** Every collection is
+  listed with its purpose, its metadata keys, and its chunk count, dsagt's
+  own (`codes`, `code_use`, `session_memory`, `explicit_memory`) before their
+  first write; `kb_search` takes a metadata filter.
+- **The MCP env block carries the launching shell's activated environment**
+  (`PATH`, `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHONPATH`, the library paths,
+  the `module` variables, plus `mcp.env_passthrough` from the config), copied
+  at `dsagt init` and `dsagt start`; a credential name is refused.
 - **Shared tracking server.** `MLFLOW_TRACKING_URI` in the shell redirects all
   self-logging — CLI, MCP server, `dsagt-run` — to a remote MLflow server
   instead of the project's sqlite file; `MLFLOW_TRACKING_API_KEY` authenticates
@@ -21,6 +58,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a `dsagt.project` tag, both set once on creation.
 
 ### Changed
+
+- **Codes and skills share `skills/`.** A code is a skill directory whose
+  frontmatter declares an executable; a project has no `codes/` directory,
+  and `dsagt init` on a project with one moves each code under `skills/`.
+- **The native skills mirror is a relative symlink per skill directory**, so
+  the agent reads the live files; a skill whose description exceeds Claude
+  Code's cap is copied with the description truncated.
+- **A skill source is fetched as a GitHub tarball** over HTTPS (the shell's
+  `GITHUB_TOKEN` when present); the user's git is the fallback for a
+  repository the API refuses and for a URL that is not GitHub.
+- **Trace acknowledgements are keyed by transcript**, so a resumed
+  conversation (`claude --continue`, `codex exec resume`) logs only its new
+  turns, and the final flush emits the last turn only once it holds a
+  response.
+- **Section 1 of the instructions** says every command that computes from
+  project data runs under `dsagt-run`, that a document the agent authors is
+  not a run, and that `save_code_spec` is for what is part of the pipeline
+  or will run again. The foreground rule names a background subagent as
+  forbidden beside a background task.
+- `search_registry` lists hits by rank instead of a rank-fusion score.
+- The startup catch-up reuses the server's knowledge base, so one embedder
+  serves the session.
 
 - AIDRIN has one path: the code registry. The `aidrin` package is a dependency
   of dsagt, so the CLI is in dsagt's Python environment; every `dsagt init`
@@ -60,7 +119,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `add_skill_source` with `force` re-clones it on request. An init with a
   warm cache needs no network.
 
+### Removed
+
+- **`scan-directory`** and the bundled-code layer (`src/dsagt/codes/`,
+  `CodeRegistry.ensure_bundled_copies`). The base skills' codes are the
+  examples.
+- **`run_command`, `read_file`, `http_request`.** Execution in the user's
+  environment is `dsagt-run`'s, from the agent's shell; reads are the
+  agent's own tools. The server has 18 tools.
+
 ### Fixed
+
 - Tool arguments and results recorded on a trace are bounded before they
   reach the store, with credential-bearing keys (`headers`, `api_key`,
   `token`, …) redacted and common credential shapes inside strings (`Bearer …`,
