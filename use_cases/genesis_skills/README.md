@@ -47,11 +47,13 @@ in step 1. Then:
 
 ```bash
 PROJ=~/dsagt-projects/genesis-skills
-# The fixture data (catalyst_screening.csv and the domain docs) is in the
-# repository, under this use case's data/ folder. The expected datacard stays
-# out of the project: it is the reference you compare against afterwards.
-mkdir -p "$PROJ/mock_data"
-cp -r use_cases/genesis_skills/data/dataset use_cases/genesis_skills/data/domain "$PROJ/mock_data/"
+# From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
+# One bundle: catalyst_screening.csv and the domain documents. The expected
+# datacard stays out of the project: it is the reference you compare against
+# afterwards, in this repository under this use case's data/ folder.
+curl -L "https://drive.usercontent.google.com/download?id=1HvmvPs6Bx4QgmXqYU0ZQuVbaLfEw0eLK&export=download&confirm=t" \
+  -o genesis_skills.tar.gz
+tar xzf genesis_skills.tar.gz -C "$PROJ"
 # $PROJ/mock_data now holds dataset/ and domain/
 dsagt start genesis-skills
 ```
@@ -149,7 +151,7 @@ ls "$PROJ/trace_archive" | wc -l           # at least 3
    them by reading their `SKILL.md`.
 3. `audit/catalyst_screening_datacard.md` was produced for the finished dataset,
    grounded in the domain documents, and carries the values listed in
-   `use_cases/genesis_skills/data/expected_datacard.md`: reactor conditions
+   [`data/expected_datacard.md`](data/expected_datacard.md): reactor conditions
    250 °C, 1 atm, H2:CO2 = 4:1, GHSV 12,000; license CC-BY-4.0; 8 rows; the
    ranges of the numeric columns; and the three caveats the measurement
    protocol states (single-run, trace C2+ excluded, relative ranking). Each

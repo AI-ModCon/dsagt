@@ -63,9 +63,11 @@ and search a second one from inside the session. Then:
 
 ```bash
 PROJ=~/dsagt-projects/isaac-vasp
-# The fixtures (the NEB images, the mock slab, and their reference records) are
-# in the repository, under this use case's data/ folder.
-cp -r use_cases/vasp_dft/data "$PROJ/data"
+# From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
+# One bundle: the NEB images, the mock slab, and their reference records (data/).
+curl -L "https://drive.usercontent.google.com/download?id=14HFHhEY4HfcQLl-Yu430zODm2CJH-kRS&export=download&confirm=t" \
+  -o vasp_dft.tar.gz
+tar xzf vasp_dft.tar.gz -C "$PROJ"
 # $PROJ/data now holds neb/, isaac_neb_record.json, mock_slab/, expected_isaac_record.json
 dsagt start isaac-vasp                        # mirrors the skill-creator base skill into the agent's native skills dir
 ```

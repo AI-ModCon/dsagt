@@ -29,13 +29,19 @@ This guide documents a reproducible DSAgt demonstration for microbial isolate da
 
 ### 1. Install fastp and megahit
 
-fastp and megahit are C/C++ programs from Bioconda, not pip packages. The setup
-script creates a conda environment for them from
-[`scripts/environment.yml`](scripts/environment.yml) under the shared DSAgt
-tools directory, using conda if present and a downloaded micromamba otherwise:
+fastp and megahit are C/C++ programs from Bioconda, not pip packages. The
+walkthrough's bundle (the reads, the two documents, and the setup script; 3.9 GB,
+from the DSAgt use-case data folder,
+https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6) holds a
+setup script that creates a conda environment for them from its
+`environment.yml` under the shared DSAgt tools directory, using conda if present
+and a downloaded micromamba otherwise:
 
 ```bash
-bash use_cases/microbial_isolates/scripts/setup_env.sh
+curl -L "https://drive.usercontent.google.com/download?id=1xabVTGy6W3vx55sRBVrPLFqNc_LqG1hz&export=download&confirm=t" \
+  -o microbial_isolates.tar.gz
+mkdir -p isolates_bundle && tar xzf microbial_isolates.tar.gz -C isolates_bundle ./setup
+bash isolates_bundle/setup/setup_env.sh
 ```
 
 It prints the environment's `bin` directory
@@ -62,24 +68,15 @@ in your shell — never written to disk.)
 ### 3. Collect data and reference material into the project
 
 The agent runs with the project directory as its working directory, so everything it
-reads goes under `$PROJ`. The two documents under [`docs/`](docs/) describe the
-processing pipeline and the fastp and megahit parameter choices; the agent reads
-them directly.
+reads goes under `$PROJ`. The bundle's two documents describe the processing
+pipeline and the fastp and megahit parameter choices; the agent reads them
+directly.
 
 ```bash
-mkdir -p "$PROJ/docs"
-# The isolate reads (11 interleaved FASTQ files, 3.9 GB) from the DSAgt use-case
-# data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
-curl -L "https://drive.usercontent.google.com/download?id=1IgeSRHS476WNFdM3z-WvYJdg3DoxCoxI&export=download&confirm=t" \
-  -o microbial_isolates_reads.tar
-tar xf microbial_isolates_reads.tar -C "$PROJ" --strip-components=1
-# $PROJ/data/microbial_isolate/ now holds the FASTQ files and their README
-cp use_cases/microbial_isolates/docs/*.md "$PROJ/docs/"
+# The bundle downloaded in step 1: 11 interleaved FASTQ files with their README
+# (data/microbial_isolate/) and the two documents (docs/).
+tar xzf microbial_isolates.tar.gz -C "$PROJ" --exclude='./setup'
 ```
-
-The data bundle's README carries an older megahit parameter note (`-t 2`, a
-fractional memory cap); the best-practices document under `docs/` is the one to
-follow.
 
 ### 4. Start the session
 
@@ -202,5 +199,6 @@ with a line on what each is. The reply may summarize a tree printed by a command
 
 ```bash
 dsagt rm isolate-pipeline -y
+rm -r microbial_isolates.tar.gz isolates_bundle
 rm -rf ~/dsagt-projects/.tools/microbial_isolates     # the fastp/megahit environment
 ```

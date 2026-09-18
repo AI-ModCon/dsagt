@@ -62,8 +62,11 @@ are fine for the rest. Then:
 PROJ=~/dsagt-projects/xgc-training
 mkdir -p "$PROJ/data"
 ln -s /path/to/your/xgc/<case_dir> "$PROJ/data/<case_dir>"   # or copy it
-mkdir -p "$PROJ/skills"
-cp -r use_cases/plasma_turbulence/skills/xgc-ai-training "$PROJ/skills/"
+# From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
+# One bundle: the xgc-ai-training skill (skills/).
+curl -L "https://drive.usercontent.google.com/download?id=1bYbN8TKNjZO5Yd9d4do7hvFq9Ao0trw4&export=download&confirm=t" \
+  -o plasma_turbulence.tar.gz
+tar xzf plasma_turbulence.tar.gz -C "$PROJ"
 dsagt start xgc-training                       # mirrors the skill into the agent's native skills dir
 ```
 

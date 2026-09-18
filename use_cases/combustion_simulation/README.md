@@ -57,13 +57,12 @@ are fine for the rest. Then:
 
 ```bash
 PROJ=~/dsagt-projects/blastnet-well
-curl -L "https://drive.usercontent.google.com/download?id=1xUZhlr6uCahSbOLiLt5wcwMzehdpaUjL&export=download&confirm=t" \
-  -o combustion_simulation_data.tar.gz
-tar xzf combustion_simulation_data.tar.gz -C "$PROJ"
-mv "$PROJ/data/holdout" ~/dsagt-projects/blastnet-well-holdout
-mkdir -p "$PROJ/skills/check-well-output/scripts" "$PROJ/docs" "$PROJ/well_output"
-cp use_cases/combustion_simulation/docs/*.md "$PROJ/docs/"
-cp use_cases/combustion_simulation/scripts/check_well_output.py "$PROJ/skills/check-well-output/scripts/"
+# From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
+# One bundle: the BlastNet trajectory (data/), the two format documents (docs/),
+# the checker (skills/check-well-output/scripts/), and the holdout reference (holdout/).
+curl -L "https://drive.usercontent.google.com/download?id=1dXFOocZ5Uep5DAmth_xMsYwIP5Gbpv83&export=download&confirm=t" \
+  -o combustion_simulation.tar.gz
+tar xzf combustion_simulation.tar.gz -C "$PROJ" --exclude='./holdout'
 dsagt start blastnet-well
 ```
 
@@ -142,10 +141,10 @@ code with its exact command.
 
 ### 5. Check against the holdout reference and iterate
 
-Copy the reference into the project first:
+Unpack the reference into the project first:
 
 ```bash
-cp -r ~/dsagt-projects/blastnet-well-holdout "$PROJ/data/holdout"
+tar xzf combustion_simulation.tar.gz -C "$PROJ/data" ./holdout
 ```
 
 ```text
@@ -247,7 +246,7 @@ is. The agent may print the tree through a command; the reply then summarizes it
 
 ```bash
 dsagt rm blastnet-well -y
-rm -r ~/dsagt-projects/blastnet-well-holdout combustion_simulation_data.tar.gz
+rm combustion_simulation.tar.gz
 ```
 
 ## Notes
