@@ -23,17 +23,21 @@ a laptop hard drive.
 
 Recommended Command
 
+The isolate files in this walkthrough are interleaved paired-end FASTQ (both
+mates in one file), and their adapters were removed upstream, so the command
+reads one file with `--interleaved_in` and writes two. Adapter auto-detection
+for paired-end input (`--detect_adapter_for_pe`) needs `--in2` and fails with
+"Failed to open file" when combined with `--interleaved_in`; leave it off.
+
 > fastp \\
 >
-> \--in1 sample_R1.fastq.gz \\
+> \--in1 sample.fastq.gz \\
 >
-> \--in2 sample_R2.fastq.gz \\
+> \--interleaved_in \\
 >
 > \--out1 sample_R1.trimmed.fastq.gz \\
 >
 > \--out2 sample_R2.trimmed.fastq.gz \\
->
-> \--detect_adapter_for_pe \\
 >
 > -q 20 \\
 >
@@ -50,10 +54,10 @@ Key Parameters
   -------------------------- -------------------------------------------------
   **Parameter**              **Description**
 
-  \--detect_adapter_for_pe   Enables automatic adapter detection for
-                             paired-end data. Without this flag,
-                             auto-detection is only active for single-end
-                             input.
+  \--interleaved_in          Reads both mates from the one input file.
+                             With separate R1/R2 files use \--in1/\--in2
+                             instead, and \--detect_adapter_for_pe then
+                             enables paired-end adapter detection.
 
   -q 20                      Quality threshold per base. Bases below Phred Q20
                              are considered low quality. A value of 20 is a
@@ -110,7 +114,7 @@ Recommended Command
 >
 > -2 sample_R2.trimmed.fastq.gz \\
 >
-> -t 4 \\
+> -t 1 \\
 >
 > -m 3000000000 \\
 >
@@ -127,9 +131,12 @@ Key Parameters
   --------------------- -------------------------------------------------
   **Parameter**         **Description**
 
-  -t 4                  Limits threads to 4. MEGAHIT defaults to
-                        auto-detecting and using all CPU threads, which
-                        will saturate a laptop. Set this explicitly.
+  -t 1                  One thread. MEGAHIT defaults to auto-detecting
+                        and using all CPU threads, which will saturate a
+                        laptop, and the Bioconda osx-arm64 build
+                        segfaults with more than one thread (see
+                        \--no-hw-accel). An isolate assembles in two to
+                        four minutes single-threaded.
 
   -m 3000000000         Hard memory cap in bytes (3 GB). Using the byte
                         value is more reliable than the fractional flag
@@ -138,11 +145,9 @@ Key Parameters
 
   \--no-hw-accel        Runs the plain MEGAHIT core. On Apple Silicon
                         the Bioconda osx-arm64 build segfaults during
-                        k-mer counting when it runs with four threads,
-                        with either core; one or two threads complete
-                        every run. Use -t 1 with this flag on Apple
-                        Silicon; an isolate assembles in one to two
-                        minutes.
+                        k-mer counting with two or more threads, with
+                        either core; only -t 1 completes every run. Use
+                        -t 1 with this flag on Apple Silicon.
 
   \--min-count 3        Filters k-mers appearing fewer than 3 times. The
                         default is 2 (tuned for metagenomes). For isolate
@@ -191,8 +196,8 @@ microbial isolate (2-6 Mb genome), 3 GB is sufficient for graph
 construction. If MEGAHIT fails with a graph-building error (not a
 segfault), increase the value. If it segfaults, decrease it. A segfault
 at the "Lv1 scanning done" line of the log, at every memory value, is
-the thread count: on Apple Silicon the Bioconda build fails with -t 4
-and completes with -t 1 or -t 2. Use -t 1 --no-hw-accel there.
+the thread count: on Apple Silicon the Bioconda build fails with -t 2
+and above and completes with -t 1. Use -t 1 --no-hw-accel there.
 
 Checking Available RAM on macOS
 

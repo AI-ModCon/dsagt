@@ -120,7 +120,7 @@ Then give me a readiness verdict organized by the four categories.
 | `aidrin run entropy-risk data/adult.csv "age,sex,race"` | `≈0.06` |
 | `aidrin run single-attribute-risk data/adult.csv ID "age,sex,race"` | per-attribute risk stats |
 | `aidrin run multiple-attribute-risk data/adult.csv ID "age,sex,race"` | joint re-identification risk |
-| `aidrin run differential-privacy data/adult.csv "age,hours.per.week" 1.0` | noised mean/variance per column |
+| `aidrin run differential-privacy data/adult.csv "age,hours.per.week" 1.0` | noised mean/variance per column; also writes `noisy/noisy_data.csv` |
 
 The agent should produce a four-part verdict: **quality** is clean (complete, no duplicates,
 moderate `hours.per.week` outliers); **impact** shows `education.num`/`age` as the strongest income
@@ -128,12 +128,12 @@ predictors; **fairness** flags a large gender gap in the target (men ~2.8× more
 **governance** flags severe re-identification risk (`k = 1`, `l = 1`) on the `age,sex,race`
 quasi-identifiers — bin or suppress before sharing.
 
-### 3. (Optional) Batch several metrics from one config
+### 3. Batch several metrics from one config
 
 ```text
 Write an aidrin batch config (YAML) that runs completeness, class-imbalance, statistical-rates, and
 representation-rate on data/adult.csv with target income and sensitive attribute sex, then run it
-with the aidrin skill through dsagt-run.
+with the aidrin skill.
 ```
 
 The config is one flat mapping, not per-metric blocks; the `aidrin` skill's
@@ -144,7 +144,6 @@ file-path: data/adult.csv
 file-type: csv
 metrics: [completeness, class-imbalance, statistical-rates, representation-rate]
 target-column: income
-y-true-column: income
 sensitive-attribute-column: sex
 columns: [sex, race]
 ```
@@ -153,12 +152,12 @@ columns: [sex, race]
 
 ```text
 Use the datacard-generator skill to write a Level 1 datacard for data/adult.csv that incorporates
-the readiness findings above. Take the values from the dataset and the reports, and note anything
-unknown rather than asking.
+the readiness findings above. Take the values from the dataset and the reports, note anything
+unknown rather than asking, and write it as one file, data/genesis_datacard_adult.md.
 ```
 
-The agent invokes the `datacard-generator` base skill and writes a Genesis Datacard (e.g.
-`data/genesis_datacard_*.md`) documenting the dataset and its readiness profile.
+The agent invokes the `datacard-generator` base skill and writes one Genesis Datacard,
+`data/genesis_datacard_adult.md`, documenting the dataset and its readiness profile.
 
 ### 5. Review the execution records
 
@@ -167,17 +166,30 @@ Show me the execution records for this session as a table of metric, command, an
 ```
 
 The agent reads the records `dsagt-run` wrote to `trace_archive/` and lists one row per
-metric call: the fifteen runs from step 2 and the batch run from step 3, every exit code 0.
+`aidrin` command: the runs from step 2 (thirteen to fifteen, since the skill may run the
+three quality metrics as one `data-quality` call) and the batch run from step 3, every exit
+code 0.
+
+### 6. Review the project artifacts
+
+```text
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+```
+
+**Expect:** a listing of the project directory that marks the execution records in
+`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
+with a line on what each is.
 
 ## Post-Conditions
 
 1. `skills/aidrin/SKILL.md` is present, with a `PROVENANCE.txt` naming the AIDRIN source.
-2. `trace_archive/` holds one execution record per metric run from step 2.
+2. `trace_archive/` holds one execution record per `aidrin` command from step 2, at least thirteen.
 3. Results span the four categories, with the gender-fairness gap and the `k = 1` / `l = 1`
    re-identification risks identified.
-4. A datacard for the dataset exists (`data/genesis_datacard_*.md`).
+4. One datacard for the dataset exists, `data/genesis_datacard_adult.md`.
 5. The agent lists every metric call from the execution records with its command and exit code.
-6. MLflow traces capture token usage, latency, and the code-execution and MCP tool spans.
+6. MLflow traces capture token usage, latency, and the code-execution spans.
 
 ## What This Tests
 
@@ -190,6 +202,7 @@ metric call: the fifteen runs from step 2 and the batch run from step 3, every e
 | Multi-metric / batch execution | 3 |
 | Base-skill use (`datacard-generator`) | 4 |
 | Provenance review from the execution records | 5 |
+| Review of the session's artifacts | 6 |
 | Observability (MLflow spans in the serverless `mlflow.db` store) | all |
 
 View the traces any time with

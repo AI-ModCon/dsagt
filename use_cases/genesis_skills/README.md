@@ -47,10 +47,12 @@ in step 1. Then:
 
 ```bash
 PROJ=~/dsagt-projects/genesis-skills
-# The fixture data (catalyst_screening.csv, the domain docs, and the expected
-# datacard) is in the repository, under this use case's data/ folder.
-cp -r use_cases/genesis_skills/data "$PROJ/mock_data"
-# $PROJ/mock_data now holds dataset/, domain/, expected_datacard.md
+# The fixture data (catalyst_screening.csv and the domain docs) is in the
+# repository, under this use case's data/ folder. The expected datacard stays
+# out of the project: it is the reference you compare against afterwards.
+mkdir -p "$PROJ/mock_data"
+cp -r use_cases/genesis_skills/data/dataset use_cases/genesis_skills/data/domain "$PROJ/mock_data/"
+# $PROJ/mock_data now holds dataset/ and domain/
 dsagt start genesis-skills
 ```
 
@@ -83,7 +85,7 @@ since init.
 ### 3. Generate the datacard for the finished dataset
 
 ```text
-Use the datacard-generator skill to write a Level 1 datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the data dictionary and measurement protocol under mock_data/domain/ — don't invent them, and note anything the documents leave unspecified rather than asking. Save it to audit/catalyst_screening_datacard.md. Then compare your sections against mock_data/expected_datacard.md and report anything missing.
+Use the datacard-generator skill to write a Level 1 datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the data dictionary and measurement protocol under mock_data/domain/ — don't invent them, and note anything the documents leave unspecified rather than asking. Save it to audit/catalyst_screening_datacard.md.
 ```
 
 **Expect:** the agent reads the installed skill's `SKILL.md` and the two domain
@@ -99,7 +101,20 @@ Use the croissant-validator skill to check the Croissant/JSON-LD metadata for th
 ```
 
 **Expect:** the validator skill runs and reports a clean pass or names specific
-schema issues.
+schema issues. The skill installs `mlcroissant` into a small virtual environment
+for its library check; a pass is one whose output shows `mlcroissant parse OK`,
+since the script skips that check when the library is absent.
+
+### 5. Review the project artifacts
+
+```text
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+```
+
+**Expect:** a listing of the project directory that marks the execution records in
+`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
+with a line on what each is.
 
 ## Post-Conditions
 
@@ -109,8 +124,9 @@ Confirm from a shell (the native skills directory is `.claude/skills/` for Claud
 ```bash
 dsagt info genesis-skills                  # KB lists skills_catalog__ai-modcon-genesis-skills
 ls "$PROJ/skills/"                         # aidrin  croissant-validator  datacard-generator  skill-creator
-cat "$PROJ/skills/datacard-generator/PROVENANCE.txt"
+cat "$PROJ/skills/croissant-validator/PROVENANCE.txt"
 ls "$PROJ/audit/"                          # catalyst_screening_datacard.md
+diff <(grep '^#' use_cases/genesis_skills/data/expected_datacard.md) <(grep '^#' "$PROJ/audit/catalyst_screening_datacard.md")
 ```
 
 1. The KB holds a `skills_catalog__ai-modcon-genesis-skills` collection
@@ -122,8 +138,11 @@ ls "$PROJ/audit/"                          # catalyst_screening_datacard.md
    them by reading their `SKILL.md`.
 3. `audit/catalyst_screening_datacard.md` was produced for the finished dataset,
    grounded in the domain documents, covering the sections in
-   `mock_data/expected_datacard.md`.
-4. MLflow traces (in the serverless `mlflow.db` store) capture the session —
+   `use_cases/genesis_skills/data/expected_datacard.md` and carrying its values:
+   reactor conditions 250 °C, 1 atm, H2:CO2 = 4:1, GHSV 12,000; license
+   CC-BY-4.0; 8 rows; and the three caveats the measurement protocol states.
+4. The validator's output shows `mlcroissant parse OK`.
+5. MLflow traces (in the serverless `mlflow.db` store) capture the session —
    `dsagt traces genesis-skills`.
 
 ## What This Tests
@@ -135,12 +154,12 @@ ls "$PROJ/audit/"                          # catalyst_screening_datacard.md
 | Native mirroring of installed skills | 2 |
 | Base-skill use (`datacard-generator`) | 3 |
 | Installed-skill execution grounded in the domain documents | 3, 4 |
+| Review of the session's artifacts | 5 |
 
 ## Cleanup
 
 ```bash
 dsagt rm genesis-skills -y
-rm genesis_skills.tar.gz
 ```
 
 The shared catalog cache is stored at `~/dsagt-projects/.skill_sources/` and is
