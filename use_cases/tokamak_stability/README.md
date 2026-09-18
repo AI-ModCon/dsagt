@@ -39,10 +39,15 @@ Sanchez-Villar (PPPL). The session below has been tested with Claude Code.
   which installs `h5py` and `matplotlib`; `numpy` is a dsagt dependency.
 - An agent platform installed and **already authenticated**.
 - The [fusion-io](https://github.com/nferraro/fusion-io) library and its Python
-  bindings, built from source by [`scripts/setup_env.sh`](scripts/setup_env.sh):
+  bindings, built from source by `scripts/setup_env.sh` in the walkthrough's
+  bundle (the DSAgt use-case data folder,
+  https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6):
 
   ```bash
-  bash use_cases/tokamak_stability/scripts/setup_env.sh
+  curl -L "https://drive.usercontent.google.com/download?id=1qo-ZG_GoGlZ_X2BjR1fE8zZW3s9K6mTu&export=download&confirm=t" \
+    -o tokamak_stability.tar.gz
+  mkdir -p tokamak_bundle && tar xzf tokamak_stability.tar.gz -C tokamak_bundle ./scripts/setup_env.sh
+  bash tokamak_bundle/scripts/setup_env.sh
   ```
 
   The build needs git, cmake, pkg-config, C/C++/Fortran compilers, MPI, HDF5,
@@ -67,22 +72,17 @@ defaults are fine for the rest. Then:
 
 ```bash
 PROJ=~/dsagt-projects/tokamak-stability
-mkdir -p "$PROJ/data" "$PROJ/skills"
-# Demo data (one M3D-C1 simulation output) from the DSAgt use-case data folder:
-# https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
-curl -L "https://drive.usercontent.google.com/download?id=1qo-ZG_GoGlZ_X2BjR1fE8zZW3s9K6mTu&export=download&confirm=t" \
-  -o tokamak_stability.tar.gz
-tar xzf tokamak_stability.tar.gz -C "$PROJ/data" --strip-components=1 tokamak_stability/m3dc1_data
-cp -r use_cases/tokamak_stability/scripts "$PROJ/scripts"     # the modules, the m3dc1 package, and their tests
-cp -r use_cases/tokamak_stability/skills/m3dc1-skill "$PROJ/skills/"
+# The bundle downloaded under Prerequisites: one M3D-C1 simulation output
+# (data/m3dc1_data), the modules with the m3dc1 package and their tests (scripts/),
+# and the m3dc1 skill (skills/).
+tar xzf tokamak_stability.tar.gz -C "$PROJ"
 export PYTHONPATH=$PROJ/scripts:$PYTHONPATH
 export M3DC1_DATA_DIR=$PROJ/data/m3dc1_data
 python -m pytest "$PROJ/scripts/tests" -q -p no:cacheprovider   # all 91 pass with fusion-io and the data in place; several minutes
 dsagt start tokamak-stability                  # mirrors the skill into the agent's native skills dir
 ```
 
-The tarball is also available from [OSF](https://osf.io/gak3v/files/). The
-integration tests need fusion-io and the data directory named by
+The integration tests need fusion-io and the data directory named by
 `M3DC1_DATA_DIR`; failures naming `fpy` or `write_neo_input` mean the
 fusion-io install is not on the path. The tests write `__pycache__` directories
 under `scripts/`; `-p no:cacheprovider` keeps `.pytest_cache` out of the
@@ -236,6 +236,6 @@ outputs, with a line on what each is.
 
 ```bash
 dsagt rm tokamak-stability -y
-rm tokamak_stability.tar.gz
+rm -r tokamak_stability.tar.gz tokamak_bundle
 rm -rf ~/dsagt-projects/.tools/tokamak_stability      # the fusion-io build
 ```
