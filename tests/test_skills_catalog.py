@@ -546,7 +546,7 @@ def test_mirror_truncates_long_description(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AgentSetup.setup_skills — per-agent native-dir mirror
+# AgentSetup.setup_skills: per-agent native-dir mirror
 # ---------------------------------------------------------------------------
 
 
@@ -623,7 +623,7 @@ def test_setup_skills_respects_populate_native_false(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# install_into_project — license / attribution capture
+# install_into_project: license / attribution capture
 # ---------------------------------------------------------------------------
 
 
@@ -667,7 +667,7 @@ def test_install_skill_local_license_wins(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# index_catalog — frontmatter-only embedding (progressive disclosure)
+# index_catalog: frontmatter-only embedding (progressive disclosure)
 # ---------------------------------------------------------------------------
 
 
@@ -782,7 +782,8 @@ def test_registration_indexes_into_the_kb(tmp_path):
 
 def test_a_previous_clone_left_behind_is_not_a_source(tmp_path, monkeypatch):
     """``<slug>.previous`` is the clone a re-clone set aside; one left by a
-    sync that died is skipped by every scanner and removed by the next sync."""
+    sync that was interrupted is skipped by every scanner and removed by the
+    next sync."""
     cache = tmp_path / "cache"
     live = _mkskill(cache / "x-y" / "skills" / "s1", "s1")
     (cache / "x-y" / "SOURCE_REF").write_text("main\n")
@@ -806,7 +807,7 @@ def test_a_previous_clone_left_behind_is_not_a_source(tmp_path, monkeypatch):
 
 def test_mirror_is_a_relative_symlink_to_the_live_skill(tmp_path):
     """The agent reads the live files: a script edited under skills/ is what
-    the mirrored skill runs, with no copy to go stale."""
+    the mirrored skill runs, with no copy that could drift."""
     src = _mkskill(tmp_path / "proj" / "skills" / "alpha", "alpha")
     (src / "scripts").mkdir()
     (src / "scripts" / "a.py").write_text("print(1)\n")

@@ -163,7 +163,7 @@ class TestSaveToolSpec:
         assert registry.get_code("stringy-tool") is not None
 
     def test_rejects_invalid_stringified_spec(self, server, registry):
-        """Non-JSON strings produce a clear error rather than crashing."""
+        """Non-JSON strings produce a clear error."""
         text = call_tool(server, "save_code_spec", {"spec": "not valid json {"})
 
         assert "Error" in text
@@ -201,16 +201,14 @@ class TestGetRegistry:
 class TestSearchRegistryNoKB:
     """search_registry with no KB configured.
 
-    The previous behavior was to silently fall back to substring matching,
-    which produced dramatically worse results than semantic search and hid
-    real KB failures.  The new contract: exact-name lookup still works
-    without a KB (it doesn't need one), but query-based semantic search
-    returns a helpful error message asking the user to configure embedding
-    credentials.
+    Exact-name lookup needs no KB and works without one; query-based
+    semantic search returns an error asking the user to configure embedding
+    credentials, so a missing KB is never hidden behind substring matching,
+    which gives worse results than semantic search.
     """
 
     def test_exact_name_lookup_works_without_kb(self, populated_server):
-        """code_name lookup is KB-free and must keep working."""
+        """code_name lookup needs no KB."""
         text = call_tool(
             populated_server, "search_registry", {"code_name": "tool-alpha"}
         )
@@ -224,12 +222,12 @@ class TestSearchRegistryNoKB:
         assert "No tool named 'nonexistent'" in text
 
     def test_query_search_without_kb_returns_helpful_error(self, populated_server):
-        """A semantic search request when no KB is configured must surface
-        the missing-KB condition clearly, not silently degrade.
+        """A semantic search request when no KB is configured reports the
+        missing KB.
 
-        The query "alpha" is a substring of the registered ``tool_alpha``;
-        the deleted string-matching fallback would have returned it, so the
-        ``not in`` assertion pins that the fallback stays gone.
+        The query "alpha" is a substring of the registered ``tool_alpha``; a
+        substring fallback would return it, so the ``not in`` assertion pins
+        that no such fallback runs.
         """
         text = call_tool(populated_server, "search_registry", {"query": "alpha"})
         assert "tool-alpha" not in text  # no silent substring fallback
@@ -243,7 +241,7 @@ class TestSearchRegistryNoKB:
 
 
 # ---------------------------------------------------------------------------
-# save_code_spec — dependency installation
+# save_code_spec: dependency installation
 # ---------------------------------------------------------------------------
 
 
@@ -317,7 +315,7 @@ class TestSaveToolSpecDependencies:
 
     @patch("dsagt.mcp.registry_tools.subprocess.run")
     def test_uv_not_found(self, mock_run, server):
-        """FileNotFoundError from missing uv is reported gracefully."""
+        """FileNotFoundError from missing uv is reported in the reply."""
         mock_run.side_effect = FileNotFoundError("uv")
         spec = make_spec("tool-no-uv", dependencies=["pandas"])
         text = call_tool(server, "save_code_spec", {"spec": spec})
@@ -386,7 +384,7 @@ class TestInstallDependencies:
         assert "empty" in text.lower() or "No tools" in text
 
     def test_tools_without_deps(self, tmp_path):
-        """Tools without dependencies field are skipped gracefully."""
+        """Tools without a dependencies field are skipped."""
         server, reg = _make_server(tmp_path, tools=[make_spec("nodep_tool")])
 
         text = call_tool(server, "install_dependencies", {})

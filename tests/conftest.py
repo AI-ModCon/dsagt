@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 def _no_shell_tracking_server(monkeypatch):
     """Keep the suite hermetic.  ``resolve_tracking_uri`` honors
     ``MLFLOW_TRACKING_URI``, so a developer with a shared server exported would
-    otherwise have every in-project test log real spans there — and fail the
+    otherwise have every in-project test log real spans there and fail the
     assertions that expect the sqlite default."""
     for var in (
         "MLFLOW_TRACKING_URI",

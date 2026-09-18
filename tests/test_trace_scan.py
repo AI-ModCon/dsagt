@@ -65,7 +65,7 @@ def scan_env(tmp_path, monkeypatch):
 
 
 def test_make_trace_collector_registered_agents(tmp_path):
-    # The periodic pass isn't Claude-special: it runs for any agent with a pipeline.
+    # The periodic pass is not specific to Claude: it runs for any agent with a pipeline.
     for agent in ("claude", "codex", "goose", "opencode", "cline"):
         assert (
             make_trace_collector(
@@ -73,7 +73,7 @@ def test_make_trace_collector_registered_agents(tmp_path):
             )
             is not None
         )
-    # An agent with no pipeline registered simply gets no periodic pass.
+    # An agent with no pipeline registered gets no periodic pass.
     assert (
         make_trace_collector(
             "nonesuch", tmp_path, "p", "p:s", "sqlite:///x.db", experiment="p"
@@ -134,7 +134,7 @@ def test_deferred_turn_emits_once_a_later_prompt_bounds_it(scan_env):
         _user("2026-06-19T15:00:02.000Z", "q2", "u2"),
     )
     assert collector.collect() == 1  # u1 only
-    # A new prompt arrives → u2 is no longer the open turn.
+    # A new prompt arrives → u2 is closed.
     _append(
         f,
         _asst("2026-06-19T15:00:03.000Z", {"type": "text", "text": "a2"}),
@@ -251,14 +251,14 @@ def test_consumers_ack_independently(tmp_path):
     assert good.seen == [{"r1", "r2"}]
     # Acks are transcript-qualified (<active_source>:<span_id>).
     assert collector._load_acks("good") == {"transcript-a:r1", "transcript-a:r2"}
-    assert collector._load_acks("bad") == set()  # wedged consumer didn't advance
+    assert collector._load_acks("bad") == set()  # wedged consumer did not advance
 
-    # Good is fully caught up; bad retries (and fails again) — good doesn't redo.
+    # Good is fully caught up; bad retries (and fails again); good does not redo.
     assert collector.collect(include_last=True) == 0
     assert good.seen == [{"r1", "r2"}]  # not re-delivered
     assert collector._load_acks("bad") == set()
 
-    # Default ack_dir: the ack files land under <project_dir>/.dsagt/.
+    # Default ack_dir: the ack files are written under <project_dir>/.dsagt/.
     assert (tmp_path / ".dsagt" / "trace_acks_good.json").exists()
 
 
@@ -431,7 +431,7 @@ def test_catch_up_traces_emits_previous_session_dangling_and_is_idempotent(tmp_p
 
     n = _catch_up_traces(proj, config, MagicMock())
     assert n == 2  # both completed turns flushed via include_last
-    # Idempotent — acks (keyed proj-1:<uuid>) suppress a re-collect.
+    # Idempotent: acks (keyed proj-1:<uuid>) suppress a re-collect.
     assert _catch_up_traces(proj, config, MagicMock()) == 0
 
 
@@ -456,8 +456,8 @@ def test_catch_up_traces_noop_without_previous_or_transcript(tmp_path):
 
 def test_sqlite_reader_pins_to_a_specific_session(tmp_path):
     """SQLite agents pin uniformly: a pinned GooseReader reads the *specified*
-    session, not the latest — so the catch-up backstops goose/opencode/cline
-    too, not just the JSONL agents.  (opencode/cline mirror this shape.)
+    session, not the latest, so the catch-up covers goose/opencode/cline as
+    well as the JSONL agents.  (opencode/cline mirror this shape.)
     """
     import os
     import sqlite3

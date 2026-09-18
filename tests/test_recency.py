@@ -1,9 +1,9 @@
 """Recency weighting for episodic (session_memory) retrieval.
 
-``_apply_recency`` is a pure re-ranker, so these test the *behavior that matters*
-without an embedder: a recent fact edges out a same-relevance stale one, while a
-strongly-relevant old fact still beats an irrelevant recent one (the guard that
-recency is a bounded boost, never a filter).
+``_apply_recency`` is a pure re-ranker, so these test the behavior without an
+embedder: a recent fact outranks a same-relevance stale one, while a
+strongly-relevant old fact still outranks an irrelevant recent one (the guard
+that recency is a bounded boost, never a filter).
 """
 
 from dsagt.knowledge import _apply_recency
@@ -33,7 +33,7 @@ def test_recent_edges_out_same_relevance_stale_fact():
 
 def test_strong_old_fact_still_beats_irrelevant_recent_one():
     # The guard: recency is a bounded boost (≤ +50%), so a much-more-relevant old
-    # fact is never buried by a barely-relevant recent one.
+    # fact never ranks below a barely-relevant recent one.
     out = _apply_recency(
         [
             _r(1.0, age_days=60, label="relevant_old"),

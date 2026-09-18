@@ -277,7 +277,7 @@ class TestRunAndRecord:
 
     def test_session_from_state(self, tmp_path, monkeypatch):
         """Session ID falls back to the current tag in ``.dsagt/state.yaml``
-        when not passed — the MCP server mints it there at startup and
+        when not passed: the MCP server mints it there at startup and
         ``dsagt-run`` (cwd == project dir) reads it."""
         from dsagt.session import append_session, write_config_file, build_config
 
@@ -406,14 +406,14 @@ class TestMain:
     def _mlflow_file_store(self, tmp_path, monkeypatch):
         """Point MLflow tracing at a scratch file-store so init_tracing has a
         real backend.  In production dsagt-run runs with cwd inside the
-        project directory, where ``.dsagt/config.yaml`` (project name) lives
+        project directory, where ``.dsagt/config.yaml`` (project name) is
         and the session id comes from ``.dsagt/state.yaml``;
         tests mirror that by chdir-ing into tmp_path.
         """
         # Serverless: init_tracing resolves a sqlite store from the project
-        # dir via MLflow's native provider — no OTLP exporter.  Stub the
-        # resolver to a known sqlite URI so a shell-set MLFLOW_TRACKING_URI
-        # can't redirect the test.
+        # dir via MLflow's native provider.  Stub the resolver to a known
+        # sqlite URI so a shell-set MLFLOW_TRACKING_URI cannot redirect the
+        # test.
         from dsagt import observability as obs_module
 
         cfg = {"project": "test"}
@@ -430,8 +430,8 @@ class TestMain:
 
     def test_trace_root_carries_the_minted_session(self, tmp_path, monkeypatch):
         """The MCP server mints the session into ``.dsagt/state.yaml``; the
-        ``code.execute`` root must carry it, or every execution trace lands
-        in an unbucketed ``(no-session)`` group in ``dsagt info``."""
+        ``code.execute`` root must carry it, or every execution trace falls
+        into an unbucketed ``(no-session)`` group in ``dsagt info``."""
         import mlflow
 
         from dsagt import observability as obs_module

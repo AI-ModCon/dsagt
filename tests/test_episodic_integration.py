@@ -6,7 +6,7 @@ built by the shared ``memory.episodic_consumers`` wiring → mechanically tagged
 turns embedded into the ``session_memory`` collection of a real
 ``KnowledgeBase`` → retrieved by ``kb.search``.
 
-Marked ``integration``: loads the local embedder, so it's deselected from the
+Marked ``integration``: loads the local embedder, so it is deselected from the
 fast suite (``-m 'not integration'``).
 """
 
@@ -46,10 +46,10 @@ def test_periodic_pass_indexes_turn_into_session_memory(tmp_path):
     project_dir = tmp_path / "proj"
     (project_dir / ".dsagt").mkdir(parents=True)
 
-    # A real KB with the local embedder (the project's session_memory lives here).
+    # A real KB with the local embedder; the project's session_memory is stored here.
     kb = KnowledgeBase(index_dir=project_dir / "kb_index", default_embedder="local")
 
-    # Episodic enabled — exactly what `dsagt init --episodic` writes — fed
+    # Episodic enabled, exactly what `dsagt init --episodic` writes, fed
     # through the server's real subscriber builder.
     from dsagt.memory import episodic_consumers
 

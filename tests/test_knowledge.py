@@ -33,7 +33,7 @@ def test_list_collections_names_purpose_keys_and_count(tmp_path):
         "session_id",
     ]
     assert "execution record" in listed["code_use"]["description"]
-    # Not written yet, listed with its purpose so the agent knows it exists.
+    # Not written yet; listed with its purpose so the agent can find it.
     assert listed["codes"]["chunk_count"] == 0
     assert "search_registry" in listed["codes"]["description"]
     assert listed["session_memory"]["metadata_keys"] == []

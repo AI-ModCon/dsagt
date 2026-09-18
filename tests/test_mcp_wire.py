@@ -1,11 +1,11 @@
 """Wire-level tests for the dispatch shell over a real stdio transport.
 
 Every other server test drives handlers in-process (``mcp_helpers.call_tool_sync``),
-which never touches :class:`mcp.server.lowlevel.Server` — so the attachment
-between :func:`~dsagt.mcp.server.build_dispatch_server` and the SDK's transport
-had no coverage at all.  That is precisely the seam the MCP SDK breaks across
-major versions, and the seam a broken ``dsagt-server`` shows up on as "the agent
-sees zero dsagt tools".
+which never reaches :class:`mcp.server.lowlevel.Server`, so these are the tests
+of the attachment between :func:`~dsagt.mcp.server.build_dispatch_server` and
+the SDK's transport.  That attachment is what the MCP SDK breaks across major
+versions, and where a broken ``dsagt-server`` shows up as an agent with zero
+dsagt tools.
 
 These spawn ``wire_server.py`` (no project config, no KB) and speak JSON-RPC to
 it, so they stay fast enough for the default suite.
@@ -71,7 +71,7 @@ class TestWireProtocol:
 
     def test_handler_error_comes_back_as_an_error_payload(self, wire_proc):
         """The dispatch shell converts handler failures into a result payload,
-        not a transport error — the agent must stay connected."""
+        not a transport error; the agent must stay connected."""
         response = mcp_call_tool(wire_proc, "boom", {})
         assert json.loads(_tool_text(response)) == {
             "status": "error",

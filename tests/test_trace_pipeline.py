@@ -4,13 +4,12 @@ The same Claude transcript is logged two ways into one serverless sqlite store:
   oracle: mlflow.claude_code.tracing.process_transcript(path)
   ours:   ClaudeTranslator → Trace → observability.MLflowSink
 
-then the two resulting MLflow traces are compared structurally.  This is the
-"how does our product match up" check — it pins our foreign-trace output to the
-autolog look (AGENT root + llm/tool children, anthropic message format, token
-usage) that makes those traces navigable.
+then the two resulting MLflow traces are compared structurally.  This pins
+our foreign-trace output to the autolog shape (AGENT root + llm/tool children,
+anthropic message format, token usage) that makes those traces navigable.
 
-Real mlflow logging to a local sqlite file — no network.  Skips cleanly if the
-maintained autolog parser isn't importable.
+Real mlflow logging to a local sqlite file, with no network.  Skips if the
+maintained autolog parser is not importable.
 """
 
 import json
@@ -96,7 +95,7 @@ def _durations_ns(trace):
 @pytest.fixture
 def mlflow_sqlite(tmp_path, monkeypatch):
     """Point MLflow at an isolated sqlite store under tmp; chdir so the autolog
-    parser's ``.claude/mlflow`` log dir also lands in tmp."""
+    parser's ``.claude/mlflow`` log dir is also written under tmp."""
     import mlflow
 
     monkeypatch.chdir(tmp_path)
@@ -124,8 +123,8 @@ def test_our_pipeline_matches_autolog_span_layout(tmp_path, mlflow_sqlite):
     )  # one turn → one trace
     ours = mlflow.get_trace(ours_id)
 
-    # Same span tree: one AGENT root, two llm turns, one tool span — thinking
-    # turn produces no span in either.
+    # Same span tree: one AGENT root, two llm turns, one tool span; the
+    # thinking turn produces no span in either.
     assert _span_shape(ours) == _span_shape(oracle)
     assert _span_shape(ours) == [
         ("AGENT", "claude_code_conversation"),
@@ -136,7 +135,7 @@ def test_our_pipeline_matches_autolog_span_layout(tmp_path, mlflow_sqlite):
 
     # Span durations match the autolog model (ported #1): both derive each
     # span's end from the next entry's timestamp, so the per-span durations line
-    # up — and crucially none is the absurd "now minus backdated start".
+    # up, and none is "now minus backdated start".
     ours_durs = _durations_ns(ours)
     oracle_durs = _durations_ns(oracle)
     assert all(d > 0 for d in ours_durs)
@@ -192,7 +191,7 @@ def test_llm_span_usage_carries_cache_tokens(mlflow_sqlite):
     (tid,) = MLflowSink(mlflow_sqlite, "parity").write(trace)
     (llm,) = _llm_spans(mlflow.get_trace(tid))
     # input_tokens is every token read (uncached + cache read + cache write);
-    # the breakdown sits beside the usage attribute as plain attributes.
+    # the breakdown is stored beside the usage attribute as plain attributes.
     usage = llm.attributes[SpanAttributeKey.CHAT_USAGE]
     assert usage[TokenUsageKey.INPUT_TOKENS] == 14 + 9000 + 500
     assert llm.attributes["cache_read_input_tokens"] == 9000

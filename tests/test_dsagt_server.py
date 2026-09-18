@@ -5,7 +5,7 @@ These verify the *composition* contract: every tool from the registry / knowledg
 ``call_tool`` wrapper preserves both return-type contracts (registry + skill
 handlers may return a plain string; knowledge / memory handlers return a dict
 that gets JSON-encoded).  Also covers ``_build_kb_from_config`` credential
-validation in-process (the full subprocess boot needs a live MLflow — see
+validation in-process (the full subprocess boot needs a live MLflow; see
 ``test_server_startup.py``).
 """
 
@@ -44,7 +44,7 @@ def _call(server, name: str, arguments: dict) -> str:
 
 
 def test_merged_server_exposes_all_tools(tmp_path):
-    """Both concern modules' tools land under one server with no collision."""
+    """Every concern module's tools are registered under one server with no collision."""
     server = _make_merged_server(tmp_path)
     names = _list_tools(server)
     # 6 registry + 5 knowledge + 2 memory + 5 skill = 18 distinct tools.
@@ -149,7 +149,7 @@ def test_dispatch_root_span_never_stores_credentials_or_payloads(tmp_path, monke
 
 
 def test_registry_tool_returns_plain_string(tmp_path):
-    """Registry handlers return a bare string — passed through unchanged."""
+    """Registry handlers return a bare string, passed through unchanged."""
     server = _make_merged_server(tmp_path)
     CodeRegistry(runtime_dir=str(tmp_path / "runtime"), kb=None).save_tool(
         {
@@ -160,7 +160,7 @@ def test_registry_tool_returns_plain_string(tmp_path):
         }
     )
     out = _call(server, "get_registry", {})
-    # Not JSON — the registry contract is a human-readable string.
+    # Not JSON: the registry contract is a human-readable string.
     with pytest.raises(json.JSONDecodeError):
         json.loads(out)
     assert "codes:" in out
@@ -245,8 +245,8 @@ class TestInputValidation:
 
     def test_unknown_tool_is_rejected_not_raised(self):
         """The tool name is client-controlled, so an unknown one must come back
-        as a readable rejection — an escaping KeyError becomes a JSON-RPC
-        protocol error that tears down the request instead."""
+        as a readable rejection; an escaping KeyError would become a JSON-RPC
+        protocol error that tears down the request."""
         res = self._call_raw(self._server(), "no_such_tool", {})
         assert res.is_error is True
         out = json.loads(res.content[0].text)
@@ -255,7 +255,7 @@ class TestInputValidation:
 
     def test_unserializable_result_is_rejected_not_raised(self):
         """A handler returning non-JSON data must not escape as a protocol
-        error either — ``json.dumps`` runs after the handler's own guard."""
+        error either; ``json.dumps`` runs after the handler's own guard."""
         from dsagt.mcp.server import build_dispatch_server
 
         tools = [
@@ -305,7 +305,7 @@ class TestBuildKbFromConfig:
 
 def test_returned_tool_error_marks_the_trace_as_error(tmp_path, monkeypatch):
     """A handler that *returns* ``{"status": "error"}`` must produce an ERROR
-    trace — otherwise a failed call is indistinguishable from a successful one
+    trace; otherwise a failed call is indistinguishable from a successful one
     in the store, and ``dsagt info`` reports ``Errors: 0`` after failures."""
     import mlflow
 
@@ -330,7 +330,7 @@ def test_returned_tool_error_marks_the_trace_as_error(tmp_path, monkeypatch):
 
 class TestPinTraceSource:
     """The trace-source token must be pinned as soon as *this* session's
-    transcript exists — not on the first periodic pass (~50 s in), which a
+    transcript exists, not on the first periodic pass (~50 s in), which a
     scripted session never reaches, and never to the previous session's
     transcript, which is what "newest file" resolves to before the agent's
     first message."""
@@ -378,7 +378,7 @@ class TestPinTraceSource:
         class Collector:
             def active_source(self):
                 seen.append(1)
-                if len(seen) >= 3:  # the agent's first message lands the new file
+                if len(seen) >= 3:  # the agent's first message creates the new file
                     new.write_text("{}\n")
                     return str(new)
                 return str(old)
@@ -402,8 +402,8 @@ class TestPinTraceSource:
 
 
 def test_rejected_call_is_traced_as_an_error(tmp_path, monkeypatch):
-    """A validation rejection must leave a trace — an agent looping on bad
-    arguments is the case the debug view exists for — and still be flagged
+    """A validation rejection must leave a trace (an agent looping on bad
+    arguments is the case the debug view exists for) and still be flagged
     ``is_error`` on the wire."""
     import asyncio
 

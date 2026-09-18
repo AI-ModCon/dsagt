@@ -150,8 +150,8 @@ class TestLoadConfig:
 
         assert config["project"] == "myproject"
         assert config["agent"] == "goose"
-        # Serverless: no mlflow block at all — the store is a sqlite path
-        # resolved from the project dir, nothing to pin in config.
+        # Serverless: no mlflow block; the store is a sqlite path resolved
+        # from the project dir, nothing to pin in config.
         assert "proxy" not in config
         assert "mlflow" not in config
         # User-supplied keys win on the merge; DEFAULTS fills in missing
@@ -169,7 +169,7 @@ class TestLoadConfig:
         """A config with no skills block gets the default genesis source.
 
         ``populate_native`` is a code default (in ``AgentSetup.setup_skills``),
-        not a config key — so it isn't backfilled here."""
+        not a config key, so it is absent here."""
         name = self._write_config(
             tmp_path,
             "myproject",
@@ -251,16 +251,16 @@ class TestDefaultConfigContent:
         assert parsed["agent"] == "goose"
 
     def test_no_user_facing_llm_block(self):
-        """BYOA: project YAML is internal-only — no llm: block, no
-        ${VAR} placeholders.  User credentials live in their shell."""
+        """The project YAML carries no llm: block and no ${VAR}
+        placeholders.  The user's credentials stay in their shell."""
         content = default_config_content("test", "claude")
         parsed = yaml.safe_load(content)
         assert "llm" not in parsed
         assert "${" not in content
 
     def test_no_mlflow_port_pinned(self):
-        """Serverless store — nothing to pin.  The config carries no
-        mlflow block at all."""
+        """Serverless store: nothing to pin.  The config carries no
+        mlflow block."""
         content = default_config_content("test", "claude")
         parsed = yaml.safe_load(content)
         assert "mlflow" not in parsed
@@ -357,7 +357,7 @@ class TestCollectSettings:
         assert s["episodic"] is None  # opt-in, off by default
 
     def test_interactive_episodic_enabled(self):
-        """Enabling episodic at the prompt yields the opt-in block."""
+        """Enabling episodic at the prompt gives the opt-in block."""
         import types
         import questionary
         from unittest.mock import patch
@@ -516,7 +516,7 @@ class TestInitProject:
         assert config["agent"] == "claude"
 
     def test_returns_pdir(self):
-        """Serverless: init_project returns just the project dir — no port."""
+        """Serverless: init_project returns the project dir, with no port."""
         pdir = init_project("myproj", "goose")
         assert pdir.exists()
         # The instructions send every check report to audit/, so it exists
@@ -539,7 +539,7 @@ class TestInitProject:
 
     def test_default_init_provisions_default_asset_set(self):
         """Default init builds exactly the default asset set into the shared
-        cache (here stubbed) — tools + genesis, nothing heavier."""
+        cache (here stubbed): tools and genesis."""
         from dsagt.commands import setup_core_kb
 
         with patch.object(
@@ -560,9 +560,9 @@ class TestInitProject:
 
     def test_reinit_handle_destructive_survives_missing_embedding_key(self):
         """Regression: re-init runs ``_handle_destructive``, which must not
-        KeyError on settings that carry no ``embedding`` key (it was dropped as
-        an init choice).  ``init_project()`` bypasses this path — which is how
-        the crash shipped — so drive ``_handle_destructive`` directly."""
+        KeyError on settings that carry no ``embedding`` key (embedding is
+        not an init choice).  ``init_project()`` bypasses this path, so drive
+        ``_handle_destructive`` directly."""
         import types
         from dsagt.commands import cli
 
@@ -587,7 +587,7 @@ class TestInitProject:
 
     def test_episodic_block_round_trips_through_config(self):
         """init_project writes the opted-in episodic block; load_config reads it
-        back.  A project without it backfills ``enabled: False`` from DEFAULTS."""
+        back.  A project without it reads ``enabled: False`` from DEFAULTS."""
         epi = {"enabled": True}
         init_project("withmem", "goose", exclude=["all"], episodic=epi)
         cfg = load_config("withmem")
@@ -595,14 +595,11 @@ class TestInitProject:
 
         init_project("nomem", "goose", exclude=["all"])
         cfg2 = load_config("nomem")
-        assert cfg2["episodic"]["enabled"] is False  # backfilled default
+        assert cfg2["episodic"]["enabled"] is False  # default from DEFAULTS
 
     def test_static_record_written_eagerly(self, tmp_path):
-        """BYOA flow writes static + dynamic records at init time so the
-        user can edit instructions and inspect the MCP config artifact
-        before launching their agent.  Static record is now driven by
-        the CLI command, not init_project itself — but the agent dir
-        layout exists post-init.
+        """The static record is written by the CLI command, not by
+        ``init_project`` itself; the agent config exists post-init.
         """
         init_project("myproj", "claude")
         config = load_config("myproj")
@@ -610,7 +607,7 @@ class TestInitProject:
 
 
 # ---------------------------------------------------------------------------
-# Session state (.dsagt/state.yaml) — owned by the MCP server
+# Session state (.dsagt/state.yaml): owned by the MCP server
 # ---------------------------------------------------------------------------
 
 
@@ -676,7 +673,7 @@ class TestAgentRecord:
         return load_config("testproj")
 
     def _write_both(self, config, working_dir):
-        """Run static then dynamic — what dsagt start does.  Serverless:
+        """Run static then dynamic, as dsagt start does.  Serverless:
         no port to populate; the store resolves from the project dir."""
         static_agent_record(config, config["agent"], working_dir)
         env = agent_env(config)
@@ -695,7 +692,7 @@ class TestAgentRecord:
         assert set(mcp["mcpServers"]) == {"dsagt"}
         assert mcp["mcpServers"]["dsagt"]["args"] == ["run", "dsagt-server"]
         assert (working_dir / "CLAUDE.md").exists()
-        # BYOA: the user manages the shell env; init writes no .dsagt_env.
+        # The user manages the shell env; init writes no .dsagt_env.
         assert not (working_dir / ".dsagt_env").exists()
 
     def test_readiness_paragraph_at_the_check_rule(self, tmp_path):
@@ -821,7 +818,7 @@ class TestAgentRecord:
         assert "EMBEDDING_BACKEND" in toml
 
     def test_static_is_idempotent(self, tmp_path):
-        # Running static twice doesn't duplicate or destroy content: the
+        # Running static twice does not duplicate or destroy content: the
         # block is unchanged, and text outside it is the user's.
         config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
@@ -876,7 +873,7 @@ class TestAgentRecord:
         """``_render_codex_config`` emits only ``[mcp_servers.*]`` sections.
         No ``[otel]`` block: codex's native telemetry and its
         ``log_user_prompt`` setting stay the user's own.  No
-        top-level keys — those come from the user's ``~/.codex/config.toml``
+        top-level keys: those come from the user's ``~/.codex/config.toml``,
         which ``write_dynamic`` copies as a base.
         """
         from dsagt.agents import _render_codex_config
@@ -893,15 +890,15 @@ class TestAgentRecord:
         # No forced telemetry / privacy override.
         assert "[otel]" not in toml
         assert "log_user_prompt" not in toml
-        # No top-level approval/sandbox keys — those come from user's
+        # No top-level approval/sandbox keys: those come from the user's
         # config.toml or the codex exec CLI flag.
         assert "approval_policy" not in toml
         assert "sandbox_mode" not in toml
 
     def test_opencode_config_json_shape(self):
         """``_render_opencode_config`` produces opencode.json with MCP
-        servers + provider blocks using ``{env:VAR}`` interpolation —
-        no actual creds on disk.  Provider blocks are emitted only for
+        servers + provider blocks using ``{env:VAR}`` interpolation, so
+        no credential is on disk.  Provider blocks are emitted only for
         providers whose API key the user has set.
         """
         from dsagt.agents.opencode import _render_opencode_config
@@ -935,12 +932,12 @@ class TestAgentRecord:
             parsed["provider"]["openai"]["options"]["baseURL"]
             == "{env:OPENAI_BASE_URL}"
         )
-        # Anthropic block omitted because user didn't have the key set.
+        # Anthropic block omitted because the user did not set the key.
         assert "anthropic" not in parsed["provider"]
 
     def test_opencode_config_omits_provider_when_no_creds(self):
         """If the user has no provider creds set, opencode.json gets no
-        provider block — opencode falls back to its own auth flow
+        provider block; opencode uses its own auth flow
         (``opencode auth login``)."""
         from dsagt.agents.opencode import _render_opencode_config
 
@@ -950,11 +947,11 @@ class TestAgentRecord:
 
     def test_opencode_registers_custom_model_under_provider(self):
         """Lab-gateway-aliased models like
-        ``claude-haiku-4-5-20251001-v1-project`` aren't in models.dev's
+        ``claude-haiku-4-5-20251001-v1-project`` are not in models.dev's
         catalog, so opencode rejects them under standard providers
         unless declared explicitly in ``provider.<id>.models``.  At
-        init we parse OPENCODE_MODEL and register the model there, plus
-        set the top-level ``model`` for interactive convenience.
+        init, OPENCODE_MODEL is parsed and the model registered there,
+        and the top-level ``model`` is set for interactive use.
         """
         from dsagt.agents.opencode import _render_opencode_config
 
@@ -973,9 +970,9 @@ class TestAgentRecord:
         )
 
     def test_opencode_skips_model_registration_when_provider_absent(self):
-        """If OPENCODE_MODEL names a provider whose API key isn't set,
-        we don't emit a provider block to attach the model to.  Top-level
-        ``model`` is also skipped so opencode doesn't error at startup
+        """If OPENCODE_MODEL names a provider whose API key is not set,
+        no provider block is emitted to attach the model to.  Top-level
+        ``model`` is also skipped so opencode does not error at startup
         on a model with no provider config."""
         from dsagt.agents.opencode import _render_opencode_config
 
@@ -1006,11 +1003,11 @@ class TestAgentRecord:
         )
 
     def test_mcp_config_carries_routing_env(self, tmp_path):
-        """Benign routing in the MCP env block: agents that don't inherit
-        the parent's shell env into their MCP children (codex / cline
-        — and claude's block is robust against shells that don't
-        export it) need project name + dir and the serverless
-        ``MLFLOW_TRACKING_URI`` baked in.  No credentials, no OTel."""
+        """Routing in the MCP env block: agents that do not inherit the
+        parent's shell env into their MCP children (codex and cline;
+        claude's block also holds under shells that do not export it)
+        need the project name and dir and the serverless
+        ``MLFLOW_TRACKING_URI`` in the block.  No credentials, no OTel."""
         config = self._init_and_load("claude")
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
@@ -1034,7 +1031,7 @@ class TestAgentRecord:
 
 class TestResolveRecordsDirProjectAware:
     """``_resolve_records_dir`` reads the project's ``.dsagt/config.yaml``
-    from cwd as the single source of truth — no env-var chain."""
+    from cwd, or from ``DSAGT_PROJECT_DIR`` when it is set."""
 
     def test_explicit_overrides_cwd(self, tmp_path):
         from dsagt.provenance import _resolve_records_dir
@@ -1084,7 +1081,7 @@ class TestAgentEnv:
         assert env["DSAGT_PROJECT_DIR"] == "/proj"
 
     def test_no_otel_routing_for_any_agent(self, monkeypatch):
-        """DSAGT forces no native OTel emission — agent traces are
+        """DSAGT forces no native OTel emission; agent traces are
         recovered post-hoc from the on-disk transcript.  ``agent_env``
         sets ``MLFLOW_TRACKING_URI`` (for MCP-server / MLflow-client
         logging) but never the OTLP routing env, for any agent.
@@ -1108,12 +1105,12 @@ class TestAgentEnv:
             assert "OTEL_RESOURCE_ATTRIBUTES" not in env
 
     def test_no_telemetry_flags_for_claude(self, monkeypatch):
-        """The forced Claude telemetry/privacy flags are gone — DSAGT no
-        longer flips ``CLAUDE_CODE_ENABLE_TELEMETRY`` / ``OTEL_LOG_*``
-        (the latter defeated Anthropic's off-by-default redaction).
+        """``agent_env`` sets neither ``CLAUDE_CODE_ENABLE_TELEMETRY`` nor
+        ``OTEL_LOG_*`` (the latter defeats Anthropic's off-by-default
+        redaction).
 
-        Cleared from the inherited shell env first so we test that DSAGT
-        doesn't *add* them — not whatever the test runner's own shell set.
+        Cleared from the inherited shell env first so the test checks what
+        DSAGT adds, not what the test runner's own shell set.
         """
         from dsagt.agents import agent_env
 
@@ -1177,7 +1174,7 @@ class TestConfigFlow:
         """The written config holds only the init choices: project, agent,
         knowledge.collections, skills.sources.  The bundled ``tools`` collection
         is always provisioned (not a choice); embedding / chunk_size
-        are code defaults backfilled on read, never written."""
+        are code defaults filled in on read, never written."""
         content = default_config_content("test", "claude")
         parsed = yaml.safe_load(content)
         assert set(parsed) == {"project", "agent", "knowledge", "skills"}
@@ -1188,7 +1185,7 @@ class TestConfigFlow:
 
     def test_episodic_written_only_when_enabled(self):
         """An opted-in episodic block is written verbatim; absent otherwise
-        (and ``load_config`` backfills ``enabled: false`` for the absent case)."""
+        (and ``load_config`` fills in ``enabled: false`` for the absent case)."""
         epi = {"enabled": True}
         parsed = yaml.safe_load(default_config_content("t", "claude", episodic=epi))
         assert parsed["episodic"] == epi
@@ -1197,9 +1194,9 @@ class TestConfigFlow:
 
     def test_mcp_env_block_carries_embedding_routing(self):
         """_mcp_env_block plumbs embedding routing (model + base_url)
-        through to MCP server children.  EMBEDDING_API_KEY is NOT baked
-        in — it lives in the user's shell env (set when launching the
-        agent) so credentials never land in on-disk artifacts."""
+        through to MCP server children.  EMBEDDING_API_KEY is absent: it
+        comes from the user's shell env (set when launching the agent), so
+        a credential is never written to an on-disk artifact."""
         from dsagt.agents import _mcp_env_block
 
         config = {
@@ -1216,13 +1213,13 @@ class TestConfigFlow:
         assert env["EMBEDDING_BASE_URL"] == "https://api.test/v1"
         assert env["EMBEDDING_BACKEND"] == "api"
         assert env["EMBEDDING_MODEL"] == "m"
-        # Credentials never land in artifacts; user sets in shell.
+        # A credential is never written to an artifact; the user sets it in the shell.
         assert "EMBEDDING_API_KEY" not in env
 
     def test_mcp_env_block_carries_project_routing(self, monkeypatch):
         """Benign routing: the MCP env block carries project name + dir and
         the serverless ``MLFLOW_TRACKING_URI`` so MCP children of agents
-        that don't inherit the parent shell env still log to the right
+        that do not inherit the parent shell env still log to the right
         store.  No credentials, no OTel."""
         from dsagt.agents import _mcp_env_block
 
@@ -1239,8 +1236,8 @@ class TestConfigFlow:
         assert env["EMBEDDING_BACKEND"] == "local"
 
     def test_mcp_env_block_omits_empty_embedding_keys(self):
-        """Local-backend embedding has no base_url / model — those keys
-        should be absent from the env block, not present-but-blank."""
+        """Local-backend embedding has no base_url / model; those keys
+        are absent from the env block, not present-but-blank."""
         from dsagt.agents import _mcp_env_block
 
         config = {
@@ -1255,17 +1252,17 @@ class TestConfigFlow:
         assert "EMBEDDING_MODEL" not in env
 
     def test_mcp_server_args_are_just_command(self):
-        """MCP server args are just ["run", "dsagt-server"] — one merged
-        server.  All configuration flows through .dsagt/config.yaml (cwd-walk).
+        """MCP server args are ["run", "dsagt-server"]: one merged server.
+        All configuration comes from .dsagt/config.yaml (cwd-walk).
         """
         from dsagt.agents import _mcp_server_args
 
         assert _mcp_server_args() == ["run", "dsagt-server"]
 
     def test_mcp_env_block_carries_no_session_id(self):
-        """The MCP server owns the session lifecycle now (minted into
+        """The MCP server owns the session lifecycle (minted into
         ``.dsagt/state.yaml`` at startup), so the env block never carries a
-        ``DSAGT_SESSION_ID`` — only project routing + embedding settings."""
+        ``DSAGT_SESSION_ID``, only project routing and embedding settings."""
         from dsagt.agents import _mcp_env_block
 
         config = {
@@ -1277,15 +1274,15 @@ class TestConfigFlow:
         assert "DSAGT_SESSION_ID" not in env
         assert env["EMBEDDING_MODEL"] == "m"
         assert env["EMBEDDING_BASE_URL"] == "u"
-        # Even if a stray session_id is on the config dict, it isn't emitted.
+        # Even if a stray session_id is on the config dict, it is not emitted.
         env2 = _mcp_env_block({**config, "session_id": "test-1"})
         assert "DSAGT_SESSION_ID" not in env2
 
 
 class TestNoLaunchShim:
-    """Phase 1 collapsed the launch surface: ``dynamic_agent_record``
-    writes the MCP config but NO ``dsagt-launch.sh`` shim.  The user
-    starts the agent directly in the project dir or via ``dsagt start``."""
+    """``dynamic_agent_record`` writes the MCP config and no
+    ``dsagt-launch.sh`` shim.  The user starts the agent directly in the
+    project dir or via ``dsagt start``."""
 
     def _make_config(self, agent_name: str, pdir):
         return {
@@ -1309,8 +1306,8 @@ class TestNoLaunchShim:
 
 
 class TestClaudeSetup:
-    """`dsagt init --agent claude` writes `.mcp.json` and does NOT wire MLflow's
-    autolog Stop hook — DSAGT's own serverless periodic pipeline (ClaudeReader →
+    """`dsagt init --agent claude` writes `.mcp.json` and does not wire MLflow's
+    autolog Stop hook: DSAGT's own serverless periodic pipeline (ClaudeReader →
     ClaudeTranslator → MLflowSink) produces Claude's traces, uniformly with every
     other agent, so wiring autolog too would double-log."""
 
