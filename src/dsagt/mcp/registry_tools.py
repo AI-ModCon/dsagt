@@ -8,15 +8,16 @@ pipeline from the recorded executions (``reconstruct_pipeline``).  Execution
 in the user's environment is ``dsagt-run``'s, from the agent's own shell, and
 reads are the agent's own tools, so the server runs nothing for the agent.
 
-Tool specs are saved as markdown files in the runtime tools directory and
-indexed into a ChromaDB collection for semantic search.  Server configuration
-(embedding credentials) flows through env vars (LLM_API_KEY, OPENAI_BASE_URL,
-EMBEDDING_MODEL) set by ``dsagt start``.
+Code specs are saved as ``skills/<name>/SKILL.md`` under the project and
+indexed into a ChromaDB collection for semantic search.  The embedding
+backend's routing (``EMBEDDING_BACKEND``, ``EMBEDDING_MODEL``,
+``EMBEDDING_BASE_URL``) comes from the MCP env block; its key comes from the
+shell or ``~/.config/dsagt/env``.
 
-These definitions + handlers run inside the merged ``dsagt-server`` (see
-:mod:`dsagt.mcp.server`); ``create_registry_server`` is retained only as a
-test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
-``install_skill``) live in :mod:`dsagt.mcp.skill_tools`.
+These definitions and handlers run inside the merged ``dsagt-server`` (see
+:mod:`dsagt.mcp.server`); ``create_registry_server`` is a test-facing
+constructor.  Skill tools (``save_skill`` / ``search_skills`` /
+``install_skill``) are defined in :mod:`dsagt.mcp.skill_tools`.
 """
 
 import os
@@ -194,8 +195,8 @@ async def _handle_search_registry(
             "code_name for KB-free lookups."
         )
 
-    # Single ``tools`` collection — bundled and registered entries
-    # coexist, distinguished by ``metadata.source`` if needed.
+    # One ``codes`` collection holds built-in and registered entries,
+    # distinguished by ``metadata.source``.
     results = await asyncio.to_thread(
         kb.search,
         query=query or "tool",
@@ -227,7 +228,18 @@ async def _handle_search_registry(
 async def _handle_readiness_reports(arguments: dict, *, runtime_dir: Path) -> dict:
     path = arguments["path"]
     reports = await asyncio.to_thread(readiness_reports, runtime_dir, path)
-    return {"path": path, "reports": reports}
+    current = next((r for r in reports if r["unchanged"] and r["report"]), None)
+    reply = {
+        "path": path,
+        "current": current,
+        "earlier": [r for r in reports if r is not current],
+    }
+    if current is None:
+        reply["next"] = (
+            f"There is no readiness report for {path} at its current content. "
+            "Check it with the aidrin skill, through the registered aidrin code."
+        )
+    return reply
 
 
 async def _handle_reconstruct_pipeline(
@@ -240,13 +252,14 @@ async def _handle_reconstruct_pipeline(
     output = arguments.get("output")
     trace_dir = runtime_dir / "trace_archive"
     # Index the session's tool-use first: reconstruct is the moment the pipeline
-    # is "done enough" to review, so make the just-run executions searchable now
-    # rather than waiting on the periodic pass.  Idempotent + file-locked, so this
-    # is safe to fire alongside the periodic pass's own CodeUseIndexer.
+    # is complete enough to review, so the just-run executions are made
+    # searchable here rather than waiting on the periodic pass.  Idempotent and
+    # file-locked, so this is safe to run beside the periodic pass's own
+    # CodeUseIndexer.
     if kb is not None:
         try:
             await asyncio.to_thread(CodeUseIndexer(kb, runtime_dir).tick)
-        except Exception as e:  # noqa: BLE001 — indexing is best-effort here
+        except Exception as e:  # noqa: BLE001  indexing is best-effort here
             logger.warning("code_use indexing before reconstruct failed: %s", e)
     with registry_reconstruct_pipeline_span(fmt):
         try:
@@ -269,7 +282,7 @@ async def _handle_reconstruct_pipeline(
 
 
 # ---------------------------------------------------------------------------
-# Tool defs + handler map (used by the merged server and the test wrapper)
+# Tool defs and handler map (used by the merged server and the test wrapper)
 # ---------------------------------------------------------------------------
 
 
@@ -321,7 +334,7 @@ def _registry_tools_and_handlers(
                                     "name": {
                                         "type": "string",
                                         "description": (
-                                            "Unique code name — lowercase "
+                                            "Unique code name: lowercase "
                                             "letters, digits, hyphens (e.g. "
                                             "'datacard-introspect')"
                                         ),
@@ -330,7 +343,7 @@ def _registry_tools_and_handlers(
                                         "type": "string",
                                         "description": (
                                             "What the code does and when to "
-                                            "use it — phrase as 'Use when "
+                                            "use it, phrased as 'Use when "
                                             "…' so native skill routing can "
                                             "match it"
                                         ),
@@ -464,11 +477,13 @@ def _registry_tools_and_handlers(
         types.Tool(
             name="readiness_reports",
             description=(
-                "The AI-readiness reports on record for a file, newest first: "
-                "each aidrin run whose input was the file, with its report path, "
-                "start time, and whether the file's content is unchanged since "
-                "that run. Call it before running a check; a current report is "
-                "the pre report of the next stage."
+                "The AI-readiness (AIDRIN) report on record for a data file. "
+                "`current` is the report made while the file had its present "
+                "content, with the report's text; when it is null, `next` says "
+                "how to make one. `earlier` lists reports from before the file "
+                "changed. When describing a change in quality, compare a table "
+                "only with its own earlier report or with the report of the "
+                "table it was made from."
             ),
             inputSchema={
                 "type": "object",
@@ -489,7 +504,7 @@ def create_registry_server(
     registry: CodeRegistry,
     kb: KnowledgeBase | None = None,
 ):
-    """Create a standalone MCP server exposing only the registry/exec/provenance tools.
+    """Create a standalone MCP server exposing only the registry and provenance tools.
 
     Test-facing API: tests call with a mock registry and drive the server via
     ``call_tool_sync()``.  The merged ``dsagt-server`` composes

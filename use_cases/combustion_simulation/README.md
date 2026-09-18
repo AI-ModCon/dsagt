@@ -225,10 +225,10 @@ is. The agent may print the tree through a command; the reply then summarizes it
 4. `trace_archive/` holds every converter and checker run, including the failed checks that drove the fixes.
 5. A datacard for the converted dataset exists under `audit/`, in the Genesis template, and `datacard-validate` accepts it.
 6. `pipeline.sh`, saved by `reconstruct_pipeline`, replays the final conversion and both checks, calling the tools directly; the trajectory directory is the only variable to edit, and the output and reference paths are derived from it.
-7. MLflow traces (in the serverless `mlflow.db` store) capture the session —
-   `dsagt traces blastnet-well`.
+7. MLflow traces (in the serverless `mlflow.db` store) capture the session;
+   view them with `dsagt traces blastnet-well`.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

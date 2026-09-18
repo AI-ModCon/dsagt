@@ -63,7 +63,7 @@ class _JobTracker:
             "error": None,
             "collection": collection,
             "started_at": time.monotonic(),
-            "message": "Starting -- embedding documents via API...",
+            "message": "Starting: chunking and embedding documents...",
         }
         if collection:
             self.active_collections.add(collection)

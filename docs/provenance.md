@@ -1,6 +1,6 @@
 # Provenance
 
-DSAgt records data operations as reproducible, auditable steps. The agent registers a **code** — a CLI executable — and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.
+DSAgt records data operations as reproducible, auditable steps. The agent registers a **code**, a CLI executable, and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.
 
 ![DSAgt provenance](assets/provenance.png)
 
@@ -20,7 +20,7 @@ Example code spec (`skills/csv-summary/SKILL.md`):
 ```markdown
 ---
 name: csv-summary
-description: Summarize a CSV — columns, row count, null counts, numeric stats. Use when profiling a tabular dataset.
+description: Summarize a CSV (columns, row count, null counts, numeric stats). Use when profiling a tabular dataset.
 executable: dsagt-run --code csv-summary -- python skills/csv-summary/scripts/csv_summary.py
 parameters:
   file:
@@ -32,10 +32,10 @@ dependencies: []
 tags: [csv, profiling]
 ---
 
-Run this registered code with the exact shell command below…
+Run this registered code with the exact shell command below.
 ```
 
-DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. The base skills' scripts and the `aidrin` CLI are registered as codes at `dsagt init`, indexed for search.
+DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent calls a code by its stored command and the environment is handled for it. The base skills' scripts and the `aidrin` CLI are registered as codes at `dsagt init`, indexed for search.
 
 ## Execution record
 
@@ -66,6 +66,6 @@ Then, in the agent (replace `$SMOKE_DIR` with the absolute path you exported):
 Afterwards, inspect the trail:
 
 ```bash
-ls ~/dsagt-projects/demo/{codes,trace_archive}          # the specs + execution records
+ls ~/dsagt-projects/demo/{skills,trace_archive}         # the specs + execution records
 dsagt traces demo                                        # code.execute spans in the MLflow viewer
 ```

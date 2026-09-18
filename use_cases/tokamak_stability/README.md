@@ -216,9 +216,9 @@ outputs, with a line on what each is.
 5. `dsagt_session_script.sh` reruns the session against a data directory set at
    the top of the script.
 6. MLflow traces (in the serverless `mlflow.db` store) capture every code
-   execution and agent turn — `dsagt traces tokamak-stability`.
+   execution and agent turn; view them with `dsagt traces tokamak-stability`.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

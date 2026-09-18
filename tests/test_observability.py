@@ -767,8 +767,8 @@ def test_api_key_header_provider_sends_x_api_key_only_when_set(monkeypatch):
 
 
 def test_bound_masks_credential_shapes_inside_strings():
-    """Key-name redaction cannot see a bearer inside a ``run_command`` argv or
-    an API key in a URL query string — the value shape has to be masked."""
+    """Key-name redaction cannot match a bearer inside a recorded argv or an
+    API key in a URL query string; the value shape has to be masked."""
     from dsagt.observability import bound
 
     argv = {
@@ -891,9 +891,9 @@ def test_init_tracing_activates_the_version_model(tmp_path, monkeypatch):
 
 def test_bound_leaves_ordinary_prose_alone_and_catches_json_keys():
     """The value-shape sweep is anchored: `Bearer`/`Basic` only after an
-    `Authorization:` label, key labels only before a token-shaped value —
-    otherwise a `read_file` of any document with "basic " or "bearer " in it
-    lost the next word in the stored preview.  JSON-quoted keys, the shape of
+    `Authorization:` label, key labels only before a token-shaped value;
+    otherwise a recorded document with "basic " or "bearer " in it
+    loses the next word in the stored preview.  JSON-quoted keys, the shape of
     a printed config, are caught."""
     from dsagt.observability import bound
 

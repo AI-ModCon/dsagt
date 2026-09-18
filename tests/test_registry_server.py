@@ -49,7 +49,7 @@ def _write_tool(codes_dir: Path, spec: dict) -> None:
 def _make_server(tmp_path, tools=None):
     """Create (server, registry) with optional pre-populated tools.
 
-    Pre-populated tools are written into ``<runtime>/codes/`` — the
+    Pre-populated codes are written into ``<runtime>/skills/``, the
     single project layer every lookup reads.
     """
     runtime_dir = tmp_path / "runtime"

@@ -259,10 +259,10 @@ ls "$PROJ/audit/" "$PROJ/trace_archive/"
    and identifiers, may differ); `trace_archive/` holds every NEB conversion attempt,
    including any that failed the comparison.
 7. `pipeline.sh` replays every recorded NEB conversion.
-8. MLflow traces (in the serverless `mlflow.db` store) capture the session —
-   `dsagt traces isaac-vasp`.
+8. MLflow traces (in the serverless `mlflow.db` store) capture the session;
+   view them with `dsagt traces isaac-vasp`.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

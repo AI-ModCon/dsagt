@@ -729,10 +729,10 @@ def _rrf_merge(
 def _chunk_key(chunk: dict) -> tuple:
     """Stable identity for a result chunk, for cross-collection RRF.
 
-    Different collections (and, later, different stores/embedders) live in
-    incomparable score spaces, so fusion is rank-only.  We key on the chunk's
-    own metadata rather than score; ``id``-based fallback keeps distinct chunks
-    distinct even when metadata is sparse.
+    Different collections and stores have incomparable score spaces, so
+    fusion is rank-only and the key is the chunk's own metadata, never its
+    score.  A text prefix in the key keeps distinct chunks distinct when the
+    metadata is sparse.
     """
     meta = chunk.get("metadata", {})
     return (

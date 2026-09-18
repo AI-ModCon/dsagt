@@ -8,21 +8,20 @@ Installed skills, the three base skills included, are located in `<project>/skil
 
 ![DSAgt skill routing](assets/skills-routing.png)
 
-Skills fall into two sets — the searchable **corpus** and the project's **installed skills** — and one class, `SkillRouter`, routes every skill operation between them:
+Skills fall into two sets, the searchable **corpus** and the project's **installed skills**, and one class, `SkillRouter`, routes every skill operation between them:
 
-- **Corpus** — skills that exist in external repositories but are *not yet installed*. DSAgt federates many sources (the known names below, or any git URL); each is cloned and indexed into its own collection. The agent browses the corpus with `search_skills` and manages sources with `add_skill_source` / `list_skill_sources`.
-- **Installed skills** — the skills in `<project>/skills/`: the base skills (`skill-creator`, `datacard-generator`, `aidrin`), skills installed from the corpus with `install_skill`, and skills the agent authors with `skill-creator`. dsagt places a copy of each in the agent's normal skills directory for the project, so the agent finds them the way it finds any skill.
+- **Corpus**: skills in external repositories, available to install. DSAgt federates many sources (the known names below, or any git URL); each is fetched and indexed into its own collection. The agent browses the corpus with `search_skills` and manages sources with `add_skill_source` / `list_skill_sources`.
+- **Installed skills**: the skills in `<project>/skills/`: the base skills (`skill-creator`, `datacard-generator`, `aidrin`), skills installed from the corpus with `install_skill`, and skills the agent authors with `skill-creator`. dsagt links each into the agent's native skills directory for the project (a relative symlink), so the agent finds them the way it finds any skill.
 
-## Design motivation
+## Rationale
 
-- **Corpus search.** Every supported agent (Claude, Codex, Goose, Cline, opencode) natively auto-discovers `SKILL.md` folders, so installed skills never need to be indexed or returned by a tool. So `search_skills` discovers new skills for an agent to access: a corpus of potentially thousands of *un*installed skills, searchable without holding them all in context. The corpus is indexed on name, description, and tags, which keeps those summaries compact and avoids diluting the embedding with full SKILL.md bodies.
-- **Keyword fallback** When no embedding model is configured, `search_skills` falls back to a keyword match over the local clones.
-
+- **Corpus search.** Every supported agent (Claude, Codex, Goose, Cline, opencode) discovers `SKILL.md` folders natively, so installed skills are found by the platform. `search_skills` covers the uninstalled ones: a corpus of thousands of skills, searchable while none of them is in context. The corpus is indexed on name, description, and tags, which keeps each entry compact and the embedding focused on what the skill does.
+- **Keyword fallback.** When no embedding model is configured, `search_skills` uses a keyword match over the local source cache.
 - **Federated and provenance-preserving.** Each source is an independent per-source collection, so re-syncing one never disturbs another; installing a skill from the corpus preserves its upstream `LICENSE`/`NOTICE` and stamps a `PROVENANCE.txt` into the installed directory.
 
 ## Sources
 
-`dsagt init` enables the `genesis` source by default. The others are enabled at init (the interactive checkbox, or `--include <name>`) or during a session with the `add_skill_source` tool, which also accepts any git URL. A source is a git repository holding `SKILL.md` directories; discovery is recursive under the configured subdirectory, so a skill added upstream appears after the source is re-synced: `add_skill_source` with `force: true` re-clones a cached source.
+`dsagt init` enables the `genesis` source by default. The others are enabled at init (the interactive checkbox, or `--include <name>`) or during a session with the `add_skill_source` tool, which also accepts any git URL. A source is a git repository holding `SKILL.md` directories, fetched as a GitHub tarball over HTTPS, so the end-user install needs no git; git is the fallback for a repository the GitHub API refuses (a private one the user's ssh key can reach) and for a URL on another host. Discovery is recursive under the configured subdirectory, so a skill added upstream appears after the source is re-synced: `add_skill_source` with `force: true` re-fetches a cached source.
 
 | Name | Repository | Contents |
 |---|---|---|
@@ -36,7 +35,7 @@ The `genesis` source is the ModCon aggregation point: skills contributed by ModC
 
 ## Base and authored skills
 
-Every `dsagt init` installs three base skills into `<project>/skills/` from the repositories that maintain them. A source is cloned once into the shared cache at `~/dsagt-projects/.skill_sources/` and reused by every later init; a cache held at another branch or tag than the one asked for is re-cloned, and `add_skill_source` with `force` re-clones on request.
+Every `dsagt init` installs three base skills into `<project>/skills/` from the repositories that maintain them. A source is fetched once into the shared cache at `~/dsagt-projects/.skill_sources/` and reused by every later init; a cache held at another branch or tag than the one asked for is re-fetched, and `add_skill_source` with `force` re-fetches on request.
 
 | Skill | Source |
 |---|---|
@@ -46,9 +45,9 @@ Every `dsagt init` installs three base skills into `<project>/skills/` from the 
 
 The scripts a base skill's workflow runs, and the CLI the `aidrin` skill documents, are registered as codes at the same init, so the agent runs them through `dsagt-run` and every run is recorded. The installed `aidrin` skill shows that CLI in its registered form (`dsagt-run --code aidrin -- aidrin …`), and its `PROVENANCE.txt` records the rewrite; the rest of the text is upstream's. `datacard-generator` registers `datacard-introspect`, `datacard-validate`, and `datacard-convert-v1`; each executes its script in place under `<project>/skills/datacard-generator/scripts/`, and the two that need PyYAML and Pydantic run under `uv run --with`. The vectors `search_registry` matches these codes by are embedded once, with the bundled tools, into the shared `~/dsagt-projects/kb_index/codes` collection that every init copies, so `dsagt init` loads no embedding model; the collection rebuilds when the dsagt version or a base-skill code spec changes.
 
-Installed skills are **not** indexed for search — the agent auto-discovers `SKILL.md` folders natively — so `search_skills` is reserved for the corpus. Other domain skills, such as the BaseData `croissant-validator`, are installed from the corpus and stay current upstream.
+The agent discovers installed `SKILL.md` folders natively, so `search_skills` indexes the corpus only. Other domain skills, such as the BaseData `croissant-validator`, are installed from the corpus and stay current upstream.
 
-To manually add a skill, place a new directory under `<project>/skills/` with a `SKILL.md` describing the workflow; the next `dsagt start` mirrors it into the agent's native skill directory, after which the agent auto-discovers and invokes it — no indexing step.
+To add a skill by hand, place a new directory under `<project>/skills/` with a `SKILL.md` describing the workflow; the next `dsagt start` links it into the agent's native skills directory, after which the agent discovers and invokes it.
 
 ## Try it
 

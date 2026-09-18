@@ -386,12 +386,11 @@ def _cmd_init(args):
     agent = settings["agent"]
     config = load_config(name)
 
-    # 1. Actions first (Wrote … / Mirrored …).
+    # 1. Actions first (Wrote / Mirrored lines).
     print()
     for action in static_agent_record(config, agent, pdir):
         print(action)
-    # Pass the user's shell env so per-agent ``write_dynamic`` can read
-    # provider creds (e.g., cline.write_dynamic invokes ``cline auth``).
+    # The shell env is the source of the MCP env block's passthrough names.
     for action in dynamic_agent_record(config, env=dict(os.environ), working_dir=pdir):
         print(action)
 
@@ -425,18 +424,16 @@ def _cmd_init(args):
 def _cmd_start(args):
     """Refresh the dynamic agent record, then ``cd <project> && <agent>``.
 
-    The refresh (``dynamic_agent_record``: per-agent MCP config +
-    native-skills mirror, all idempotent) backstops the install-time mirror
-    the MCP tools run (``agents.refresh_native_skills``) — e.g. a skill dir
-    dropped in by hand still mirrors here — and lets a credential-dependent
-    step skipped at init (cline auth) pick up once the vars are in the
-    shell.  Session lifecycle (session-id
-    minting, post-session extraction catch-up) is owned by the MCP server
-    at startup.
+    The refresh (``dynamic_agent_record``: per-agent MCP config and
+    native-skills mirror, all idempotent) repeats the install-time mirror
+    the MCP tools run (``agents.refresh_native_skills``), so a skill dir
+    copied in by hand is mirrored here, and rewrites the env block from the
+    current shell.  The MCP server owns the session lifecycle (session-id
+    minting, the catch-up) at startup.
 
-    The per-project runtime env (e.g. ``CLINE_DIR`` / ``CODEX_HOME`` that
+    The per-project runtime env (``CLINE_MCP_SETTINGS_PATH`` / ``CODEX_HOME``, which
     point an agent at its init-written config) is applied so the launched
-    agent finds what ``init`` set up.
+    agent reads what ``init`` set up.
     """
     config = load_config(args.project)
     pdir = Path(config["project_dir"])

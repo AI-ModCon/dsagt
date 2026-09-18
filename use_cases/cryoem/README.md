@@ -244,7 +244,7 @@ is. The agent may print the tree through a command; the reply then summarizes it
 7. Code execution records in `trace_archive/` document the full provenance chain, including one record per check run, each naming the table it read.
 8. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

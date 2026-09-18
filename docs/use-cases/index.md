@@ -1,6 +1,6 @@
 # Use Cases
 
-End-to-end walkthroughs for representative scientific and data-readiness scenarios are located in [`use_cases/`](https://github.com/AI-ModCon/dsagt/tree/main/use_cases/). Each follows one layout — Prerequisites, Setup, Execution as pasted prompts with expected results, Post-Conditions, What This Tests, Cleanup — and covers data acquisition, code or skill registration, pipeline construction, and agent-driven execution. Some run on real scientific datasets; the skill-management demos use small fixture data.
+End-to-end walkthroughs for representative scientific and data-readiness scenarios are located in [`use_cases/`](https://github.com/AI-ModCon/dsagt/tree/main/use_cases/). Each follows one layout (Prerequisites, Setup, Execution as pasted prompts with expected results, Post-Conditions, Coverage, Cleanup) and covers data acquisition, code or skill registration, pipeline construction, and agent-driven execution. Some run on real scientific datasets; the skill-management demos use small fixture data.
 
 Fixture data of a few megabytes is in the use case's own `data/` folder in the repository; larger datasets are hosted in the [DSAgt use-case data folder](https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6), and each Setup section gives the copy or download command.
 

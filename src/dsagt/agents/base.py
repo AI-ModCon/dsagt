@@ -455,32 +455,32 @@ class AgentSetup(ABC):
         return _mirror_skills_to(target, src_dirs)
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
-        """Files/dirs this agent's setup writes, for cleanup when a project
-        re-inits onto a *different* agent platform.
+        """Files and dirs this agent's setup writes, for cleanup when a project
+        re-inits onto a different agent platform.
 
-        Lists the instruction file, the per-agent MCP-config file(s), and the
-        agent's private per-project state dir(s) — NOT the shared
-        ``.agents/`` skill-mirror dir (managed by the manifest reaper), and
-        never project data (``.dsagt/``, ``kb_index/``, ``trace_archive/``,
-        ``skills/``).  Paths may not all exist; the caller filters.
+        Lists the instruction file, the per-agent MCP-config files, and the
+        agent's private per-project state dirs.  The shared ``.agents/``
+        skill-mirror dir is managed by the manifest, and project data
+        (``.dsagt/``, ``kb_index/``, ``trace_archive/``, ``skills/``) is
+        never listed.  Paths may not all exist; the caller filters.
 
-        Default = just the static marker; subclasses extend.
+        Default is the static marker alone; subclasses extend.
         """
         return [working_dir / self.static_marker]
 
     def runtime_env(self, config: dict) -> dict[str, str]:
-        """Dsagt-owned env vars the agent process needs at runtime (BYOA).
+        """Dsagt-owned env vars the agent process needs at runtime.
 
-        Default is empty: DSAGT sets no telemetry env on the
-        agent (agent traces are recovered post-hoc from the on-disk
-        transcript, not by native OTel emission).  Subclasses override
-        only to set per-project state-dir env (``CLINE_DIR``,
-        ``CODEX_HOME``) that isolates their global config per project.
+        Default is empty: agent traces are recovered from the on-disk
+        transcript, so the agent's environment needs no telemetry setting.
+        Subclasses override only to set per-project state-dir env
+        (``CLINE_MCP_SETTINGS_PATH``, ``CODEX_HOME``) that isolates their global config
+        per project.
 
         LLM-provider credentials (ANTHROPIC_*, OPENAI_*, GOOSE_*) are the
-        user's responsibility — exported in their shell, never read or
-        translated by dsagt.  DSAgt's own service credentials (trace store,
-        embedding backend) are a separate matter: see ``_mcp_env_block``.
+        user's responsibility, exported in their shell; dsagt never reads
+        or translates them.  DSAgt's own service credentials (trace store,
+        embedding backend) are handled by ``_mcp_env_block``.
         """
         del config
         return {}

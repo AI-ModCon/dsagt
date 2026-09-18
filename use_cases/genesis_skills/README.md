@@ -164,10 +164,10 @@ ls "$PROJ/trace_archive" | wc -l           # at least 2
    validator as a code; when it installs `mlcroissant` into the skill's own
    virtual environment instead, that run is outside the wrapper and leaves no
    record, which step 4 allows.
-6. MLflow traces (in the serverless `mlflow.db` store) capture the session —
-   `dsagt traces genesis-skills`.
+6. MLflow traces (in the serverless `mlflow.db` store) capture the session;
+   view them with `dsagt traces genesis-skills`.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

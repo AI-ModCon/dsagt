@@ -184,7 +184,7 @@ with a line on what each is. The reply may summarize a tree printed by a command
 
 `megahit` segfaults on Apple Silicon with more than one thread; the best-practices document says `-t 1 --no-hw-accel`, and a sample that segfaulted is rerun that way with the same `kmax=21` and memory cap.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|
