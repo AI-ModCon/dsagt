@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 import numpy as np
@@ -51,6 +52,37 @@ def _fake_clone(fake_repo: Path):
         return subprocess.CompletedProcess(cmd, 0, stdout="fake0commit\n", stderr="")
 
     return _run
+
+
+def _fake_github(fake_repo: Path, sha: str = "fake0commit", status: int = 200):
+    """An httpx transport that answers the two GitHub API calls
+    :func:`fetch_github_tree` makes: the commit for a ref, and the tarball at
+    that commit, built from *fake_repo* under GitHub's one-directory layout."""
+    import io
+    import tarfile
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if status != 200:
+            return httpx.Response(status, json={"message": "Not Found"})
+        path = request.url.path
+        if "/commits/" in path:
+            return httpx.Response(200, json={"sha": sha})
+        assert "/tarball/" in path, path
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            tar.add(fake_repo, arcname=f"owner-fake-{sha[:7]}")
+        return httpx.Response(200, content=buf.getvalue())
+
+    return httpx.MockTransport(handler)
+
+
+def _patched_client(transport):
+    """``httpx.Client`` bound to *transport*, for patching into the module.
+
+    Patching ``setup_core_kb.httpx.Client`` patches the httpx module itself,
+    so the real class is captured first."""
+    real_client = httpx.Client
+    return lambda **kw: real_client(transport=transport, **kw)
 
 
 @pytest.fixture
@@ -94,9 +126,12 @@ def test_clone_with_include_keeps_top_level_files(fake_repo, tmp_path):
     dest = tmp_path / "dest"
     dest.mkdir()
 
-    with patch("dsagt.commands.setup_core_kb.subprocess.run", _fake_clone(fake_repo)):
+    with patch(
+        "dsagt.commands.setup_core_kb.httpx.Client",
+        _patched_client(_fake_github(fake_repo)),
+    ):
         clone_github(
-            url="https://example.com/fake.git",
+            url="https://github.com/owner/fake.git",
             dest=dest,
             branch="main",
             include=["docs", "fakelib"],
@@ -119,15 +154,59 @@ def test_clone_with_include_keeps_top_level_files(fake_repo, tmp_path):
     assert (dest / "SOURCE_REF").read_text() == "main\n"
 
 
+def test_a_private_repository_falls_back_to_the_users_git(fake_repo, tmp_path):
+    """The API refuses a private repository without a token; the user's git,
+    with their ssh key, is the one fallback."""
+    dest = tmp_path / "dest"
+    with (
+        patch(
+            "dsagt.commands.setup_core_kb.httpx.Client",
+            _patched_client(_fake_github(fake_repo, status=404)),
+        ),
+        patch("dsagt.commands.setup_core_kb.subprocess.run", _fake_clone(fake_repo)),
+    ):
+        clone_github(url="git@github.com:owner/fake.git", dest=dest, branch="main")
+    assert (dest / "pyproject.toml").exists()
+    assert (dest / "SOURCE_COMMIT").read_text() == "fake0commit\n"
+
+
+def test_a_non_github_url_uses_git(fake_repo, tmp_path):
+    dest = tmp_path / "dest"
+    with patch("dsagt.commands.setup_core_kb.subprocess.run", _fake_clone(fake_repo)):
+        clone_github(url="https://gitlab.example.org/o/r.git", dest=dest, branch="main")
+    assert (dest / "README.md").exists()
+
+
+def test_github_owner_repo_parses_both_forms():
+    from dsagt.commands.setup_core_kb import _github_owner_repo
+
+    assert _github_owner_repo("https://github.com/AI-ModCon/dsagt") == (
+        "AI-ModCon",
+        "dsagt",
+    )
+    assert _github_owner_repo("https://github.com/AI-ModCon/dsagt.git/") == (
+        "AI-ModCon",
+        "dsagt",
+    )
+    assert _github_owner_repo("git@github.com:idtlab/AIDRIN.git") == (
+        "idtlab",
+        "AIDRIN",
+    )
+    assert _github_owner_repo("https://gitlab.com/o/r") is None
+
+
 def test_clone_without_include_copies_everything(fake_repo, tmp_path):
     """When include is None, clone_github copies the whole repo (minus .git)."""
     dest = tmp_path / "dest"
     # clone_github copies into dest, which must NOT pre-exist when include=None
     # because shutil.copytree(dirs_exist_ok=True) is used.
 
-    with patch("dsagt.commands.setup_core_kb.subprocess.run", _fake_clone(fake_repo)):
+    with patch(
+        "dsagt.commands.setup_core_kb.httpx.Client",
+        _patched_client(_fake_github(fake_repo)),
+    ):
         clone_github(
-            url="https://example.com/fake.git",
+            url="https://github.com/owner/fake.git",
             dest=dest,
             branch="main",
         )
