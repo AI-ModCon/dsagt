@@ -152,6 +152,17 @@ Reconstruct the pipeline from the execution records as a bash script.
 
 The agent calls `reconstruct_pipeline` to generate a reproducible script from the trace archive.
 
+### 7. Review the project artifacts
+
+```text
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+```
+
+**Expect:** a listing of the project directory that marks the execution records in
+`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
+with a line on what each is.
+
 ## Post-Conditions
 
 1. Code registry includes `fastp` and `megahit` code specs (wrapped with `dsagt-run`).

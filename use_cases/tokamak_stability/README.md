@@ -181,6 +181,17 @@ order they ran, including any run that failed; the agent's only edit is the
 variable. The skill asks the agent to check your default shell first, since the
 fusion-io environment variables may be set only in that shell's startup files.
 
+### 8. Review the project artifacts
+
+```text
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+```
+
+**Expect:** a listing of the project directory that marks the execution records in
+`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
+with a line on what each is.
+
 ## Post-Conditions
 
 1. Code registry contains specs for the M3D-C1 reading, analysis, plotting, and

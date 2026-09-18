@@ -170,6 +170,17 @@ The agent reads the records `dsagt-run` wrote to `trace_archive/` and lists one 
 three quality metrics as one `data-quality` call) and the batch run from step 3, every exit
 code 0.
 
+### 6. Review the project artifacts
+
+```text
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+```
+
+**Expect:** a listing of the project directory that marks the execution records in
+`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
+with a line on what each is.
+
 ## Post-Conditions
 
 1. `skills/aidrin/SKILL.md` is present, with a `PROVENANCE.txt` naming the AIDRIN source.
