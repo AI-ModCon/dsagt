@@ -1360,9 +1360,8 @@
 <li><strong>Semantic embeddings</strong> catch paraphrase and synonymy: a query about "missing values" finds a passage on "null rates" even with no shared words.</li>
 <li><strong>BM25 keyword matching</strong> catches the exact terms embeddings tend to under-rank — identifiers, gene names, parameter flags, standard names — where a literal match matters.</li>
 <li><strong>Per-collection partitioning</strong> scopes a search to a domain, so a materials-science query isn't diluted by genomics references.</li>
-<li><strong>Optional cross-encoder reranking</strong> re-scores the top candidates for precision when it's worth the extra pass.</li>
 </ul>
-<p>The default embedder is a local sentence-transformers model (~130 MB).</p>
+<p>The default embedder is <code>BAAI/bge-small-en-v1.5</code> run locally on onnxruntime from the ONNX export the model's repository publishes (133 MB, downloaded once).</p>
 <h2 id="shared-vector-store">Shared vector store<a class="headerlink" href="#shared-vector-store" title="Permanent link">&para;</a></h2>
 <p>The same vector store additionally supports DSAgt's <a href="../memory/">memory</a> (explicit + episodic), <a href="../skills/">skills discovery</a> (the installable-skill corpus), and <a href="../provenance/">code execution tracking</a> (the <code>code_use</code> records). Each is a separate partitioned collection in that store, sharing one embedder and one ChromaDB. Respective docs on <a href="../memory/">memory</a>, <a href="../skills/">skills</a>, and <a href="../provenance/">provenance</a> share specific details about those collections.</p>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
