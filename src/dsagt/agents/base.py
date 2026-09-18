@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import logging
 import shutil
 import subprocess
@@ -75,18 +76,48 @@ def _mcp_server_args() -> list[str]:
     return ["run", "dsagt-server"]
 
 
-def _mcp_env_block(config: dict) -> dict[str, str]:
+#: The launching shell's variables copied into the MCP env block: what an
+#: activated environment sets (a venv, conda, ``module load``) and what a
+#: compiled dependency needs to load.  Codex and cline start the server from
+#: the block alone, so without these the server's python lacked the user's
+#: packages.
+_SHELL_ENV_PASSTHROUGH = (
+    "PATH",
+    "VIRTUAL_ENV",
+    "CONDA_PREFIX",
+    "CONDA_DEFAULT_ENV",
+    "PYTHONPATH",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "MODULEPATH",
+    "LOADEDMODULES",
+    "_LMFILES_",
+)
+
+#: A name matching one of these never enters the block, whatever a config
+#: lists: the block is written into the project's agent config, which is a
+#: file, and dsagt writes no credential into a file.
+_CREDENTIAL_NAME = re.compile(r"_KEY$|_TOKEN$|_SECRET$|SECRET|PASSW", re.I)
+
+
+def _mcp_env_block(
+    config: dict, environ: dict[str, str] | None = None
+) -> dict[str, str]:
     """Env vars the dsagt MCP server children need at startup.
 
-    Benign routing only (no credentials, no provider redirection): the
-    project name + dir, the resolved ``MLFLOW_TRACKING_URI``, and the
-    embedding-backend settings.  MCP children run with cwd == project_dir
-    and could read most of this from ``.dsagt/config.yaml``, but agents that
-    don't inherit the parent's shell env into their MCP children (codex /
-    cline) need it baked into the per-agent MCP config.  Credentials are never
-    part of it: ``EMBEDDING_API_KEY`` and the trace store's key come from the
-    shell or ``~/.config/dsagt/env`` (``session.load_user_env``), which is
-    also how codex/cline children — which see only this block — receive them.
+    Two kinds. Routing: the project name + dir, the resolved
+    ``MLFLOW_TRACKING_URI``, and the embedding-backend settings, which MCP
+    children could read from ``.dsagt/config.yaml`` but which codex and
+    cline, whose children see only this block, need baked in.  The launching
+    shell's environment: :data:`_SHELL_ENV_PASSTHROUGH` plus the names the
+    config lists under ``mcp.env_passthrough`` for site-specific ones, copied
+    from *environ* (the process environment by default) at every ``dsagt
+    init`` and ``dsagt start``, so the server's python is the user's
+    activated one; a bare launch after a changed activation needs one of the
+    two.  Credentials are never part of it: a name matching
+    :data:`_CREDENTIAL_NAME` is refused with ``ValueError``, and
+    ``EMBEDDING_API_KEY`` and the trace store's key come from the shell or
+    ``~/.config/dsagt/env`` (``session.load_user_env``).
 
     No session id here — the MCP server mints it at startup into
     ``.dsagt/state.yaml`` (it owns the session lifecycle now), so there's
@@ -94,6 +125,7 @@ def _mcp_env_block(config: dict) -> dict[str, str]:
     """
     from dsagt.observability import resolve_tracking_uri
 
+    environ = os.environ if environ is None else environ
     emb = config.get("embedding") or {}
     block: dict[str, str] = {}
     for key, src in (
@@ -106,6 +138,18 @@ def _mcp_env_block(config: dict) -> dict[str, str]:
     ):
         if src:
             block[key] = str(src)
+    extra = (config.get("mcp") or {}).get("env_passthrough") or []
+    for name in extra:
+        if _CREDENTIAL_NAME.search(name):
+            raise ValueError(
+                f"mcp.env_passthrough names {name!r}, a credential; the MCP env "
+                "block is written into the agent config, and a credential is read "
+                "from the shell or ~/.config/dsagt/env instead"
+            )
+    for name in (*_SHELL_ENV_PASSTHROUGH, *extra):
+        value = environ.get(name)
+        if value:
+            block[name] = value
     return block
 
 
