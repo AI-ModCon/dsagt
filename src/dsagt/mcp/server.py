@@ -476,7 +476,7 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     return kb
 
 
-def _spawn_catch_up(project_dir: Path, config: dict) -> None:
+def _spawn_catch_up(project_dir: Path, config: dict, kb=None) -> None:
     """Run :func:`dsagt.session.catch_up_extraction` in a daemon thread.
 
     Best-effort background catch-up of the previous session's post-session
@@ -488,7 +488,7 @@ def _spawn_catch_up(project_dir: Path, config: dict) -> None:
         try:
             from dsagt.session import catch_up_extraction
 
-            result = catch_up_extraction(project_dir, config)
+            result = catch_up_extraction(project_dir, config, kb=kb)
             logger.info("Background catch-up complete: %s", result)
         except Exception as e:  # noqa: BLE001
             logger.warning("Background catch-up failed: %s", e)
@@ -614,7 +614,7 @@ def main():
 
         # Catch up post-session extraction for the previous session in the
         # background.  Daemon thread: best-effort, never fails startup.
-        _spawn_catch_up(project_dir, config)
+        _spawn_catch_up(project_dir, config, kb=kb)
 
         # The periodic trace pass: read the live transcript → MLflow.  The
         # loop is agent-agnostic; ``make_trace_collector`` returns a collector

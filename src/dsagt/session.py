@@ -793,7 +793,7 @@ def remove_project(project_name: str, keep_files: bool = False) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def catch_up_extraction(pdir: Path, config: dict) -> dict:
+def catch_up_extraction(pdir: Path, config: dict, kb=None) -> dict:
     """Background post-session catch-up — run by the MCP server at startup.
 
     The MCP server owns the session lifecycle: each launch, it spawns this
@@ -819,7 +819,10 @@ def catch_up_extraction(pdir: Path, config: dict) -> dict:
     """
     pdir = Path(pdir)
     config = {**config, "project_dir": str(pdir)}
-    kb = kb_from_config(config)
+    # The server passes its own knowledge base so one embedder serves the
+    # session; a second one costs a model load per start.
+    if kb is None:
+        kb = kb_from_config(config)
 
     try:
         code_use_indexed = 0

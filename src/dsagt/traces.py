@@ -319,9 +319,19 @@ class Trace:
                     _message(_ROLE_ASSISTANT, [_tool_use_block(name, tool_input)])
                 )
                 pending.append(_message(_ROLE_USER, [_tool_result_block(result)]))
-        root["end_time"] = last_ts if last_ts is not None else root_ts
+        root["end_time"] = self._root_end(root, last_ts)
         if final_response is not None:
             root["attributes"]["response"] = final_response
+
+    def _root_end(self, root: dict, last_ts: float | None) -> float | None:
+        """The turn's end: the bounding timestamp, and never before the turn's
+        start.  A transcript can carry the next prompt's timestamp a few
+        milliseconds before the turn's own first record, which as the end
+        alone gave a negative duration.  The children's ends are left out
+        because the last child's end is a one-second fallback, and the root
+        matches the autolog parser's, which ends at the bounding record."""
+        candidates = [t for t in (last_ts, root["start_time"]) if t is not None]
+        return max(candidates) if candidates else None
 
     # -- query / projection -------------------------------------------------
 
@@ -1214,7 +1224,7 @@ class ClaudeTranslator(Translator):
                     )
                     counter += 1
 
-        root["end_time"] = last_ts
+        root["end_time"] = trace._root_end(root, last_ts)
         if final_response is not None:
             root["attributes"]["response"] = final_response
 
