@@ -1,8 +1,10 @@
 """
-dsagt-run: registered-code execution wrapper for provenance capture.
+dsagt-run: execution wrapper for provenance capture.
 
 Usage:
     dsagt-run --code fastp -- fastp -q 20 -l 50 --in1 reads.fq.gz
+    dsagt-run -- python compare.py a.json b.json            # ad-hoc, no spec
+    dsagt-run --code aidrin --stdout audit/pre.json -- aidrin data-quality f.csv
 """
 
 import argparse
@@ -23,7 +25,17 @@ def _make_parser() -> argparse.ArgumentParser:
         description="Wrap a code command and capture execution provenance.",
     )
     parser.add_argument(
-        "--code", required=True, help="Name of the code being executed."
+        "--code",
+        default=None,
+        help="Name of the registered code being executed; omitted for an "
+        "ad-hoc run, which is recorded without a spec.",
+    )
+    parser.add_argument(
+        "--stdout",
+        default=None,
+        metavar="PATH",
+        help="Write the command's stdout to this file and record it as an "
+        "output; the terminal gets one line naming the file.",
     )
     parser.add_argument(
         "--session",
@@ -96,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
 
     input_files = _parse_file_list(args.input_files)
     output_files = _parse_file_list(args.output_files)
-    if not input_files and not output_files:
+    if args.code and not input_files and not output_files:
         # The spec's parameter roles name the files; the flags are the
         # override for a command the roles cannot describe.
         from dsagt.registry import CodeRegistry
@@ -106,13 +118,14 @@ def main(argv: list[str] | None = None) -> int:
             input_files, output_files = file_roles_from_command(spec, command)
 
     return run_and_record(
-        code_name=args.code,
+        code_name=args.code or "",
         command=command,
         records_dir=records_dir,
         session_id=session_id,
         record_id=args.record_id,
         input_files=input_files,
         output_files=output_files,
+        stdout_path=args.stdout,
     )
 
 

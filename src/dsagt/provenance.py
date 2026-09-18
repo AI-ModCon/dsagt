@@ -21,6 +21,7 @@ import fcntl
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -201,14 +202,23 @@ def _pump(source, sink, lines: list[str]) -> None:
         sink.flush()
 
 
-def _run_streaming(command: list[str]) -> tuple[int, str, str]:
+_FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+
+
+def _run_streaming(command: list[str], stdout_sink=None) -> tuple[int, str, str]:
     """Run *command*, echoing its output as it arrives, and return the exit
     code with the full stdout and stderr.
 
     The child's two pipes are read on two threads, so a command that fills
     one while the other is being read cannot block.  Undecodable bytes are
     replaced, so a stray byte in a tool's log cannot lose the record of
-    the run.  Raises ``FileNotFoundError`` when the executable is absent.
+    the run.  *stdout_sink* replaces the terminal as where the child's
+    stdout is copied.  A SIGTERM, SIGINT, or SIGHUP to this process is
+    forwarded to the child and the call returns the child's exit status
+    (negative, the signal number, as ``subprocess`` reports it), so the
+    caller writes the record for a run that was ended from outside; a
+    headless harness ends a turn that way.  Raises ``FileNotFoundError``
+    when the executable is absent.
     """
     proc = subprocess.Popen(
         command,
@@ -218,17 +228,34 @@ def _run_streaming(command: list[str]) -> tuple[int, str, str]:
         errors="replace",
         env=_child_env(),
     )
+    forwarded: list[int] = []
+
+    def forward(signum, _frame):
+        forwarded.append(signum)
+        proc.send_signal(signum)
+
+    previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED_SIGNALS}
     out_lines: list[str] = []
     err_lines: list[str] = []
     readers = [
-        threading.Thread(target=_pump, args=(proc.stdout, sys.stdout, out_lines)),
+        threading.Thread(
+            target=_pump, args=(proc.stdout, stdout_sink or sys.stdout, out_lines)
+        ),
         threading.Thread(target=_pump, args=(proc.stderr, sys.stderr, err_lines)),
     ]
     for reader in readers:
         reader.start()
     for reader in readers:
         reader.join()
-    return proc.wait(), "".join(out_lines), "".join(err_lines)
+    try:
+        return_code = proc.wait()
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    if forwarded:
+        name = signal.Signals(forwarded[0]).name
+        err_lines.append(f"dsagt-run: terminated by {name}\n")
+    return return_code, "".join(out_lines), "".join(err_lines)
 
 
 def run_and_record(
@@ -239,16 +266,27 @@ def run_and_record(
     record_id: str | None = None,
     input_files: list[str] | None = None,
     output_files: list[str] | None = None,
+    stdout_path: str | None = None,
 ) -> int:
     """Execute a command, write an execution record, return the exit code.
 
     The command's output is echoed as it arrives and kept in full for the
     record, so a slow code shows progress and the record still holds
-    everything it printed.
+    everything it printed.  An empty *code_name* is an ad-hoc run: a
+    command recorded without a registered spec, so provenance is separate
+    from registration and the agent's cheapest path to running anything is
+    the recorded one.  With *stdout_path* the child's stdout goes to that
+    file, which joins the record's output files, and the terminal gets one
+    line naming it; a code that prints its report (``aidrin``, the datacard
+    codes) is then reproducible from the record and the reconstructed
+    script, where a shell redirect in the agent's command is not.
     """
     from dsagt.observability import obs, code_execute_span, truncate
 
     record_id = record_id or uuid.uuid4().hex[:12]
+    output_files = list(output_files or [])
+    if stdout_path is not None and stdout_path not in output_files:
+        output_files.append(stdout_path)
     if session_id is None:
         # The MCP server mints the session at startup and records it in
         # ``.dsagt/state.yaml``; read the current tag from there so this
@@ -261,7 +299,15 @@ def run_and_record(
         start_perf = time.perf_counter()
 
         try:
-            return_code, stdout, stderr = _run_streaming(command)
+            if stdout_path is None:
+                return_code, stdout, stderr = _run_streaming(command)
+            else:
+                Path(stdout_path).parent.mkdir(parents=True, exist_ok=True)
+                with open(stdout_path, "w") as sink:
+                    return_code, stdout, stderr = _run_streaming(command, sink)
+                print(
+                    f"dsagt-run: stdout written to {stdout_path} ({len(stdout)} bytes)"
+                )
         except FileNotFoundError:
             return_code = 127
             stdout = ""
@@ -333,6 +379,8 @@ def run_and_record(
             "output_files": output_files or [],
         },
     }
+    if stdout_path is not None:
+        record["execution"]["stdout_file"] = stdout_path
 
     _write_record(record, records_dir)
     return return_code
@@ -343,7 +391,8 @@ def _write_record(record: dict, records_dir: Path) -> Path:
     records_dir.mkdir(parents=True, exist_ok=True)
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    filename = f"{record['code_name']}_{ts}_{record['record_id']}.json"
+    prefix = record["code_name"] or "adhoc"
+    filename = f"{prefix}_{ts}_{record['record_id']}.json"
     path = records_dir / filename
 
     path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
@@ -662,8 +711,21 @@ def render_bash(
         "",
     ]
 
+    # The recorded commands assume the directories the session had made by
+    # hand; on a fresh copy the script makes them first.
+    output_dirs: list[str] = []
+    for record in records:
+        for f in record["execution"].get("output_files", []):
+            parent = str(Path(_relative_to_project(f, project_dir)).parent)
+            if parent not in (".", "") and parent not in output_dirs:
+                output_dirs.append(parent)
+    if output_dirs:
+        lines.append("mkdir -p " + " ".join(_shell_quote(d) for d in output_dirs))
+        lines.append("")
+
+    written: set[str] = set()
     for i, record in enumerate(records):
-        code = record["code_name"]
+        code = record["code_name"] or "ad-hoc run"
         execution = record["execution"]
         cmd = [_relative_to_project(a, project_dir) for a in execution["exact_command"]]
         rc = execution.get("return_code", 0)
@@ -675,6 +737,9 @@ def render_bash(
             _relative_to_project(f, project_dir)
             for f in execution.get("output_files", [])
         ]
+        stdout_file = execution.get("stdout_file")
+        if stdout_file:
+            stdout_file = _relative_to_project(stdout_file, project_dir)
 
         lines.append(f"# Step {i + 1}: {code}")
         if inputs:
@@ -682,15 +747,24 @@ def render_bash(
         if outputs:
             lines.append(f"#   outputs: {', '.join(outputs)}")
         if deps[i]:
-            dep_names = [records[d]["code_name"] for d in deps[i]]
+            dep_names = [records[d]["code_name"] or "ad-hoc run" for d in deps[i]]
             lines.append(f"#   depends: {', '.join(dep_names)}")
 
         cmd_str = " ".join(_shell_quote(arg) for arg in cmd)
+        if stdout_file:
+            cmd_str += f" > {_shell_quote(stdout_file)}"
         if rc != 0:
             lines.append(f"#   failed with exit code {rc}; kept as a comment")
             lines.append(f"# {cmd_str}")
         else:
+            # A converter that refuses to overwrite fails on the second
+            # write of one output; the session removed the file by hand
+            # between runs, and that removal was never recorded.
+            for f in outputs:
+                if f in written:
+                    lines.append(f"rm -f {_shell_quote(f)}")
             lines.append(cmd_str)
+            written.update(outputs)
         lines.append("")
 
     return "\n".join(lines)
@@ -705,7 +779,7 @@ def render_snakemake(records: list[dict], deps: dict[int, list[int]]) -> str:
 
     rule_names = []
     for i, record in enumerate(records):
-        code = record["code_name"]
+        code = record["code_name"] or "adhoc"
         rule_name = f"{code}_{i + 1}"
         rule_names.append(rule_name)
 

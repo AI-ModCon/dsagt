@@ -593,3 +593,114 @@ class TestChildEnv:
         assert exit_code == 0
         (record,) = tmp_path.glob("*.json")
         assert "found" in json.loads(record.read_text())["execution"]["stdout"]
+
+
+# ---------------------------------------------------------------------------
+# Ad-hoc runs, --stdout, and a run ended by a signal
+# ---------------------------------------------------------------------------
+
+
+class TestAdHocRun:
+
+    def test_code_is_optional(self):
+        args, command = _parse_args(["--", "python", "x.py"])
+        assert args.code is None
+        assert command == ["python", "x.py"]
+
+    def test_record_without_a_code(self, tmp_path):
+        """A run with no --code is recorded with an empty code name."""
+        exit_code = main(["--records-dir", str(tmp_path), "--", "echo", "adhoc"])
+        assert exit_code == 0
+        records = list(tmp_path.glob("*.json"))
+        assert len(records) == 1
+        assert records[0].name.startswith("adhoc_")
+        record = json.loads(records[0].read_text())
+        assert record["code_name"] == ""
+        assert record["execution"]["exact_command"] == ["echo", "adhoc"]
+        assert record["execution"]["stdout"] == "adhoc\n"
+
+
+class TestStdoutFile:
+
+    def test_stdout_is_written_to_the_file_and_recorded_as_an_output(
+        self, tmp_path, capsys
+    ):
+        target = tmp_path / "audit" / "report.json"
+        exit_code = main(
+            [
+                "--code",
+                "echo_tool",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--stdout",
+                str(target),
+                "--",
+                "echo",
+                '{"ok": true}',
+            ]
+        )
+        assert exit_code == 0
+        assert target.read_text() == '{"ok": true}\n'
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["output_files"] == [str(target)]
+        assert record["execution"]["stdout"] == '{"ok": true}\n'
+        # The file holds the output; the terminal gets one line saying so.
+        out = capsys.readouterr().out
+        assert '{"ok": true}' not in out
+        assert str(target) in out
+
+    def test_stdout_file_joins_the_role_outputs(self, tmp_path):
+        target = tmp_path / "report.txt"
+        main(
+            [
+                "--code",
+                "t",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--output-files",
+                "data/out.csv",
+                "--stdout",
+                str(target),
+                "--",
+                "echo",
+                "x",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["output_files"] == ["data/out.csv", str(target)]
+
+
+class TestSignal:
+
+    def test_a_terminated_run_still_writes_its_record(self, tmp_path):
+        """SIGTERM to dsagt-run reaches the child and the record says so."""
+        import os
+        import signal
+        import subprocess
+        import sys
+        import time
+
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "dsagt.commands.run_code",
+                "--code",
+                "sleeper",
+                "--records-dir",
+                str(tmp_path),
+                "--",
+                "sleep",
+                "30",
+            ],
+            cwd=str(tmp_path),
+        )
+        time.sleep(1.5)
+        os.kill(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=10)
+        records = list(tmp_path.glob("*.json"))
+        assert len(records) == 1
+        record = json.loads(records[0].read_text())
+        assert record["execution"]["return_code"] == -signal.SIGTERM
+        assert "SIGTERM" in record["execution"]["stderr"]
+        assert proc.returncode != 0
