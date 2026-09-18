@@ -110,6 +110,14 @@ async def _handle_install_skill(
     name = arguments.get("skill_name")
     if not name:
         return "install_skill requires 'skill_name'."
+    installed = Path(runtime_dir) / "skills" / name
+    if installed.exists():
+        # Edits to an installed skill win, the same rule the base-skill
+        # install follows; a re-copy would overwrite them.
+        return (
+            f"'{name}' is already installed at {installed}/ and was left as it "
+            "is; read and follow its SKILL.md."
+        )
     try:
         info = SkillRouter().install(name, runtime_dir)
     except LookupError as e:
@@ -301,8 +309,13 @@ def _skill_tools_and_handlers(
                     "reference_files": {
                         "description": (
                             "Optional additional files to write into the "
-                            "skill directory.  Object mapping relative "
-                            "path -> file contents, or JSON-encoded string."
+                            "skill directory.  Object mapping a path inside "
+                            "the skill directory -> file contents, or a "
+                            "JSON-encoded string.  Skill-standard layout: "
+                            "reference documents under references/ (for "
+                            "example 'references/spec.md') and scripts under "
+                            "scripts/ (for example 'scripts/convert.py'); a "
+                            "bare filename lands at the skill root."
                         ),
                         "anyOf": [
                             {
@@ -375,7 +388,8 @@ def _skill_tools_and_handlers(
                 "into this project. Copies SKILL.md + scripts/references and mirrors "
                 "it into the agent's native skills dir — usable immediately (read and "
                 "follow its SKILL.md); future sessions auto-discover it natively with "
-                "no user action."
+                "no user action. A skill already in <project>/skills/ (a base skill, "
+                "or one installed earlier) is left as it is."
             ),
             inputSchema={
                 "type": "object",

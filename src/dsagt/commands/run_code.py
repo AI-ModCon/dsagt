@@ -12,6 +12,7 @@ from dsagt.provenance import (
     _current_session_tag_from_cwd,
     _parse_file_list,
     _resolve_records_dir,
+    file_roles_from_command,
     run_and_record,
 )
 
@@ -34,10 +35,16 @@ def _make_parser() -> argparse.ArgumentParser:
         "--records-dir", default=None, help="Directory for execution records."
     )
     parser.add_argument(
-        "--input-files", default=None, help="Comma-separated input file paths."
+        "--input-files",
+        default=None,
+        help="Comma-separated input file paths; derived from the spec's "
+        "parameter roles when omitted.",
     )
     parser.add_argument(
-        "--output-files", default=None, help="Comma-separated output file paths."
+        "--output-files",
+        default=None,
+        help="Comma-separated output file paths; derived from the spec's "
+        "parameter roles when omitted.",
     )
     return parser
 
@@ -81,7 +88,22 @@ def main(argv: list[str] | None = None) -> int:
     session_id = args.session or _current_session_tag_from_cwd()
     init_tracing("dsagt-run", session_id=session_id)
 
-    records_dir = _resolve_records_dir(args.records_dir)
+    try:
+        records_dir = _resolve_records_dir(args.records_dir)
+    except ValueError as err:
+        print(f"dsagt-run: {err}", file=sys.stderr)
+        return 1
+
+    input_files = _parse_file_list(args.input_files)
+    output_files = _parse_file_list(args.output_files)
+    if not input_files and not output_files:
+        # The spec's parameter roles name the files; the flags are the
+        # override for a command the roles cannot describe.
+        from dsagt.registry import CodeRegistry
+
+        spec = CodeRegistry(runtime_dir=records_dir.parent).get_code(args.code)
+        if spec is not None:
+            input_files, output_files = file_roles_from_command(spec, command)
 
     return run_and_record(
         code_name=args.code,
@@ -89,8 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         records_dir=records_dir,
         session_id=session_id,
         record_id=args.record_id,
-        input_files=_parse_file_list(args.input_files),
-        output_files=_parse_file_list(args.output_files),
+        input_files=input_files,
+        output_files=output_files,
     )
 
 

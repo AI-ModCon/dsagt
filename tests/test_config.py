@@ -488,10 +488,21 @@ class TestInitProject:
 
         with patch("dsagt.skills.install_base_skills", fake_install):
             pdir = init_project("base", "claude", exclude=["all"])
-        # Installed after the knowledge base exists, with the project's KB,
-        # so the base-skill codes are indexed where search_registry looks.
+        # Without the ``codes`` asset there is no copied collection to carry
+        # the base-skill code vectors, so they are embedded into the
+        # project's own KB.
         assert [c[0] for c in calls] == [pdir]
         assert Path(calls[0][1].index_dir) == pdir / "kb_index"
+
+        calls.clear()
+        with (
+            patch("dsagt.skills.install_base_skills", fake_install),
+            patch("dsagt.session._provision_kb", return_value=["codes", "genesis"]),
+        ):
+            pdir = init_project("cached", "claude")
+        # With the ``codes`` asset the copied collection already holds the
+        # vectors: no KB, so init loads no embedding model.
+        assert calls == [(pdir, None)]
 
         def boom(pdir, **_k):
             raise RuntimeError("no network")
@@ -511,6 +522,9 @@ class TestInitProject:
         """Serverless: init_project returns just the project dir — no port."""
         pdir = init_project("myproj", "goose")
         assert pdir.exists()
+        # The instructions send every check report to audit/, so it exists
+        # before the first code runs.
+        assert (pdir / "audit").is_dir()
         config = load_config("myproj")
         assert "mlflow" not in config
 
@@ -797,6 +811,11 @@ class TestAgentRecord:
         self._write_both(config, working_dir)
 
         assert (working_dir / "AGENTS.md").exists()
+        # Codex loads MCP tools through tool_search; the master instructions
+        # name the tools bare, so AGENTS.md carries the loading note.
+        agents_md = (working_dir / "AGENTS.md").read_text()
+        assert "DSAgt Pipeline Builder" in agents_md
+        assert 'tool_search(query="dsagt")' in agents_md
         assert (working_dir / ".codex-data").is_dir()
         toml = (working_dir / ".codex-data" / "config.toml").read_text()
         assert "[mcp_servers.dsagt.env]" in toml
@@ -813,6 +832,7 @@ class TestAgentRecord:
 
         static_agent_record(config, "claude", working_dir)
         first = (working_dir / "CLAUDE.md").read_text()
+        assert "tool_search" not in first  # the loading note is Codex-only
         # Simulate a user edit
         (working_dir / "CLAUDE.md").write_text(first + "\n\n## My project notes\nfoo")
         edited = (working_dir / "CLAUDE.md").read_text()
@@ -1026,18 +1046,19 @@ class TestResolveRecordsDirProjectAware:
         assert result == Path("/custom")
 
     def test_cwd_with_config(self, tmp_path, monkeypatch):
-        """When cwd contains ``.dsagt/config.yaml``, records dir is
-        ``<cwd>/trace_archive``.  Even if env vars are set to point
-        elsewhere, the config-in-cwd rule wins (env is ignored)."""
+        """With no DSAGT_PROJECT_DIR the cwd is the project. A
+        DSAGT_PROJECT_DIR that names a non-project is an error naming the
+        variable, never a silent fall back to the cwd."""
         from dsagt.provenance import _resolve_records_dir
 
+        monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         (tmp_path / ".dsagt").mkdir()
         (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         monkeypatch.chdir(tmp_path)
-        # Stale env vars must not be consulted.
-        monkeypatch.setenv("DSAGT_PROJECT_DIR", "/stale/proj/dir")
-        monkeypatch.setenv("DSAGT_RECORDS_DIR", "/stale/records/dir")
         assert _resolve_records_dir(None) == tmp_path / "trace_archive"
+        monkeypatch.setenv("DSAGT_PROJECT_DIR", "/stale/proj/dir")
+        with pytest.raises(ValueError, match="DSAGT_PROJECT_DIR"):
+            _resolve_records_dir(None)
 
 
 # ---------------------------------------------------------------------------

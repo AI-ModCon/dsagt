@@ -56,6 +56,16 @@ from .base import (
     _toml_quote,
 )
 
+#: Appended to the master instructions in ``AGENTS.md``.  Codex adds an MCP
+#: server's tools to the model's tool list only after a ``tool_search`` call,
+#: and a search that runs before the server has answered ``initialize``
+#: returns nothing, which the model otherwise reads as "no such tools".
+_TOOL_SEARCH_NOTE = """
+## CODEX: LOADING THE DSAGT TOOLS
+
+The tools named in this file (`kb_remember`, `search_registry`, `save_code_spec`, `reconstruct_pipeline`, and the rest) are MCP tools in the `mcp__dsagt` namespace. Codex adds them to your tool list only after a `tool_search` call: `tool_search(query="dsagt")` returns the `mcp__dsagt` namespace with every dsagt tool, so run it once before the first dsagt tool call of a session. An empty result means the dsagt server was still starting; run the same search again before concluding the tools are absent. A dsagt tool missing from your tool list has not been loaded yet: search for it. Do not substitute a shell command or a Python import for it.
+"""
+
 
 def _render_codex_config(mcp_env: dict) -> str:
     """Render the per-project ``$CODEX_HOME/config.toml`` body.
@@ -104,7 +114,9 @@ class CodexSetup(AgentSetup):
         (working_dir / ".codex-data").mkdir(parents=True, exist_ok=True)
         instructions = _load_master_instructions(auto_assess)
         if instructions:
-            action = _write_dsagt_block(working_dir / "AGENTS.md", instructions)
+            action = _write_dsagt_block(
+                working_dir / "AGENTS.md", instructions + _TOOL_SEARCH_NOTE
+            )
             if action:
                 actions.append(action)
         return actions

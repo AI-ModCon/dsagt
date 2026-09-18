@@ -20,6 +20,7 @@ test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
 import asyncio
 import json
 import logging
+import shlex
 import subprocess
 import sys
 from functools import partial
@@ -102,7 +103,9 @@ async def _handle_http_request(arguments: dict) -> str:
 
 
 async def _handle_run_command(arguments: dict) -> str:
-    command = arguments["command"]
+    # A code spec's executable is a multi-word string ("dsagt-run --code x --
+    # uv run -- python script.py"); agents pass it whole, so split it.
+    command = shlex.split(arguments["command"])
     args = arguments.get("args", [])
     timeout = arguments.get("timeout", 10)
     try:
@@ -111,7 +114,7 @@ async def _handle_run_command(arguments: dict) -> str:
         result = await asyncio.to_thread(
             partial(
                 subprocess.run,
-                [command] + args,
+                command + args,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -120,7 +123,7 @@ async def _handle_run_command(arguments: dict) -> str:
     except subprocess.TimeoutExpired:
         return f"Command timed out after {timeout} seconds"
     except FileNotFoundError:
-        return f"Command '{command}' not found"
+        return f"Command '{command[0]}' not found"
 
     output = ""
     if result.stdout:
@@ -162,9 +165,13 @@ async def _handle_save_code_spec(
         tool_count = len(registry.list_codes_raw())
         obs.set("action", action)
         obs.set("registry_size", tool_count)
+        stored = registry.get_code(spec["name"])
         message = (
             f"Tool '{spec['name']}' {action} successfully. "
-            f"Registry now contains {tool_count} tools."
+            f"Registry now contains {tool_count} tools.\n"
+            f"Run it as: {stored['executable']}\n"
+            "The dsagt-run prefix writes the execution record; run this line, "
+            "not the command you supplied."
         )
         deps = spec.get("dependencies", [])
         if deps:
@@ -380,7 +387,11 @@ def _registry_tools_and_handlers(
         ),
         types.Tool(
             name="run_command",
-            description="Execute a command to get help/usage information",
+            description=(
+                "Run a command to read its --help or usage text. Not for "
+                "executing registered codes: run those from your shell with "
+                "the spec's executable string so dsagt-run records them."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -439,7 +450,16 @@ def _registry_tools_and_handlers(
                                     },
                                     "executable": {
                                         "type": "string",
-                                        "description": "Command to execute",
+                                        "description": (
+                                            "The bare command, for example "
+                                            "'python codes/x/scripts/x.py'. "
+                                            "The registry prepends "
+                                            "'dsagt-run --code <name> --' and, "
+                                            "when dependencies are declared, "
+                                            "'uv run --with <deps> --'; the "
+                                            "reply returns the stored line to "
+                                            "run."
+                                        ),
                                     },
                                     "parameters": {
                                         "type": "object",
@@ -464,6 +484,16 @@ def _registry_tools_and_handlers(
                                                         "for spaced flags, '--name=' or '-n=' for glued flags, "
                                                         "'key=' for dd-style key=value. Defaults to '--<param_name>' "
                                                         "if omitted."
+                                                    ),
+                                                },
+                                                "role": {
+                                                    "type": "string",
+                                                    "enum": ["input", "output"],
+                                                    "description": (
+                                                        "Set on a parameter whose value is a file the code "
+                                                        "reads ('input') or writes ('output'). dsagt-run "
+                                                        "records those files on every run, which is what "
+                                                        "reconstruct_pipeline's dependency graph reads."
                                                     ),
                                                 },
                                             },
@@ -518,7 +548,14 @@ def _registry_tools_and_handlers(
         ),
         types.Tool(
             name="reconstruct_pipeline",
-            description="Reconstruct a reproducible pipeline script from tool execution records.",
+            description=(
+                "Reconstruct a reproducible pipeline script from the execution "
+                "records in trace_archive/, in the order they ran; a run that "
+                "exited non-zero is kept as a comment, and paths under the "
+                "project are relative to it. The script calls each recorded tool "
+                "directly, without the dsagt-run wrapper, so it runs outside a "
+                "DSAgt project; present it to the user as returned."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {

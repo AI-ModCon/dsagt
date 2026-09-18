@@ -45,7 +45,7 @@ The wrapper is the point of code-mediated data access. A direct shell or editor 
 
 ## Pipeline reconstruction
 
-The on-disk execution records are the canonical provenance chain. The agent calls `reconstruct_pipeline` to render the trace archive as a reproducible **bash script** (`format="bash"`) or **Snakemake workflow** (`format="snakemake"`). It flushes the latest records into the searchable index first, then walks the dependency graph inferred from each step's input/output files to order the steps.
+The on-disk execution records are the canonical provenance chain. The agent calls `reconstruct_pipeline` to render the trace archive as a reproducible **bash script** (`format="bash"`) or **Snakemake workflow** (`format="snakemake"`). It flushes the latest records into the searchable index first, then lists the steps in the order they ran, each annotated with its input and output files and the steps it depends on; a run that exited non-zero is kept as a comment, and paths under the project are written relative to it. The files come from the spec's parameter roles (`role: input` or `role: output` on a parameter), which `dsagt-run` reads off the command line on every run; `--input-files` and `--output-files` override them.
 
 ## Try it
 

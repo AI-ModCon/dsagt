@@ -104,25 +104,80 @@ class TestParseFileList:
 # ---------------------------------------------------------------------------
 
 
+class TestFileRolesFromCommand:
+    """The record's input and output files come from the spec's parameter
+    roles, read off the command line the way the parameters' ``cli`` says."""
+
+    SPEC = {
+        "name": "conv",
+        "executable": "dsagt-run --code conv -- python codes/conv/scripts/conv.py",
+        "parameters": {
+            "src": {"type": "string", "cli": "positional", "role": "input"},
+            "out": {"type": "string", "cli": "--out", "role": "output"},
+            "grid": {"type": "string", "cli": "--grid=", "role": "input"},
+            "verbose": {"type": "boolean", "cli": "-v"},
+            "n": {"type": "integer", "cli": "-n"},
+        },
+    }
+
+    def test_reads_positional_spaced_and_glued_values(self):
+        from dsagt.provenance import file_roles_from_command
+
+        cmd = [
+            "python", "codes/conv/scripts/conv.py",
+            "-v", "-n", "3", "data/in.h5", "--out", "data/out.h5", "--grid=data/grid.npy",
+        ]  # fmt: skip
+        inputs, outputs = file_roles_from_command(self.SPEC, cmd)
+        assert inputs == ["data/in.h5", "data/grid.npy"]
+        assert outputs == ["data/out.h5"]
+
+    def test_absent_parameters_name_nothing(self):
+        from dsagt.provenance import file_roles_from_command
+
+        cmd = ["python", "codes/conv/scripts/conv.py", "data/in.h5"]
+        assert file_roles_from_command(self.SPEC, cmd) == (["data/in.h5"], [])
+
+    def test_a_command_that_is_not_the_spec_executable_names_nothing(self):
+        """A different prefix is not this code's invocation; the roles are
+        not applied to it."""
+        from dsagt.provenance import file_roles_from_command
+
+        cmd = ["python3", "other.py", "data/in.h5", "--out", "x"]
+        assert file_roles_from_command(self.SPEC, cmd) == ([], [])
+
+
 class TestResolveRecordsDir:
 
     def test_explicit_wins(self):
         assert _resolve_records_dir("/custom/dir") == Path("/custom/dir")
 
     def test_uses_cwd_dsagt_config(self, tmp_path, monkeypatch):
-        """No --records-dir → reads ``<cwd>/.dsagt/config.yaml`` and uses
-        ``<cwd>/trace_archive``.  Env vars are not consulted; the project
-        dir is the single source of truth."""
+        """No --records-dir and no DSAGT_PROJECT_DIR → the cwd is the
+        project: reads ``<cwd>/.dsagt/config.yaml`` and uses
+        ``<cwd>/trace_archive``."""
+        monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         (tmp_path / ".dsagt").mkdir()
         (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         monkeypatch.chdir(tmp_path)
         assert _resolve_records_dir(None) == tmp_path / "trace_archive"
 
+    def test_project_dir_env_wins_over_cwd(self, tmp_path, monkeypatch):
+        """``DSAGT_PROJECT_DIR`` (exported by ``dsagt start``) names the
+        project even when the command runs from a subdirectory."""
+        project = tmp_path / "proj"
+        (project / ".dsagt").mkdir(parents=True)
+        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (project / "data").mkdir()
+        monkeypatch.setenv("DSAGT_PROJECT_DIR", str(project))
+        monkeypatch.chdir(project / "data")
+        assert _resolve_records_dir(None) == project / "trace_archive"
+
     def test_no_config_in_cwd_raises(self, tmp_path, monkeypatch):
-        """If cwd has no .dsagt/config.yaml, fail clearly — don't walk
-        up the tree, don't fall back to env vars."""
+        """A cwd without .dsagt/config.yaml fails with one line naming the
+        rule; there is no walk up the tree."""
+        monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         monkeypatch.chdir(tmp_path)
-        with pytest.raises(ValueError, match="No .dsagt/config.yaml"):
+        with pytest.raises(ValueError, match="not a dsagt project"):
             _resolve_records_dir(None)
 
 
@@ -308,6 +363,45 @@ class TestRunAndRecord:
             data["execution"]["timestamp_start"] <= data["execution"]["timestamp_end"]
         )
 
+    def test_output_is_echoed_while_the_command_runs(self, tmp_path, monkeypatch):
+        """A line the command prints is echoed before the command exits, so a
+        slow code shows progress instead of looking hung until it finishes."""
+        import sys
+        import time
+
+        class TimedWriter:
+            def __init__(self):
+                self.first_write_at = None
+
+            def write(self, text):
+                if self.first_write_at is None and text.strip():
+                    self.first_write_at = time.monotonic()
+
+            def flush(self):
+                pass
+
+        writer = TimedWriter()
+        monkeypatch.setattr(sys, "stdout", writer)
+        run_and_record(
+            code_name="slow",
+            command=[
+                sys.executable,
+                "-c",
+                "import time; print('started', flush=True); "
+                "time.sleep(1.0); print('done')",
+            ],
+            records_dir=tmp_path,
+            record_id="test-008",
+        )
+        finished_at = time.monotonic()
+
+        assert writer.first_write_at is not None
+        assert (
+            finished_at - writer.first_write_at >= 0.9
+        ), "the first line was echoed only after the command exited"
+        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+        assert data["execution"]["stdout"] == "started\ndone\n"
+
     def test_auto_generates_record_id(self, tmp_path):
         """Omitting record_id auto-generates one."""
         run_and_record(
@@ -376,6 +470,53 @@ class TestMain:
         assert obs_module._default_session_id == "test-7"
         trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
         assert trace.info.trace_metadata.get("mlflow.trace.session") == "test-7"
+
+    def test_record_files_come_from_the_spec_roles(self, tmp_path, monkeypatch):
+        """Without --input-files/--output-files, dsagt-run reads the spec of
+        --code from the project and records the files its role parameters
+        name, so the dependency graph has edges without the agent passing
+        the flags."""
+        from dsagt.registry import CodeRegistry
+
+        project = tmp_path / "proj"
+        (project / ".dsagt").mkdir(parents=True)
+        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        script = project / "codes" / "conv" / "scripts" / "conv.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("import sys; print(sys.argv[1:])\n")
+        CodeRegistry(runtime_dir=project).save_tool(
+            {
+                "name": "conv",
+                "description": "Convert.",
+                "executable": "python codes/conv/scripts/conv.py",
+                "parameters": {
+                    "src": {
+                        "type": "string",
+                        "description": "in",
+                        "cli": "positional",
+                        "role": "input",
+                    },
+                    "out": {
+                        "type": "string",
+                        "description": "out",
+                        "cli": "--out",
+                        "role": "output",
+                    },
+                },
+            }
+        )
+        monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
+        monkeypatch.chdir(project)
+        rc = main(
+            ["--code", "conv", "--", "python", "codes/conv/scripts/conv.py",
+             "data/in.csv", "--out", "data/out.csv"]
+        )  # fmt: skip
+        assert rc == 0
+        records = list((project / "trace_archive").glob("*.json"))
+        assert len(records) == 1
+        execution = json.loads(records[0].read_text())["execution"]
+        assert execution["input_files"] == ["data/in.csv"]
+        assert execution["output_files"] == ["data/out.csv"]
 
     def test_basic_invocation(self, tmp_path):
         """main() runs a command and returns its exit code."""

@@ -373,44 +373,92 @@ def _model_is_cached(model_id: str) -> bool:
         return True
 
 
-def _build_bundled_tools(kb, index_dir: Path) -> int:
-    """(Re)build the bundled-tools collection from the package's tool specs.
+#: Written into the shared ``codes`` collection by :func:`_build_bundled_tools`;
+#: :func:`ensure_assets` rebuilds the collection when the file differs from
+#: :func:`_codes_stamp`, so a dsagt upgrade or a changed base-skill code
+#: refreshes every later init without a manual cache wipe.
+CODES_STAMP_FILE = "CODES_STAMP"
 
-    Each spec file is one chunk with rich metadata.  Wipe-and-rebuild so a
-    dsagt upgrade refreshes the bundled set.  Returns the number indexed.
+
+def _codes_entries() -> list[tuple[str, dict]]:
+    """The text and metadata of every entry the shared ``codes`` collection holds.
+
+    The package codes are their SKILL.md files.  The base-skill codes are
+    rendered from :func:`dsagt.skills.base_skill_code_specs` by the same
+    function ``save_tool`` uses, so the embedded text equals the file init
+    writes into the project.  Neither depends on a project, which is what
+    lets the collection be built once and copied.
     """
-    from dsagt.registry import CODES_COLLECTION, CodeRegistry, _parse_frontmatter
+    from dsagt.registry import (
+        CodeRegistry,
+        _parse_frontmatter,
+        code_metadata,
+        render_code_spec,
+    )
+    from dsagt.skills import base_skill_code_specs
+
+    entries: list[tuple[str, dict]] = []
+    for path in sorted(CodeRegistry._PACKAGE_CODES_DIR.glob("*/SKILL.md")):
+        spec = _parse_frontmatter(path)
+        if spec.get("name"):
+            spec.setdefault("executable", "")
+            entries.append((path.read_text(), code_metadata(spec, "bundled")))
+    for spec in base_skill_code_specs():
+        text = render_code_spec(spec)
+        wrapped = _parse_frontmatter_text(text)
+        entries.append((text, code_metadata(wrapped, "base-skill")))
+    return entries
+
+
+def _parse_frontmatter_text(text: str) -> dict:
+    import yaml
+
+    return yaml.safe_load(text.split("---", 2)[1])
+
+
+def _codes_stamp(entries: list[tuple[str, dict]]) -> str:
+    """A digest of the dsagt version and every entry text."""
+    import hashlib
+
+    digest = hashlib.sha256(_current_dsagt_version().encode())
+    for text, _ in entries:
+        digest.update(text.encode())
+    return digest.hexdigest()
+
+
+def _codes_current(index_dir: Path) -> bool:
+    """Whether the shared ``codes`` collection exists and matches the package."""
+    coll_dir = index_dir / "codes"
+    stamp = coll_dir / CODES_STAMP_FILE
+    return (
+        _collection_exists(coll_dir)
+        and stamp.exists()
+        and stamp.read_text().strip() == _codes_stamp(_codes_entries())
+    )
+
+
+def _build_bundled_tools(kb, index_dir: Path) -> int:
+    """(Re)build the shared ``codes`` collection: package codes and base-skill codes.
+
+    Wipe-and-rebuild, then write :data:`CODES_STAMP_FILE`.  Returns the
+    number indexed.
+    """
+    from dsagt.registry import CODES_COLLECTION
 
     coll_dir = index_dir / CODES_COLLECTION
     if coll_dir.exists():
         shutil.rmtree(coll_dir)
 
-    code_paths = [
-        p
-        for p in sorted(CodeRegistry._PACKAGE_CODES_DIR.glob("*/SKILL.md"))
-        if _parse_frontmatter(p).get("name")
-    ]
-    if not code_paths:
-        return 0
-
+    entries = _codes_entries()
     current_version = _current_dsagt_version()
-    code_specs = [_parse_frontmatter(p) for p in code_paths]
     kb.add_entries(
-        texts=[p.read_text() for p in code_paths],
+        texts=[text for text, _ in entries],
         collection=CODES_COLLECTION,
-        metadatas=[
-            {
-                "code_name": s["name"],
-                "tags": ",".join(s.get("tags", [])),
-                "executable": s.get("executable", ""),
-                "has_dependencies": str(bool(s.get("dependencies"))),
-                "source": "bundled",
-                "dsagt_version": current_version,
-            }
-            for s in code_specs
-        ],
+        metadatas=[{**meta, "dsagt_version": current_version} for _, meta in entries],
     )
-    return len(code_paths)
+    coll_dir.mkdir(parents=True, exist_ok=True)
+    (coll_dir / CODES_STAMP_FILE).write_text(_codes_stamp(entries) + "\n")
+    return len(entries)
 
 
 def ensure_assets(
@@ -442,7 +490,12 @@ def ensure_assets(
     to_build = [
         a
         for a in asset_names
-        if rebuild or not _collection_exists(index_dir / asset_collection_name(a))
+        if rebuild
+        or (
+            not _codes_current(index_dir)
+            if a == "codes"
+            else not _collection_exists(index_dir / asset_collection_name(a))
+        )
     ]
     skipped = [a for a in asset_names if a not in to_build]
     if not to_build:
@@ -480,7 +533,7 @@ def ensure_assets(
 
         for asset in to_build:
             if asset == "codes":
-                print("  Indexing bundled tools …", flush=True)
+                print("  Indexing bundled tools and base-skill codes …", flush=True)
                 _build_bundled_tools(kb, index_dir)
                 built.append(asset)
             elif asset in KNOWN_SOURCES:

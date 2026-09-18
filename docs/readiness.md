@@ -1,23 +1,27 @@
 # AI-Readiness Check
 
-DSAgt is configured at init to run [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage; uncheck it on the menu to turn it off. AIDRIN installs with dsagt, and every project gets the `aidrin` skill and an `aidrin` code, so each call the agent makes is an execution record in `trace_archive/` like any other code. A user who asks "is my data AI-ready?" gets the skill's own workflow.
+DSAgt is configured at init to run [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage; uncheck it on the menu to turn it off. AIDRIN installs with dsagt, and every project gets the `aidrin` skill and an `aidrin` code, so each call the agent makes is an execution record in `trace_archive/` like any other code. A user who asks "is my data AI-ready?" gets the AIDRIN skill's workflow.
 
-The pipeline-builder instructions require a paired check around every data operation, with reports in `audit/`. The AI-readiness check makes that check concrete for tabular files: it is the `aidrin` skill's quality baseline (completeness, duplicity, outliers), run on a stage's input before the operation and on its output after it, so every stage of a pipeline is measured the same way and the before/after delta is comparable across stages and projects.
+The DSAgt instructions request assessments for the effects of data transformations for the downstream application, with reports in `audit/`. For tabular files that check is the `aidrin` skill's quality baseline (completeness, duplicity, outliers), run on the stage's input before the operation and on its output after it. Every stage is measured the same way, so the before/after delta is comparable across stages and projects.
 
-## The setting
+`dsagt init` asks "Assess tabular data for AI-readiness before and after each data transform?", default yes; when it is yes, the agent's instructions carry one paragraph at the per-operation check rule; when it is no, they do not. The `aidrin` code and skill are present either way.
 
-`dsagt init` asks "Assess tabular data for AI-readiness before and after each data transform?", default yes. (The automation path turns it off with `dsagt init <name> --agent <agent> --no-readiness`.) The answer is the one thing the setting controls: when it is yes, the agent's instructions carry one paragraph at the per-operation check rule; when it is no, they do not. The `aidrin` code and skill are present either way.
+The inserted paragraph:
 
-The config records the answer:
-
-```yaml
-readiness:
-  auto_assess: true
-```
-
-## What the paragraph says
-
-For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5, Parquet, npz), the check is the `aidrin` skill's quality baseline, run through the registered `aidrin` code before and after the operation. The agent runs the baseline directly, without the skill's intent and plan steps, which are for assessments the user asks for. It saves the results as `audit/step_N_pre.aidrin.json` and `audit/step_N_post.aidrin.json`, reports the per-metric change before proposing the next step, and writes no custom check for a metric AIDRIN provides; every other stage keeps the generic check rule.
+> #### AI-readiness check
+>
+> For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5,
+> Parquet, npz), the check is the `aidrin` skill's quality baseline: run it on
+> the file before and after the operation, through the registered `aidrin`
+> code's `executable` (never bare `aidrin`). Run the baseline directly; do not
+> ask the user about intent or confirm a plan for these checks (the skill's full workflow is for assessments the user
+> asks for). The CLI prints its report to stdout, so redirect it into the audit
+> file: `... aidrin data-quality <file> --detail > audit/step_N_pre.aidrin.json`
+> before the operation and `> audit/step_N_post.aidrin.json` after it, then
+> report the per-metric change to the user before proposing the next step. Do
+> not write a custom check for a metric AIDRIN provides. A stage with tabular
+> input or output gets this check; every other stage keeps the check rule
+> above.
 
 ## Try it
 

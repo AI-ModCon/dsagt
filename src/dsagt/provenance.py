@@ -23,6 +23,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -52,21 +53,26 @@ CODE_USE_COLLECTION = "code_use"
 def _resolve_records_dir(explicit: str | None) -> Path:
     """Determine the records directory.
 
-    Priority: explicit ``--records-dir`` flag → ``<cwd>/trace_archive``,
-    where cwd must contain ``.dsagt/config.yaml`` (the project's
-    single-source-of-truth config written by ``dsagt init``).  No env-var
-    chain, no walking up the tree — if the agent's cwd isn't the project
-    dir, that's the bug to fix, not something to recover from silently.
+    Priority: explicit ``--records-dir`` flag → ``$DSAGT_PROJECT_DIR``
+    (exported by ``dsagt start`` and the MCP env block) → the cwd.  The
+    directory must hold ``.dsagt/config.yaml``, the project config
+    ``dsagt init`` writes.  The project is a fixed place, the agent's
+    working directory, so there is no walk up the tree: a ``cd`` into a
+    subdirectory before the command is the error, and the message names it.
     """
     if explicit:
         return Path(explicit)
-    cwd = Path.cwd().resolve()
-    if not (cwd / ".dsagt" / "config.yaml").exists():
+    env_dir = os.environ.get("DSAGT_PROJECT_DIR")
+    if env_dir:
+        project, source = Path(env_dir).resolve(), "DSAGT_PROJECT_DIR"
+    else:
+        project, source = Path.cwd().resolve(), "the working directory"
+    if not (project / ".dsagt" / "config.yaml").exists():
         raise ValueError(
-            f"No .dsagt/config.yaml in cwd ({cwd}); pass --records-dir or "
-            "run dsagt-run from a project directory."
+            f"{source} ({project}) is not a dsagt project: no .dsagt/config.yaml. "
+            "Run dsagt-run from the project directory, or pass --records-dir."
         )
-    return cwd / "trace_archive"
+    return project / "trace_archive"
 
 
 def _current_session_tag_from_cwd() -> str | None:
@@ -85,6 +91,82 @@ def _current_session_tag_from_cwd() -> str | None:
     if not project:
         return None
     return session.current_session_tag(cwd, project)
+
+
+def file_roles_from_command(
+    spec: dict, command: list[str]
+) -> tuple[list[str], list[str]]:
+    """The input and output files a command names, by the spec's parameter roles.
+
+    A parameter whose ``role`` is ``input`` or ``output`` names a file; its
+    value is read off *command* by the parameter's ``cli`` rendering: a
+    ``--name``/``-n`` flag takes the next token, a glued ``--name=``/``-n=``
+    flag carries its value, and ``positional[:N]`` is the Nth bare token
+    after the spec's own executable tokens.  The command must start with the
+    spec's executable (the part after ``dsagt-run --code <name> --``); a
+    command that does not is not this code's invocation and names nothing.
+    The agent records the mapping once at registration and the record gets
+    its files on every run, which is what the dependency graph in
+    :func:`build_dependency_graph` reads.
+    """
+    import shlex
+
+    executable = spec.get("executable", "")
+    marker = " -- "
+    inner = (
+        executable.split(marker, 1)[1]
+        if executable.startswith("dsagt-run")
+        else executable
+    )
+    prefix = shlex.split(inner)
+    if command[: len(prefix)] != prefix:
+        return [], []
+    args = command[len(prefix) :]
+    params = spec.get("parameters") or {}
+
+    by_flag: dict[str, tuple[str, dict]] = {}
+    positional_params: list[tuple[int | None, str, dict]] = []
+    for name, param in params.items():
+        cli = param.get("cli") or f"--{name}"
+        if cli.startswith("positional"):
+            index = int(cli.split(":", 1)[1]) if ":" in cli else None
+            positional_params.append((index, name, param))
+        else:
+            by_flag[cli.rstrip("=")] = (name, param)
+
+    values: dict[str, str] = {}
+    positionals: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token.startswith("-"):
+            flag, glued, value = token.partition("=")
+            if flag in by_flag:
+                name, param = by_flag[flag]
+                if glued:
+                    values[name] = value
+                elif param.get("type") != "boolean" and i + 1 < len(args):
+                    values[name] = args[i + 1]
+                    i += 1
+            i += 1
+            continue
+        positionals.append(token)
+        i += 1
+    unindexed = [p for p in positional_params if p[0] is None]
+    for slot, (index, name, param) in enumerate(positional_params):
+        position = index if index is not None else unindexed.index((index, name, param))
+        if position < len(positionals):
+            values[name] = positionals[position]
+
+    inputs = [
+        values[n] for n, p in params.items() if p.get("role") == "input" and n in values
+    ]
+    outputs = [
+        values[n]
+        for n, p in params.items()
+        if p.get("role") == "output" and n in values
+    ]
+    return inputs, outputs
 
 
 def _parse_file_list(raw: str | None) -> list[str]:
@@ -111,6 +193,44 @@ def _child_env() -> dict[str, str]:
     return env
 
 
+def _pump(source, sink, lines: list[str]) -> None:
+    """Copy *source* to *sink* line by line, keeping every line in *lines*."""
+    for line in iter(source.readline, ""):
+        lines.append(line)
+        sink.write(line)
+        sink.flush()
+
+
+def _run_streaming(command: list[str]) -> tuple[int, str, str]:
+    """Run *command*, echoing its output as it arrives, and return the exit
+    code with the full stdout and stderr.
+
+    The child's two pipes are read on two threads, so a command that fills
+    one while the other is being read cannot block.  Undecodable bytes are
+    replaced, so a stray byte in a tool's log cannot lose the record of
+    the run.  Raises ``FileNotFoundError`` when the executable is absent.
+    """
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        env=_child_env(),
+    )
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+    readers = [
+        threading.Thread(target=_pump, args=(proc.stdout, sys.stdout, out_lines)),
+        threading.Thread(target=_pump, args=(proc.stderr, sys.stderr, err_lines)),
+    ]
+    for reader in readers:
+        reader.start()
+    for reader in readers:
+        reader.join()
+    return proc.wait(), "".join(out_lines), "".join(err_lines)
+
+
 def run_and_record(
     code_name: str,
     command: list[str],
@@ -120,7 +240,12 @@ def run_and_record(
     input_files: list[str] | None = None,
     output_files: list[str] | None = None,
 ) -> int:
-    """Execute a command, write an execution record, return the exit code."""
+    """Execute a command, write an execution record, return the exit code.
+
+    The command's output is echoed as it arrives and kept in full for the
+    record, so a slow code shows progress and the record still holds
+    everything it printed.
+    """
     from dsagt.observability import obs, code_execute_span, truncate
 
     record_id = record_id or uuid.uuid4().hex[:12]
@@ -136,15 +261,7 @@ def run_and_record(
         start_perf = time.perf_counter()
 
         try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                env=_child_env(),
-            )
-            return_code = result.returncode
-            stdout = result.stdout
-            stderr = result.stderr
+            return_code, stdout, stderr = _run_streaming(command)
         except FileNotFoundError:
             return_code = 127
             stdout = ""
@@ -218,12 +335,6 @@ def run_and_record(
     }
 
     _write_record(record, records_dir)
-
-    if stdout:
-        sys.stdout.write(stdout)
-    if stderr:
-        sys.stderr.write(stderr)
-
     return return_code
 
 
@@ -518,23 +629,52 @@ def build_dependency_graph(records: list[dict]) -> dict[int, list[int]]:
     return deps
 
 
-def render_bash(records: list[dict], deps: dict[int, list[int]]) -> str:
-    """Render the pipeline as a bash script."""
+def _relative_to_project(arg: str, project_dir: Path | None) -> str:
+    """*arg* with a leading *project_dir* removed, so the script runs from the project."""
+    if project_dir is None:
+        return arg
+    root = str(project_dir)
+    if arg == root:
+        return "."
+    if arg.startswith(root + "/"):
+        return arg[len(root) + 1 :]
+    return arg
+
+
+def render_bash(
+    records: list[dict],
+    deps: dict[int, list[int]],
+    project_dir: Path | None = None,
+) -> str:
+    """Render the pipeline as a bash script, in the order the records ran.
+
+    A run that exited non-zero is kept as a comment: the script opens with
+    ``set -e``, so a live failed step would stop it at that point, and the
+    failed attempts are part of the record the reader may want.  Paths under
+    *project_dir* are written relative to it, so the script runs from the
+    project directory or another checkout of the same layout.
+    """
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "",
-        "# Pipeline reconstructed from DSAgt execution records",
+        "# Pipeline reconstructed from DSAgt execution records, in the order they ran",
         "",
     ]
 
     for i, record in enumerate(records):
         code = record["code_name"]
         execution = record["execution"]
-        cmd = execution["exact_command"]
+        cmd = [_relative_to_project(a, project_dir) for a in execution["exact_command"]]
         rc = execution.get("return_code", 0)
-        inputs = execution.get("input_files", [])
-        outputs = execution.get("output_files", [])
+        inputs = [
+            _relative_to_project(f, project_dir)
+            for f in execution.get("input_files", [])
+        ]
+        outputs = [
+            _relative_to_project(f, project_dir)
+            for f in execution.get("output_files", [])
+        ]
 
         lines.append(f"# Step {i + 1}: {code}")
         if inputs:
@@ -544,11 +684,13 @@ def render_bash(records: list[dict], deps: dict[int, list[int]]) -> str:
         if deps[i]:
             dep_names = [records[d]["code_name"] for d in deps[i]]
             lines.append(f"#   depends: {', '.join(dep_names)}")
-        if rc != 0:
-            lines.append(f"#   WARNING: original run exited with code {rc}")
 
         cmd_str = " ".join(_shell_quote(arg) for arg in cmd)
-        lines.append(cmd_str)
+        if rc != 0:
+            lines.append(f"#   failed with exit code {rc}; kept as a comment")
+            lines.append(f"# {cmd_str}")
+        else:
+            lines.append(cmd_str)
         lines.append("")
 
     return "\n".join(lines)
@@ -640,4 +782,4 @@ def reconstruct_pipeline(
 
     if fmt == "snakemake":
         return render_snakemake(records, deps)
-    return render_bash(records, deps)
+    return render_bash(records, deps, project_dir=Path(trace_dir).resolve().parent)

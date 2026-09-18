@@ -77,6 +77,28 @@ Copy a skill directory into the agent's skills directory (for Claude Code,
 `~/.claude/skills/<name>/` for every project, or `.claude/skills/<name>/` in
 this checkout) and the agent loads it when its description matches the task.
 
+## Where a function lands
+
+The agent reaches dsagt two ways, and each owns one thing:
+
+- **MCP tools** (`dsagt-server`) own dsagt's state: the registry, the
+  knowledge base, memory, skills, and the execution records. A function that
+  reads or writes `trace_archive/`, `kb_index/`, `.dsagt/`, or a contract's
+  fingerprint is a tool.
+- **`dsagt-run`** owns execution in the user's environment: anything that runs
+  the user's code, data, or binaries, wrapped so the run is recorded. The
+  agent invokes it from its own shell, which is the one process that has the
+  user's activated environment (`PATH`, a venv or conda env, `module load`)
+  on every platform; codex and cline give the MCP server only the env block
+  dsagt writes.
+- The **`dsagt` CLI** is for people. No script or agent invokes it.
+
+So a built-in code that operates on the user's objects (a `Dataset`, a data
+file, a binary) runs under `dsagt-run` in the user's environment and imports
+nothing from the package; when it needs something dsagt holds, the agent
+calls a tool for it beside the code. A function that needs only dsagt's own
+state is a tool. Nothing is both.
+
 ## Codebase orientation
 
 The [Architecture](https://ai-modcon.github.io/dsagt/architecture/) page explains in more detail the components of DSAgt — the
