@@ -804,6 +804,13 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
                         rf"^(\s*){re.escape(bare)}(?=\s)", rf"\1{wrapped}", new
                     )
                     new = re.sub(rf"`{re.escape(bare)}(?=\s)", f"`{wrapped}", new)
+                    if "/" in bare:
+                        # A script path is specific enough to rewrite
+                        # mid-sentence ("Run python3 scripts/x.py on ...");
+                        # a bare CLI name is not ("uv run aidrin" stays).
+                        new = re.sub(
+                            rf"(?<=\s)(?<!-- ){re.escape(bare)}(?=\s)", wrapped, new
+                        )
             changed += new != line
             out.append(new)
         md.write_text("".join(out))
@@ -818,6 +825,30 @@ def _script_overrides(entry: dict) -> dict[str, dict]:
     """The curated specs a base skill's ``codes`` tuple gives its scripts, by
     script path relative to the skill directory."""
     return {c["script"]: c for c in entry.get("codes", ()) if "script" in c}
+
+
+def _is_entry_script(path: Path) -> bool:
+    """Whether a file under ``scripts/`` is something to run.
+
+    A shell script is.  A Python file is when it has a ``__main__`` guard or
+    reads its arguments (argparse, click, ``sys.argv``); a module the scripts
+    import (a Pydantic model file, a helper) has neither and is not a code.
+    A leading underscore marks a helper whatever it contains.
+    """
+    if path.name.startswith("_"):
+        return False
+    if path.suffix == ".sh":
+        return True
+    if path.suffix != ".py":
+        return False
+    text = path.read_text(errors="replace")
+    return (
+        '__name__ == "__main__"' in text
+        or "__name__ == '__main__'" in text
+        or "argparse" in text
+        or "sys.argv" in text
+        or "import click" in text
+    )
 
 
 def script_code_name(skill_name: str, script: Path) -> str:
@@ -947,7 +978,7 @@ def register_skill_scripts(
         sorted(
             p
             for p in (skill_dir / "scripts").glob("*")
-            if p.suffix in (".py", ".sh") and not p.name.startswith("_")
+            if _is_entry_script(p) or str(p.relative_to(skill_dir)) in overrides
         )
         if (skill_dir / "scripts").is_dir()
         else []

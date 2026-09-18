@@ -251,3 +251,36 @@ class TestSaveCodeSpec:
             runtime_dir=project
         ).skill_dirs()
         assert not (project / "codes").exists()
+
+
+class TestWhatIsAScript:
+
+    def test_a_module_without_an_entry_point_is_not_a_code(
+        self, tmp_path, fresh_project
+    ):
+        skill_src = _write_skill(tmp_path / "src")
+        (skill_src / "scripts" / "models.py").write_text("class Card:\n    pass\n")
+        (skill_src / "scripts" / "run.sh").write_text("echo hi\n")
+        project = fresh_project("p")
+        _via_copy(project, skill_src)
+        registry = CodeRegistry(runtime_dir=project)
+        assert registry.get_code("trim-reads-models") is None
+        assert registry.get_code("trim-reads-run")["executable"].endswith(
+            "-- bash skills/trim-reads/scripts/run.sh"
+        )
+
+    def test_a_mid_sentence_script_invocation_is_rewritten(
+        self, tmp_path, fresh_project
+    ):
+        skill_src = _write_skill(tmp_path / "src")
+        md = skill_src / "SKILL.md"
+        md.write_text(
+            md.read_text() + "\n- [ ] 2. Run python3 scripts/trim.py on the sample\n"
+        )
+        project = fresh_project("p")
+        _via_copy(project, skill_src)
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        assert (
+            "Run dsagt-run --code trim-reads-trim -- python skills/trim-reads/scripts/trim.py on the sample"
+            in text
+        )
