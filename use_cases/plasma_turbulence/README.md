@@ -82,7 +82,7 @@ check_xgc_preprocessed.py) as a code, running --help on each to confirm its
 interface. Use the skill's parameter tables for the descriptions.
 ```
 
-**Verify:** `Search the registry for XGC codes.` → four specs under `codes/`.
+**Verify:** `Search the registry for XGC codes.` → four specs under `skills/`.
 
 ### 2. Pre-flight check
 
@@ -140,8 +140,8 @@ ITER and NSTX cases.
 
 ## Post-Conditions
 
-1. Code registry contains four XGC specs (`codes/check-xgc-structure/`,
-   `codes/xgc-summarize/`, `codes/xgc-preprocess/`, `codes/check-xgc-preprocessed/`).
+1. Code registry contains four XGC specs (`skills/check-xgc-structure/`,
+   `skills/xgc-summarize/`, `skills/xgc-preprocess/`, `skills/check-xgc-preprocessed/`).
 2. `audit/` holds `step1_pre.json`, `xgc_summary.json`, `step3_op.json`, and
    `step3_post.json`, each with `"status": "ok"`.
 3. `data/<case_dir>_npz/` contains `mesh.npz`, `meta.json`, and three step files.

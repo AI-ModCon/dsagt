@@ -1,9 +1,8 @@
 # Measurement Protocol — Methanation Screen v2
 
 This protocol describes how the values in `catalyst_screening.csv` were
-produced. It is domain context for the curation agent: ingest it into the
-knowledge base so the agent can describe methods + provenance accurately in the
-datacard without re-deriving them.
+produced. It is domain context for the curation agent, so the datacard's methods
+and provenance come from this document.
 
 ## Catalyst preparation
 

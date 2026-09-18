@@ -144,12 +144,16 @@ imports `pymatgen.io.vasp` (not a hand-rolled regex parser).
 Invoke the vasp-to-isaac skill on data/mock_slab/ and write the result to audit/mock_slab_isaac.json. Then diff its structure and values against data/expected_isaac_record.json and report any differences.
 ```
 
-**Expect:** pymatgen parses the mock directory and the agent writes
-`audit/mock_slab_isaac.json` with the key fields pymatgen extracted — final
-energy ≈ -132.8421 eV (`Outcar.final_energy`), 12 atoms (`Poscar`), ENCUT 520 /
-NSW 50 (`Incar`), total mag ≈ 8.0123 (`Outcar.total_mag`) — matching the reference.
-The reference's `ionic_steps` is NSW from the INCAR: the mock OUTCAR keeps only the
-first and last of the 50 steps.
+**Expect:** the agent registers the skill's converter as a code and runs it through
+`dsagt-run`, so the run has a record in `trace_archive/`. pymatgen parses the mock
+directory and the converter writes `audit/mock_slab_isaac.json` with the key fields
+pymatgen extracted, matching the reference: final energy ≈ -132.8421 eV
+(`Outcar.final_energy`), 12 atoms (`Poscar`), ENCUT 520 / NSW 50 (`Incar`), total
+mag ≈ 8.0123 (`Outcar.total_mag`). The reference's `ionic_steps` is 2, the steps the mock OUTCAR
+holds; NSW 50 is the INCAR's limit. Its `code_version` is `5.4.1`, from the OUTCAR
+header. The energy(sigma->0) value is `Outcar.final_energy`; `final_energy_wo_entrp`
+is the energy-without-entropy line, -132.8 here, and a converter that maps
+`energy_sigma0_eV` to it reports a spurious difference.
 
 ### 7. Extend the skill to NEB calculations and register the converter
 
@@ -167,7 +171,7 @@ neb_dir and the --output option; run it with --help first.
 ```
 
 **Verify:** `Search the registry for the vasp-neb-to-isaac code.` →
-`$PROJ/codes/vasp-neb-to-isaac/SKILL.md` should exist.
+`$PROJ/skills/vasp-neb-to-isaac/SKILL.md` should exist.
 
 ### 8. Run the conversion and check it
 
@@ -178,7 +182,8 @@ Compare it against data/isaac_neb_record.json: report differences in structure
 and in the computation and measurement blocks, fix the converter, and rerun the
 registered code until they agree on the method, image count, reaction, and
 energy series. The reaction is Fe(lattice) → Fe(vacancy site); the OUTCARs do
-not state it, so pass it to the converter.
+not state it, so pass it to the converter. Read the cutoff, k-points, smearing,
+and convergence settings from the OUTCARs; the images have no INCAR.
 ```
 
 **Expect:** `dsagt-run --code vasp-neb-to-isaac -- ...` runs land in
@@ -186,7 +191,10 @@ not state it, so pass it to the converter.
 intermediate images); the final record's `computation.transition_state` has
 `method: NEB`, `images: 3`, and the Fe vacancy-migration reaction, and its
 `measurement.series` carries the five-point energy path matching the reference:
-endpoints at −255.980 eV and −255.981 eV, a barrier of 0.325 eV at image 2.
+endpoints at −255.980 eV and −255.981 eV, a barrier of 0.325 eV at image 2. The
+`computation.method` sub-fields (cutoff, k-points, smearing, convergence) are parsed
+from the OUTCAR text, where VASP echoes them; a converter that copies the reference's
+values as literals matches by construction and fails on any other calculation.
 
 One pitfall to watch for: reading `Outcar.final_energy_wo_entrp` instead of
 `Outcar.final_energy` (the energy(sigma→0) of the last ionic step) shifts every
@@ -202,19 +210,22 @@ Reconstruct the pipeline from the execution records as a bash script and save it
 pipeline.sh.
 ```
 
-**Expect:** the script holds every recorded run of the NEB converter, including
-the attempts that failed the comparison, in the order they ran.
+**Expect:** `reconstruct_pipeline` saves the script at the path given. It holds
+every recorded run of the NEB converter, including the attempts that failed the
+comparison, in the order they ran. The script creates its output directories and
+removes a repeated output before the step that rewrites it, so a converter that
+refuses to overwrite still replays.
 
 ### 10. Review the project artifacts
 
 ```text
-Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+Reply with a tree of my project folder, with the artifacts dsagt recorded during this session marked and one line on what each marked item is.
 ```
 
-**Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
-installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
-with a line on what each is.
+**Expect:** a tree of the project directory in the reply that marks the execution
+records in `trace_archive/`, the reports in `audit/`, the registered codes and
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's
+outputs, with a line on what each is.
 
 ## Post-Conditions
 
@@ -223,8 +234,7 @@ Confirm from a shell (the native skills directory is `.claude/skills/` for Claud
 
 ```bash
 dsagt info isaac-vasp                     # KB shows the k-dense-ai catalog collection
-ls "$PROJ/skills/"                        # aidrin  datacard-generator  pymatgen  skill-creator  vasp-to-isaac
-ls "$PROJ/codes/"                         # vasp-neb-to-isaac
+ls "$PROJ/skills/"                        # aidrin  datacard-generator  pymatgen  skill-creator  vasp-neb-to-isaac  vasp-to-isaac
 ls "$PROJ/audit/" "$PROJ/trace_archive/"
 ```
 
@@ -235,14 +245,17 @@ ls "$PROJ/audit/" "$PROJ/trace_archive/"
    mirrored into the agent's native skills directory.
 3. A `vasp-to-isaac` skill, authored via `skill-creator` and parsing with
    `pymatgen.io.vasp`, exists and is natively discoverable.
-4. `audit/mock_slab_isaac.json` was produced from the mock slab directory and
-   matches the ISAAC shape and values.
+4. `audit/mock_slab_isaac.json` was produced from the mock slab directory by a
+   registered code, with a record in `trace_archive/`, and matches the ISAAC shape
+   and values.
 5. The `vasp-to-isaac` skill has a second script, `vasp_neb_to_isaac.py`, and
-   the code registry contains the `vasp-neb-to-isaac` spec.
+   the code registry contains the `vasp-neb-to-isaac` spec at
+   `skills/vasp-neb-to-isaac/SKILL.md`.
 6. `data/neb_record.json` has the structure of the reference `data/isaac_neb_record.json`
-   and agrees with it on the method, the image count, the reaction, and the energy series
-   (other fields, such as notes and the method's sub-fields, may differ); `trace_archive/`
-   holds every NEB conversion attempt, including any that failed the comparison.
+   and agrees with it on the method, the image count, the reaction, and the energy series,
+   with the method sub-fields parsed from the OUTCARs (free-text fields, such as notes
+   and identifiers, may differ); `trace_archive/` holds every NEB conversion attempt,
+   including any that failed the comparison.
 7. `pipeline.sh` replays every recorded NEB conversion.
 8. MLflow traces (in the serverless `mlflow.db` store) capture the session —
    `dsagt traces isaac-vasp`.
