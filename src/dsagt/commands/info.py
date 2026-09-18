@@ -108,9 +108,9 @@ def _print_kb_collections(rows: list[dict]) -> None:
     """Render the per-collection chunk counts.
 
     For collections whose chunks carry a ``source`` metadata field
-    (``tools``, ``skills``), shows the bundled-vs-project split inline
-    so the user can see what the agent's local registry contributed
-    over the bundled defaults.
+    (``codes``, ``skills``), shows the split by source inline (base-skill
+    versus registered, installed versus project) so the user can see what the
+    session added.
     """
     if not rows:
         return
@@ -295,7 +295,7 @@ def _kb_collections(pdir: Path) -> list[dict]:
     """Per-collection summary read directly from ``<project>/kb_index/``.
 
     Reports chunk count and (when present) a ``metadata.source`` breakdown
-    so tools/skills collections can show bundled-vs-project at a glance.
+    so the codes and skills collections show the split by source at a glance.
     Counts come from line-counting ``chunks.jsonl`` rather than loading
     the vector index — fast, and survives even if Chroma's sqlite is locked.
     """

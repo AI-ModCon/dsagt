@@ -35,7 +35,7 @@ tags: [csv, profiling]
 Run this registered code with the exact shell command below…
 ```
 
-DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. It provides one built-in code, `scan-directory`, indexed for search by `dsagt init`.
+DSAgt wraps every registered code with `dsagt-run` for provenance capture and `uv run --with` for Python dependencies, so the agent can call any code without managing environments manually. The base skills' scripts and the `aidrin` CLI are registered as codes at `dsagt init`, indexed for search.
 
 ## Execution record
 

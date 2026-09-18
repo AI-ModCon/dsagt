@@ -338,75 +338,13 @@ class TestSaveTool:
 # ---------------------------------------------------------------------------
 
 
-class TestBundledCopies:
+class TestFreshRegistry:
 
-    def test_copies_bundled_codes_into_project(self, tmp_path):
-        """ensure_bundled_copies lands each packaged code dir in codes/."""
-        reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
-        actions = reg.ensure_bundled_copies()
-        assert any("scan-directory" in a for a in actions)
-        copied = tmp_path / "rt" / "codes" / "scan-directory"
-        assert (copied / "SKILL.md").exists()
-        # Fully self-contained: the implementation script rides along.
-        assert (copied / "scripts" / "scan_directory.py").exists()
-        assert reg.get_code("scan-directory") is not None
-
-    def test_never_clobbers_existing_copy(self, tmp_path):
-        """A user-edited (or agent-overridden) code dir is left untouched."""
-        reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
-        reg.ensure_bundled_copies()
-        spec = tmp_path / "rt" / "codes" / "scan-directory" / "SKILL.md"
-        spec.write_text(spec.read_text() + "\nUser edit.\n")
-        actions = reg.ensure_bundled_copies()
-        assert actions == []
-        assert "User edit." in spec.read_text()
-
-    def test_package_source_unmodified(self, tmp_path):
-        """Copying never touches the packaged source dirs."""
-        before = sorted(
-            p.relative_to(CodeRegistry._PACKAGE_CODES_DIR)
-            for p in CodeRegistry._PACKAGE_CODES_DIR.rglob("*")
-        )
-        CodeRegistry(runtime_dir=str(tmp_path / "rt")).ensure_bundled_copies()
-        after = sorted(
-            p.relative_to(CodeRegistry._PACKAGE_CODES_DIR)
-            for p in CodeRegistry._PACKAGE_CODES_DIR.rglob("*")
-        )
-        assert before == after
-
-
-# ---------------------------------------------------------------------------
-# Default skills
-# ---------------------------------------------------------------------------
-
-
-class TestDefaultTools:
-    """Validate the tool files that ship with the package."""
-
-    def test_tools_directory_exists(self):
-        """The package ships a tools directory."""
-        assert CodeRegistry._PACKAGE_CODES_DIR.exists()
-        assert CodeRegistry._PACKAGE_CODES_DIR.is_dir()
-
-    def test_tools_are_valid(self):
-        """Every tool file must parse cleanly and have required fields."""
-        tool_files = list(CodeRegistry._PACKAGE_CODES_DIR.glob("*/SKILL.md"))
-        assert len(tool_files) > 0, "No tool files found in package"
-
-        for path in tool_files:
-            tool = _parse_frontmatter(path)
-            assert tool.get("name"), f"{path.name}: missing 'name'"
-            assert tool.get("description"), f"{path.name}: missing 'description'"
-            assert tool.get("executable"), f"{path.name}: missing 'executable'"
-            assert "parameters" in tool, f"{path.name}: missing 'parameters'"
-
-    def test_bundled_codes_appear_after_copy(self, tmp_path):
-        """A fresh registry is empty until ensure_bundled_copies runs."""
+    def test_fresh_registry_is_empty(self, tmp_path):
+        """A registry with no saved code lists nothing."""
         reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
         assert reg.list_codes() == []
-        reg.ensure_bundled_copies()
-        names = [t["name"] for t in reg.list_codes()]
-        assert "scan-directory" in names
+        assert reg.get_code("datacard-introspect") is None
 
 
 # ---------------------------------------------------------------------------

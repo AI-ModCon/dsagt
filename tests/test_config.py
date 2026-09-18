@@ -439,10 +439,7 @@ class TestInitProject:
         assert (pdir / "skills").is_dir()
         assert (pdir / "kb_index").is_dir()
         assert (pdir / ".dsagt").is_dir()
-        # Bundled codes are copied into codes/ at init — every available
-        # code in one place, one format (skill-standard dirs).
-        assert (pdir / "codes" / "scan-directory" / "SKILL.md").exists()
-        assert (pdir / "codes" / "scan-directory" / "scripts").is_dir()
+        assert (pdir / "codes").is_dir()
         # Serverless: no MLflow store is pre-created; ``mlflow.db`` is
         # written lazily by the MLflow client on first span.
         assert not (pdir / "mlflow.db").exists()
