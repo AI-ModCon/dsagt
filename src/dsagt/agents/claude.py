@@ -19,6 +19,7 @@ proxies to a non-Anthropic provider lose caching.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from .base import (
@@ -30,37 +31,48 @@ from .base import (
     _run_simple_script,
 )
 
-#: The PreToolUse hook entry dsagt owns in ``.claude/settings.json``; the
-#: command is the console script, so an upgrade changes the guard without
-#: touching the project.
-_BASH_GUARD_HOOK = {
-    "matcher": "Bash",
-    "hooks": [{"type": "command", "command": "uv run dsagt-bash-guard"}],
-}
+_BASH_GUARD_SCRIPT = "dsagt-bash-guard"
+
+
+def _bash_guard_command() -> str:
+    """The guard's absolute path, beside the interpreter running dsagt.
+
+    Claude Code spawns a hook from a shell that has no dsagt environment
+    active under pipx or ``uv tool install``, where ``uv run`` finds nothing
+    and a hook that fails to start lets the call through.
+    """
+    return str(Path(sys.executable).parent / _BASH_GUARD_SCRIPT)
 
 
 def _write_bash_guard_hook(working_dir: Path) -> list[str]:
-    """Add the bash guard to the project's Claude Code settings, once.
+    """Write the bash guard into the project's Claude Code settings.
 
     ``.claude/settings.json`` is shared with the user's own settings, so the
-    file is read and only the dsagt hook entry is added; an entry already
-    present is left alone, and a user's other hooks are kept.  The guard
-    refuses a bare ``python`` call from the Bash tool with the recorded form
-    to use instead (``dsagt-bash-guard``).
+    file is read and only the dsagt hook entry is set: an entry whose
+    command names the guard is replaced (a reinstall moves the script), and
+    a user's other hooks are kept.  The guard refuses a bare ``python`` call
+    from the Bash tool with the recorded form to use (``dsagt-bash-guard``).
     """
     settings_path = working_dir / ".claude" / "settings.json"
     settings: dict = {}
     if settings_path.exists():
         settings = json.loads(settings_path.read_text() or "{}")
     hooks = settings.setdefault("hooks", {})
-    pre = hooks.setdefault("PreToolUse", [])
-    if any(
-        h.get("command") == _BASH_GUARD_HOOK["hooks"][0]["command"]
-        for entry in pre
-        for h in entry.get("hooks", [])
-    ):
+    entry = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": _bash_guard_command()}],
+    }
+    kept = [
+        e
+        for e in hooks.get("PreToolUse", [])
+        if not any(
+            _BASH_GUARD_SCRIPT in h.get("command", "") for h in e.get("hooks", [])
+        )
+    ]
+    before = json.dumps(hooks.get("PreToolUse", []), sort_keys=True)
+    hooks["PreToolUse"] = [*kept, entry]
+    if json.dumps(hooks["PreToolUse"], sort_keys=True) == before:
         return []
-    pre.append(_BASH_GUARD_HOOK)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
     return [f"Wrote the bash guard hook into {settings_path}"]

@@ -926,3 +926,26 @@ def test_stdout_that_is_also_an_argument_is_refused(tmp_path, capsys):
     assert rc == 2
     assert "also an argument" in capsys.readouterr().err
     assert list(tmp_path.glob("*.json")) == []
+
+
+class TestArgumentScanDetails:
+
+    def test_a_directory_is_an_input_and_the_interpreted_script_is_not(
+        self, tmp_path, monkeypatch
+    ):
+        from dsagt.provenance import files_from_arguments
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "case").mkdir()
+        (tmp_path / "tool.py").write_text("print(1)\n")
+        (tmp_path / "t.csv").write_text("a\n")
+        assert files_from_arguments(
+            ["python", "tool.py", "case", "t.csv", "--n", "3"]
+        ) == [
+            "case",
+            "t.csv",
+        ]
+        assert files_from_arguments(["mytool", "tool.py", "case"]) == [
+            "tool.py",
+            "case",
+        ]

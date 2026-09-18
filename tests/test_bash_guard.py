@@ -103,7 +103,18 @@ def test_claude_setup_writes_the_hook_once_and_keeps_user_hooks(tmp_path):
     commands = [
         h["command"] for e in written["hooks"]["PreToolUse"] for h in e["hooks"]
     ]
-    assert commands == ["mine", "uv run dsagt-bash-guard"]
+    assert commands[0] == "mine"
+    # The guard's absolute path, beside the interpreter running dsagt.
+    assert commands[1].startswith("/") and commands[1].endswith("/dsagt-bash-guard")
+    # An entry from an earlier install is replaced, not duplicated.
+    written["hooks"]["PreToolUse"][1]["hooks"][0][
+        "command"
+    ] = "/old/bin/dsagt-bash-guard"
+    settings.write_text(json.dumps(written))
+    assert _write_bash_guard_hook(tmp_path)
+    again = json.loads(settings.read_text())
+    commands = [h["command"] for e in again["hooks"]["PreToolUse"] for h in e["hooks"]]
+    assert len(commands) == 2 and commands[1] != "/old/bin/dsagt-bash-guard"
 
 
 def test_a_quoted_string_with_an_operator_stays_one_segment():

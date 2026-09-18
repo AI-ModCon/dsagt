@@ -93,7 +93,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "dsagt: bare python leaves no execution record. Run it as "
         f"`dsagt-run -- {segment}` (or the registered code's stored command); "
-        "use --stdout <path> for a report the command prints.",
+        "use --stdout <path> for a report the command prints, and run each "
+        "step of a chain under its own dsagt-run so its files are recorded.",
         file=sys.stderr,
     )
     return 2

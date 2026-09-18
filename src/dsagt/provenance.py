@@ -216,15 +216,34 @@ def _is_file(arg: str) -> bool:
         return False
 
 
+_INTERPRETERS = ("python", "python3", "bash", "sh", "zsh", "Rscript", "perl", "node")
+
+
 def files_from_arguments(command: list[str]) -> list[str]:
-    """The arguments of *command* that are existing regular files.
+    """The arguments of *command* that are existing files or directories.
 
     A spec with no parameter roles, or an ad-hoc run with no spec, names no
-    files; an argument that is a file when the command starts is one the
+    files; an argument that exists when the command starts is one the
     command reads or overwrites, which is what the dependency graph and the
-    readiness reports read.  The first token, the executable, is left out.
+    readiness reports need to know.  A directory counts (a simulation case,
+    a dataset directory); it gets no hash.  The executable is left out, and
+    so is the script an interpreter runs (``python x.py data.csv`` reads
+    ``data.csv``; ``x.py`` is the program, and as an input it would read as
+    the product of whichever step wrote it).
     """
-    return [arg for arg in command[1:] if _is_file(arg)]
+    args = command[1:]
+    if command and Path(command[0]).name in _INTERPRETERS:
+        script = next((a for a in args if not a.startswith("-")), None)
+        if script is not None and _is_file(script):
+            args = [a for a in args if a != script]
+    return [arg for arg in args if _is_file(arg) or _is_dir(arg)]
+
+
+def _is_dir(arg: str) -> bool:
+    try:
+        return Path(arg).is_dir()
+    except OSError:
+        return False
 
 
 def new_files_from_arguments(command: list[str], before: list[str]) -> list[str]:
@@ -858,6 +877,9 @@ def render_bash(
             parent = str(Path(_relative_to_project(f, project_dir)).parent)
             if parent not in (".", "") and parent not in output_dirs:
                 output_dirs.append(parent)
+    output_dirs = [
+        d for d in output_dirs if not any(o.startswith(d + "/") for o in output_dirs)
+    ]
     if output_dirs:
         lines.append("mkdir -p " + " ".join(_shell_quote(d) for d in output_dirs))
         lines.append("")
