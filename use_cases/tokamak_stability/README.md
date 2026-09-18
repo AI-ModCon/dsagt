@@ -1,6 +1,6 @@
 ---
 title: Tokamak Stability
-domain: Fusion energy — M3D-C1 finite-element simulation data
+domain: Fusion energy, M3D-C1 finite-element simulation data
 summary: >-
   Register codes for reading, analyzing, and visualizing data from the M3D-C1
   finite-element code, then use DSAgt to explore an example linear-MHD dataset,
@@ -12,8 +12,8 @@ order: 40
 
 # DSAgt Demo: Tokamak Stability
 
-> **Estimated time:** involved / not a 10-minute demo. Setup is the cost:
-> building the **fusion-io** C/C++ library from source (scripted, but its
+> **Estimated time:** involved / not a 10-minute demo. Setup takes most of the
+> time: building the fusion-io C/C++ library from source (scripted, but its
 > compilers and libraries must be installed first). Budget roughly an hour
 > for first-time setup; the agent session itself is ~15 minutes once the
 > dependencies and data are in place.
@@ -21,8 +21,8 @@ order: 40
 This guide uses DSAgt to investigate the stability properties of a tokamak
 configuration from linear MHD simulation output produced by the
 [M3D-C1](https://sites.google.com/pppl.gov/m3d-c1) unstructured-mesh
-finite-element code. The Python modules under [`scripts/`](scripts/) — `hdf5.py`,
-`m3dc1_tools.py`, `m3dc1_plots.py`, and the `m3dc1/` wrapper package — provide
+finite-element code. The Python modules under [`scripts/`](scripts/) (`hdf5.py`,
+`m3dc1_tools.py`, `m3dc1_plots.py`, and the `m3dc1/` wrapper package) provide
 the functions for reading M3D-C1 HDF5 output, evaluating fields from their
 basis-function coefficients, computing equilibrium and spectral quantities, and
 plotting. The agent registers those functions as codes under the guidance of
@@ -36,7 +36,7 @@ Sanchez-Villar (PPPL). The session below has been tested with Claude Code.
 
 - DSAgt installed with the `tokamak-stability` extra
   (`pip install "dsagt[tokamak-stability] @ git+https://github.com/AI-ModCon/dsagt.git"`),
-  which brings `h5py` and `matplotlib`; `numpy` comes with dsagt.
+  which installs `h5py` and `matplotlib`; `numpy` is a dsagt dependency.
 - An agent platform installed and **already authenticated**.
 - The [fusion-io](https://github.com/nferraro/fusion-io) library and its Python
   bindings, built from source by [`scripts/setup_env.sh`](scripts/setup_env.sh):
@@ -110,7 +110,8 @@ functions as codes and print a summary here.
 Creating and registering the codes may take several minutes. **Verify:**
 `Search the registry for M3D-C1 codes.` The skill requires that codes wrapping
 functions that call into fusion-io write their JSON result to an
-`--output-json` file rather than stdout; check one such spec (for example the
+`--output-json` file, since fusion-io writes to the process's stdout and
+corrupts anything printed there; check one such spec (for example the
 Miller-geometry code) carries that option.
 
 ### 2. Explore the dataset

@@ -1,9 +1,9 @@
 ---
 title: Cryo-EM
-domain: Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP
+domain: Structural biology, EMPIAR-10017 β-galactosidase micrographs via CryoPPP
 summary: >-
   DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive
-  (EMPIAR-10017 β-galactosidase micrographs via CryoPPP) — register curation
+  (EMPIAR-10017 β-galactosidase micrographs via CryoPPP): register curation
   codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing
   pipeline, with the AIDRIN AI-readiness check measuring the curation step
   before/after.
@@ -13,12 +13,13 @@ order: 20
 
 # DSAgt Demo: Cryo-EM Data Curation Pipeline
 
-> **Estimated time:** 12 to 25 minutes of session time. Setup pulls a **~0.5 GB data
-> download** (84 micrograph previews and the ground-truth particle tables), two
-> open-access papers, and the CryoPPP repository, then KB-ingests the repository
-> (minutes on the local embedder) before any pipeline work.
+> **Estimated time:** 12 to 25 minutes of session time. Setup downloads **~0.5 GB of
+> data** (84 micrograph previews and the ground-truth particle tables), two
+> open-access papers, and the CryoPPP repository, then ingests the repository into
+> the knowledge base (minutes on the local embedder) before any pipeline work.
 
-This guide documents a DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, multi-stage pipeline execution with domain-specific evaluation, and the [AI-readiness check](../../docs/readiness.md): with the check on, the agent runs the AIDRIN quality baseline before and after the tabular curation step on its own, so the pipeline's AI-readiness gain is *measured*. 
+This guide documents a DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, multi-stage pipeline execution with domain-specific evaluation, and the [AI-readiness check](../../docs/readiness.md): with the check on, the agent runs the AIDRIN quality baseline before and after the tabular curation step on its own, so the pipeline's AI-readiness gain is measured.
+
 ## Prerequisites
 
 - DSAgt installed
@@ -175,9 +176,9 @@ judged on. Expected across the curation step:
 | `outliers` (overall) | **0.041 → 0.029** | curation removed ~30% of outliers |
 | `class-imbalance` (Class Number, passthrough) | **22.2 → 11.1** | markedly more balanced |
 
-Curation produced a cleaner, more balanced particle set — a **measurable** AI-readiness gain, with
-`outliers` (and `class-imbalance`, if the agent proposes it) as the headline indicators and
-`completeness`/`duplicity` confirming the data was already structurally sound.
+Curation produced a cleaner, more balanced particle set, a measurable AI-readiness gain:
+`outliers` (and `class-imbalance`, if the agent proposes it) are the indicators of the gain, and
+`completeness`/`duplicity` confirm the data was already structurally sound.
 
 ### 6. Generate a datacard
 

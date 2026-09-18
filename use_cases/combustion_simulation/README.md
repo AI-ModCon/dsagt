@@ -1,6 +1,6 @@
 ---
 title: BlastNet → WELL Conversion
-domain: Combustion CFD — BlastNet DNS trajectories to the WELL HDF5 format
+domain: Combustion CFD, BlastNet DNS trajectories to the WELL HDF5 format
 summary: >-
   Develop a BlastNet-to-WELL converter from the format documents: author a
   conversion skill that carries the specifications as references, register
@@ -11,6 +11,8 @@ summary: >-
 status: published
 order: 90
 ---
+# Missing: Knowledge base, AI-readiness
+
 
 # DSAgt Demo: BlastNet → WELL Conversion
 
@@ -23,9 +25,9 @@ order: 90
 [BlastNet](https://blastnet.github.io/) publishes combustion DNS datasets as
 per-trajectory directories of raw float32 arrays plus an `info.json`.
 Machine-learning pipelines consume them in the [WELL](https://polymathic-ai.org/the_well/)
-HDF5 layout. This walkthrough has the agent build the bridge between the two
-from the two documents that define them, then prove it against a reference
-file produced upstream. It reproduces the workflow that produced the converter
+HDF5 layout. This walkthrough has the agent write the converter between the
+two formats from the two documents that define them, then check it against a
+reference file produced upstream. It reproduces the workflow that produced the converter
 in [`reference/`](reference/); that development history, with the bugs each
 version had, is in
 [`reference/development_history.md`](reference/development_history.md).
@@ -37,13 +39,13 @@ Folder contents:
 | [`docs/well_format.md`](docs/well_format.md), [`docs/blastnet_layout.md`](docs/blastnet_layout.md) | the two specifications the agent works from; they become the skill's `references/` |
 | [`scripts/check_well_output.py`](scripts/check_well_output.py) | the checker: compares a candidate WELL file to a reference (structure, shapes, values) |
 | [`scripts/make_demo_subset.py`](scripts/make_demo_subset.py) | builds the demo data bundle from a full trajectory |
-| [`reference/`](reference/) | the converter this workflow produced, its earlier versions, and the validation reports — a reference solution, not an input to the demo |
+| [`reference/`](reference/) | the converter this workflow produced, its earlier versions, and the validation reports: a reference solution, not an input to the demo |
 
 ## Prerequisites
 
 - DSAgt installed with the `combustion-simulation` extra
   (`pip install "dsagt[combustion-simulation] @ git+https://github.com/AI-ModCon/dsagt.git"`),
-  which brings `h5py`.
+  which installs `h5py`.
 - An agent platform installed and authenticated.
 
 ## Setup
@@ -159,7 +161,7 @@ its rules match the converter.
 ```
 
 **Expect:** a first pass that fails on one or more of the pitfalls the
-original development hit — all of them are visible in the checker's output:
+original development encountered; all of them are visible in the checker's output:
 
 | Pitfall | Checker symptom |
 |---------|-----------------|
