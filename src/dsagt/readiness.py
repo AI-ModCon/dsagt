@@ -24,20 +24,25 @@ from __future__ import annotations
 INSTRUCTIONS_PARAGRAPH = """\
 #### AI-readiness check
 
-For a stage whose input or output is a tabular file (CSV, Excel, JSON, HDF5,
-Parquet, npz), the check is the `aidrin` skill's quality baseline: run it on
-the file before and after the operation, through the registered `aidrin`
-code's `executable` (never bare `aidrin`). Run the baseline directly; do not
-ask the user about intent or confirm a plan for these checks (the skill's full workflow is for assessments the user
+For a stage whose input or output is a table, the check is the `aidrin`
+skill's quality baseline: run it on the file before and after the operation,
+through the registered `aidrin` code's `executable` (never bare `aidrin`).
+A table is a CSV, Parquet, Excel, or JSON-records file; an HDF5 or NumPy file
+counts only once `aidrin summarize` shows it as one table, since AIDRIN reads
+any HDF5 it can flatten and scores a simulation field as columns. Before a
+check, call the `readiness_reports` tool on the file: a report from a run
+after which the file is unchanged is current, and the post report of one
+stage is the pre report of the next, so an unchanged file is not checked
+twice. Run the baseline directly; do not ask the user about intent or confirm
+a plan for these checks (the skill's full workflow is for assessments the user
 asks for). The CLI prints its report to stdout, so name the audit file with
 `dsagt-run`'s `--stdout` option, which records it as the run's output:
 `dsagt-run --code aidrin --stdout audit/step_N_pre.aidrin.json -- aidrin
 data-quality <file> --detail` before the operation and `--stdout
 audit/step_N_post.aidrin.json` after it, then report the per-metric change
-to the user before proposing the next step. Do
-not write a custom check for a metric AIDRIN provides. A stage with tabular
-input or output gets this check; every other stage keeps the check rule
-above."""
+to the user before proposing the next step. Do not write a custom check for a
+metric AIDRIN provides. A stage with a table as input or output gets this
+check; every other stage keeps the check rule above."""
 
 
 def aidrin_release_tag(version: str) -> str:

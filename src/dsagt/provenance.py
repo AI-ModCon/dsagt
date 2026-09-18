@@ -18,6 +18,7 @@ Provenance for code executions.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -177,6 +178,49 @@ def _parse_file_list(raw: str | None) -> list[str]:
     return [f.strip() for f in raw.split(",") if f.strip()]
 
 
+def sha256_of(path: str) -> str | None:
+    """The SHA-256 of a regular file, or ``None`` for a path that is not one.
+
+    Streamed in 1 MiB chunks; the record identifies each input and output by
+    content so a later pass can tell whether a file changed since the run,
+    which a timestamp cannot (a copy has a new mtime, a move keeps an old one).
+    """
+    file = Path(path)
+    if not _is_file(path):
+        return None
+    digest = hashlib.sha256()
+    with open(file, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _is_file(arg: str) -> bool:
+    """Whether *arg* names a regular file; an argument the OS cannot stat (a
+    script passed inline, longer than a path may be) is not one."""
+    try:
+        return Path(arg).is_file()
+    except OSError:
+        return False
+
+
+def files_from_arguments(command: list[str]) -> list[str]:
+    """The arguments of *command* that are existing regular files.
+
+    A spec with no parameter roles, or an ad-hoc run with no spec, names no
+    files; an argument that is a file when the command starts is one the
+    command reads or overwrites, which is what the dependency graph and the
+    readiness reports need to know.  The first token, the executable, is
+    left out.
+    """
+    return [arg for arg in command[1:] if _is_file(arg)]
+
+
+def new_files_from_arguments(command: list[str], before: list[str]) -> list[str]:
+    """The arguments of *command* that are files now and were not in *before*."""
+    return [arg for arg in command[1:] if _is_file(arg) and arg not in before]
+
+
 def _child_env() -> dict[str, str]:
     """Environment for the code's process: the caller's, with the directory
     of dsagt's own interpreter appended to PATH.
@@ -283,16 +327,12 @@ def run_and_record(
     from dsagt.observability import obs, code_execute_span, truncate
 
     record_id = record_id or uuid.uuid4().hex[:12]
+    input_files = list(input_files or [])
     output_files = list(output_files or [])
-    # Each side the roles leave empty is filled from the arguments: a spec
-    # whose flags differ from the ones the agent used (fastp's -i against
-    # --in1) matches nothing on one side and must not silence the other.
-    derive_inputs = not input_files
-    derive_outputs = not output_files
-    if derive_inputs:
+    derive_from_arguments = not input_files and not output_files
+    if derive_from_arguments:
         input_files = files_from_arguments(command)
     file_hashes = {f: sha256_of(f) for f in input_files}
-    parent_record_id = os.environ.get("DSAGT_RUN_PARENT")
     if session_id is None:
         # The MCP server mints the session at startup and records it in
         # ``.dsagt/state.yaml``; read the current tag from there so this
@@ -315,31 +355,61 @@ def run_and_record(
         stdout = ""
         stderr = f"dsagt-run: execution error: {e}"
 
-    duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
-    timestamp_end = datetime.now(timezone.utc).isoformat()
-    if derive_outputs:
-        # With no roles, an argument that did not exist before the run is an
-        # output, and so is one the run changed: a converter that replaces
-        # its output file names it on every run, not only the first.
-        rewritten = [
-            f
-            for f in input_files
-            if derive_inputs
-            and sha256_of(f) is not None  # still there: a moved file is not written
-            and file_hashes.get(f) not in (None, sha256_of(f))
-        ]
-        output_files = [
-            f
-            for f in new_files_from_arguments(command, input_files) + rewritten
-            if f not in output_files
-        ] + output_files
-    if return_code != 0:
-        # A declared output a failed run never wrote is left out, so the
-        # record names no producer for a file that does not exist.
-        output_files = [f for f in output_files if _is_file(f) or _is_dir(f)]
-    for f in output_files:
-        file_hashes[f] = sha256_of(f)
-    file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
+        duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
+        timestamp_end = datetime.now(timezone.utc).isoformat()
+        if derive_from_arguments:
+            output_files = [
+                f
+                for f in new_files_from_arguments(command, input_files)
+                if f not in output_files
+            ] + output_files
+        for f in output_files:
+            file_hashes[f] = sha256_of(f)
+        file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
+
+        # Attach execution summary to the span. Full payload still goes to
+        # trace_archive/<record_id>.json; the span only carries truncated
+        # summaries that render usefully in the MLflow UI.
+        obs.set_many(
+            {
+                "exit_code": return_code,
+                "duration_ms": duration_ms,
+                "n_input_files": len(input_files or []),
+                "n_output_files": len(output_files or []),
+                "command": truncate(" ".join(command), 256),
+                "stdout_len": len(stdout),
+                "stderr_len": len(stderr),
+            }
+        )
+        if stderr.strip():
+            obs.set("stderr_truncated", truncate(stderr, 256))
+        if return_code != 0:
+            obs.event("code_failed", exit_code=return_code)
+            obs.set_status("ERROR")
+
+        # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
+        # ~4KB per side so big code results don't bloat the trace store.  The
+        # span is a preview by contract: the full stdout/stderr is in
+        # trace_archive/<code>_<ts>_<record_id>.json on the machine that ran
+        # the code, findable by the span's ``record_id`` attribute — and that
+        # file is the only full copy, including when the store is a shared
+        # server that other people read.
+        obs.set_inputs(
+            {
+                "code": code_name,
+                "command": list(command),
+                "input_files": input_files or [],
+            }
+        )
+        obs.set_outputs(
+            {
+                "exit_code": return_code,
+                "duration_ms": duration_ms,
+                "stdout": truncate(stdout, 4096),
+                "stderr": truncate(stderr, 4096) if stderr else "",
+                "output_files": output_files or [],
+            }
+        )
 
     record = {
         "record_id": record_id,
@@ -352,8 +422,9 @@ def run_and_record(
             "stderr": stderr,
             "timestamp_start": timestamp_start,
             "timestamp_end": timestamp_end,
-            "input_files": input_files or [],
-            "output_files": output_files or [],
+            "input_files": input_files,
+            "output_files": output_files,
+            "file_hashes": file_hashes,
         },
     }
     if parent_record_id:
@@ -638,6 +709,55 @@ def load_pipeline_records(trace_dir: Path, session_id: str | None = None) -> lis
 
     records.sort(key=lambda r: r["execution"].get("timestamp_start", ""))
     return records
+
+
+def readiness_reports(project_dir: Path, path: str) -> list[dict]:
+    """The AI-readiness reports on record for *path*, newest first.
+
+    Reads the ``aidrin`` records under ``<project>/trace_archive/`` whose
+    inputs name *path* (given relative to the project, or absolute under it)
+    and gives, per run, the report file, the run's start time, and whether
+    the file's content is what it was at the run (``unchanged``), from the
+    record's hash against the file now.  The readiness paragraph asks the
+    agent to call this before a check, so a file checked at the end of one
+    stage is not checked again at the start of the next.  A record with no
+    hash for the file, from a run before hashes were recorded, reports
+    ``unchanged`` as ``None``.
+    """
+    project_dir = Path(project_dir)
+    target = _relative_to_project(path, project_dir)
+    current = sha256_of(str(project_dir / target))
+    reports = []
+    for record in load_pipeline_records(project_dir / "trace_archive"):
+        if record.get("code_name") != "aidrin":
+            continue
+        execution = record["execution"]
+        inputs = [
+            _relative_to_project(f, project_dir)
+            for f in execution.get("input_files", [])
+        ]
+        if target not in inputs:
+            continue
+        recorded = execution.get("file_hashes", {})
+        digest = next(
+            (
+                h
+                for f, h in recorded.items()
+                if _relative_to_project(f, project_dir) == target
+            ),
+            None,
+        )
+        report = next(iter(execution.get("output_files", [])), None)
+        reports.append(
+            {
+                "report": _relative_to_project(report, project_dir) if report else None,
+                "timestamp": execution.get("timestamp_start"),
+                "command": " ".join(execution.get("exact_command", [])),
+                "unchanged": None if digest is None else digest == current,
+            }
+        )
+    reports.reverse()
+    return reports
 
 
 def build_dependency_graph(records: list[dict]) -> dict[int, list[int]]:

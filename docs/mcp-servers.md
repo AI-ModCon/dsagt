@@ -2,9 +2,9 @@
 
 DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.) and launched automatically when the agent starts. It combines four capabilities — a code registry, a [knowledge base](knowledge-base.md), [explicit memory](memory.md), and [skill discovery](skills.md) — behind one process with one shared embedder and one ChromaDB.
 
-The 20 tools split across four concerns, all on the one process.
+The 21 tools split across four concerns, all on the one process.
 
-## Registry tools (8)
+## Registry tools (9)
 
 Code registration, execution helpers, dependency installation, and pipeline reconstruction. See [Provenance](provenance.md) for how registered codes are captured.
 
@@ -17,7 +17,8 @@ Code registration, execution helpers, dependency installation, and pipeline reco
 | `run_command` | Execute a command to capture its help/usage output |
 | `read_file` | Read a text file from disk |
 | `http_request` | Fetch documentation or an API spec over HTTP(S) |
-| `reconstruct_pipeline` | Render `trace_archive/` as a dependency-ordered bash script or Snakemake workflow |
+| `reconstruct_pipeline` | Render `trace_archive/` as a bash script (in run order, output directories created, recorded stdout files redirected) or a Snakemake workflow; `output` saves it under the project |
+| `readiness_reports` | The AI-readiness reports on record for a file, each with whether the file is unchanged since that run |
 
 Codes are markdown files with YAML frontmatter under `<project>/codes/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies.
 

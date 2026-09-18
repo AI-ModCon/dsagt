@@ -298,7 +298,6 @@ class TestRenderBashReplays:
         assert "rm -f out.json\nconv b" in second
 
 
-
 class TestRenderSnakemake:
 
     def test_basic_workflow(self):
@@ -433,3 +432,86 @@ class TestReconstructPipeline:
         # Dependencies noted
         assert "depends: fastp" in script
         assert "depends: megahit" in script
+
+
+# ---------------------------------------------------------------------------
+# readiness_reports
+# ---------------------------------------------------------------------------
+
+
+class TestReadinessReports:
+
+    def _aidrin_record(self, project, path, digest, record_id, ts, report):
+        rec = _make_record(
+            "aidrin",
+            ["aidrin", "data-quality", path, "--detail"],
+            input_files=[path],
+            output_files=[report],
+            record_id=record_id,
+            timestamp=ts,
+        )
+        rec["execution"]["file_hashes"] = {path: digest}
+        _write_record(project / "trace_archive", rec)
+
+    def test_reports_for_a_file_newest_first_with_change_status(self, tmp_path):
+        import hashlib
+
+        from dsagt.provenance import readiness_reports
+
+        project = tmp_path
+        (project / "data").mkdir()
+        (project / "data" / "t.csv").write_text("a\n1\n")
+        digest = hashlib.sha256(b"a\n1\n").hexdigest()
+        self._aidrin_record(
+            project,
+            "data/t.csv",
+            "0" * 64,
+            "r1",
+            "2026-01-01T00:00:00Z",
+            "audit/pre.json",
+        )
+        self._aidrin_record(
+            project,
+            "data/t.csv",
+            digest,
+            "r2",
+            "2026-01-01T01:00:00Z",
+            "audit/post.json",
+        )
+        # A record for another file and a record from another code are left out.
+        self._aidrin_record(
+            project, "data/u.csv", digest, "r3", "2026-01-01T02:00:00Z", "audit/u.json"
+        )
+        _write_record(
+            project / "trace_archive",
+            _make_record(
+                "convert",
+                ["convert", "data/t.csv"],
+                input_files=["data/t.csv"],
+                record_id="r4",
+            ),
+        )
+        reports = readiness_reports(project, "data/t.csv")
+        assert [r["report"] for r in reports] == ["audit/post.json", "audit/pre.json"]
+        assert reports[0]["unchanged"] is True
+        assert reports[1]["unchanged"] is False
+
+    def test_absolute_path_under_the_project_matches(self, tmp_path):
+        from dsagt.provenance import readiness_reports
+
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "t.csv").write_text("x\n")
+        self._aidrin_record(
+            tmp_path,
+            "data/t.csv",
+            "0" * 64,
+            "r1",
+            "2026-01-01T00:00:00Z",
+            "audit/pre.json",
+        )
+        assert len(readiness_reports(tmp_path, str(tmp_path / "data" / "t.csv"))) == 1
+
+    def test_no_reports(self, tmp_path):
+        from dsagt.provenance import readiness_reports
+
+        assert readiness_reports(tmp_path, "data/none.csv") == []

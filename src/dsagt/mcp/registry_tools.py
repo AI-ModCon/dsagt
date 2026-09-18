@@ -39,7 +39,7 @@ from dsagt.observability import (
     registry_reconstruct_pipeline_span,
     registry_save_code_span,
 )
-from dsagt.provenance import CodeUseIndexer, reconstruct_pipeline
+from dsagt.provenance import CodeUseIndexer, readiness_reports, reconstruct_pipeline
 from dsagt.registry import CODES_COLLECTION, CodeRegistry
 
 logger = logging.getLogger(__name__)
@@ -253,6 +253,12 @@ async def _handle_search_registry(
     return f"Found {len(results)} tool(s):\n\n" + "\n\n".join(summaries)
 
 
+async def _handle_readiness_reports(arguments: dict, *, runtime_dir: Path) -> dict:
+    path = arguments["path"]
+    reports = await asyncio.to_thread(readiness_reports, runtime_dir, path)
+    return {"path": path, "reports": reports}
+
+
 async def _handle_reconstruct_pipeline(
     arguments: dict,
     *,
@@ -355,6 +361,9 @@ def _registry_tools_and_handlers(
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
         "reconstruct_pipeline": partial(
             _handle_reconstruct_pipeline, runtime_dir=runtime_dir, kb=kb
+        ),
+        "readiness_reports": partial(
+            _handle_readiness_reports, runtime_dir=runtime_dir
         ),
         "install_dependencies": partial(
             _handle_install_dependencies, registry=registry
@@ -583,6 +592,26 @@ def _registry_tools_and_handlers(
                         "to, e.g. audit/pipeline.sh; the reply says where it went.",
                     },
                 },
+            },
+        ),
+        types.Tool(
+            name="readiness_reports",
+            description=(
+                "The AI-readiness reports on record for a file, newest first: "
+                "each aidrin run whose input was the file, with its report path, "
+                "start time, and whether the file's content is unchanged since "
+                "that run. Call it before running a check; a current report is "
+                "the pre report of the next stage."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The file, relative to the project directory",
+                    },
+                },
+                "required": ["path"],
             },
         ),
         types.Tool(
