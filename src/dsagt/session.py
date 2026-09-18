@@ -889,10 +889,13 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
     sessions = read_state(pdir).get("sessions") or []
     if len(sessions) < 2:
         return 0
-    prev = sessions[-2]
-    source = prev.get("trace_source")
-    if source is None:
+    # The most recent earlier session that recorded its source.  A session
+    # that ended before the periodic pass stamped one (a headless prompt of a
+    # few seconds) would otherwise hide the turns of the session before it.
+    prev = next((s for s in reversed(sessions[:-1]) if s.get("trace_source")), None)
+    if prev is None:
         return 0
+    source = prev["trace_source"]
 
     project = config.get("project", "")
     prev_tag = session_tag(project, prev["id"])

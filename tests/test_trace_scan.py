@@ -435,6 +435,36 @@ def test_catch_up_traces_emits_previous_session_dangling_and_is_idempotent(tmp_p
     assert _catch_up_traces(proj, config, MagicMock()) == 0
 
 
+def test_catch_up_passes_over_a_session_that_recorded_no_source(tmp_path):
+    """A session that ended before the periodic pass stamped its source (a
+    headless prompt of a few seconds) does not hide the session before it."""
+    from unittest.mock import MagicMock
+
+    from dsagt.session import _catch_up_traces, write_state
+
+    proj = tmp_path / "proj"
+    (proj / ".dsagt").mkdir(parents=True)
+    transcript = tmp_path / "prev.jsonl"
+    _append(
+        transcript,
+        _user("2026-06-19T15:00:00.000Z", "q1", "u1"),
+        _asst("2026-06-19T15:00:01.000Z", {"type": "text", "text": "a1"}),
+    )
+    write_state(
+        proj,
+        {
+            "sessions": [
+                {"id": 1, "trace_source": str(transcript)},
+                {"id": 2},  # too short to record a source
+                {"id": 3},  # the live session
+            ],
+            "memory_cursor": {},
+        },
+    )
+    config = {"project": "proj", "agent": "claude", "project_dir": str(proj)}
+    assert _catch_up_traces(proj, config, MagicMock()) == 1
+
+
 def test_catch_up_traces_noop_without_previous_or_transcript(tmp_path):
     from unittest.mock import MagicMock
 
