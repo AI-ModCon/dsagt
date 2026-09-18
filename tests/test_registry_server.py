@@ -483,3 +483,35 @@ class TestToolIndexing:
             server, "search_registry", {"query": "tool", "tag": "genomics"}
         )
         assert "fastp" in text
+
+
+def test_save_code_spec_under_an_installed_skills_name_is_refused(tmp_path):
+    """Codes and skills share a directory; a code named after a skill would
+    replace the skill's frontmatter."""
+    from dsagt.mcp.registry_tools import create_registry_server
+    from dsagt.skills import register_skill_scripts
+
+    runtime = tmp_path / "rt"
+    skill = runtime / "skills" / "vasp-to-isaac"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: vasp-to-isaac\ndescription: d\n---\nbody\n"
+    )
+    (skill / "scripts" / "convert.py").write_text("import argparse\n")
+    register_skill_scripts(runtime, "vasp-to-isaac")
+    server = create_registry_server(CodeRegistry(runtime_dir=str(runtime)))
+    reply = call_tool(
+        server,
+        "save_code_spec",
+        {
+            "spec": {
+                "name": "vasp-to-isaac",
+                "description": "d",
+                "executable": "python other.py",
+                "parameters": {},
+            }
+        },
+    )
+    assert "is an installed skill" in reply and "vasp-to-isaac-convert" in reply
+    assert "body" in (skill / "SKILL.md").read_text()
+    assert "executable" not in (skill / "SKILL.md").read_text().split("---")[1]

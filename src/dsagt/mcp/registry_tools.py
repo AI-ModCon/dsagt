@@ -111,6 +111,19 @@ async def _handle_save_code_spec(
         obs.set("n_dependencies", len(spec.get("dependencies") or []))
         obs.set("n_tags", len(spec.get("tags") or []))
         try:
+            skill_md = registry.codes_dir / str(spec.get("name")) / "SKILL.md"
+            if skill_md.exists() and registry.get_code(spec["name"]) is None:
+                codes = [
+                    c["name"]
+                    for c in registry.list_codes_raw()
+                    if spec["name"] in (c.get("tags") or [])
+                ]
+                return (
+                    f"'{spec['name']}' is an installed skill, and a code of that name "
+                    "would replace its frontmatter. Its scripts are registered as: "
+                    f"{', '.join(codes) or 'none'}. Use one of those, or choose "
+                    "another name."
+                )
             existing = _code_for_same_script(registry, spec)
             if existing is not None:
                 return (
