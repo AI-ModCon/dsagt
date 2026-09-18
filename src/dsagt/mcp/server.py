@@ -297,7 +297,7 @@ async def _run_stdio(
             # this is killed before it runs, the next session's startup
             # catch-up re-collects the previous session's transcript
             # (session.catch_up_extraction → _catch_up_traces, pinned to the
-            # recorded transcript path); session-qualified acks make both
+            # recorded transcript path); transcript-qualified acks make both
             # paths idempotent.  Tool-use likewise re-indexes via its ack set.
             if collector is not None:
                 try:
