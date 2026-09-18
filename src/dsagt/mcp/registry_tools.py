@@ -178,16 +178,17 @@ async def _handle_search_registry(
     if not results:
         return "No tools found matching the query."
 
+    # The rank is the information; a rank-fusion score is a sum of 1/(60+rank)
+    # terms and reads as the same two decimals for every hit.
     summaries = []
-    for r in results:
+    for rank, r in enumerate(results, start=1):
         chunk = r.get("chunk", {})
         meta = chunk.get("metadata", {})
         summaries.append(
-            f"- **{meta.get('code_name', 'unknown')}** "
-            f"(score: {r.get('score', 0):.2f})\n"
-            f"  {chunk.get('text', '')[:200]}"
+            f"{rank}. **{meta.get('code_name', 'unknown')}**\n"
+            f"   {chunk.get('text', '')[:200]}"
         )
-    return f"Found {len(results)} tool(s):\n\n" + "\n\n".join(summaries)
+    return f"Found {len(results)} code(s), best first:\n\n" + "\n\n".join(summaries)
 
 
 async def _handle_readiness_reports(arguments: dict, *, runtime_dir: Path) -> dict:
