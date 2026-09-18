@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,10 +49,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Single project-local collection holding the bundled (package) codes, the
-#: base-skill codes, and the registered (agent-saved) codes.  The first two
-#: are embedded once by the shared knowledge-base build and copied into the
-#: project at init; ``metadata.source`` says which kind an entry is.
+#: Single project-local collection holding the base-skill codes and the
+#: registered (agent-saved) codes.  The base-skill codes are embedded once by
+#: the shared knowledge-base build and copied into the project at init;
+#: ``metadata.source`` says which kind an entry is.
 CODES_COLLECTION = "codes"
 
 #: External skill catalogs (fetched from GitHub repos) live in their own
@@ -102,8 +101,7 @@ def code_metadata(spec: dict, source: str) -> dict:
     """The ``codes`` collection metadata for a spec whose executable is wrapped.
 
     *source* says who put the entry there: ``registered`` for an agent-saved
-    code, ``bundled`` for a package code, ``base-skill`` for a code a base
-    skill declares.  One builder so an entry embedded by the shared
+    code, ``base-skill`` for a code a base skill declares.  One builder so an entry embedded by the shared
     knowledge-base build and one indexed by :meth:`CodeRegistry.save_tool`
     have the same shape.
     """
@@ -340,17 +338,10 @@ class CodeRegistry:
     """
     Manages CLI code spec files and optional KB indexing.
 
-    One layer: every code — bundled or agent-registered — is a
-    skill-standard directory in ``<project>/codes/<name>/``.  Bundled
-    codes ship with the package at ``_PACKAGE_CODES_DIR`` and are COPIED
-    into the project at ``dsagt init`` (:meth:`ensure_bundled_copies`),
-    so all available codes live in one place, in one format, fully
-    self-contained (spec + scripts).  Re-running ``dsagt init`` after a
-    package upgrade refreshes unmodified copies; a user-edited copy is
-    never clobbered.  KB-side search via ``search_registry``.
+    One layer: every code, a base skill's or the agent's, is a
+    skill-standard directory in ``<project>/codes/<name>/``, self-contained
+    (spec + scripts), in one format.  KB-side search via ``search_registry``.
     """
-
-    _PACKAGE_CODES_DIR = Path(__file__).parent / "codes"
 
     def __init__(
         self,
@@ -365,25 +356,6 @@ class CodeRegistry:
         # (``codes/<name>/SKILL.md`` + optional ``scripts/``), so there is
         # no shared scripts/ dir to pre-create.
         self.codes_dir.mkdir(parents=True, exist_ok=True)
-
-    def ensure_bundled_copies(self) -> list[str]:
-        """Copy package-bundled code dirs into ``<project>/codes/``.
-
-        Called at ``dsagt init``.  A dir whose name already exists in the
-        project is left untouched — user edits and agent overrides win;
-        delete the dir and re-init to restore the packaged version.
-        Returns one action line per copy made.
-        """
-        actions: list[str] = []
-        if not self._PACKAGE_CODES_DIR.exists():
-            return actions
-        for spec in sorted(self._PACKAGE_CODES_DIR.glob("*/SKILL.md")):
-            dest = self.codes_dir / spec.parent.name
-            if dest.exists():
-                continue
-            shutil.copytree(spec.parent, dest)
-            actions.append(f"Copied bundled code {spec.parent.name} into {dest}")
-        return actions
 
     def _project_code_paths(self) -> list[Path]:
         """Return SKILL.md spec paths in this project's codes dir."""
@@ -458,7 +430,7 @@ class CodeRegistry:
             raise ValueError(
                 f"invalid code name {spec['name']!r}: use lowercase letters, "
                 "digits, and hyphens (the skill-standard charset agent native "
-                "skill loaders require), e.g. 'scan-directory'"
+                "skill loaders require), e.g. 'datacard-introspect'"
             )
         code_dir = self.codes_dir / spec["name"]
         path = code_dir / "SKILL.md"

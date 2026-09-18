@@ -80,7 +80,7 @@ Inside the agent, paste these prompts one at a time (substitute the absolute pat
 <!-- md-shared:quickstart-prompts:start -->
 1. > Ingest the docs in `$SMOKE_DIR/knowledge/` into a collection named `knowledge`.
 2. > Register the CLI utility at `$SMOKE_DIR/csv_summary.py` as a code named `csv-summary` so we can reuse it.
-3. > Use the `scan-directory` code from the registry to scan `$SMOKE_DIR/data/`.
+3. > Use the `datacard-introspect` code from the registry to summarize `$SMOKE_DIR/data/`.
 4. > Run the `csv-summary` code on `$SMOKE_DIR/data/samples.csv` and tell me the columns, row count, and any columns with null values.
 5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
 6. > Tell me what you remember about the samples dataset.

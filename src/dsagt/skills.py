@@ -731,8 +731,7 @@ def install_base_skills(
     """Install every :func:`base_skills` entry into ``<project>/skills/<name>/``
     and register the scripts they run as codes.
 
-    A skill already present in the project is left as it is, the rule
-    ``CodeRegistry.ensure_bundled_copies`` applies to codes: edits by the
+    A skill already present in the project is left as it is: edits by the
     user or the agent win, and deleting the directory and re-running init
     restores the upstream version.  Otherwise the source is cloned into the
     cache when absent or held at another ref, and reused as is when

@@ -711,7 +711,7 @@ def main(argv=None):
         nargs="+",
         metavar="ASSET",
         help="KB assets to provision into the project (or 'all' for "
-        "everything).  Default: bundled tools + the genesis skill catalog.",
+        "everything).  Default: the base-skill codes + the genesis skill catalog.",
     )
     _kb_sel.add_argument(
         "--exclude",

@@ -436,7 +436,7 @@ def _registry_tools_and_handlers(
                                         "description": (
                                             "Unique code name — lowercase "
                                             "letters, digits, hyphens (e.g. "
-                                            "'scan-directory')"
+                                            "'datacard-introspect')"
                                         ),
                                     },
                                     "description": {

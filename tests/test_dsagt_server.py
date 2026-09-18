@@ -29,7 +29,6 @@ def _make_merged_server(tmp_path: Path):
     kb.collections = []
     runtime = str(tmp_path / "runtime")
     reg = CodeRegistry(runtime_dir=runtime, kb=None)
-    reg.ensure_bundled_copies()
     sreg = SkillRegistry(runtime_dir=runtime, kb=None)
     return create_dsagt_server(reg, kb, sreg, runtime_dir=runtime)
 
@@ -154,6 +153,14 @@ def test_dispatch_root_span_never_stores_credentials_or_payloads(tmp_path, monke
 def test_registry_tool_returns_plain_string(tmp_path):
     """Registry handlers return a bare string — passed through unchanged."""
     server = _make_merged_server(tmp_path)
+    CodeRegistry(runtime_dir=str(tmp_path / "runtime"), kb=None).save_tool(
+        {
+            "name": "ping",
+            "description": "Print pong.",
+            "executable": "echo pong",
+            "parameters": {},
+        }
+    )
     out = _call(server, "get_registry", {})
     # Not JSON — the registry contract is a human-readable string.
     with pytest.raises(json.JSONDecodeError):

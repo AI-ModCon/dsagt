@@ -250,11 +250,10 @@ class TestEnsureAssetsTools:
         assert third["built"] == ["codes"]
         assert len(stamp.read_text().strip()) == 64
 
-    def test_build_holds_bundled_and_base_skill_codes(self, tmp_path):
-        """The shared ``codes`` collection carries the package codes and the
-        base-skill codes, each tagged by source, so a project that copies it
-        needs no embedding at init."""
-        from dsagt.commands.setup_core_kb import _build_bundled_tools
+    def test_build_holds_the_base_skill_codes(self, tmp_path):
+        """The shared ``codes`` collection carries the base-skill codes, tagged
+        by source, so a project that copies it needs no embedding at init."""
+        from dsagt.commands.setup_core_kb import _build_codes
         from dsagt.registry import render_code_spec
         from dsagt.skills import base_skill_code_specs
 
@@ -270,7 +269,7 @@ class TestEnsureAssetsTools:
 
         (tmp_path / "codes").mkdir()
         kb = FakeKB()
-        n = _build_bundled_tools(kb, tmp_path)
+        n = _build_codes(kb, tmp_path)
         assert n == len(kb.texts)
         by_source = {}
         for m in kb.metadatas:
@@ -278,7 +277,6 @@ class TestEnsureAssetsTools:
         assert {"aidrin", "datacard-introspect", "datacard-validate"} <= by_source[
             "base-skill"
         ]
-        assert by_source["bundled"]
         expected = {render_code_spec(s) for s in base_skill_code_specs()}
         assert expected <= set(kb.texts)
         assert all("dsagt_version" in m for m in kb.metadatas)

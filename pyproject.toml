@@ -85,7 +85,7 @@ version = {attr = "dsagt.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-dsagt = ["py.typed", "codes/**/*", "dsagt_instructions.md"]
+dsagt = ["py.typed", "dsagt_instructions.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
