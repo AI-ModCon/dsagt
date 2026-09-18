@@ -57,7 +57,7 @@ def _make_server(tmp_path, tools=None):
     single project layer every lookup reads.
     """
     runtime_dir = tmp_path / "runtime"
-    project_tools_dir = runtime_dir / "codes"
+    project_tools_dir = runtime_dir / "skills"
     project_tools_dir.mkdir(parents=True, exist_ok=True)
     for spec in tools or []:
         _write_tool(project_tools_dir, spec)
@@ -540,7 +540,7 @@ def _make_server_with_kb(tmp_path, tools=None):
     from dsagt.knowledge import KnowledgeBase
 
     runtime_dir = tmp_path / "runtime"
-    project_tools_dir = runtime_dir / "codes"
+    project_tools_dir = runtime_dir / "skills"
     project_tools_dir.mkdir(parents=True, exist_ok=True)
     for spec in tools or []:
         _write_tool(project_tools_dir, spec)

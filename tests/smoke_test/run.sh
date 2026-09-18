@@ -174,7 +174,7 @@ check() {
 }
 
 # -- registry + execution + provenance --------------------------------------
-check "greet spec written"           "test -f '${PDIR}/codes/greet/SKILL.md'"
+check "greet spec written"           "test -f '${PDIR}/skills/greet/SKILL.md'"
 # Codes share the skill-standard envelope and mirror into the agent's
 # native skills dir at dsagt start: the base-skill datacard-introspect at
 # session 1's start, greet (registered mid-session-1) at session 2's.

@@ -12,7 +12,7 @@ Code registration, execution helpers, dependency installation, and pipeline reco
 |------|-------------|
 | `search_registry` | Semantic search over registered + built-in code specs |
 | `get_registry` | List every registered code with its MCP-compatible schema |
-| `save_code_spec` | Register a CLI code as `codes/<name>/SKILL.md` (executable auto-wrapped with `dsagt-run` + `uv run --with`), mirrored into the agent's native skills dir |
+| `save_code_spec` | Register a CLI code as `skills/<name>/SKILL.md` (executable auto-wrapped with `dsagt-run` + `uv run --with`), mirrored into the agent's native skills dir |
 | `install_dependencies` | Install a code's Python dependencies via `uv run --with` |
 | `run_command` | Execute a command to capture its help/usage output |
 | `read_file` | Read a text file from disk |
@@ -20,7 +20,7 @@ Code registration, execution helpers, dependency installation, and pipeline reco
 | `reconstruct_pipeline` | Render `trace_archive/` as a bash script (in run order, output directories created, recorded stdout files redirected) or a Snakemake workflow; `output` saves it under the project |
 | `readiness_reports` | The AI-readiness reports on record for a file, each with whether the file is unchanged since that run |
 
-Codes are markdown files with YAML frontmatter under `<project>/codes/`. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies.
+Codes are markdown files with YAML frontmatter under `<project>/skills/`, beside the instruction skills; the `executable` in the frontmatter is what makes a skill a code. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies.
 
 ## Knowledge tools (5)
 

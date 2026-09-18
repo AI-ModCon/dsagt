@@ -360,7 +360,7 @@ class AgentSetup(ABC):
         """Mirror installed skills AND registered codes into the agent's
         native skills dir so it auto-discovers/auto-invokes them.
 
-        Codes share the skill-standard envelope (``codes/<name>/SKILL.md``),
+        Codes share the skill-standard envelope and the ``skills/`` directory,
         so the same copy serves both: native discovery puts a code's exact
         dsagt-run command in context at invocation time — a second discovery
         path alongside ``search_registry``, aimed at the from-memory
@@ -375,14 +375,9 @@ class AgentSetup(ABC):
             return []
         if not (config.get("skills") or {}).get("populate_native", True):
             return []
-        from dsagt.registry import CodeRegistry, SkillRegistry
+        from dsagt.registry import SkillRegistry
 
-        codes = CodeRegistry(runtime_dir=working_dir, kb=None)
-        reg = SkillRegistry(runtime_dir=working_dir, kb=None)
-        # Later entries win name collisions: codes first, then project
-        # skills — a deliberately installed instruction skill outranks a
-        # registered code of the same name.
-        src_dirs = codes.code_dirs() + reg.skill_dirs()
+        src_dirs = SkillRegistry(runtime_dir=working_dir, kb=None).skill_dirs()
         target = working_dir
         for part in self.native_skills_dir.split("/"):
             target = target / part

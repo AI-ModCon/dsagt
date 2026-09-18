@@ -439,7 +439,7 @@ class TestInitProject:
         assert (pdir / "skills").is_dir()
         assert (pdir / "kb_index").is_dir()
         assert (pdir / ".dsagt").is_dir()
-        assert (pdir / "codes").is_dir()
+        assert not (pdir / "codes").exists()
         # Serverless: no MLflow store is pre-created; ``mlflow.db`` is
         # written lazily by the MLflow client on first span.
         assert not (pdir / "mlflow.db").exists()

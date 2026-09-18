@@ -4,11 +4,13 @@ Code and Skill Registries.
 Two parallel registries for agent capabilities:
 
 **Codes** (CLI executables) — skill-standard directories
-(`<project>/codes/<name>/SKILL.md`) whose frontmatter carries the machine
+(`<project>/skills/<name>/SKILL.md`) whose frontmatter carries the machine
 fields (name, description, executable, parameters, dependencies, tags) on
-top of the skill-required name/description.  Agent-written scripts live
-beside their spec in `<project>/codes/<name>/scripts/`, making each
-registered code a self-contained, portable directory.  The skill-standard
+top of the skill-required name/description; a code is a skill whose
+frontmatter declares an executable, and codes and skills share one
+directory.  Agent-written scripts live beside their spec in
+`<project>/skills/<name>/scripts/`, making each registered code a
+self-contained, portable directory.  The skill-standard
 envelope means codes mirror into the agent's native skills dir unchanged
 (see ``AgentSetup.setup_skills``) — native discovery puts the exact
 runnable command in context at invocation time, alongside MCP discovery
@@ -339,8 +341,10 @@ class CodeRegistry:
     Manages CLI code spec files and optional KB indexing.
 
     One layer: every code, a base skill's or the agent's, is a
-    skill-standard directory in ``<project>/codes/<name>/``, self-contained
-    (spec + scripts), in one format.  KB-side search via ``search_registry``.
+    skill-standard directory in ``<project>/skills/<name>/``, self-contained
+    (spec + scripts), in one format, beside the instruction skills; what
+    makes it a code is the ``executable`` in its frontmatter.  KB-side search
+    via ``search_registry``.
     """
 
     def __init__(
@@ -349,17 +353,19 @@ class CodeRegistry:
         kb: KnowledgeBase | None = None,
     ):
         self.runtime_dir = Path(runtime_dir)
-        self.codes_dir = self.runtime_dir / "codes"
+        self.codes_dir = self.runtime_dir / "skills"
         self._kb = kb
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        # Each code is a self-contained skill-standard directory
-        # (``codes/<name>/SKILL.md`` + optional ``scripts/``), so there is
-        # no shared scripts/ dir to pre-create.
         self.codes_dir.mkdir(parents=True, exist_ok=True)
 
     def _project_code_paths(self) -> list[Path]:
-        """Return SKILL.md spec paths in this project's codes dir."""
-        return sorted(self.codes_dir.glob("*/SKILL.md"))
+        """The SKILL.md paths under ``skills/`` whose frontmatter declares an
+        executable."""
+        return [
+            p
+            for p in sorted(self.codes_dir.glob("*/SKILL.md"))
+            if _parse_frontmatter(p).get("executable")
+        ]
 
     def code_dirs(self) -> list[Path]:
         """All code directories (for the native-skills mirror — see
@@ -411,7 +417,7 @@ class CodeRegistry:
         path = self.codes_dir / name / "SKILL.md"
         if path.exists():
             code = _parse_frontmatter(path)
-            if code.get("name") == name:
+            if code.get("name") == name and code.get("executable"):
                 return code
         return None
 
@@ -444,16 +450,27 @@ class CodeRegistry:
             spec.get("dependencies"),
         )
 
-        # Preserve existing body when updating so hand-edited docs survive
+        # Preserve existing body when updating so hand-edited docs survive.
+        # An existing frontmatter is kept underneath the spec's keys: a skill
+        # whose CLI is a code of its own name (aidrin) keeps its upstream
+        # fields, and its description, which is the skill's, on the first
+        # registration; a code re-saved by the agent takes every key from
+        # the new spec.
         body = ""
+        existing: dict = {}
         if path.exists():
             parts = path.read_text().split("---", 2)
             if len(parts) == 3:
                 body = parts[2]
+            existing = _parse_frontmatter(path)
 
         if body:
-            frontmatter = yaml.dump(wrapped, default_flow_style=False, sort_keys=False)
+            merged = {**existing, **wrapped}
+            if existing.get("description") and not existing.get("executable"):
+                merged["description"] = existing["description"]
+            frontmatter = yaml.dump(merged, default_flow_style=False, sort_keys=False)
             path.write_text(f"---\n{frontmatter}---\n{body}")
+            wrapped = merged
         else:
             path.write_text(render_code_spec(spec))
 

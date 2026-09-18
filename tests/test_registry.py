@@ -112,7 +112,7 @@ def _write_tool(codes_dir, spec: dict) -> None:
 def make_registry(tmp_path, tools: list[dict]) -> CodeRegistry:
     """Create a CodeRegistry with the given tool definitions."""
     runtime_dir = tmp_path / "runtime"
-    codes_dir = runtime_dir / "codes"
+    codes_dir = runtime_dir / "skills"
     codes_dir.mkdir(parents=True, exist_ok=True)
     for tool in tools:
         _write_tool(codes_dir, tool)
@@ -454,6 +454,6 @@ def test_save_tool_writes_the_rendered_spec(tmp_path):
     }
     registry = CodeRegistry(runtime_dir=tmp_path)
     assert registry.save_tool(spec) == "added"
-    written = (tmp_path / "codes" / "count-rows" / "SKILL.md").read_text()
+    written = (tmp_path / "skills" / "count-rows" / "SKILL.md").read_text()
     assert written == render_code_spec(spec)
     assert "dsagt-run --code count-rows -- uv run --with pandas -- python" in written

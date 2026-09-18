@@ -92,7 +92,7 @@ This exercised:
 | Prompt | Capability |
 |---|---|
 | 1 | `dsagt-server` (`kb_ingest`) — chunks and indexes docs into ChromaDB |
-| 2 | `dsagt-server` (`save_code_spec`) — writes `codes/csv-summary/SKILL.md` (a skill-standard dir), wrapping the executable with `dsagt-run` |
+| 2 | `dsagt-server` (`save_code_spec`) — writes `skills/csv-summary/SKILL.md` (a skill-standard dir), wrapping the executable with `dsagt-run` |
 | 3–4 | `dsagt-run` provenance wrapper — records each execution to `trace_archive/` |
 | 5–6 | Explicit memory (`kb_remember` → `.dsagt/explicit_memories.yaml`) + KB recall (`kb_get_memories`) |
 <!-- md-shared:quickstart-capabilities:end -->
@@ -129,7 +129,7 @@ DSAgt provides a preconfigured agent platform with augmented capabilities for AI
 ### Capabilities
 
 **Code Registry** (`dsagt-server`)
-The agent registers CLI data processing codes as skills (markdown files with YAML frontmatter) under `<project>/codes/`. DSAgt handles dependency installation via `uv run --with` (`uv` installs with dsagt) and wraps every execution with `dsagt-run` for provenance capture. The agent discovers codes via `search_registry`.
+The agent registers CLI data processing codes as skills (markdown files with YAML frontmatter whose frontmatter declares the executable) under `<project>/skills/`, beside the instruction skills. DSAgt handles dependency installation via `uv run --with` (`uv` installs with dsagt) and wraps every execution with `dsagt-run` for provenance capture. The agent discovers codes via `search_registry`.
 
 **[Knowledge Base](docs/knowledge-base.md)** (`dsagt-server`)
 Hybrid semantic + BM25 search over ChromaDB collections partitioned by concern — code specs, the skill corpus, scientific documents, and per-project memory. A first `dsagt init` installs the built-in code specs and a default `genesis` skill corpus; the NeMo Curator reference collection and additional skill sources are also available (e.g. k-dense, anthropic), and new collections can be added for the documents of a specific scientific pursuit. The agent searches via `kb_search`, ingests via `kb_ingest`, and saves user-confirmed facts via `kb_remember`. Opt-in episodic memory distills each session turn into the per-project `session_memory` collection.
@@ -162,7 +162,6 @@ DSAgt adds two memory extensions that complement the host agent's own memory (wh
     config.yaml                 # project configuration (set by dsagt init)
     state.yaml                  # session log + memory cursor (owned by the MCP server)
     explicit_memories.yaml      # user-confirmed facts
-  codes/<name>/                 # registered codes — skill-standard dirs (SKILL.md + scripts/)
   skills/                       # agent skills (SKILL.md + reference docs)
   trace_archive/                # code execution records (JSON, from dsagt-run)
   mlflow.db                     # serverless MLflow SQLite trace store

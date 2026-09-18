@@ -15,13 +15,13 @@ A code spec includes:
 - A YAML frontmatter block describing the executable, parameters, dependencies, and tags.
 - A markdown body with the exact runnable command, usage, and notes for the agent.
 
-Example code spec (`codes/csv-summary/SKILL.md`):
+Example code spec (`skills/csv-summary/SKILL.md`):
 
 ```markdown
 ---
 name: csv-summary
 description: Summarize a CSV — columns, row count, null counts, numeric stats. Use when profiling a tabular dataset.
-executable: dsagt-run --code csv-summary -- python codes/csv-summary/scripts/csv_summary.py
+executable: dsagt-run --code csv-summary -- python skills/csv-summary/scripts/csv_summary.py
 parameters:
   file:
     type: string
