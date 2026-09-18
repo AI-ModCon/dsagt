@@ -5,9 +5,9 @@ one MCP server per agent — a single embedder and a single Chroma owner back
 every concern.  Single ownership matters for the ``skills_catalog__*``
 collections, which are written under the skill concern and read under the
 registry concern: one owner removes any write-here/read-there hazard across
-them.  Heavy/risky work runs off the event loop (``run_command`` →
-``dsagt-run`` subprocess; ``kb_ingest`` → background job thread), so one process
-costs little isolation.
+them.  Heavy work runs off the event loop (``kb_ingest`` → background job
+thread; the collectors in worker threads), so one process costs little
+isolation.
 
 Tool *definitions* and *handlers* are defined in their concern modules
 (:mod:`~dsagt.mcp.registry_tools` / :mod:`~dsagt.mcp.knowledge_tools` /

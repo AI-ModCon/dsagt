@@ -2,9 +2,11 @@
 
 The "tool lifecycle" surface of ``dsagt-server``: define a tool spec
 (``save_code_spec``), discover tools (``get_registry`` / ``search_registry``),
-execute / gather (``read_file`` / ``http_request`` / ``run_command`` /
-``install_dependencies``), and reconstruct a reproducible pipeline from the
-recorded executions (``reconstruct_pipeline``).
+install a code's dependencies (``install_dependencies``), read the readiness
+reports on record (``readiness_reports``), and reconstruct a reproducible
+pipeline from the recorded executions (``reconstruct_pipeline``).  Execution
+in the user's environment is ``dsagt-run``'s, from the agent's own shell, and
+reads are the agent's own tools, so the server runs nothing for the agent.
 
 Tool specs are saved as markdown files in the runtime tools directory and
 indexed into a ChromaDB collection for semantic search.  Server configuration
@@ -20,13 +22,11 @@ test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
 import asyncio
 import json
 import logging
-import shlex
 import subprocess
 import sys
 from functools import partial
 from pathlib import Path
 
-import httpx
 import yaml
 
 import mcp.types as types
@@ -69,69 +69,6 @@ def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
 # ---------------------------------------------------------------------------
 # Per-tool handlers (module-level, explicit dependencies)
 # ---------------------------------------------------------------------------
-
-
-async def _handle_read_file(arguments: dict) -> str:
-    path = Path(arguments["path"])
-    try:
-        return path.read_text()
-    except (
-        FileNotFoundError,
-        PermissionError,
-        IsADirectoryError,
-        OSError,
-        UnicodeDecodeError,
-    ) as e:
-        return f"Error reading file: {e}"
-
-
-async def _handle_http_request(arguments: dict) -> str:
-    url = arguments["url"]
-    method = arguments.get("method", "GET")
-    headers = arguments.get("headers", {})
-    try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                timeout=30.0,
-            )
-            return f"Status: {response.status_code}\n\n{response.text}"
-    except (httpx.HTTPError, httpx.InvalidURL) as e:
-        return f"Error making request: {e}"
-
-
-async def _handle_run_command(arguments: dict) -> str:
-    # A code spec's executable is a multi-word string ("dsagt-run --code x --
-    # uv run -- python script.py"); agents pass it whole, so split it.
-    command = shlex.split(arguments["command"])
-    args = arguments.get("args", [])
-    timeout = arguments.get("timeout", 10)
-    try:
-        # Off the shared event loop: a blocking subprocess.run here would stall
-        # the periodic trace pass and every concurrent tool call for its duration.
-        result = await asyncio.to_thread(
-            partial(
-                subprocess.run,
-                command + args,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        )
-    except subprocess.TimeoutExpired:
-        return f"Command timed out after {timeout} seconds"
-    except FileNotFoundError:
-        return f"Command '{command[0]}' not found"
-
-    output = ""
-    if result.stdout:
-        output += f"STDOUT:\n{result.stdout}\n"
-    if result.stderr:
-        output += f"STDERR:\n{result.stderr}\n"
-    output += f"\nReturn code: {result.returncode}"
-    return output
 
 
 async def _handle_save_code_spec(
@@ -353,9 +290,6 @@ def _registry_tools_and_handlers(
     runtime_dir = Path(registry.runtime_dir)
 
     handlers = {
-        "read_file": _handle_read_file,
-        "http_request": _handle_http_request,
-        "run_command": _handle_run_command,
         "save_code_spec": partial(_handle_save_code_spec, registry=registry),
         "get_registry": partial(_handle_get_registry, registry=registry),
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
@@ -371,65 +305,6 @@ def _registry_tools_and_handlers(
     }
 
     tools = [
-        types.Tool(
-            name="read_file",
-            description="Read contents of a text file",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file to read",
-                    },
-                },
-                "required": ["path"],
-            },
-        ),
-        types.Tool(
-            name="http_request",
-            description="Make an HTTP request to fetch documentation or API specs",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "URL to request"},
-                    "method": {
-                        "type": "string",
-                        "description": "HTTP method",
-                        "default": "GET",
-                    },
-                    "headers": {
-                        "type": "object",
-                        "description": "Optional headers",
-                    },
-                },
-                "required": ["url"],
-            },
-        ),
-        types.Tool(
-            name="run_command",
-            description=(
-                "Run a command to read its --help or usage text. Not for "
-                "executing registered codes: run those from your shell with "
-                "the spec's executable string so dsagt-run records them."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Command to execute",
-                    },
-                    "args": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Arguments (e.g., ['--help'])",
-                        "default": [],
-                    },
-                    "timeout": {"type": "number", "default": 10},
-                },
-                "required": ["command"],
-            },
-        ),
         types.Tool(
             name="save_code_spec",
             description=(

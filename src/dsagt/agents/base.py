@@ -41,7 +41,6 @@ _BLOCK_END = "<!-- dsagt:end -->"
 _DSAGT_MCP_ALWAYS_ALLOW = [
     "add_skill_source",
     "get_registry",
-    "http_request",
     "install_dependencies",
     "install_skill",
     "kb_append",
@@ -52,9 +51,8 @@ _DSAGT_MCP_ALWAYS_ALLOW = [
     "kb_remember",
     "kb_search",
     "list_skill_sources",
-    "read_file",
+    "readiness_reports",
     "reconstruct_pipeline",
-    "run_command",
     "save_skill",
     "save_code_spec",
     "search_registry",

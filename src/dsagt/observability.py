@@ -417,7 +417,7 @@ REDACTED_KEYS = frozenset(
         "secret",
     }
 )
-# Credential *shapes* inside free text — a `run_command` argv carrying
+# Credential *shapes* inside free text — a recorded command carrying
 # `-H "Authorization: Bearer …"`, a URL with `?api_key=…`, a printed config
 # with `"api_key": "…"` — which no key name can catch.  Anchored so ordinary
 # prose survives: `Bearer`/`Basic` only after `Authorization:`, and a key
@@ -440,10 +440,9 @@ def bound(value: Any, limit: int = 4096) -> Any:
     """Shrink a tool argument or result to what a span may safely carry.
 
     The dispatch shell records every call's raw arguments and result on the
-    trace root, and both are agent-controlled: ``http_request`` takes a
-    ``headers`` dict that is the natural home for an ``Authorization`` bearer,
-    and ``read_file`` / ``run_command`` / ``kb_search`` return whole files,
-    whole stdout, whole chunk texts.  Anything set on a span is written verbatim
+    trace root, and both are agent-controlled: a ``kb_ingest`` argument or a
+    ``kb_search`` result can carry an ``Authorization`` bearer or an API key
+    from a document, and ``kb_search`` returns whole chunk texts.  Anything set on a span is written verbatim
     into ``mlflow.db`` — MLflow truncates only the UI preview — and ``dsagt
     traces`` then serves it in a browser.  Credential-bearing keys are replaced
     outright, credential shapes inside strings are masked, and every string
