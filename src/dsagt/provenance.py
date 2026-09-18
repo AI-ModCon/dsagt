@@ -247,7 +247,9 @@ def _pump(source, sink, lines: list[str]) -> None:
 _FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 
 
-def _run_streaming(command: list[str], stdout_sink=None) -> tuple[int, str, str]:
+def _run_streaming(
+    command: list[str], stdout_sink=None, *, parent: str | None = None
+) -> tuple[int, str, str]:
     """Run *command*, echoing its output as it arrives, and return the exit
     code with the full stdout and stderr.
 
@@ -262,13 +264,16 @@ def _run_streaming(command: list[str], stdout_sink=None) -> tuple[int, str, str]
     headless harness ends a turn that way.  Raises ``FileNotFoundError``
     when the executable is absent.
     """
+    env = _child_env()
+    if parent:
+        env["DSAGT_RUN_PARENT"] = parent
     proc = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         errors="replace",
-        env=_child_env(),
+        env=env,
     )
     forwarded: list[int] = []
 
@@ -328,12 +333,17 @@ def run_and_record(
     record_id = record_id or uuid.uuid4().hex[:12]
     input_files = list(input_files or [])
     output_files = list(output_files or [])
-    derive_from_arguments = not input_files and not output_files
-    if derive_from_arguments:
+    # Each side the roles leave empty is filled from the arguments: a spec
+    # whose flags differ from the ones the agent used (fastp's -i against
+    # --in1) matches nothing on one side and must not silence the other.
+    derive_inputs = not input_files
+    derive_outputs = not output_files
+    if derive_inputs:
         input_files = files_from_arguments(command)
     if stdout_path is not None and stdout_path not in output_files:
         output_files.append(stdout_path)
     file_hashes = {f: sha256_of(f) for f in input_files}
+    parent_record_id = os.environ.get("DSAGT_RUN_PARENT")
     if session_id is None:
         # The MCP server mints the session at startup and records it in
         # ``.dsagt/state.yaml``; read the current tag from there so this
@@ -347,11 +357,13 @@ def run_and_record(
 
         try:
             if stdout_path is None:
-                return_code, stdout, stderr = _run_streaming(command)
+                return_code, stdout, stderr = _run_streaming(command, parent=record_id)
             else:
                 Path(stdout_path).parent.mkdir(parents=True, exist_ok=True)
                 with open(stdout_path, "w") as sink:
-                    return_code, stdout, stderr = _run_streaming(command, sink)
+                    return_code, stdout, stderr = _run_streaming(
+                        command, sink, parent=record_id
+                    )
                 print(
                     f"dsagt-run: stdout written to {stdout_path} ({len(stdout)} bytes)"
                 )
@@ -366,7 +378,7 @@ def run_and_record(
 
         duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
         timestamp_end = datetime.now(timezone.utc).isoformat()
-        if derive_from_arguments:
+        if derive_outputs:
             output_files = [
                 f
                 for f in new_files_from_arguments(command, input_files)
@@ -438,6 +450,10 @@ def run_and_record(
     }
     if stdout_path is not None:
         record["execution"]["stdout_file"] = stdout_path
+    if parent_record_id:
+        # A run started by a recorded run (a loop script over samples): the
+        # parent's command replays it, so the reconstruction leaves it out.
+        record["parent_record_id"] = parent_record_id
 
     _write_record(record, records_dir)
     return return_code
@@ -709,6 +725,9 @@ def load_pipeline_records(trace_dir: Path, session_id: str | None = None) -> lis
         if not execution:
             continue
         if session_id and raw.get("session_id") != session_id:
+            continue
+        if raw.get("parent_record_id"):
+            # Started by another recorded run, whose command replays it.
             continue
         records.append(raw)
 

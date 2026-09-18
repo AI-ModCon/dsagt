@@ -104,3 +104,10 @@ def test_claude_setup_writes_the_hook_once_and_keeps_user_hooks(tmp_path):
         h["command"] for e in written["hooks"]["PreToolUse"] for h in e["hooks"]
     ]
     assert commands == ["mine", "uv run dsagt-bash-guard"]
+
+
+def test_a_quoted_string_with_an_operator_stays_one_segment():
+    command = "python3 -c 'import pandas as pd; print(pd.read_csv(\"data/x.csv\").shape)' && echo done"
+    assert bare_python_call(command) == (
+        "python3 -c 'import pandas as pd; print(pd.read_csv(\"data/x.csv\").shape)'"
+    )

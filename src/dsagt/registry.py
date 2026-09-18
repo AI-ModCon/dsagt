@@ -144,8 +144,10 @@ def _generate_code_body(spec: dict) -> str:
         "Run this registered code with the exact shell command below: copy "
         "it byte-for-byte (the `dsagt-run` prefix writes the execution "
         "record to `trace_archive/` when the process exits, so run it in the "
-        "foreground and wait, however long it takes; never as a background "
-        "task or a background subagent, which end with the turn):\n\n```bash\n",
+        "foreground and wait; a run longer than the shell tool's ceiling goes "
+        "to a subagent you wait for, or is split into calls under it; never a "
+        "background task or a background subagent, which end with the turn):"
+        "\n\n```bash\n",
         f"{spec['executable']} [options]\n",
         "```\n\n",
         f"{spec['description']}\n\n## Parameters\n\n",

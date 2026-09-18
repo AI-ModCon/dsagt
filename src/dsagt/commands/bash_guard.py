@@ -24,14 +24,34 @@ _PYTHON = re.compile(r"^\s*(?:\w+=\S*\s+)*(?:uv\s+run\s+)?python3?(?=\s|$)")
 _ALLOWED = re.compile(r"python3?\s+(?:-m\s+pytest|-m\s+pip|--version|--help)\b")
 
 
+def _segments(command: str) -> list[str]:
+    """The parts of a shell line between ``;``, ``&&``, ``||`` and ``|``,
+    with quoted strings kept whole, so a ``python -c '...; ...'`` is one
+    segment and the form the refusal suggests is the whole call."""
+    import shlex
+
+    lexer = shlex.shlex(command, posix=False, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    segments: list[list[str]] = [[]]
+    try:
+        for token in lexer:
+            if token in (";", "&&", "||", "|", "&", ";;"):
+                segments.append([])
+            else:
+                segments[-1].append(token)
+    except ValueError:
+        # An unbalanced quote: one segment, judged as a whole.
+        return [command]
+    return [" ".join(seg) for seg in segments if seg]
+
+
 def bare_python_call(command: str) -> str | None:
     """The segment of *command* that runs python outside ``dsagt-run``, or ``None``.
 
-    Segments are the parts of a shell line between ``;``, ``&&``, ``||`` and
-    ``|``; a segment whose python is preceded by ``dsagt-run`` on the same
-    segment is the recorded form and passes.
+    A segment whose python is preceded by ``dsagt-run`` on the same segment
+    is the recorded form and passes.
     """
-    for segment in re.split(r"\s*(?:;|&&|\|\||\|)\s*", command):
+    for segment in _segments(command):
         if "dsagt-run" in segment:
             continue
         if not _PYTHON.search(segment):
