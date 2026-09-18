@@ -155,26 +155,6 @@ class TestWriteRecord:
         assert data["code_name"] == "fastp"
         assert data["execution"]["return_code"] == 0
 
-    def test_record_is_valid_json(self, tmp_path):
-        record = {
-            "record_id": "x",
-            "code_name": "t",
-            "session_id": None,
-            "execution": {
-                "exact_command": ["echo"],
-                "return_code": 0,
-                "stdout": "",
-                "stderr": "",
-                "timestamp_start": "",
-                "timestamp_end": "",
-                "input_files": [],
-                "output_files": [],
-            },
-        }
-        path = _write_record(record, tmp_path)
-        # Should parse without error
-        json.loads(path.read_text())
-
 
 # ---------------------------------------------------------------------------
 # run_and_record
