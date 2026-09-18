@@ -77,6 +77,10 @@ tar xf microbial_isolates_reads.tar -C "$PROJ" --strip-components=1
 cp use_cases/microbial_isolates/docs/*.md "$PROJ/docs/"
 ```
 
+The data bundle's README carries an older megahit parameter note (`-t 2`, a
+fractional memory cap); the best-practices document under `docs/` is the one to
+follow.
+
 ### 4. Start the session
 
 ```bash
@@ -134,6 +138,9 @@ in `trace_archive/` when it exits; an assembly takes two to four minutes.
 Let's run this same pipeline on the rest of the fastq files at data/microbial_isolate/
 ```
 
+Processing the remaining ten samples takes 30 to 40 minutes on a laptop; the agent runs
+them to completion before replying.
+
 ### 5. Generate datacard
 
 ```text
@@ -142,7 +149,7 @@ data/assemblies/. Take the values from the data and the reports, and note anythi
 rather than asking.
 ```
 
-`datacard-generator` is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search.
+`datacard-generator` is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search. Level 1 means discoverability only: the card sets `supports_discoverability` and no other capability flag.
 
 ### 6. Reconstruct pipeline
 
@@ -150,7 +157,8 @@ rather than asking.
 Reconstruct the pipeline from the execution records as a bash script.
 ```
 
-The agent calls `reconstruct_pipeline` to generate a reproducible script from the trace archive.
+The agent calls `reconstruct_pipeline` with an `output` path under the project, and the tool
+renders the `trace_archive/` records as a bash script in the order they ran and saves it there.
 
 ### 7. Review the project artifacts
 
@@ -159,9 +167,9 @@ Show me the contents of my project folder in a tree format, with the artifacts d
 ```
 
 **Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
-installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
-with a line on what each is.
+`trace_archive/`, the reports in `audit/`, the registered codes and installed skills under
+`skills/`, the trace store `mlflow.db`, the reconstructed script, and the session's outputs,
+with a line on what each is. The reply may summarize a tree printed by a command.
 
 ## Post-Conditions
 
@@ -171,7 +179,7 @@ with a line on what each is.
    - the trimmed R1 and R2 FASTQ files are under `data/processed/<sample>/`
    - the `fastp` HTML and JSON reports are beside them
    - `data/assemblies/<sample>/final.contigs.fa` exists
-4. A Level 1 datacard exists for the processed dataset.
+4. A Level 1 datacard exists for the processed dataset and validates with the registered `datacard-validate` code with no findings.
 5. A reconstructed pipeline script (bash or Snakemake) is available.
 6. Code execution records in `trace_archive/` document the full provenance chain.
 7. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history. View with `dsagt traces isolate-pipeline`.

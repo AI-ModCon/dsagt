@@ -30,7 +30,7 @@ Required pattern for any new CLI code wrapping these functions:
       from the file rather than capturing stdout.
 
 Functions that ARE affected:
-    `compute_flux_average_profiles`, `compute_q95`, `compute_miller_geometry`,
+    `compute_flux_average_profiles`, `compute_miller_geometry`,
     `compute_perturbed_fields`, `compute_poloidal_spectrum`, `compute_standard_spectra`
     `evaluate_field_on_grid`
 
@@ -40,9 +40,18 @@ Functions NOT affected (h5py / numpy only — no compiled stdout writes):
     `compute_ke_growth_trace`, `compute_growth_rate`, `compute_q95`
 
 Every function above becomes its own code, including `compute_q95`: q95 is
-obtained by passing the `q` profile written by the `compute_flux_average_profiles`
-code to the `compute_q95` code, never by reading the profile and estimating it.
-Pass `case_dir` as an absolute path.
+obtained by passing the `q` entry of the JSON file the `compute_flux_average_profiles`
+code wrote (`{"psi_norm": [...], "profile": [...]}`, layout in
+`references/m3dc1_tools_api.md`) to the `compute_q95` code, never by reading the
+profile and estimating it. Pass `case_dir` as an absolute path.
+
+The same rule holds for `m3dc1_plots.py`: every public plotting function in
+`references/m3dc1_plots_api.md` becomes its own code, and a plot is made by
+running that code, never by importing the module from a script. A request for
+plots of fields at a time index uses the `plot_field` code (a field or a
+component of one at a snapshot) and the `plot_perturbed_field_map` code (the
+difference between a snapshot and the equilibrium). Plot codes take an
+`--output` path with `role: output` so the record names the PNG.
 
 
 ## When to use these codes
@@ -61,7 +70,7 @@ M3D-C1 stores fields using the coefficients of the basis functions rather than t
 
 ## Where to store products
 
-Unless explicitly requested by the user, products you create (e.g. plots or new files containing repacked or processed data) should be placed in the active dsagt project directory or its subdirectories. In particular, do not place any new files in the data directory in which the source M3D-C1 data files are located unless requested by the user. By default, place plots in a `plots/` subdirectory and new files containing data in a `processed_data/` subdirectory, creating them if necessary. 
+Unless explicitly requested by the user, products you create (e.g. plots or new files containing repacked or processed data) should be placed in the active dsagt project directory or its subdirectories. In particular, do not place any new files in the data directory in which the source M3D-C1 data files are located unless requested by the user. By default, place plots in a `plots/` subdirectory and new files containing data in a `processed_data/` subdirectory. A code creates the directory of its output path (`Path(output).parent.mkdir(parents=True, exist_ok=True)`) before writing, so the first write into a new location succeeds without a shell `mkdir` outside the record.
 
 If the user expresses a preference for new file locations attempt to maintain consistency with this choice for the remainder of the session unless new instructions are given; for example, if the user asks for a plot to go in a `new_images/` directory place subsequent plots in the same directory unless directed otherwise. If the user's intentions are unclear (e.g. plots have been placed in more the one directory in the same session) ask for clarification before proceeding.
 

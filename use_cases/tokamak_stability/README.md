@@ -77,14 +77,16 @@ cp -r use_cases/tokamak_stability/scripts "$PROJ/scripts"     # the modules, the
 cp -r use_cases/tokamak_stability/skills/m3dc1-skill "$PROJ/skills/"
 export PYTHONPATH=$PROJ/scripts:$PYTHONPATH
 export M3DC1_DATA_DIR=$PROJ/data/m3dc1_data
-python -m pytest "$PROJ/scripts/tests" -q      # all 91 pass with fusion-io and the data in place; several minutes
+python -m pytest "$PROJ/scripts/tests" -q -p no:cacheprovider   # all 91 pass with fusion-io and the data in place; several minutes
 dsagt start tokamak-stability                  # mirrors the skill into the agent's native skills dir
 ```
 
 The tarball is also available from [OSF](https://osf.io/gak3v/files/). The
 integration tests need fusion-io and the data directory named by
 `M3DC1_DATA_DIR`; failures naming `fpy` or `write_neo_input` mean the
-fusion-io install is not on the path. `dsagt start` mirrors the copied skill
+fusion-io install is not on the path. The tests write `__pycache__` directories
+under `scripts/`; `-p no:cacheprovider` keeps `.pytest_cache` out of the
+current directory. `dsagt start` mirrors the copied skill
 into the agent's native skills directory; if you start the agent directly
 instead, run `dsagt init` on the project once more first.
 
@@ -127,13 +129,15 @@ What are the Miller parameters for this configuration?
 ```
 
 ```text
-What's the safety factor?
+What's the safety factor profile: q on axis, q95, and q at the edge?
 ```
 
 **Expect:** the agent runs the Miller-geometry and q-profile codes and reports
-the parameters and q95: R0 1.819 m, a 0.559 m, κ 1.589, δ 0.299; q0 1.10,
-q95 5.03, q_edge 6.72. q95 comes from the `compute_q95` code applied to the
-profile, not from reading the profile by eye.
+the parameters and the three q values: R0 1.819 m, a 0.559 m, κ 1.589, δ 0.299;
+q0 1.10, q95 5.03, q_edge 6.72. q95 comes from the `compute_q95` code applied
+to the `q` entry the `compute_flux_average_profiles` code wrote; the profile
+value at the grid point nearest 0.95 is 5.05, which is what reading the profile
+by eye gives.
 
 ### 4. Field plots
 
@@ -143,13 +147,19 @@ current density, and the perturbations of the density and magnetic flux.
 ```
 
 **Expect:** PNG files under `plots/`, produced by evaluating the fields on a
-grid rather than plotting raw coefficients (the skill says which the user means).
+grid rather than plotting raw coefficients (the skill says which the user means),
+through the registered `plot_field` and `plot_perturbed_field_map` codes, one
+record per plot.
 
 ### 5. Spectra and energy trace
 
 ```text
 Create plots of the standard poloidal spectra and the kinetic energy trace.
 ```
+
+**Expect:** two PNG files under `plots/`, `standard_spectra_t1.png` from the
+standard-spectra plot code and `kinetic_energy.png` from the kinetic-energy
+plot code, each with a record.
 
 ### 6. Repackage secondary data products
 
@@ -177,20 +187,23 @@ variable at the top so it can be rerun on other M3D-C1 datasets.
 ```
 
 **Expect:** `reconstruct_pipeline` renders the `trace_archive/` records in the
-order they ran, including any run that failed; the agent's only edit is the
-variable. The skill asks the agent to check your default shell first, since the
-fusion-io environment variables may be set only in that shell's startup files.
+order they ran, including any run that failed, and saves the script at the path
+given; the agent's only edit is the variable. The script starts by creating the
+directories the recorded outputs go to (`plots/`, `processed_data/tmp/`), so it
+runs on a fresh copy of the project. The skill asks the agent to check your
+default shell first, since the fusion-io environment variables may be set only
+in that shell's startup files.
 
 ### 8. Review the project artifacts
 
 ```text
-Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+Reply with a tree listing of my project folder, with the artifacts dsagt recorded during this session marked and one line on what each marked item is.
 ```
 
-**Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
-installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
-with a line on what each is.
+**Expect:** a tree of the project directory in the reply that marks the execution
+records in `trace_archive/`, the reports in `audit/`, the registered codes and
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's
+outputs, with a line on what each is.
 
 ## Post-Conditions
 

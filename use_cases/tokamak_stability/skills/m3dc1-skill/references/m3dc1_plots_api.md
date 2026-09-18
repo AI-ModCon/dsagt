@@ -10,7 +10,10 @@ headless-safe.
 ## Architecture
 
 Functions are divided into two categories and one layer of convenience wrappers,
-all clearly labelled with section headers in the source file.
+all clearly labelled with section headers in the source file. Each public
+function is registered as its own code, and plots are made by running the code;
+field plots at a time index use the `plot_field` code, perturbation maps the
+`plot_perturbed_field_map` code.
 
 ### Category A — Pure matplotlib
 

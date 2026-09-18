@@ -221,6 +221,15 @@ profiles = compute_flux_average_profiles("m3dc1_data")
 psin, q = profiles["q"]   # safety factor profile vs psi_norm
 ```
 
+The code wrapping this function writes its `--output-json` file as one object
+per field, keyed by field name, each with the two arrays as lists:
+
+```json
+{"q": {"psi_norm": [0.0, 0.005, ...], "profile": [1.10, 1.10, ...]}, "p": {...}}
+```
+
+The `compute_q95` code reads the `q` entry of this file.
+
 ---
 
 ### `compute_q95(psin, q_profile)`
@@ -238,6 +247,11 @@ Returns `float`. Returns `nan` if the profile does not reach psi_norm = 0.95.
 psin, q = profiles["q"]
 q95 = compute_q95(psin, q)   # → e.g. 3.2
 ```
+
+The code wrapping this function takes the `--output-json` file the
+`compute_flux_average_profiles` code wrote (its `q` entry,
+`{"psi_norm": [...], "profile": [...]}`) as its input, so the two codes chain
+with no reshaping between them.
 
 ---
 
