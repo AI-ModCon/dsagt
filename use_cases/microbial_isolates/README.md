@@ -109,27 +109,42 @@ I have an isolate file at data/microbial_isolate/53162.2.609630.AAAGGCTAGA-GATTC
 Information about the dataset is in the README in that directory. I need to preprocess this file and assemble it.
 Follow docs/genomics.md for the processing pipeline and docs/fastp_megahit_best_practices.md for parameter choices.
 fastp and megahit both have data assessment capability so we don't need to create additional codes.
-megahit should be run with kmax=21 and memory=0.3 to avoid OOM on this laptop.
+megahit should be run with kmax=21 and a 3 GB memory cap to avoid OOM on this laptop.
+Write the trimmed reads and the fastp reports to data/processed/<sample>/ and the assembly to
+data/assemblies/<sample>/.
 Tell me your plan before proceeding.
 ```
 
-### 3. Process remaining samples
+The reads are interleaved paired-end files with adapters already removed, and the
+best-practices document gives the `fastp --interleaved_in` form and `megahit -t 1 --no-hw-accel`
+for this machine; a plan that follows the document uses both.
+
+### 3. Approve the plan and process the sample
+
+```text
+Go ahead and process that sample.
+```
+
+Each fastp and megahit run is a registered-code execution, run in the foreground and recorded
+in `trace_archive/` when it exits; an assembly takes two to four minutes.
+
+### 4. Process remaining samples
 
 ```text
 Let's run this same pipeline on the rest of the fastq files at data/microbial_isolate/
-We can process them one at a time.
 ```
 
-### 4. Generate datacard
+### 5. Generate datacard
 
 ```text
-Use the datacard-generator skill to write a Level 1 datacard for our processed data. Take the
-values from the data and the reports, and note anything unknown rather than asking.
+Use the datacard-generator skill to write a Level 1 datacard for the assembled data under
+data/assemblies/. Take the values from the data and the reports, and note anything unknown
+rather than asking.
 ```
 
 `datacard-generator` is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search.
 
-### 5. Reconstruct pipeline
+### 6. Reconstruct pipeline
 
 ```text
 Reconstruct the pipeline from the execution records as a bash script.
@@ -140,17 +155,17 @@ The agent calls `reconstruct_pipeline` to generate a reproducible script from th
 ## Post-Conditions
 
 1. Code registry includes `fastp` and `megahit` code specs (wrapped with `dsagt-run`).
-2. Processed output directories exist for each isolate sample.
+2. `data/processed/<sample>/` and `data/assemblies/<sample>/` exist for each isolate sample.
 3. For each completed sample:
-   - Preprocessed FASTQ output exists
-   - `fastp` HTML and JSON reports exist
-   - Assembly output exists, including `final.contigs.fa`
+   - the trimmed R1 and R2 FASTQ files are under `data/processed/<sample>/`
+   - the `fastp` HTML and JSON reports are beside them
+   - `data/assemblies/<sample>/final.contigs.fa` exists
 4. A Level 1 datacard exists for the processed dataset.
 5. A reconstructed pipeline script (bash or Snakemake) is available.
 6. Code execution records in `trace_archive/` document the full provenance chain.
 7. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history. View with `dsagt traces isolate-pipeline`.
 
-`megahit` may intermittently fail with segmentation faults on some files/hardware settings. If this occurs, rerun that sample with conservative settings while preserving the required `kmax=21` and laptop-safe memory cap.
+`megahit` segfaults on Apple Silicon with more than one thread; the best-practices document says `-t 1 --no-hw-accel`, and a sample that segfaulted is rerun that way with the same `kmax=21` and memory cap.
 
 ## What This Tests
 
@@ -158,10 +173,11 @@ The agent calls `reconstruct_pipeline` to generate a reproducible script from th
 |------------------|-------|
 | Registering external binaries as codes | 1 |
 | Registry search | 1 |
-| Pipeline planning from best-practice documents, confirmed with the user | 2 |
-| Code execution with provenance across many samples | 2, 3 |
-| Base-skill use (`datacard-generator`) | 4 |
-| Pipeline reconstruction | 5 |
+| Pipeline planning from best-practice documents, confirmed with the user | 2, 3 |
+| Code execution with provenance across many samples | 3, 4 |
+| Base-skill use (`datacard-generator`) | 5 |
+| Pipeline reconstruction | 6 |
+| Review of the session's artifacts | 7 |
 
 ## Cleanup
 

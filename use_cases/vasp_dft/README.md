@@ -29,7 +29,8 @@ through both of DSAgt's extension mechanisms:
    `trace_archive/` and can be reconstructed. A reference record is the oracle.
 
 Both parts use real `pymatgen.io.vasp` parsing. The slab data is a mock: valid
-VASP format with the OUTCAR reduced to the lines pymatgen reads. The NEB data is
+VASP format, with an OUTCAR whose header comes from a real run and whose body
+keeps the first and last ionic steps. The NEB data is
 a fixture from the pymatgen test suite. Reference outputs for both
 (`expected_isaac_record.json` for the slab, `isaac_neb_record.json` for the NEB)
 come with the data, so the agent's records can be checked.
@@ -56,10 +57,9 @@ Folder contents:
 dsagt init
 ```
 
-At the menu, name the project `isaac-vasp`, pick your agent, and **uncheck every
-skill source** at the skill-sources checkbox, so the project starts with no external
-catalog synced — the walkthrough has the agent discover, sync, and search one from
-inside the session. Then:
+At the menu, name the project `isaac-vasp`, pick your agent, and keep the defaults:
+`genesis` is the default skill source, and the walkthrough has the agent discover, sync,
+and search a second one from inside the session. Then:
 
 ```bash
 PROJ=~/dsagt-projects/isaac-vasp
@@ -96,10 +96,11 @@ Where can I get more skills from? List the skill sources you can pull from and w
 ```
 
 **Expect:** `list_skill_sources` → the known sources (`k-dense-ai`, `anthropic`,
-`antigravity`, `composio`, `genesis`) with URLs, each flagged available but not
-synced. The catalog cache under `~/dsagt-projects/.skill_sources/` is shared
-across projects, so a source another project has already cloned shows as
-synced here, and step 3 becomes a refresh.
+`antigravity`, `composio`, `genesis`) with URLs; `genesis` is synced (the default
+source) and the rest are available but not synced. Synced means indexed into this
+project's knowledge base, so a source another project has cloned still shows as
+not synced here, and step 3 indexes it from the shared clone under
+`~/dsagt-projects/.skill_sources/`.
 
 ### 3. Sync a source
 
@@ -147,6 +148,8 @@ Invoke the vasp-to-isaac skill on data/mock_slab/ and write the result to audit/
 `audit/mock_slab_isaac.json` with the key fields pymatgen extracted — final
 energy ≈ -132.8421 eV (`Outcar.final_energy`), 12 atoms (`Poscar`), ENCUT 520 /
 NSW 50 (`Incar`), total mag ≈ 8.0123 (`Outcar.total_mag`) — matching the reference.
+The reference's `ionic_steps` is NSW from the INCAR: the mock OUTCAR keeps only the
+first and last of the 50 steps.
 
 ### 7. Extend the skill to NEB calculations and register the converter
 
@@ -174,7 +177,8 @@ and write the record to data/neb_record.json.
 Compare it against data/isaac_neb_record.json: report differences in structure
 and in the computation and measurement blocks, fix the converter, and rerun the
 registered code until they agree on the method, image count, reaction, and
-energy series.
+energy series. The reaction is Fe(lattice) → Fe(vacancy site); the OUTCARs do
+not state it, so pass it to the converter.
 ```
 
 **Expect:** `dsagt-run --code vasp-neb-to-isaac -- ...` runs land in
@@ -197,6 +201,9 @@ hold it to them.
 Reconstruct the pipeline from the execution records as a bash script and save it as
 pipeline.sh.
 ```
+
+**Expect:** the script holds every recorded run of the NEB converter, including
+the attempts that failed the comparison, in the order they ran.
 
 ## Post-Conditions
 
@@ -221,11 +228,11 @@ ls "$PROJ/audit/" "$PROJ/trace_archive/"
    matches the ISAAC shape and values.
 5. The `vasp-to-isaac` skill has a second script, `vasp_neb_to_isaac.py`, and
    the code registry contains the `vasp-neb-to-isaac` spec.
-6. `data/neb_record.json` has the structure of the reference `data/isaac_neb_record.json`,
-   and its energies and series values in the computation and measurement blocks equal the
-   reference's (free-text fields such as notes may differ); `trace_archive/` holds every
-   conversion attempt, including any that failed the comparison.
-7. `pipeline.sh` replays the conversion.
+6. `data/neb_record.json` has the structure of the reference `data/isaac_neb_record.json`
+   and agrees with it on the method, the image count, the reaction, and the energy series
+   (other fields, such as notes and the method's sub-fields, may differ); `trace_archive/`
+   holds every NEB conversion attempt, including any that failed the comparison.
+7. `pipeline.sh` replays every recorded NEB conversion.
 8. MLflow traces (in the serverless `mlflow.db` store) capture the session —
    `dsagt traces isaac-vasp`.
 
@@ -242,12 +249,12 @@ ls "$PROJ/audit/" "$PROJ/trace_archive/"
 | Code registration (`save_code_spec`) and registry search | 7 |
 | Code execution with provenance through `dsagt-run`, iterated against a reference | 8 |
 | Pipeline reconstruction | 9 |
+| Review of the session's artifacts | 10 |
 
 ## Cleanup
 
 ```bash
 dsagt rm isaac-vasp -y
-rm neb_fixture.tar.gz slab_fixture.tar.gz
 ```
 
 The shared catalog cache is stored at `~/dsagt-projects/.skill_sources/` and is
@@ -256,10 +263,11 @@ reused across projects; delete it to force a fresh clone.
 ## Notes
 
 - `mock_slab/` is not real DFT output, but it is valid VASP format: the
-  INCAR/POSCAR parse cleanly, and the OUTCAR keeps exactly the lines pymatgen's
-  `Outcar` reads (TOTEN, `energy(sigma->0)`, magnetization, the force block) while
-  omitting the SCF/eigenvalue blocks. There is no `vasprun.xml`, so the converter
-  takes energy/forces from the OUTCAR.
+  INCAR/POSCAR parse cleanly, and the OUTCAR's header (dimensions, plane-wave
+  table) is copied from a real VASP 5 run so pymatgen's `Outcar` parses it,
+  while its body keeps only the first and last ionic steps (TOTEN,
+  `energy(sigma->0)`, magnetization, the force block). There is no
+  `vasprun.xml`, so the converter takes energy/forces from the OUTCAR.
 - The `neb/` OUTCARs are public pymatgen test fixtures.
   [`reference/vasp_neb_to_isaac.py`](reference/vasp_neb_to_isaac.py) is a
   converter that produces the reference record; compare the agent's converter

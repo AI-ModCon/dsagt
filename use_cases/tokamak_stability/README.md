@@ -52,7 +52,8 @@ Sanchez-Villar (PPPL). The session below has been tested with Claude Code.
   script names whatever is missing and stops. It installs under
   `~/dsagt-projects/.tools/tokamak_stability/fusion-io/` and prints the
   `FIO_INSTALL_DIR`, `PATH`, `PYTHONPATH`, and library-path exports to add to
-  your shell before starting the session.
+  your shell before starting the session. The build is bound to the Python
+  that ran the script; after switching to another Python, run the script again.
 
 
 ## Setup
@@ -76,14 +77,16 @@ cp -r use_cases/tokamak_stability/scripts "$PROJ/scripts"     # the modules, the
 cp -r use_cases/tokamak_stability/skills/m3dc1-skill "$PROJ/skills/"
 export PYTHONPATH=$PROJ/scripts:$PYTHONPATH
 export M3DC1_DATA_DIR=$PROJ/data/m3dc1_data
-python -m pytest "$PROJ/scripts/tests" -q      # all 91 pass with fusion-io and the data in place
+python -m pytest "$PROJ/scripts/tests" -q      # all 91 pass with fusion-io and the data in place; several minutes
 dsagt start tokamak-stability                  # mirrors the skill into the agent's native skills dir
 ```
 
 The tarball is also available from [OSF](https://osf.io/gak3v/files/). The
 integration tests need fusion-io and the data directory named by
 `M3DC1_DATA_DIR`; failures naming `fpy` or `write_neo_input` mean the
-fusion-io install is not on the path.
+fusion-io install is not on the path. `dsagt start` mirrors the copied skill
+into the agent's native skills directory; if you start the agent directly
+instead, run `dsagt init` on the project once more first.
 
 ## Execution
 
@@ -128,7 +131,9 @@ What's the safety factor?
 ```
 
 **Expect:** the agent runs the Miller-geometry and q-profile codes and reports
-the parameters and q95.
+the parameters and q95: R0 1.819 m, a 0.559 m, κ 1.589, δ 0.299; q0 1.10,
+q95 5.03, q_edge 6.72. q95 comes from the `compute_q95` code applied to the
+profile, not from reading the profile by eye.
 
 ### 4. Field plots
 
@@ -166,15 +171,15 @@ values rather than basis coefficients.
 ### 7. Reconstruct the session as a rerunnable script
 
 ```text
-Reconstruct the pipeline from the execution records as a bash script, with the
-data directory set as a variable at the top so it can be rerun on other M3D-C1
-datasets. Save it as dsagt_session_script.sh.
+Reconstruct the pipeline from the execution records as a bash script and save
+it as dsagt_session_script.sh. Then change only the data-directory path into a
+variable at the top so it can be rerun on other M3D-C1 datasets.
 ```
 
-**Expect:** `reconstruct_pipeline` renders the `trace_archive/` records in
-dependency order. The skill asks the agent to check your default shell first,
-since the fusion-io environment variables may be set only in that shell's
-startup files.
+**Expect:** `reconstruct_pipeline` renders the `trace_archive/` records in the
+order they ran, including any run that failed; the agent's only edit is the
+variable. The skill asks the agent to check your default shell first, since the
+fusion-io environment variables may be set only in that shell's startup files.
 
 ## Post-Conditions
 
@@ -200,6 +205,7 @@ startup files.
 | Handling codes whose stdout is unusable (file-based JSON results) | 1, 3 |
 | Plot and data-product generation into project subdirectories | 4–6 |
 | Pipeline reconstruction with a parameterized input | 7 |
+| Review of the session's artifacts | 8 |
 
 ## Cleanup
 
