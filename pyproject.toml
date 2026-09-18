@@ -43,6 +43,7 @@ dependencies = [
 [project.scripts]
 dsagt = "dsagt.commands.cli:main"
 dsagt-run = "dsagt.commands.run_code:main"
+dsagt-bash-guard = "dsagt.commands.bash_guard:main"   # the Claude Code PreToolUse hook
 dsagt-server = "dsagt.mcp.server:main"
 
 # Loaded by MLflow itself in every process of this environment; see

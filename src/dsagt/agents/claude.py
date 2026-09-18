@@ -32,6 +32,41 @@ from .base import (
     _run_simple_script,
 )
 
+#: The PreToolUse hook entry dsagt owns in ``.claude/settings.json``; the
+#: command is the console script, so an upgrade changes the guard without
+#: touching the project.
+_BASH_GUARD_HOOK = {
+    "matcher": "Bash",
+    "hooks": [{"type": "command", "command": "uv run dsagt-bash-guard"}],
+}
+
+
+def _write_bash_guard_hook(working_dir: Path) -> list[str]:
+    """Add the bash guard to the project's Claude Code settings, once.
+
+    ``.claude/settings.json`` is shared with the user's own settings, so the
+    file is read and only the dsagt hook entry is added; an entry already
+    present is left alone, and a user's other hooks are kept.  The guard
+    refuses a bare ``python`` call from the Bash tool with the recorded form
+    to use instead (``dsagt-bash-guard``).
+    """
+    settings_path = working_dir / ".claude" / "settings.json"
+    settings: dict = {}
+    if settings_path.exists():
+        settings = json.loads(settings_path.read_text() or "{}")
+    hooks = settings.setdefault("hooks", {})
+    pre = hooks.setdefault("PreToolUse", [])
+    if any(
+        h.get("command") == _BASH_GUARD_HOOK["hooks"][0]["command"]
+        for entry in pre
+        for h in entry.get("hooks", [])
+    ):
+        return []
+    pre.append(_BASH_GUARD_HOOK)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    return [f"Wrote the bash guard hook into {settings_path}"]
+
 
 class ClaudeSetup(AgentSetup):
     name = "claude"
@@ -90,6 +125,7 @@ class ClaudeSetup(AgentSetup):
         mcp_path = working_dir / ".mcp.json"
         mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
         actions.append(f"Wrote {mcp_path}")
+        actions.extend(_write_bash_guard_hook(working_dir))
 
         # Skills are mirrored into .claude/skills/ centrally via
         # AgentSetup.setup_skills (driven by native_skills_dir) in

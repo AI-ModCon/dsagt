@@ -1330,9 +1330,12 @@ class TestClaudeSetup:
         )
 
         assert (tmp_path / ".mcp.json").exists()
-        # No autolog: no Stop hook, no .claude/settings.json.
+        # No autolog Stop hook: the traces come from the transcript.  The one
+        # hook dsagt writes is the bash guard.
         assert not any("autolog" in a.lower() for a in actions)
-        assert not (tmp_path / ".claude" / "settings.json").exists()
+        settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+        assert [m["matcher"] for m in settings["hooks"]["PreToolUse"]] == ["Bash"]
+        assert "Stop" not in settings["hooks"]
 
 
 class TestLoadUserEnv:
