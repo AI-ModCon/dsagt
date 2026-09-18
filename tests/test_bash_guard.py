@@ -116,3 +116,18 @@ def test_a_quoted_string_with_an_operator_stays_one_segment():
 def test_a_shebang_executed_script_is_refused():
     assert bare_python_call("./convert.py data/in.csv") is not None
     assert bare_python_call("scripts/tally.py") is not None
+
+
+def test_a_scratchpad_path_is_refused(monkeypatch, capsys):
+    rc, err = _run(
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "dsagt-run -- python /private/tmp/claude-501/-Users-x/abc/scratchpad/stats.py data/t.csv"
+            },
+        },
+        monkeypatch,
+        capsys,
+    )
+    assert rc == 2
+    assert "outside the project" in err

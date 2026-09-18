@@ -64,6 +64,12 @@ def bare_python_call(command: str) -> str | None:
     return None
 
 
+#: Where Claude Code puts a session's temporary files.  A script written
+#: there is outside the project, so a record naming it replays only on the
+#: machine that ran it while the directory still exists.
+_SCRATCHPAD = re.compile(r"/(?:private/)?tmp/claude-[^\s'\"]*/scratchpad/")
+
+
 def main(argv: list[str] | None = None) -> int:
     del argv
     try:
@@ -73,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
     if payload.get("tool_name") != "Bash":
         return 0
     command = (payload.get("tool_input") or {}).get("command", "")
+    if _SCRATCHPAD.search(command):
+        print(
+            "dsagt: the scratchpad is outside the project, and a run that names a "
+            "file there replays nowhere else. Write the script under "
+            "skills/<name>/scripts/ and run it from the project directory.",
+            file=sys.stderr,
+        )
+        return 2
     segment = bare_python_call(command)
     if segment is None:
         return 0
