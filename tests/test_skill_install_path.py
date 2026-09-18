@@ -284,3 +284,25 @@ class TestWhatIsAScript:
             "Run dsagt-run --code trim-reads-trim -- python skills/trim-reads/scripts/trim.py on the sample"
             in text
         )
+
+
+class TestGuessedWrapperLine:
+
+    def test_a_wrapped_line_under_the_wrong_name_takes_the_stored_command(
+        self, tmp_path, fresh_project
+    ):
+        skill_src = _write_skill(tmp_path / "src")
+        md = skill_src / "SKILL.md"
+        md.write_text(
+            md.read_text()
+            + "\n```bash\ndsagt-run --code trim-reads -- python scripts/trim.py --reads r.fq --out o.fq\n```\n"
+        )
+        project = fresh_project("p")
+        _via_copy(project, skill_src)
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        stored = "dsagt-run --code trim-reads-trim -- python skills/trim-reads/scripts/trim.py"
+        assert f"{stored} --reads r.fq --out o.fq" in text
+        assert "dsagt-run --code trim-reads --" not in text
+        provenance = (project / "skills" / "trim-reads" / "PROVENANCE.txt").read_text()
+        # Only the pairs that changed a line are on record, not all eight.
+        assert provenance.count("rewritten by dsagt") == 2

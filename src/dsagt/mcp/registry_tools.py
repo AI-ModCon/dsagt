@@ -71,6 +71,28 @@ def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _code_for_same_script(registry: CodeRegistry, spec: dict) -> dict | None:
+    """A registered code, under another name, whose executable runs the same
+    script file as *spec*; a skill's scripts are registered when the skill
+    is saved, and a second registration of one script gives two codes."""
+    import shlex
+
+    def script_of(executable: str) -> str | None:
+        tokens = shlex.split(executable.split(" -- ")[-1]) if executable else []
+        return next((t for t in tokens if t.endswith((".py", ".sh"))), None)
+
+    target = script_of(spec.get("executable", ""))
+    if target is None:
+        return None
+    for code in registry.list_codes_raw():
+        if (
+            code.get("name") != spec.get("name")
+            and script_of(code.get("executable", "")) == target
+        ):
+            return code
+    return None
+
+
 async def _handle_save_code_spec(
     arguments: dict,
     *,
@@ -89,6 +111,13 @@ async def _handle_save_code_spec(
         obs.set("n_dependencies", len(spec.get("dependencies") or []))
         obs.set("n_tags", len(spec.get("tags") or []))
         try:
+            existing = _code_for_same_script(registry, spec)
+            if existing is not None:
+                return (
+                    f"'{spec['name']}' was not saved: {existing['name']} already "
+                    f"runs {spec.get('executable', '')!r}. Run it as: "
+                    f"{existing['executable']}"
+                )
             action = registry.save_tool(spec)
         except (KeyError, ValueError, OSError) as e:
             obs.event("save_tool_failed", error=str(e)[:256])
