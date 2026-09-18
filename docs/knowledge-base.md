@@ -1,6 +1,6 @@
 # Knowledge Base
 
-The knowledge base is DSAgt's catalog of **domain knowledge** — reference corpora and your own documents — that the agent searches to ground its work on scientific data-processing and AI-readiness evaluation.
+The knowledge base is DSAgt's catalog of domain knowledge, reference corpora and your own documents, that the agent searches to ground its work on scientific data processing and AI-readiness evaluation.
 
 ![DSAgt knowledge base](assets/knowledge-base.png)
 
@@ -38,7 +38,7 @@ dsagt init            # name it `demo`, and check `nemo_curator` at the knowledg
 dsagt start demo
 ```
 
-Then, in the agent — substituting `<your-docs-folder>` with any folder of your
+Then, in the agent, substituting `<your-docs-folder>` with any folder of your
 own documents (papers, protocols, schemas):
 
 1. > Ingest the docs in `<your-docs-folder>` into a collection named `domain`.

@@ -1,6 +1,6 @@
 # Provenance
 
-DSAgt records data operations as reproducible, auditable steps. The agent registers a **code** — a CLI executable — and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.
+DSAgt records data operations as reproducible, auditable steps. The agent registers a **code**, a CLI executable, and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.
 
 ![DSAgt provenance](assets/provenance.png)
 
@@ -20,7 +20,7 @@ Example code spec (`skills/csv-summary/SKILL.md`):
 ```markdown
 ---
 name: csv-summary
-description: Summarize a CSV — columns, row count, null counts, numeric stats. Use when profiling a tabular dataset.
+description: Summarize a CSV (columns, row count, null counts, numeric stats). Use when profiling a tabular dataset.
 executable: dsagt-run --code csv-summary -- python skills/csv-summary/scripts/csv_summary.py
 parameters:
   file:

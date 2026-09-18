@@ -1,6 +1,6 @@
 # MCP Server
 
-DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.) and launched automatically when the agent starts. It combines four capabilities — a code registry, a [knowledge base](knowledge-base.md), [explicit memory](memory.md), and [skill discovery](skills.md) — behind one process with one shared embedder and one ChromaDB.
+DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, and so on) and launched by the agent when it starts. It combines four capabilities (a code registry, a [knowledge base](knowledge-base.md), [explicit memory](memory.md), and [skill discovery](skills.md)) behind one process with one shared embedder and one ChromaDB.
 
 The 18 tools split across four concerns, all on the one process.
 

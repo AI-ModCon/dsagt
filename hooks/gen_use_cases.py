@@ -6,19 +6,19 @@ Add a use case by dropping a ``README.md`` with YAML frontmatter into
 
     ---
     title: My Use Case
-    domain: Field — short descriptor          # one cell in the overview table
+    domain: Field, short descriptor           # one cell in the overview table
     summary: One or two sentences shown in the overview table and page.
     status: published                         # omit, or 'draft' to hide it
     order: 10                                 # optional sort key (default 100)
     ---
 
-It then appears in the overview table, gets its own docs page, and lands in
-the "Use Cases" nav group — no edits to mkdocs.yml or the docs tree required.
+It then appears in the overview table, gets its own docs page, and is added to
+the "Use Cases" nav group, with mkdocs.yml and the docs tree unchanged.
 
-The README body is the walkthrough and is inlined into the generated page
-rather than linked out to GitHub: its frontmatter and leading ``# Title`` line
+The README body is the walkthrough and is inlined into the generated page, so
+the site reads as one document: its frontmatter and leading ``# Title`` line
 are stripped (the generated page supplies its own), and every relative
-link/image is rewritten — to another use case's generated page when it points
+link/image is rewritten, to another use case's generated page when it points
 at that use case's folder or README, otherwise to a GitHub blob/tree URL, since
 only ``docs/`` itself is served by the built site.
 """
@@ -72,7 +72,7 @@ def _strip_leading_h1(text: str) -> str:
     while i < len(lines) and not lines[i].strip():
         i += 1
     if i >= len(lines) or not _H1_RE.match(lines[i]):
-        return text  # no leading title line — leave the body as-is
+        return text  # no leading title line; the body stays as it is
     i += 1
     while i < len(lines) and not lines[i].strip():
         i += 1
@@ -88,7 +88,7 @@ def _rewrite_link_target(target: str, uc: dict, gh: str, uc_names: set[str]) -> 
     try:
         rel = resolved.relative_to(repo_root)
     except ValueError:
-        return target  # escapes the repo entirely — leave it alone
+        return target  # outside the repository; left as it is
     use_cases_dir = uc["dir"].parent
     if resolved.parent == use_cases_dir and resolved.name in uc_names:
         return f"{resolved.name}.md"  # links at a sibling use case's folder
@@ -140,7 +140,7 @@ def _discover(config) -> list[dict]:
         missing = [k for k in ("title", "domain", "summary") if not fm.get(k)]
         if missing:
             log.warning(
-                "use_cases/%s/README.md missing frontmatter %s — skipped",
+                "use_cases/%s/README.md missing frontmatter %s; skipped",
                 folder.name,
                 missing,
             )

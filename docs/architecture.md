@@ -1,6 +1,6 @@
 # Architecture
 
-<!-- Shared with README.md — edit there, not here. -->
+<!-- Shared with README.md. Edit there, not here. -->
 {%
    include-markdown "../README.md"
    start="<!-- md-shared:architecture:start -->"
@@ -10,7 +10,7 @@
 
 ## Project Layout
 
-<!-- Shared with README.md — edit there, not here. -->
+<!-- Shared with README.md. Edit there, not here. -->
 {%
    include-markdown "../README.md"
    start="<!-- md-shared:project-layout:start -->"

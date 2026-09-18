@@ -32,7 +32,7 @@ The inserted paragraph:
 
 ## Try it
 
-A three-stage pipeline on AIDRIN's own demo dataset — 525 sensor readings with 25 exact
+A three-stage pipeline on AIDRIN's own demo dataset: 525 sensor readings with 25 exact
 duplicates, missing values in every sensor column, and temperature outliers. About ten minutes;
 the only download is a 40 KB CSV.
 
@@ -51,7 +51,7 @@ curl -sL https://raw.githubusercontent.com/idtlab/AIDRIN/develop/demos/messy_sen
 dsagt start assessment-demo
 ```
 
-Then one prompt. Do not mention AIDRIN or checks — the point is what the agent does on its own:
+Then one prompt. Leave AIDRIN and checks out of it; the demo shows what the agent does unprompted:
 
 ```text
 Build a curation pipeline for data/sensors.csv in three steps, one at a time:
@@ -82,4 +82,4 @@ The table lists one record per baseline run (two per stage) and one per operatio
 
 ## Demos
 
-The [cryo-EM curation demo](use-cases/cryoem.md) runs on real scientific data — the check measures the particle-curation step unprompted. The [AIDRIN example](use-cases/aidrin-ai-readiness.md) drives quality, fairness, and privacy metrics on a tabular dataset.
+The [cryo-EM curation demo](use-cases/cryoem.md) runs on real scientific data; the check measures the particle-curation step unprompted. The [AIDRIN example](use-cases/aidrin-ai-readiness.md) drives quality, fairness, and privacy metrics on a tabular dataset.

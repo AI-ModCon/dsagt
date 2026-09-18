@@ -29,7 +29,7 @@ The walkthroughs under `use_cases/` are tutorials for a person. They double as
 end-to-end tests because each README has an Execution section of prompts and a
 Post-Conditions section that states the outcome. `tests/headless_usecases.py`
 sends the prompts through a headless agent and the post-conditions are the
-judgment; the unit and integration suites do not run them.
+judgment; they run only when a person starts them.
 
 ```bash
 dsagt init <name> --agent claude|codex --location ~/dsagt-projects   # then stage data per the README's Setup
@@ -91,7 +91,7 @@ uv run mkdocs build --strict    # what CI runs
 ## Pull requests
 
 - One concern per pull request. A small, focused pull request receives full
-  and timely review; a monolithic refactor invites a cursory one and occludes important changes.
+  and timely review; a large refactor invites a cursory one and hides important changes.
 - Code an agent wrote gets a human review before it merges, the same as any
   other code.
 - Work on a branch off `main`. Describe the intent, not the diff. Update
@@ -145,13 +145,13 @@ state is a tool. Nothing is both.
 
 ## Codebase orientation
 
-The [Architecture](https://ai-modcon.github.io/dsagt/architecture/) page explains in more detail the components of DSAgt — the
+The [Architecture](https://ai-modcon.github.io/dsagt/architecture/) page describes the components of DSAgt: the
 capabilities, the single `dsagt-server` MCP layout, and the observability and
-memory design. `CLAUDE.md` contains helpful information for the human as well as agent developer.
+memory design. `CLAUDE.md` holds the glossary and the invariants, for a human developer as well as an agent.
 
 ## Troubleshooting
 
-**Agent command not found.** The agent CLI isn't installed or isn't on PATH —
+**Agent command not found.** The agent CLI is not installed or is not on PATH;
 see the [supported agents](https://ai-modcon.github.io/dsagt/#supported-agents).
 
 **MCP server not connecting.** Confirm the entry point resolves:
@@ -160,7 +160,7 @@ see the [supported agents](https://ai-modcon.github.io/dsagt/#supported-agents).
 uv run which dsagt-server
 ```
 
-If it's missing, reinstall:
+If it is missing, reinstall:
 `pip install --force-reinstall "git+https://github.com/AI-ModCon/dsagt.git"`.
 
 ## AI/LLM-assisted contributions
@@ -170,7 +170,7 @@ If it's missing, reinstall:
   an AI tool does not transfer that responsibility to the tool.
 - **Understand your work.** Review AI-generated code line by line before
   submitting it. You are responsible for its correctness, security, and scope,
-  and for confirming it doesn't breach copyright.
+  and for confirming it does not breach copyright.
 - **Disclose it.** If AI/LLM tools were used to generate a substantial part of
   a PR, say so in the PR description.
 - **Human review is mandatory.** An LLM review can supplement a human
