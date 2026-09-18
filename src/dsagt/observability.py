@@ -1,38 +1,38 @@
 """
-DSAgt observability — first-party span emission over the serverless MLflow store.
+DSAgt observability: first-party span emission over the MLflow store.
 
-DSAGT writes every trace to one ``sqlite:///<pdir>/mlflow.db`` store (no server).
-TWO emission paths share that one store; they differ because MLflow's API forces
-it, not by accident:
+DSAGT writes every trace to one store, ``sqlite:///<pdir>/mlflow.db`` by
+default.  Two emission paths share that one store, because MLflow's API
+separates them:
 
-  * LIVE tracer (``mlflow.start_span``) — first-party DSAGT spans emitted *as the
-    MCP server / dsagt-run runs*.  Uses MLflow's active-span context for
-    auto-nesting and the ``obs`` proxy.  Each trace's root is tagged
-    ``dsagt.source`` with the MCP tool *category* the agent invoked
-    (memory / skill / knowledge / registry), or ``execution`` for dsagt-run —
-    set at the dispatch boundary, so the UI can filter this *debugging* view
-    apart from agent traces and bucket it by concern.
-  * REPLAY sink (``MLflowSink`` → ``mlflow.start_span_no_context``) — a finished
-    agent ``traces.Trace`` backfilled after the fact with the transcript's
-    original timestamps.  ``start_span`` cannot backdate (it has no
-    ``start_time_ns`` param), so replay *must* use ``start_span_no_context``;
-    live *should* use ``start_span`` (no_context establishes no active span,
-    which would kill the ``obs`` proxy and auto-nesting).  Hence two paths, one
-    store.
+  * The live tracer (``mlflow.start_span``): first-party DSAGT spans emitted
+    while the MCP server or dsagt-run runs.  Uses MLflow's active-span context
+    for auto-nesting and the ``obs`` proxy.  Each trace's root is tagged
+    ``dsagt.source`` with the MCP tool category the agent invoked
+    (memory / skill / knowledge / registry), or ``execution`` for dsagt-run,
+    set at the dispatch boundary, so the UI can filter this debugging view
+    apart from agent traces and group it by concern.
+  * The replay sink (``MLflowSink``, ``mlflow.start_span_no_context``): a
+    finished agent ``traces.Trace`` written after the fact with the
+    transcript's original timestamps.  ``start_span`` cannot backdate (it has
+    no ``start_time_ns`` parameter), so replay uses ``start_span_no_context``;
+    live uses ``start_span``, because ``start_span_no_context`` establishes no
+    active span, and the ``obs`` proxy and auto-nesting depend on one.
 
-Layout (top → bottom)
----------------------
+Layout (top to bottom)
+----------------------
   setup        find_project_config · resolve_tracking_uri · init_tracing
   live tracer  open_span ─┬─ traced       (decorate a function)
                           ├─ child_span   (open a sub-span)
-                          └─ obs          (annotate the span you're inside)
-               tagging:   open_span(source=…) → _attach_trace_metadata
+                          └─ obs          (annotate the open span)
+               tagging:   open_span(source=…) calls _attach_trace_metadata
                           (dsagt.source set on the trace's root only)
                factories: kb_* · registry_* · code_execute_span
-  replay sink  MLflowSink  (Trace → backdated spans; a traces.TraceCollector consumer)
+  replay sink  MLflowSink  (Trace to backdated spans; a traces.TraceCollector
+                            consumer)
 
-``traced`` and ``child_span`` *open* a span; ``obs`` *annotates* whichever span
-is currently open.  All three no-op when tracing was never initialized, so
+``traced`` and ``child_span`` open a span; ``obs`` annotates whichever span is
+currently open.  All three no-op when tracing was never initialized, so
 business code never imports MLflow and never branches on whether tracing is on.
 """
 
@@ -63,22 +63,22 @@ _default_agent: str | None = None
 
 
 # ===========================================================================
-# Setup — where am I, where do I write, wire MLflow up
+# Setup: the project, the store, and the MLflow configuration
 # ===========================================================================
 
 
 def find_project_config() -> tuple[Path | None, dict | None]:
     """Read ``./.dsagt/config.yaml`` from cwd.
 
-    Returns ``(cwd, parsed_config)`` or ``(None, None)`` if cwd isn't a
-    project directory.  No walking — services that need this info run
-    with cwd == project_dir by contract; if cwd is anywhere else the
-    caller is misconfigured and we fail fast.
+    Returns ``(cwd, parsed_config)``, or ``(None, None)`` when cwd is not a
+    project directory.  Only cwd is checked: services that need this run
+    with cwd equal to the project directory by contract, so any other cwd is
+    a misconfigured caller and fails at once.
 
-    Project name → project_dir for arbitrary-cwd lookups (e.g., the
-    user CLI typing ``dsagt info <name>``) is the registry's job
-    (``~/dsagt-projects/projects.yaml``, see ``session.project_dir``).  This
-    helper is only for services running inside the project.
+    Resolving a project name to its directory from an arbitrary cwd (the
+    user CLI's ``dsagt info <name>``) is the registry's job
+    (``~/dsagt-projects/projects.yaml``, ``session.project_dir``).  This
+    helper is for services running inside the project.
     """
     cwd = Path.cwd().resolve()
     candidate = cwd / ".dsagt" / "config.yaml"
@@ -96,26 +96,26 @@ def find_project_config() -> tuple[Path | None, dict | None]:
 def resolve_tracking_uri(config: dict | None) -> str:
     """Compute the MLflow tracking URI for DSAGT self-logging.
 
-    ``MLFLOW_TRACKING_URI`` in the environment wins when set — MLflow's own
-    convention, and the one variable ``agents._mcp_env_block`` already bakes
-    into every per-agent MCP config, so a value exported before ``dsagt init``
+    ``MLFLOW_TRACKING_URI`` in the environment wins when set: MLflow's own
+    convention, and the one variable ``agents._mcp_env_block`` writes into
+    every per-agent MCP config, so a value exported before ``dsagt init``
     reaches the CLI, the MCP server and its ``dsagt-run`` children alike.  That
-    is how a project logs to a shared tracking server instead of its own file.
-    Credentials for such a server (``MLFLOW_TRACKING_TOKEN`` / ``_USERNAME`` /
-    ``_PASSWORD``, or ``MLFLOW_TRACKING_API_KEY`` for an ``X-API-Key`` gateway —
-    see :class:`ApiKeyHeaderProvider`) are read from the shell and are never
+    is how a project logs to a shared tracking server.  Credentials for such a
+    server (``MLFLOW_TRACKING_TOKEN``, ``_USERNAME``, ``_PASSWORD``, or
+    ``MLFLOW_TRACKING_API_KEY`` for an ``X-API-Key`` gateway, see
+    :class:`ApiKeyHeaderProvider`) are read from the shell and are never
     written to disk.
 
-    Otherwise ``sqlite:///<project_dir>/mlflow.db`` — the serverless default.
+    Otherwise ``sqlite:///<project_dir>/mlflow.db``, the serverless default.
     ``project_dir`` comes from the resolved config (injected by
     ``session.load_config``), falling back to cwd for in-project callers.  The
-    MLflow client honors a ``sqlite:`` URI directly (auto-creating + migrating
-    the DB on first use), so self-logging needs no listener and this never has
-    to fail.  SQLite is MLflow's supported serverless backend — the filesystem
-    store (``file:`` / ``./mlruns``) is deprecated as of Feb 2026.  Spans and
-    their metadata go to the sqlite store; MLflow keeps a span's large inputs
-    and outputs, and the model record a trace hangs off, as files under the
-    experiment's artifact location, ``<project>/mlruns/``.
+    MLflow client accepts a ``sqlite:`` URI directly (creating and migrating
+    the database on first use), so self-logging needs no listener.  SQLite is
+    MLflow's supported serverless backend; the filesystem store (``file:``,
+    ``./mlruns``) is deprecated as of Feb 2026.  Spans and their metadata go
+    to the sqlite store; MLflow keeps a span's large inputs and outputs, and
+    the model record a trace is attached to, as files under the experiment's
+    artifact location, ``<project>/mlruns/``.
     """
     uri = os.environ.get("MLFLOW_TRACKING_URI")
     if uri:
@@ -127,18 +127,19 @@ def resolve_tracking_uri(config: dict | None) -> str:
 
 
 class ApiKeyHeaderProvider:
-    """Send ``X-API-Key`` on every MLflow request when ``MLFLOW_TRACKING_API_KEY`` is set.
+    """Send ``X-API-Key`` on every MLflow request.
 
-    A tracking server behind an API gateway (Kong answers ``WWW-Authenticate:
-    Key``) authenticates on that header alone, and the MLflow client cannot
-    produce it: it knows only the Bearer form of ``MLFLOW_TRACKING_TOKEN`` and
-    Basic auth.  Registered under the ``mlflow.request_header_provider`` entry
-    point in ``pyproject.toml``, so MLflow loads it in every process of this
-    environment — the CLI, the MCP server and its ``dsagt-run`` children — with
-    no import from dsagt's side.  MLflow duck-types the provider (``in_context``
-    + ``request_headers``), so no mlflow import is needed here either, which
-    keeps this module's cold start unchanged.  The key is read from the shell
-    on each request and never written to disk.
+    The key is ``MLFLOW_TRACKING_API_KEY``; the header is sent only when the
+    variable is set.  A tracking server behind an API gateway (Kong answers ``WWW-Authenticate:
+    Key``) authenticates on that header alone, and the MLflow client produces
+    only the Bearer form of ``MLFLOW_TRACKING_TOKEN`` and Basic auth.
+    Registered under the ``mlflow.request_header_provider`` entry point in
+    ``pyproject.toml``, so MLflow loads it in every process of this
+    environment (the CLI, the MCP server and its ``dsagt-run`` children)
+    without an import on dsagt's side.  MLflow duck-types the provider
+    (``in_context`` and ``request_headers``), so this class imports nothing
+    from mlflow and the module's cold start is unchanged.  The key is read
+    from the shell on each request and never written to disk.
     """
 
     def in_context(self) -> bool:
@@ -160,8 +161,8 @@ def experiment_name(config: dict | None) -> str:
     users, and the experiment list there belongs to everyone.  The directory
     hash is stable for the life of the project (``dsagt mv`` changes it) and
     distinct per user because home directories are.  The readable project name
-    travels on the experiment's description and ``dsagt.project`` tag instead
-    — see :func:`_ensure_experiment`.
+    is carried on the experiment's description and ``dsagt.project`` tag
+    (:func:`_ensure_experiment`).
     """
     cfg = config or {}
     name = (cfg.get("mlflow") or {}).get("experiment")
@@ -176,10 +177,10 @@ def _version_model_name() -> str:
     """The LoggedModel that stands for this dsagt release in an experiment.
 
     MLflow's trace table fills its *Version* column from ``mlflow.modelId``,
-    which must reference a LoggedModel — MLflow 3's unit of "which version of
-    the app produced this".  ``set_active_model(name=…)`` creates or reuses one
-    per experiment and stamps every trace of the process, replayed agent turns
-    included.  Model names may not contain ``.``.
+    which must reference a LoggedModel, MLflow 3's record of which version of
+    the application produced a trace.  ``set_active_model(name=…)`` creates
+    or reuses one per experiment and stamps every trace of the process,
+    replayed agent turns included.  Model names may not contain ``.``.
     """
     from dsagt import __version__
 
@@ -189,8 +190,9 @@ def _version_model_name() -> str:
 def _current_user() -> str | None:
     """The local user for the trace table's *User* column (``mlflow.trace.user``).
 
-    A gateway may stamp its own identity under ``mlflow.user``; the UI does
-    not read that key.  ``None`` where the process has no login identity."""
+    A gateway may stamp its own identity under ``mlflow.user``; the UI reads
+    only ``mlflow.trace.user``.  ``None`` where the process has no login
+    identity."""
     try:
         return getpass.getuser()
     except (KeyError, OSError):
@@ -198,13 +200,13 @@ def _current_user() -> str | None:
 
 
 def _quiet_mlflow_chatter() -> None:
-    """Drop MLflow's INFO narration of what DSAgt just did on purpose.
+    """Silence MLflow's INFO messages about routine setup.
 
     ``set_experiment`` and ``set_active_model`` log "Experiment … does not
     exist. Creating", "LoggedModel … creating one" and "Active model is set to
-    …" at INFO — the last on every ``dsagt-run``.  They go to stderr, and an
+    …" at INFO, the last on every ``dsagt-run``.  They go to stderr, and an
     agent that captures a code's stderr reads them as the code's output.
-    Warnings and errors still surface.
+    Warnings and errors are still logged.
     """
     logging.getLogger("mlflow.tracking.fluent").setLevel(logging.WARNING)
     # "Flushing the async trace logging queue before program exit" at INFO on
@@ -221,7 +223,7 @@ def _quiet_mlflow_chatter() -> None:
 def _bound_remote_retries(tracking_uri: str) -> None:
     """Cap the MLflow client's retry budget against an http(s) store.
 
-    The client defaults — 7 retries at backoff 2, 120 s per request — mean a
+    The client defaults (7 retries at backoff 2, 120 s per request) mean a
     hung server stalls a single call for minutes, and the unattended paths
     (``dsagt-run`` cold start, the periodic pass) make several.  Tracing is
     best-effort; a few seconds is the most it may cost a tool call.
@@ -236,15 +238,16 @@ def _ensure_experiment(name: str, project: str) -> None:
     """Select the experiment; on first creation, describe it and tag the project.
 
     ``set_experiment`` returns the experiment, so the tags cost nothing once
-    they exist — and a description edited by hand on the server is left alone.
+    they exist, and a description edited by hand on the server is left alone.
     """
     import mlflow
 
     existing = mlflow.get_experiment_by_name(name)
     if existing is not None and existing.lifecycle_stage == "deleted":
         # `set_experiment` refuses a name that exists in the deleted state,
-        # and the name is deterministic for this project — so without this the
-        # project could never start again.  Say what to do.
+        # and the name is deterministic for this project, so the project
+        # cannot start again until the experiment is restored or renamed.
+        # The error says which.
         raise RuntimeError(
             f"MLflow experiment {name!r} (id {existing.experiment_id}) exists "
             f"in the deleted state on {mlflow.get_tracking_uri()}. Restore it "
@@ -254,7 +257,7 @@ def _ensure_experiment(name: str, project: str) -> None:
     exp = mlflow.set_experiment(name)
     if "dsagt.project" not in exp.tags:
         mlflow.set_experiment_tag(
-            "mlflow.note.content", f"{EXPERIMENT_DESCRIPTION} — project: {project}"
+            "mlflow.note.content", f"{EXPERIMENT_DESCRIPTION}; project: {project}"
         )
         mlflow.set_experiment_tag("dsagt.project", project)
 
@@ -264,20 +267,20 @@ def init_tracing(
     mlflow_url: str | None = None,
     session_id: str | None = None,
 ) -> None:
-    """Point MLflow at the project's serverless store + experiment.
+    """Point MLflow at the project's store and experiment.
 
-    After this, every ``mlflow.start_span`` (from ``@traced`` / ``child_span``
-    in the MCP server and dsagt-run) lands in ``sqlite:///<pdir>/mlflow.db``.
-    The tracking URI is the serverless ``sqlite:///<pdir>/mlflow.db`` computed by
-    :func:`resolve_tracking_uri`.  The session id, passed by the MCP server at
-    startup, tags internal traces for grouping.
+    After this, every ``mlflow.start_span`` (from ``@traced`` and
+    ``child_span`` in the MCP server and dsagt-run) is written to the store
+    :func:`resolve_tracking_uri` names, ``sqlite:///<pdir>/mlflow.db`` by
+    default.  The session id, passed by the MCP server at startup, tags
+    internal traces for grouping.
 
-    The ``mlflow_url`` and ``session_id`` keyword args are kept for tests, where
-    the caller plants known values directly.
+    The ``mlflow_url`` and ``session_id`` keyword arguments exist for tests,
+    where the caller supplies known values directly.
 
-    Never raises.  When cwd isn't a dsagt project dir, or the store cannot be
+    Never raises.  When cwd is not a dsagt project dir, or the store cannot be
     reached or the experiment used (deleted on a shared server, refused key,
-    server down), logs the cause and no-ops so the process runs untraced —
+    server down), logs the cause and no-ops so the process runs untraced:
     one-shot tools and tests outside a project, and a server whose tools must
     keep working regardless.
     """
@@ -292,7 +295,7 @@ def init_tracing(
     project_name = (cfg or {}).get("project")
     if not project_name:
         logger.warning(
-            "%s: no .dsagt/config.yaml with a 'project' in cwd (%s) — tracing "
+            "%s: no .dsagt/config.yaml with a 'project' in cwd (%s); tracing "
             "disabled for this process.",
             service_name,
             Path.cwd(),
@@ -317,12 +320,12 @@ def init_tracing(
         mlflow.set_active_model(name=_version_model_name())
     except (
         Exception
-    ) as e:  # noqa: BLE001 — a store problem must not take the server down
+    ) as e:  # noqa: BLE001  # a store problem must not take the server down
         # The MCP tools serve regardless of tracing: a server that cannot
         # reach or use its store still serves the agent, untraced, with the
         # cause on the log so the operator can fix the store.
         logger.error(
-            "%s: tracing disabled — cannot use experiment %r at %s: %s",
+            "%s: tracing disabled; cannot use experiment %r at %s: %s",
             service_name,
             experiment,
             mlflow_url,
@@ -341,7 +344,7 @@ def init_tracing(
 
 
 # ===========================================================================
-# Live tracer — first-party debug spans, emitted as code runs
+# Live tracer: first-party debug spans, emitted as code runs
 # ===========================================================================
 
 # ----- the span primitive -----
@@ -349,17 +352,19 @@ def init_tracing(
 
 @contextmanager
 def open_span(name: str, span_type: str | None = None, source: str | None = None):
-    """Open a span on the serverless MLflow store.
+    """Open a span on the MLflow store.
 
-    Single tracing code path — ``mlflow.start_span`` auto-nests under whatever
-    span is already active (its own context model), so child spans Just Work.
-    Yields ``None`` when tracing was never initialized (one-shot tools / tests
-    outside a project), so the helpers below degrade to no-ops.
+    The single tracing code path: ``mlflow.start_span`` nests under whatever
+    span is already active (its own context model), so child spans nest
+    without bookkeeping here.  Yields ``None`` when tracing was never
+    initialized (one-shot tools and tests outside a project), so the helpers
+    below become no-ops.
 
-    ``source`` is set only on the *categorization root* of a trace — the MCP
-    dispatch span and ``tool.execute`` — and tags the whole trace
-    ``dsagt.source`` for the debug-view filter (see :func:`_attach_trace_metadata`).
-    Inner spans pass ``source=None`` and inherit the root's tag.
+    ``source`` is set only on the categorization root of a trace (the MCP
+    dispatch span and ``tool.execute``) and tags the whole trace
+    ``dsagt.source`` for the debug-view filter
+    (:func:`_attach_trace_metadata`).  Inner spans pass ``source=None`` and
+    inherit the root's tag.
     """
     if not _initialized:
         yield None
@@ -388,8 +393,8 @@ def truncate(value: str, limit: int = 256) -> str:
 
     Span backends (and the MLflow trace UI) handle short attribute values
     much better than multi-megabyte stdout/stderr blobs.  The full payload
-    lives in ``trace_archive/<record_id>.json``; the span just carries a
-    head/tail summary so a human glancing at the UI can tell what happened.
+    is in ``trace_archive/<record_id>.json``; the span carries a head and a
+    character count so a reader of the UI can tell what happened.
     """
     if value is None:
         return ""
@@ -414,13 +419,13 @@ REDACTED_KEYS = frozenset(
         "secret",
     }
 )
-# Credential *shapes* inside free text — a recorded command carrying
+# Credential shapes inside free text (a recorded command carrying
 # `-H "Authorization: Bearer …"`, a URL with `?api_key=…`, a printed config
-# with `"api_key": "…"` — which no key name can catch.  Anchored so ordinary
-# prose survives: `Bearer`/`Basic` only after `Authorization:`, and a key
-# label only when its value looks like a token (16+ token characters), so
-# "a basic example", "the bearer of bad news" and "max_token: 5" pass through
-# untouched.  This masks the common shapes.
+# with `"api_key": "…"`), which a key-name match cannot catch.  Anchored so
+# ordinary prose survives: `Bearer`/`Basic` only after `Authorization:`, and
+# a key label only when its value looks like a token (16+ token characters),
+# so "a basic example", "the bearer of bad news" and "max_token: 5" pass
+# through untouched.  This masks the common shapes.
 _SECRET_IN_TEXT = re.compile(
     r"(?i)"
     r"(authorization\s*[=:]\s*(?:bearer|basic)\s+)[^\s&\"']+"
@@ -439,12 +444,12 @@ def bound(value: Any, limit: int = 4096) -> Any:
     The dispatch shell records every call's raw arguments and result on the
     trace root, and both are agent-controlled: a ``kb_ingest`` argument or a
     ``kb_search`` result can carry an ``Authorization`` bearer or an API key
-    from a document, and ``kb_search`` returns whole chunk texts.  Anything set on a span is written verbatim
-    into ``mlflow.db`` — MLflow truncates only the UI preview — and ``dsagt
-    traces`` then serves it in a browser.  Credential-bearing keys are replaced
-    outright, credential shapes inside strings are masked, and every string
-    leaf is cut to ``limit`` so structure survives for the UI while the store
-    holds a preview, not a payload.
+    from a document, and ``kb_search`` returns whole chunk texts.  Anything
+    set on a span is written verbatim into ``mlflow.db`` (MLflow truncates
+    only the UI preview), and ``dsagt traces`` then serves it in a browser.
+    Credential-bearing keys are replaced outright, credential shapes inside
+    strings are masked, and every string leaf is cut to ``limit`` so structure
+    survives for the UI while the store holds a preview.
     """
     if isinstance(value, dict):
         return {
@@ -458,18 +463,18 @@ def bound(value: Any, limit: int = 4096) -> Any:
     return value
 
 
-# ----- trace tagging — the dsagt.source debug filter + session grouping -----
+# ----- trace tagging: the dsagt.source debug filter + session grouping -----
 #
-# dsagt.source names the MCP tool *category* that was invoked — one of
-# {memory, skill, knowledge, registry} (the four concern modules of the merged
-# dsagt-server), plus ``execution`` for dsagt-run's out-of-process data-tool
-# runs.  It is assigned at the *entry point*, not derived from the span name:
-# the MCP dispatch shell knows which concern owns each tool and stamps the
-# category on the trace's root span, so e.g. ``search_skills`` calling into
-# ``kb.search`` is tagged ``skill`` (the tool the agent called), not
-# ``knowledge`` (the subsystem that happened to do the work).  Inner spans
-# inherit the root's tag; agent traces carry no ``dsagt.source`` at all, which
-# is what lets the MLflow UI filter the debug view in or out.
+# dsagt.source names the MCP tool category that was invoked, one of
+# {memory, skill, knowledge, registry} (the four concern modules of
+# dsagt-server), plus ``execution`` for dsagt-run's out-of-process code runs.
+# It is assigned at the entry point: the MCP dispatch shell maps each tool to
+# the concern that owns it and stamps the category on the trace's root span,
+# so ``search_skills`` calling into ``kb.search`` is tagged ``skill`` (the
+# tool the agent called), and the ``knowledge`` subsystem that did the work
+# leaves no tag of its own.  Inner spans inherit the root's tag; agent traces
+# carry no ``dsagt.source`` at all, which is what lets the MLflow UI filter
+# the debug view in or out.
 
 
 def _attach_trace_metadata(source: str | None) -> None:
@@ -477,25 +482,25 @@ def _attach_trace_metadata(source: str | None) -> None:
 
     Called from :func:`open_span` on a categorization root (``source`` set):
 
-    - ``dsagt.source`` tag: the MCP tool category / ``execution`` — powers the
-      UI's debug-view filter.
+    - ``dsagt.source`` tag: the MCP tool category or ``execution``; the UI's
+      debug-view filter reads it.
     - ``dsagt.agent`` metadata: the agent platform that drove this session, so
-      a shared store can be split by agent — the comparison the smoke test
-      exists for.  Metadata, not a tag, because that is where ``MLflowSink``
-      puts it on agent traces and where ``dsagt info`` reads it; one place.
+      a shared store can be split by agent, the comparison the smoke test
+      exists for.  Metadata, because that is where ``MLflowSink`` puts it on
+      agent traces and where ``dsagt info`` reads it; one place.
     - ``mlflow.trace.session`` metadata: groups this process's internal traces
       under one session (reserved MLflow key, drives the native session filter).
-    - ``mlflow.trace.user`` metadata: the local user — the reserved key behind
+    - ``mlflow.trace.user`` metadata: the local user, the reserved key behind
       the trace table's *User* column.
     - ``mlflow.modelId`` (set process-wide by :func:`init_tracing` through
       ``set_active_model``): the dsagt release, behind the *Version* column.
     - ``dsagt.version`` metadata: which dsagt produced the trace.  On a shared
       server holding months of traces from many installs, nothing else says;
       MLflow's own ``mlflow.source.git.*`` are empty because the process runs
-      in the project directory, not a checkout.  ``MLflowSink`` stamps the
-      same key on agent traces.
+      in the project directory, which is no checkout.  ``MLflowSink`` stamps
+      the same key on agent traces.
 
-    No-op for inner spans (``source is None``) — they inherit the root's tag.
+    No-op for inner spans (``source is None``); they inherit the root's tag.
     """
     if not source:
         return
@@ -517,14 +522,13 @@ def _attach_trace_metadata(source: str | None) -> None:
 
 
 class _ActiveSpanProxy:
-    """The *annotate* verb that complements the *open* verbs (traced/child_span).
+    """Annotate the open span; ``traced`` and ``child_span`` open one.
 
-    Where ``traced`` / ``child_span`` open a span, this annotates whichever span
-    is currently open — ``obs.set("hits", 5)`` from inside a ``@traced`` body
-    attaches to that body's span.  It exists so business code (knowledge.py,
-    provenance.py, registry_tools.py) never imports MLflow and never branches on
-    whether tracing is on: when no span is active (tracing disabled, or call
-    site outside any traced block) every method silently does nothing.
+    ``obs.set("hits", 5)`` from inside a ``@traced`` body attaches to that
+    body's span.  It exists so business code (knowledge.py, provenance.py,
+    registry_tools.py) never imports MLflow and never branches on whether
+    tracing is on: when no span is active (tracing disabled, or a call site
+    outside any traced block) every method does nothing.
 
     The process-wide singleton is exported as ``obs``.
     """
@@ -566,10 +570,10 @@ class _ActiveSpanProxy:
         span.set_outputs(outputs)
 
     def set_status(self, status: str) -> None:
-        """Mark the span ``"ERROR"`` (or ``"OK"``) — the trace state the UI
-        filters on and ``dsagt info`` counts.  A failure that is *returned*
-        rather than raised (a tool's ``{"status": "error"}``, a non-zero exit)
-        is otherwise indistinguishable from success in the store."""
+        """Mark the span ``"ERROR"`` (or ``"OK"``), the trace state the UI
+        filters on and ``dsagt info`` counts.  A failure a tool returns as a
+        value (a ``{"status": "error"}`` result, a non-zero exit) is otherwise
+        indistinguishable from success in the store."""
         span = self._current()
         if span is None:
             return
@@ -577,7 +581,7 @@ class _ActiveSpanProxy:
 
     @staticmethod
     def _current():
-        """Return the currently-active MLflow span, or ``None`` if none."""
+        """Return the active MLflow span, or ``None`` when no span is open."""
         if not _initialized:
             return None
         import mlflow
@@ -588,7 +592,7 @@ class _ActiveSpanProxy:
 obs = _ActiveSpanProxy()
 
 
-# ----- open a span — decorator + context manager -----
+# ----- open a span: decorator + context manager -----
 
 
 def traced(
@@ -608,8 +612,8 @@ def traced(
         against the function signature, so positional and keyword args both
         work.
     extract_return
-        Optional mapping of attribute name → function applied to the return
-        value to extract that attribute (e.g. ``{"hits": lambda r: len(r)}``).
+        Optional mapping of attribute name to a function applied to the return
+        value to extract that attribute (``{"hits": lambda r: len(r)}``).
 
     Behavior
     --------
@@ -746,9 +750,9 @@ def kb_index_search_span(vector_db: str | None, k: int, filtered: bool):
 
 
 # Registry spans.  Only the deliberate, infrequent registry operations are
-# instrumented.  search_registry / search_skills are intentionally NOT — they
-# are high-frequency low-information per call, and the agent-side LLM trace
-# already records that they were invoked.
+# instrumented: search_registry and search_skills are high-frequency and
+# low-information per call, and the agent-side LLM trace already records that
+# they were invoked.
 
 
 def registry_save_code_span(code_name: str | None):
@@ -768,8 +772,8 @@ def registry_install_deps_span(packages: list[str] | None):
         "registry.install_dependencies",
         span_type=SpanType.TOOL,
         package_count=len(packages) if packages else 0,
-        # First few package names are useful in the UI for at-a-glance
-        # identification; full list is in the LLM call record if needed.
+        # The first few package names identify the call in the UI; the full
+        # list is in the LLM call record.
         packages_preview=", ".join(packages[:5]) if packages else "",
     )
 
@@ -789,12 +793,12 @@ def registry_reconstruct_pipeline_span(fmt: str | None):
 def code_execute_span(record_id: str, code_name: str):
     """Span around a single ``dsagt-run`` code execution.
 
-    A *top-level, categorization-root* span: the agent CLI spawns ``dsagt-run``
-    in its own process tree, so this trace stands alone in the store rather than
-    nesting under any MCP-dispatch span.  It carries ``record_id`` (correlates
-    to the ``trace_archive`` record) and ``code_name``, and is tagged
-    ``dsagt.source=execution`` — its own bucket, distinct from the four MCP tool
-    categories, since these are actual code runs rather than meta-ops.
+    A top-level, categorization-root span: the agent's shell spawns
+    ``dsagt-run`` in its own process tree, so this trace stands alone in the
+    store.  It carries ``record_id`` (correlates to the ``trace_archive``
+    record) and ``code_name``, and is tagged ``dsagt.source=execution``, a
+    bucket distinct from the four MCP tool categories because these are code
+    runs in the user's environment.
     """
     from mlflow.entities import SpanType
 
@@ -814,7 +818,7 @@ def code_execute_span(record_id: str, code_name: str):
 
 
 # ===========================================================================
-# Replay sink — finished agent Trace → backdated MLflow spans
+# Replay sink: a finished agent Trace to backdated MLflow spans
 # ===========================================================================
 
 _S_PER_NS = 1e9
@@ -828,11 +832,11 @@ def _stamp_usage(span, usage: dict | None) -> None:
     """Set MLflow's chat-usage attribute from a normalized usage dict.
 
     MLflow sums this attribute across every span of a trace into
-    ``mlflow.trace.tokenUsage``, so it may sit on whichever span represents
-    the LLM call — an LLM span, or the tool span that a tool-calling message
+    ``mlflow.trace.tokenUsage``, so it is set on whichever span represents
+    the LLM call: an LLM span, or the tool span that a tool-calling message
     collapses into under the autolog-parity layout.  ``input_tokens`` already
-    counts cached tokens (see ``traces._usage``); the cache breakdown is kept
-    as plain attributes for the per-span view.
+    counts cached tokens (``traces._usage``); the cache breakdown is kept as
+    plain attributes for the per-span view.
     """
     if not usage:
         return
@@ -856,27 +860,27 @@ def _stamp_usage(span, usage: dict | None) -> None:
 class MLflowSink:
     """Render a :class:`~dsagt.traces.Trace` into MLflow spans (a trace consumer).
 
-    The agent half of observability: where ``@traced`` / ``obs`` emit DSAGT's
-    own first-party debug spans live, this replays a finished transcript's
-    :class:`~dsagt.traces.Trace` after the fact into the *same* store.  It uses
-    ``mlflow.start_span_no_context`` — the only API that accepts an explicit
-    ``parent_span`` and backdated ``start_time_ns`` — and mirrors the span
-    conventions of MLflow's own ``claude_code`` autolog so foreign traces render
-    identically in the Chat UI: an AGENT root, ``llm`` children carrying
-    ``message.format="anthropic"`` + ``mlflow.chat.tokenUsage``, and
-    ``tool_<name>`` children.  Agent traces carry no ``dsagt.source`` tag, so
-    they stay in the normal view, separate from the internal debug traces.
+    The agent half of observability: ``@traced`` and ``obs`` emit DSAGT's own
+    debug spans live, and this replays a finished transcript's
+    :class:`~dsagt.traces.Trace` after the fact into the same store.  It uses
+    ``mlflow.start_span_no_context``, the one API that accepts an explicit
+    ``parent_span`` and a backdated ``start_time_ns``, and mirrors the span
+    conventions of MLflow's own ``claude_code`` autolog so foreign traces
+    render identically in the Chat UI: an AGENT root, ``llm`` children
+    carrying ``message.format="anthropic"`` and ``mlflow.chat.tokenUsage``,
+    and ``tool_<name>`` children.  Agent traces carry no ``dsagt.source`` tag,
+    so they stay in the normal view, separate from the internal debug traces.
 
-    A session ``Trace`` carries one AGENT subtree per turn; the sink emits **one
-    MLflow trace per AGENT root**, matching the per-prompt granularity autolog's
-    Stop hook produces.  MLflow mints its own trace/span ids, so each trace is
-    tagged ``dsagt.trace_id = <trace_id>:<root span_id>`` (a stable per-turn
-    idempotency key).
+    A session ``Trace`` carries one AGENT subtree per turn; the sink emits one
+    MLflow trace per AGENT root, matching the per-prompt granularity autolog's
+    Stop hook produces.  MLflow mints its own trace and span ids, so each
+    trace is tagged ``dsagt.trace_id = <trace_id>:<root span_id>`` (a stable
+    per-turn idempotency key).
 
-    A *consumer* of :class:`~dsagt.traces.TraceCollector`: ``name`` keys its own
+    A consumer of :class:`~dsagt.traces.TraceCollector`: ``name`` keys its own
     ack file (``.dsagt/trace_acks_mlflow.json``); ``write`` logs the trace.
-    Spans are plain dicts (see ``traces`` module docstring), so this reads them
-    directly — no per-object serialization.
+    Spans are plain dicts (the ``traces`` module docstring describes them), so
+    this reads them directly.
     """
 
     name = "mlflow"

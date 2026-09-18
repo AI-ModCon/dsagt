@@ -1,21 +1,21 @@
-"""Skill discovery — catalog data plane, keyword scorer, and the router facade.
+"""Skill discovery: catalog data plane, keyword scorer, and the router facade.
 
 DSAGT fetches external Agent-Skills repos, indexes each per-source into a
 ``skills_catalog__<slug>`` KB collection, and searches/installs them into a
-project.  This is the one job native skill discovery can't do: a *catalog* skill
-stays searchable without being copied locally or held in the agent's context
-(you can't hold thousands of skill descriptions in context), while an
+project.  This is the one job native skill discovery cannot do: a *catalog*
+skill stays searchable without being copied locally or held in the agent's
+context (thousands of skill descriptions exceed an agent's context), while an
 *installed* skill is copied into ``<project>/skills/<name>/`` and mirrored into
 the agent's native skills dir (``agents.base.setup_skills``).  It backs the MCP
 ``search_skills`` / ``add_skill_source`` tools and ``dsagt init`` through the one
-:class:`SkillRouter` facade, so search/install policy can't diverge between them.
-Design-wise it stays cheap and degradable: :class:`SkillsCatalog` composes over
-the host server's :class:`~dsagt.knowledge.KnowledgeBase` (shared embedder, no
-second model load), falls back to a Genesis-derived keyword scorer
-(:func:`rank_skills`) when no embedder/KB is configured, and indexes per-source
-so re-sync is an idempotent drop-and-rebuild of just that source's collection.
+:class:`SkillRouter` facade, so search/install policy cannot diverge between
+them.  :class:`SkillsCatalog` composes over the host server's
+:class:`~dsagt.knowledge.KnowledgeBase`, so one embedder serves both; with no
+KB configured it uses the Genesis-derived keyword scorer (:func:`rank_skills`);
+and it indexes per-source, so a re-sync is an idempotent drop-and-rebuild of
+that source's collection.
 
-Class map — every edge is ``<branch>─<rel> Class`` (``◇`` holds · ``◆`` owns)::
+Class map, every edge ``<branch>─<rel> Class`` (``◇`` holds · ``◆`` owns)::
 
     SkillRouter                     render/MCP facade: the search_skills string,
     │                               the empty-result message, exact-name lookup
@@ -60,15 +60,15 @@ logger = logging.getLogger(__name__)
 
 
 # ===========================================================================
-# Keyword scorer — Genesis-derived token-overlap fallback (stdlib only)
+# Keyword scorer: Genesis-derived token-overlap fallback (stdlib only)
 # ===========================================================================
 #
-# A faithful reimplementation (not an import) of the Genesis Skills
-# ``skill-search`` engine (``skill_search/catalog.py``: ``_score_skill`` /
-# ``rank_skills``).  Used by :class:`SkillsCatalog` when no embedder / KB is
-# configured: keyword overlap only, deterministic.
+# A reimplementation of the Genesis Skills ``skill-search`` engine
+# (``skill_search/catalog.py``: ``_score_skill`` / ``rank_skills``).  Used by
+# :class:`SkillsCatalog` when no embedder / KB is configured: keyword overlap
+# only, deterministic.
 #
-# Scoring (per skill, against a query) — matching Genesis exactly:
+# Scoring (per skill, against a query), matching Genesis exactly:
 #
 # * +2 for each query token that also appears in the skill **name**
 # * +1 for each query token that also appears in the **description**
@@ -80,7 +80,7 @@ logger = logging.getLogger(__name__)
 # tokens and stopwords dropped.  Ties break by name (ascending); below
 # ``min_score`` are dropped.
 
-#: Stopword set — kept identical to Genesis so ranking parity holds.
+#: Stopword set, kept identical to Genesis so ranking parity holds.
 _STOPWORDS = frozenset(
     {
         "a",
@@ -156,19 +156,19 @@ def rank_skills(
 
 
 # ===========================================================================
-# Catalog data plane — sources, sync/index, lookup/install, SkillsCatalog
+# Catalog data plane: sources, sync/index, lookup/install, SkillsCatalog
 # ===========================================================================
 
-#: Default source enabled out of the box (matches .dsagt/config.yaml default).
-#: Curated, named skill sources.  ``subdir`` scopes the recursive SKILL.md
-#: walk when set (cheaper clone); when omitted the whole repo is cloned and
-#: walked, which is robust to category-nested layouts.
+#: Curated, named skill sources; ``genesis`` is the default in
+#: .dsagt/config.yaml.  ``subdir`` scopes the recursive SKILL.md walk when set
+#: (a cheaper clone); when omitted the whole repo is cloned and walked, which
+#: handles category-nested layouts.
 KNOWN_SOURCES: dict[str, dict] = {
     "k-dense-ai": {
         "url": "https://github.com/K-Dense-AI/scientific-agent-skills",
         "branch": "main",
         "subdir": "skills",
-        "description": "K-Dense scientific agent skills — chem/bio/medicine/materials (140+).",
+        "description": "K-Dense scientific agent skills: chem/bio/medicine/materials (140+).",
     },
     "anthropic": {
         "url": "https://github.com/anthropics/skills",
@@ -180,19 +180,19 @@ KNOWN_SOURCES: dict[str, dict] = {
         "url": "https://github.com/sickn33/antigravity-awesome-skills",
         "branch": "main",
         "subdir": None,
-        "description": "Antigravity Awesome Skills — 1,500+ cross-platform agentic skills.",
+        "description": "Antigravity Awesome Skills: 1,500+ cross-platform agentic skills.",
     },
     "composio": {
         "url": "https://github.com/ComposioHQ/awesome-claude-skills",
         "branch": "master",
         "subdir": None,
-        "description": "Composio awesome-claude-skills — workflow skills for many SaaS apps.",
+        "description": "Composio awesome-claude-skills: workflow skills for many SaaS apps.",
     },
     "genesis": {
         "url": "https://github.com/AI-ModCon/genesis-skills",
         "branch": "main",
         "subdir": "skills",
-        "description": "GENESIS skills (AI-ModCon) — aggregated agent-skill "
+        "description": "GENESIS skills (AI-ModCon): aggregated agent-skill "
         "catalog: HPC (Slurm/PBS, Perlmutter/Aurora/Frontier), plasma-sim, "
         "BaseData, BaseEval, BaseSAFE, AmSC, and more.",
     },
@@ -238,8 +238,8 @@ def resolve_source(source: str | dict) -> dict:
 def persist_source_to_config(project_dir: str | Path, spec: dict) -> bool:
     """Append a resolved source to ``skills.sources`` in the project config.
 
-    Dedupes by URL.  Returns True if the config was updated.  No-op (returns
-    False) if the config file is missing — the catalog is still indexed
+    Dedupes by URL.  Returns True if the config was updated, and False
+    without writing when the config file is missing; the catalog is indexed
     either way.  Used by the ``add_skill_source`` MCP tool so the project
     config records every enabled source.
     """
@@ -261,9 +261,7 @@ def _repo_slug(url: str) -> str:
     """Stable, collection-name-safe slug from a repo URL (``owner-repo``).
 
     Host-agnostic: the scheme and host are stripped so github.com, gitlab.*,
-    etc. all reduce to the ``owner/repo`` path.  GitHub URLs keep the slug
-    they had before this generalization, so existing catalog collections do
-    not need rebuilding.
+    etc. all reduce to the ``owner/repo`` path.
     """
     s = url.rstrip("/")
     s = re.sub(r"^https?://", "", s)  # drop scheme
@@ -336,10 +334,9 @@ def sync_source(
     ``force`` re-clones from scratch, and so does a cached clone whose
     ``SOURCE_REF`` is not the branch or tag asked for (a cache from before
     the stamp counts as differing).  Indexing wipes and rebuilds only this
-    source's ``skills_catalog__<slug>`` collection, so other catalogs and the
-    installed/bundled ``skills`` collection are untouched.  When *kb* is None
-    the clone still happens (so ``install`` works offline-of-KB) but nothing
-    is indexed.
+    source's ``skills_catalog__<slug>`` collection, so the other catalogs are
+    left as they are.  With *kb* None the source is cloned and nothing is
+    indexed, so ``install`` works without a KB.
     """
     spec = resolve_source(source)
     slug = _repo_slug(spec["url"])
@@ -367,8 +364,8 @@ def sync_source(
             clone_github(spec["url"], dest, branch=branch, include=include)
         except Exception:
             # A failed clone must not leave the empty dir behind: it would
-            # permanently satisfy the dest.exists() skip above, wedging the
-            # source at zero skills until a manual force-resync.
+            # satisfy the dest.exists() skip above on every later sync,
+            # leaving the source at zero skills until a forced resync.
             shutil.rmtree(dest, ignore_errors=True)
             if previous is not None:
                 previous.rename(dest)
@@ -381,7 +378,7 @@ def sync_source(
     indexed = index_catalog(skill_dirs, slug, spec["url"], kb) if kb is not None else 0
     if kb is not None and not skill_dirs:
         logger.warning(
-            "source %s yielded no SKILL.md skills under %s", spec["url"], walk_root
+            "source %s has no SKILL.md skills under %s", spec["url"], walk_root
         )
 
     return {
@@ -394,15 +391,14 @@ def sync_source(
 
 
 def _catalog_embed_text(spec: dict, fallback_name: str) -> str:
-    """Text embedded for catalog search: the frontmatter ``name`` + ``description``
-    (+ ``tags``) only — *not* the SKILL.md body.
+    """Text embedded for catalog search: the frontmatter ``name``,
+    ``description``, and ``tags``.
 
-    Discovery is progressive-disclosure level 1: the description is authored to
-    say *what the skill does and when to use it*, which is exactly the match
-    target.  Embedding the body would dilute that signal, and the embedder
-    truncates long input anyway (so a full SKILL.md is both incomplete and
-    misallocated).  This also keeps the semantic backend ranking on the same
-    fields as the keyword fallback.
+    Discovery is progressive-disclosure level 1: the description is authored
+    to say what the skill does and when to use it, which is the match target.
+    Embedding the body would dilute that signal, and the embedder truncates
+    long input, so a full SKILL.md is both incomplete and misallocated.  The
+    semantic backend then ranks on the same fields as the keyword fallback.
     """
     name = spec.get("name") or fallback_name
     desc = spec.get("description") or ""
@@ -449,7 +445,7 @@ def find_catalog_skill(name: str, *, cache_dir: Path = SKILL_SOURCES_DIR) -> Pat
 
     Matches on frontmatter ``name`` first, then directory name.  A bare name
     must be unique across the machine-global clone cache; when the same name
-    exists in more than one synced source, pass a **source-qualified**
+    exists in more than one synced source, pass a source-qualified
     ``<slug>/<name>`` (the slug is the per-source cache dir / catalog-collection
     suffix, as shown by ``list_skill_sources``) to pick one.  Raises on no
     match or on a still-ambiguous bare name.
@@ -499,10 +495,10 @@ _ATTRIBUTION_GLOBS = (
 def _capture_attribution(src: Path, dest: Path, cache_dir: Path) -> list[str]:
     """Preserve license/attribution when installing a (third-party) catalog skill.
 
-    ``copytree`` already carries files *inside* the skill dir.  A skill is often
+    ``copytree`` already carries files inside the skill dir.  A skill is often
     governed by a per-subtree or repo-root ``LICENSE`` / ``NOTICE`` /
-    ``ATTRIBUTION`` that lives *outside* its own folder, so this also pulls those
-    from ancestor dirs up to the source repo root (which ``clone_github`` mirrors
+    ``ATTRIBUTION`` outside its own folder, so this also copies those from
+    ancestor dirs up to the source repo root (which ``clone_github`` mirrors
     into the cache root even for sparse ``subdir`` clones).  Nearest ancestor
     wins a filename collision; skill-local files (already in ``dest``) are never
     overwritten.  Always stamps a ``PROVENANCE.txt`` recording the source
@@ -582,7 +578,7 @@ def install_into_project(
 
 
 # ---------------------------------------------------------------------------
-# Base skills — installed into every project at ``dsagt init``
+# Base skills: installed into every project at ``dsagt init``
 # ---------------------------------------------------------------------------
 
 
@@ -777,7 +773,7 @@ def install_base_skills(
             )
         except (
             Exception
-        ) as e:  # noqa: BLE001 — every skill gets its turn; the failures are raised together below
+        ) as e:  # noqa: BLE001  every skill gets its turn; the failures are raised together below
             failures.append(f"{entry['name']}: {e}")
             continue
         results.append(result)
@@ -1017,7 +1013,7 @@ def _code_spec(entry: dict, code: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# SkillsCatalog — the catalog data plane (composition over KnowledgeBase)
+# SkillsCatalog: the catalog data plane (composition over KnowledgeBase)
 # ---------------------------------------------------------------------------
 
 
@@ -1031,29 +1027,31 @@ def _has_tag(tags: str | None, tag: str) -> bool:
 
 
 class SkillsCatalog:
-    """The external-skill *catalog* behind one object.
+    """The external-skill catalog behind one object.
 
-    Composition over :class:`~dsagt.knowledge.KnowledgeBase`: it holds a KB
-    handle (the host server's existing instance → shared embedder, no second
-    model load) plus the clone-cache dir, and exposes the skill-domain ops —
-    ``sync`` / ``search`` / ``install`` / ``list_sources``.  The skill-specific
-    behavior (frontmatter-indexed catalog collections, the no-embedder keyword
-    fallback over the clone cache) lives here; the vector store + embedder are
-    the shared KB.  :class:`SkillRouter` is a thin render/MCP facade over this.
+    It holds the host server's :class:`~dsagt.knowledge.KnowledgeBase`, so
+    one embedder serves both, plus the clone-cache dir, and exposes the
+    skill-domain operations: ``sync``, ``search``, ``install``,
+    ``list_sources``.  The frontmatter-indexed catalog collections and the
+    keyword fallback over the clone cache are defined here; the vector store
+    and embedder are the shared KB.  :class:`SkillRouter` is the render/MCP
+    facade over this.
 
-    Catalog tier only: installed/created skills are natively auto-discovered by
-    every supported agent, so they are never search candidates.  ``search``
-    covers the not-yet-installed catalog (which native discovery can't see)
-    plus the Cline-skills-disabled / no-embedder case via the keyword scorer.
+    Catalog tier only: installed and created skills are discovered natively
+    by every supported agent, so they are never search candidates.
+    ``search`` covers the not-yet-installed catalog (which native discovery
+    cannot see) plus the Cline-skills-disabled / no-embedder case via the
+    keyword scorer.
     """
 
     def __init__(self, *, kb=None, cache_dir: Path | None = None):
         """Compose a catalog over an existing KB + a clone-cache directory.
 
-        ``kb`` is the host server's :class:`~dsagt.knowledge.KnowledgeBase` (so
-        the embedder/Chroma are shared, never a second model load); pass ``None``
-        for the no-embedder keyword path.  ``cache_dir`` overrides the default
-        machine-global clone cache (:data:`SKILL_SOURCES_DIR`) — handy for tests.
+        ``kb`` is the host server's :class:`~dsagt.knowledge.KnowledgeBase`,
+        so the embedder and Chroma are shared; pass ``None`` for the
+        no-embedder keyword path.  ``cache_dir`` overrides the default
+        machine-global clone cache (:data:`SKILL_SOURCES_DIR`), which tests
+        use.
         """
         self._kb = kb
         self._cache_dir = cache_dir  # default resolved lazily
@@ -1064,7 +1062,7 @@ class SkillsCatalog:
         return self._kb is not None
 
     def _resolved_cache_dir(self) -> Path:
-        """The clone-cache dir — the ``cache_dir`` override or the global default."""
+        """The clone-cache dir: the ``cache_dir`` override or the global default."""
         return Path(self._cache_dir or SKILL_SOURCES_DIR)
 
     # -- write ops (delegate to the module functions) ------------------------
@@ -1105,19 +1103,18 @@ class SkillsCatalog:
         """Semantic backend: rank-fused search across every synced catalog
         collection, normalized into hit dicts.
 
-        Fan-out + RRF live in ``KnowledgeBase.search`` (the shared substrate);
+        Fan-out and RRF are in ``KnowledgeBase.search`` (the shared substrate);
         catalog collections are homogeneous (one embedder) so the fusion is a
-        clean rank merge.  When a ``tag`` filter is set we over-fetch
-        (``top_k * 3``) then post-filter so the tag filter leaves enough results.
+        plain rank merge.  With a ``tag`` filter, ``top_k * 3`` are fetched
+        and filtered after, so enough results remain.
         """
         collections = self.synced_collections()
         if not collections:
             return []
         fetch_k = top_k * 3 if tag else top_k
-        # collections all come from synced_collections() (they exist), and
-        # KnowledgeBase.search already skips a missing collection with a warning
-        # and raises only when every target fails — so a raise here is a real
-        # failure worth surfacing, not a can't-happen state to swallow.
+        # Every collection comes from synced_collections(), and
+        # KnowledgeBase.search raises only when every target fails, so a raise
+        # here is a real failure and propagates.
         hits = self._kb.search(
             query=query or "skill", collections=collections, top_k=fetch_k
         )
@@ -1163,9 +1160,9 @@ class SkillsCatalog:
         """No-embedder backend: rank cached-catalog skills with the Genesis
         token-overlap scorer (:func:`rank_skills`) into normalized hit dicts.
 
-        With no ``query`` there's nothing to score, so it returns the first
-        ``top_k`` candidates (tag-filtered) at score 0.0 — a browse mode rather
-        than a search.
+        With no ``query`` there is nothing to score, so the first ``top_k``
+        candidates (tag-filtered) are returned at score 0.0, which is a
+        browse.
         """
         cands = self._candidate_skills()
         if tag:
@@ -1185,7 +1182,7 @@ class SkillsCatalog:
     # -- source view ---------------------------------------------------------
 
     def list_sources(self) -> list[dict]:
-        """Known sources + synced flag + indexed count (one source of truth)."""
+        """Known sources with their synced flag and indexed count."""
         synced = set(self.synced_collections())
         out = []
         for name, spec in KNOWN_SOURCES.items():
@@ -1205,8 +1202,8 @@ class SkillsCatalog:
     def _indexed_count(self, collection: str) -> int:
         """Number of skills indexed in a catalog *collection* (0 if absent/no KB).
 
-        Reads the collection's persisted ``chroma_ids.json`` directly rather than
-        querying the store — cheap, and works without loading the embedder.
+        Reads the collection's persisted ``chroma_ids.json`` rather than
+        querying the store, so no embedder is loaded.
         """
         if self._kb is None:
             return 0
@@ -1218,25 +1215,25 @@ class SkillsCatalog:
 
 
 # ===========================================================================
-# SkillRouter — the thin render/MCP facade over the catalog
+# SkillRouter: the render/MCP facade over the catalog
 # ===========================================================================
 #
 # ``SkillRouter`` adds only the presentation concerns that the MCP handlers and
 # the CLI share: rendering a ranked hit list into the ``search_skills`` string,
-# the empty-result message, and the exact-``skill_name`` lookup (which needs the
-# installed-skill registry, not the catalog).
+# the empty-result message, and the exact-``skill_name`` lookup (which reads
+# the installed-skill registry).
 #
 # Construct it from the same inputs at every call site (MCP ``search_skills``,
-# CLI ``skills search/list``) so policy can't diverge between them — or hand it
-# a prebuilt :class:`SkillsCatalog` via ``catalog=`` so a server that already
-# owns a shared KB reuses one catalog instance.
+# CLI ``skills search/list``) so policy cannot diverge between them, or hand
+# it a prebuilt :class:`SkillsCatalog` via ``catalog=`` so a server that
+# already owns a shared KB reuses one catalog instance.
 #
-# Skill *materialization* (mirroring installed skills into each agent's native
-# skills directory) is in the agent layer (``AgentSetup.setup_skills``): every
-# supported agent (claude/codex/goose/cline) auto-discovers ``SKILL.md``
-# folders, so the router owns the *catalog* tier alone: ``search_skills`` over
-# skills not yet installed, which native discovery cannot see, plus the
-# no-embedder keyword fallback.
+# Mirroring installed skills into each agent's native skills directory is in
+# the agent layer (``AgentSetup.setup_skills``): every supported agent
+# (claude/codex/goose/cline) discovers ``SKILL.md`` folders natively, so the
+# router owns the catalog tier alone: ``search_skills`` over skills not yet
+# installed, which native discovery cannot see, plus the no-embedder keyword
+# fallback.
 
 
 def _where_label(source: str) -> str:
@@ -1256,9 +1253,9 @@ class SkillRouter:
 
         Pass a prebuilt ``catalog`` (a :class:`SkillsCatalog`) to share one
         instance with the server; otherwise one is constructed from ``kb`` /
-        ``cache_dir``.  ``skill_registry`` is only consulted for the exact
-        ``skill_name`` lookup in :meth:`search` (installed skills live there,
-        not in the catalog), so it may be ``None`` for catalog-only callers.
+        ``cache_dir``.  ``skill_registry`` is read only for the exact
+        ``skill_name`` lookup in :meth:`search` (installed skills are in the
+        registry), so it may be ``None`` for catalog-only callers.
         """
         self._catalog = (
             catalog
@@ -1273,7 +1270,7 @@ class SkillRouter:
         """Format ranked catalog hits into the ``search_skills`` markdown list.
 
         Each line carries the skill name, an origin tag (:func:`_where_label`),
-        the score, and the summary — the human-facing string the MCP tool and
+        the score, and the summary, the human-facing string the MCP tool and
         CLI both return.
         """
         lines = []
@@ -1285,16 +1282,16 @@ class SkillRouter:
         return f"Found {len(hits)} skill(s):\n\n" + "\n\n".join(lines)
 
     def _empty_message(self) -> str:
-        """The no-results string, tailored to *why* nothing matched.
+        """The no-results string for the cause.
 
-        When a KB exists but no catalog source is synced yet, point the agent
-        at ``list_skill_sources`` / ``add_skill_source`` (the likely cause);
-        otherwise it's a genuine no-match for the query.
+        When a KB exists and no catalog source is synced, point the agent at
+        ``list_skill_sources`` / ``add_skill_source`` (the likely cause);
+        otherwise nothing matched the query.
         """
         if not self._catalog.synced_collections() and self._catalog.has_kb:
             return (
                 "No catalog skills found. No external skill catalog is synced "
-                "yet — search covers the catalog (skills you can install), since "
+                "yet: search covers the catalog (skills you can install), since "
                 "installed skills are already natively discoverable. Call "
                 "list_skill_sources() to see available sources, then "
                 "add_skill_source(source=...) to sync one before searching again."
@@ -1304,7 +1301,7 @@ class SkillRouter:
     # -- public API ----------------------------------------------------------
 
     def search(self, query=None, *, top_k: int = 8, tag=None, skill_name=None) -> str:
-        """Stage B. Select + render. Stateless — no session/exposure tracking."""
+        """Select and render; stateless."""
         if skill_name:
             if self._reg is None:
                 return f"No skill named '{skill_name}'."
@@ -1321,13 +1318,13 @@ class SkillRouter:
         return self._render_search(hits)
 
     def sync(self, source, *, force: bool = False) -> dict:
-        """Stage A passthrough — see :meth:`SkillsCatalog.sync`."""
+        """Passthrough to :meth:`SkillsCatalog.sync`."""
         return self._catalog.sync(source, force=force)
 
     def install(self, name: str, project_dir) -> dict:
-        """Stage C passthrough — see :meth:`SkillsCatalog.install`."""
+        """Passthrough to :meth:`SkillsCatalog.install`."""
         return self._catalog.install(name, project_dir)
 
     def list_sources(self) -> list[dict]:
-        """Stage A view passthrough — see :meth:`SkillsCatalog.list_sources`."""
+        """Passthrough to :meth:`SkillsCatalog.list_sources`."""
         return self._catalog.list_sources()

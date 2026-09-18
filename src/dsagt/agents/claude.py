@@ -4,18 +4,16 @@ Claude Code agent setup.
 Install: ``npm i -g @anthropic-ai/claude-code``.
 Generates: ``CLAUDE.md`` (instructions) and ``.mcp.json`` (MCP config).
 
-The user brings ``ANTHROPIC_API_KEY`` (and optionally ``ANTHROPIC_MODEL``,
-``ANTHROPIC_BASE_URL``) themselves and Claude Code talks directly to its
-provider.  DSAGT sets **no** telemetry env on the agent — agent-side traces
-are recovered post-hoc from Claude's on-disk transcript by DSAGT's own
-serverless pipeline (MCP server periodic pass → ``ClaudeReader`` →
-``ClaudeTranslator`` → ``MLflowSink``), uniformly with every other agent; not
-by forcing native OTel emission or wiring MLflow's autolog hook.
+The user sets ``ANTHROPIC_API_KEY`` (and optionally ``ANTHROPIC_MODEL``,
+``ANTHROPIC_BASE_URL``) in the shell and Claude Code talks directly to its
+provider.  Agent-side traces are recovered from Claude's on-disk transcript
+by the periodic pass (``ClaudeReader``, ``ClaudeTranslator``,
+``MLflowSink``), the same way as for every other agent, so the agent's
+environment carries no telemetry setting.
 
-Cache-marker injection: Claude Code handles Anthropic prompt caching
-natively against the Anthropic API.  Users on a custom
-``ANTHROPIC_BASE_URL`` that proxies to a non-Anthropic provider lose
-caching.
+Prompt caching: Claude Code handles Anthropic prompt caching natively
+against the Anthropic API.  Users on a custom ``ANTHROPIC_BASE_URL`` that
+proxies to a non-Anthropic provider lose caching.
 """
 
 from __future__ import annotations
@@ -104,14 +102,13 @@ class ClaudeSetup(AgentSetup):
         """Write ``.mcp.json``.
 
         The env block carries DSAGT/MLflow/embedding routing for the MCP-server
-        children — claude inherits parent env into them, but baking it into the
-        JSON is robust against shells that don't have those vars set.
+        children.  Claude passes its parent env to them, and writing the block
+        into the JSON as well covers a shell where those vars are unset.
 
-        No trace wiring here: DSAGT's own serverless pipeline (the MCP server's
-        periodic pass → ``ClaudeReader`` → ``ClaudeTranslator`` → ``MLflowSink``)
-        produces Claude's traces, uniformly with every other agent — so we do
-        NOT also wire MLflow's ``autolog claude`` Stop hook (which would
-        double-log the same turns, and only Claude can use it serverlessly).
+        The periodic pass (``ClaudeReader``, ``ClaudeTranslator``,
+        ``MLflowSink``) produces Claude's traces, the same way as for every
+        other agent, so the file carries no trace setting; MLflow's ``autolog
+        claude`` Stop hook would log the same turns a second time.
         """
         del env, pdir
         actions: list[str] = []
@@ -127,10 +124,9 @@ class ClaudeSetup(AgentSetup):
         actions.append(f"Wrote {mcp_path}")
         actions.extend(_write_bash_guard_hook(working_dir))
 
-        # Skills are mirrored into .claude/skills/ centrally via
-        # AgentSetup.setup_skills (driven by native_skills_dir) in
-        # dynamic_agent_record — see base.py.  Picked up on the next Claude
-        # start, which is fine: this runs at init/start, before launch.
+        # Skills are mirrored into .claude/skills/ by AgentSetup.setup_skills
+        # (driven by native_skills_dir) in dynamic_agent_record.  Claude reads
+        # them on its next start; this runs at init/start, before launch.
         return actions
 
     def run_script(
@@ -145,11 +141,10 @@ class ClaudeSetup(AgentSetup):
 
         ``--verbose`` streams tool-call progress as it happens.
 
-        ``--max-thinking-tokens 4096`` caps per-turn extended thinking
-        — claude code's default is much higher and a multi-task smoke
-        prompt can spend tens of seconds per turn just thinking.  4096
-        is enough headroom for the bounded reasoning each smoke task
-        needs.
+        ``--max-thinking-tokens 4096`` caps per-turn extended thinking.
+        Claude Code's default is much higher, and a multi-task smoke prompt
+        can spend tens of seconds per turn on thinking alone.  4096 is
+        enough for the bounded reasoning each smoke task needs.
         """
         del config, max_turns
         text = script_path.read_text().strip()

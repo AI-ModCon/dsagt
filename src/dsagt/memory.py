@@ -3,21 +3,21 @@ Memory management for DSAgt projects.
 
 Two memory types:
 
-**Explicit memory** (ExplicitMemory class):
+Explicit memory (:class:`ExplicitMemory`):
     User-confirmed facts stored in a YAML file and mirrored into the
-    ``explicit_memory`` ChromaDB collection.  Not auto-loaded into the
-    agent's context at session start — the agent retrieves entries on
-    demand via the ``kb_get_memories`` / ``kb_search`` MCP tools.
+    ``explicit_memory`` ChromaDB collection.  The agent retrieves entries on
+    demand via the ``kb_get_memories`` and ``kb_search`` MCP tools.
     Supports remember, supersede, remove, and retrieval.
 
-**Episodic memory** (MemoryExtractor):
-    A trace-pipeline *consumer* (``MemoryExtractor``) that consumes the
-    in-process ``Trace`` the periodic pass produces and writes per-block chunks into
-    the ``session_memory`` collection (producer/tool/turn_id metadata, no LLM).
+Episodic memory (:class:`MemoryExtractor`):
+    A trace-pipeline consumer that reads the in-process ``Trace`` the
+    periodic pass produces and writes per-block chunks into the
+    ``session_memory`` collection (producer, tool, and turn_id metadata; the
+    chunking is mechanical).
 
-Files on disk (in project directory):
-  explicit_memories.yaml       — active user-confirmed facts
-  explicit_memories_history.yaml — superseded/removed entries
+Files on disk (in the project directory):
+  explicit_memories.yaml: active user-confirmed facts
+  explicit_memories_history.yaml: superseded and removed entries
 """
 
 from __future__ import annotations
@@ -194,13 +194,14 @@ SESSION_MEMORY_COLLECTION = "session_memory"
 
 
 # ---------------------------------------------------------------------------
-# Trace chunking — split a turn's blocks into embeddable chunks
+# Trace chunking: split a turn's blocks into embeddable chunks
 #
-# The trace already carries mechanical boundaries (messages → content blocks),
-# so a "chunk" is one block: a user/assistant text block or a tool_result, each
-# embedded separately with a ``producer`` (user/llm/tool) label.  tool_use blocks
-# aren't embedded — they only supply the ``tool`` name resolved onto the matching
-# tool_result.  Over-long blocks split on newlines (cheap, boundary-meaningful).
+# The trace already carries mechanical boundaries (messages, then content
+# blocks), so a chunk is one block: a user/assistant text block or a
+# tool_result, each embedded separately with a ``producer`` (user/llm/tool)
+# label.  A tool_use block supplies only the ``tool`` name resolved onto the
+# matching tool_result.  Over-long blocks split on newlines (cheap, and the
+# boundary carries meaning).
 # ---------------------------------------------------------------------------
 
 #: Char budget above which a block is split on newlines before embedding.
@@ -221,11 +222,11 @@ def _extract_block_text(block: dict) -> str:
 
 
 def _split_oversized(text: str) -> list[str]:
-    """Split an over-long block at meaningful boundaries — no tokenizer.
+    """Split an over-long block at paragraph or line boundaries.
 
     Paragraph (``\\n\\n``) first, then line (``\\n``), greedily packing pieces up
-    to :data:`_MAX_CHUNK_CHARS`; a no-newline blob is hard-sliced as a last
-    resort.  Short blocks pass through untouched (stripped).
+    to :data:`_MAX_CHUNK_CHARS`; a block without newlines is sliced at fixed
+    width as a last resort.  Short blocks pass through stripped.
     """
     text = text.strip()
     if not text:
@@ -253,11 +254,11 @@ def _split_oversized(text: str) -> list[str]:
 
 
 def _resolve_tool_names(exchanges: list[dict]) -> dict[str, str]:
-    """Map ``tool_use_id`` → tool name across a batch.
+    """Map ``tool_use_id`` to tool name across a batch.
 
-    A tool call and its result land in *different* turns (the result is the next
-    turn's input), so the lookup is built over the whole delivered batch, not a
-    single exchange.
+    A tool call and its result are recorded in different turns (the result is
+    the next turn's input), so the lookup is built over the whole delivered
+    batch.
     """
     names: dict[str, str] = {}
     for ex in exchanges:
@@ -273,11 +274,11 @@ def _resolve_tool_names(exchanges: list[dict]) -> dict[str, str]:
 
 
 def _turn_chunks(exchange: dict, tool_names: dict[str, str]) -> list[dict]:
-    """One turn's blocks → ``[{text, producer, tool}]`` chunks.
+    """One turn's blocks as ``[{text, producer, tool}]`` chunks.
 
     text blocks carry the message's producer (``user``/``llm``); tool_result
     blocks are ``tool`` with the name resolved via ``tool_use_id``; tool_use
-    blocks are skipped (captured in ``tool_names``, not embedded as prose).
+    blocks are skipped (they supply ``tool_names`` only).
     """
     chunks: list[dict] = []
 
@@ -317,11 +318,11 @@ def _turn_chunks(exchange: dict, tool_names: dict[str, str]) -> list[dict]:
 
 
 def _epoch_or_now(ts: object) -> float:
-    """An exchange timestamp (epoch seconds) → float, else wall-clock now.
+    """An exchange timestamp (epoch seconds) as a float, else wall-clock now.
 
-    ``Trace.to_exchanges`` carries the span ``start_time`` (epoch
-    seconds) when the transcript recorded it, ``None`` otherwise — recency
-    weighting needs a number, so fall back to now for unstamped turns.
+    ``Trace.to_exchanges`` carries the span ``start_time`` (epoch seconds)
+    when the transcript recorded it, ``None`` otherwise; recency weighting
+    needs a number, so an unstamped turn gets the current time.
     """
     return float(ts) if isinstance(ts, (int, float)) else time.time()
 
@@ -345,24 +346,24 @@ def episodic_consumers(config: dict, kb, runtime_dir, session_id) -> list:
                 session_id=session_id or "",
             )
         ]
-    except Exception as e:  # noqa: BLE001 — memory is best-effort, never fatal
+    except Exception as e:  # noqa: BLE001  # memory is best-effort, never fatal
         logger.warning("Could not build episodic-memory consumer: %s", e)
         return []
 
 
 class MemoryExtractor:
-    """Trace-pipeline consumer: ``Trace`` → ``session_memory`` chunks.
+    """Trace-pipeline consumer: ``Trace`` to ``session_memory`` chunks.
 
-    Plugged into :class:`~dsagt.traces.TraceCollector` alongside the MLflow sink;
-    each ``write`` receives the (subset of) just-completed turns and indexes them.
-    Idempotency is the periodic pass's job — it only delivers turns this consumer
-    hasn't acked — so ``write`` just does the work.
+    Plugged into :class:`~dsagt.traces.TraceCollector` alongside the MLflow
+    sink; each ``write`` receives the just-completed turns and indexes them.
+    Idempotency is the periodic pass's job: it delivers only turns this
+    consumer has not acked, so ``write`` indexes everything it receives.
 
-    Chunks each turn per-block and embeds it — no LLM, nothing lost, the agent
-    is never blocked.
+    Each turn is chunked per block and embedded mechanically, so every block
+    is indexed and the agent is never blocked.
     """
 
-    #: Subscriber name → its own ack file (``.dsagt/trace_acks_memory.json``).
+    #: Subscriber name; it names the ack file (``.dsagt/trace_acks_memory.json``).
     name = "memory"
 
     def __init__(
@@ -381,12 +382,13 @@ class MemoryExtractor:
         if not exchanges:
             return
         # Categorization root: this runs on the periodic pass, outside any MCP
-        # dispatch, so tag the whole extraction ``dsagt.source=episodic`` — the
-        # nested kb.* writes inherit it (otherwise they'd land uncategorized).
-        # ``episodic``, NOT ``memory``: this is per-turn internal embedding, and
-        # must filter apart from the user-facing memory tools (kb_remember /
-        # kb_get_memories) that carry ``dsagt.source=memory``.
-        # (This tags the *observability* span, not the memory chunks.)
+        # dispatch, so the whole extraction is tagged ``dsagt.source=episodic``
+        # and the nested kb.* writes inherit it; without the tag they would be
+        # uncategorized.  The value is ``episodic``, never ``memory``: this is
+        # per-turn internal embedding, and it must filter apart from the
+        # user-facing memory tools (kb_remember, kb_get_memories), which carry
+        # ``dsagt.source=memory``.  The tag is on the observability span; the
+        # memory chunks carry their own metadata.
         from dsagt.observability import open_span
 
         with open_span("memory.extract", source="episodic") as span:

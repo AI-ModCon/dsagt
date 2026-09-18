@@ -1,4 +1,4 @@
-"""AI-readiness check — the AIDRIN quality baseline around every tabular stage.
+"""AI-readiness check: the AIDRIN quality baseline around every tabular stage.
 
 The pipeline-builder instructions require a paired check before and after
 every data operation, with reports in ``audit/``.  When a project keeps the

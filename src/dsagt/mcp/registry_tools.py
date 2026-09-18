@@ -162,8 +162,8 @@ async def _handle_search_registry(
             "code_name for KB-free lookups."
         )
 
-    # Single ``tools`` collection — bundled and registered entries
-    # coexist, distinguished by ``metadata.source`` if needed.
+    # One ``codes`` collection holds bundled and registered entries,
+    # distinguished by ``metadata.source``.
     results = await asyncio.to_thread(
         kb.search,
         query=query or "tool",
@@ -208,13 +208,14 @@ async def _handle_reconstruct_pipeline(
     output = arguments.get("output")
     trace_dir = runtime_dir / "trace_archive"
     # Index the session's tool-use first: reconstruct is the moment the pipeline
-    # is "done enough" to review, so make the just-run executions searchable now
-    # rather than waiting on the periodic pass.  Idempotent + file-locked, so this
-    # is safe to fire alongside the periodic pass's own CodeUseIndexer.
+    # is complete enough to review, so the just-run executions are made
+    # searchable here rather than waiting on the periodic pass.  Idempotent and
+    # file-locked, so this is safe to run beside the periodic pass's own
+    # CodeUseIndexer.
     if kb is not None:
         try:
             await asyncio.to_thread(CodeUseIndexer(kb, runtime_dir).tick)
-        except Exception as e:  # noqa: BLE001 — indexing is best-effort here
+        except Exception as e:  # noqa: BLE001  indexing is best-effort here
             logger.warning("code_use indexing before reconstruct failed: %s", e)
     with registry_reconstruct_pipeline_span(fmt):
         try:
@@ -276,7 +277,7 @@ async def _handle_install_dependencies(
 
 
 # ---------------------------------------------------------------------------
-# Tool defs + handler map (used by the merged server and the test wrapper)
+# Tool defs and handler map (used by the merged server and the test wrapper)
 # ---------------------------------------------------------------------------
 
 
@@ -331,7 +332,7 @@ def _registry_tools_and_handlers(
                                     "name": {
                                         "type": "string",
                                         "description": (
-                                            "Unique code name — lowercase "
+                                            "Unique code name: lowercase "
                                             "letters, digits, hyphens (e.g. "
                                             "'datacard-introspect')"
                                         ),
@@ -340,7 +341,7 @@ def _registry_tools_and_handlers(
                                         "type": "string",
                                         "description": (
                                             "What the code does and when to "
-                                            "use it — phrase as 'Use when "
+                                            "use it, phrased as 'Use when "
                                             "…' so native skill routing can "
                                             "match it"
                                         ),
@@ -512,7 +513,7 @@ def create_registry_server(
     registry: CodeRegistry,
     kb: KnowledgeBase | None = None,
 ):
-    """Create a standalone MCP server exposing only the registry/exec/provenance tools.
+    """Create a standalone MCP server exposing only the registry and provenance tools.
 
     Test-facing API: tests call with a mock registry and drive the server via
     ``call_tool_sync()``.  The merged ``dsagt-server`` composes

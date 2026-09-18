@@ -1,5 +1,5 @@
 """
-DSAgt — DataSmith Agent.
+DSAgt (DataSmith Agent).
 
 AI-assisted data pipeline builder for MCP-compatible agents.
 """
@@ -8,14 +8,12 @@ AI-assisted data pipeline builder for MCP-compatible agents.
 # via `[tool.setuptools.dynamic] version = {attr = "dsagt.__version__"}`.
 __version__ = "0.2.1"
 
-# Cap CPU thread count for embedding / tokenization libraries before any
-# heavy imports happen.  Without this, onnxruntime / numpy+MKL default to
-# using every available core, which pegs the
-# machine and causes visible system unresponsiveness during embed bursts
-# (kb_ingest, kb_search bursts, init's KB build).  Half the physical
-# cores is a sensible default that leaves headroom for the OS, the
-# agent process, OneDrive sync, IDE, browser, etc.  ``setdefault``
-# preserves any value the user has already exported in their shell.
+# Cap the CPU thread count for the embedding and tokenization libraries
+# before any heavy import.  onnxruntime and numpy+MKL default to every
+# available core, which makes the host unresponsive during an embed burst
+# (kb_ingest, kb_search, init's KB build).  Half the cores leaves headroom
+# for the OS, the agent process, file sync, the IDE, and the browser.
+# ``setdefault`` keeps a value the user exported in their shell.
 import os as _os
 
 _default_threads = str(max(1, (_os.cpu_count() or 4) // 2))
@@ -32,13 +30,14 @@ _os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 # agent's environment marker is set, which is every dsagt process an agent
 # launches; dsagt-run under an agent printed it on every call.
 _os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
-# uv bundles its own OpenSSL that does not read the macOS Security keychain.
-# On networks with an SSL-intercepting proxy (e.g. Zscaler), the corporate
-# root CA lives only in the keychain, so HTTPS downloads (HuggingFace model
+# uv's Python carries its own OpenSSL, whose trust store is its own CA
+# bundle and never the macOS Security keychain.  On a network with an
+# SSL-intercepting proxy (Zscaler, for example) the corporate root CA is
+# installed only in the keychain, so HTTPS downloads (HuggingFace model
 # weights, arXiv PDFs) fail with "unable to get local issuer certificate".
 # truststore patches ssl.SSLContext to use the OS-native trust store
-# (macOS Security framework / Windows Certificate Store), making the
-# installed corporate CA visible to httpx, requests, and urllib3.
+# (macOS Security framework, Windows Certificate Store), so httpx,
+# requests, and urllib3 trust the installed corporate CA.
 # inject_into_ssl() must run before any ssl.SSLContext is constructed.
 try:
     import truststore as _truststore

@@ -1,26 +1,24 @@
 """
-Trace pipeline — read each agent's on-disk session, normalize it to one common
-``Trace``, and hand that to whatever consumes traces (the MLflow logger in
+Trace pipeline: read each agent's on-disk session, normalize it to one common
+``Trace``, and pass that to each consumer of traces (the MLflow logger in
 :mod:`dsagt.observability`, the episodic-memory indexer in :mod:`dsagt.memory`).
 
-While a session runs, the MCP server wakes on a timer and, for the running agent:
-a **Reader** finds and reads the platform's session files on disk into raw
-records; the matching **Translator** maps those records into one **Trace**; and
-the **TraceCollector** hands the result to its consumers, skipping the turns it
-already handled.
+While a session runs, the periodic pass runs on a timer and, for the running
+agent: a **Reader** finds and reads the platform's session files on disk into
+raw records; the matching **Translator** maps those records into one **Trace**;
+and the **TraceCollector** passes the result to its consumers, skipping the
+turns it already handled.
 
- A session ``Trace`` carries one AGENT subtree per turn
- (an AGENT root with ``llm`` / ``tool_<name>``
-children), matching the per-prompt granularity MLflow's own claude autolog
-produces.  Fidelity is capped by what the transcript persisted: every timestamp
-and token count is ``None``-tolerant.
+A session ``Trace`` carries one AGENT subtree per turn (an AGENT root with
+``llm`` / ``tool_<name>`` children), matching the per-prompt granularity
+MLflow's own claude autolog produces.  Fidelity is capped by what the
+transcript persisted: every timestamp and token count is ``None``-tolerant.
 
-The Claude grammar below is ported from MLflow's
-``claude_code/tracing.py`` — © Databricks, Inc., Apache-2.0 — specifically its
-turn-windowing, skill/command skips, and next-timestamp span durations.  See
-NOTICE.
+The Claude grammar below is ported from MLflow's ``claude_code/tracing.py``
+(© Databricks, Inc., Apache-2.0), specifically its turn-windowing,
+skill/command skips, and next-timestamp span durations.  See NOTICE.
 
-Class map — ``▷`` inherits · ``◆`` owns · ``◇`` holds  (``*`` = many)::
+Class map: ``▷`` inherits · ``◆`` owns · ``◇`` holds  (``*`` = many)::
 
     Trace                       one session: id fields + spans (list of dicts)
                                 + compose / query / to_exchanges methods
@@ -34,7 +32,7 @@ Class map — ``▷`` inherits · ``◆`` owns · ``◇`` holds  (``*`` = many):
     └─▷ ClineReader              ~/.cline/.../<id>.messages.json (whole file)
 
     Translator  «abstract»      raw records → Trace (pure); shared turn template
-    ├─▷ ClaudeTranslator         overrides translate() — bespoke grammar
+    ├─▷ ClaudeTranslator         overrides translate(): bespoke grammar
     ├─▷ CodexTranslator          fills parse hooks (+ normalize / prompt-index)
     ├─▷ GooseTranslator          fills parse hooks
     ├─▷ OpenCodeTranslator       fills parse hooks
@@ -84,7 +82,7 @@ def _parse_ts(ts: object) -> float | None:
 
 
 # ---------------------------------------------------------------------------
-# The block / message / usage shapes (the one place they're constructed)
+# The block / message / usage shapes (the one place they are constructed)
 # ---------------------------------------------------------------------------
 
 
@@ -112,7 +110,7 @@ def _message(role: str, blocks: list[dict]) -> dict:
 def _usage(raw: dict | None) -> dict | None:
     """Token counts from an Anthropic ``usage`` dict; ``None`` when absent.
 
-    ``input_tokens`` is every token the model read — Anthropic reports the
+    ``input_tokens`` is every token the model read: Anthropic reports the
     uncached, cache-written and cache-read parts as three disjoint counts, so
     they are summed here.  Reading only ``input_tokens`` undercounts an agentic
     turn by roughly the whole prompt: a smoke session showed 36 uncached
@@ -148,7 +146,7 @@ def _codex_usage(raw: dict | None) -> dict | None:
 
 
 # ===========================================================================
-# Trace — the canonical form (nested data + composition / query methods)
+# Trace: the canonical form (nested data + composition / query methods)
 # ===========================================================================
 
 
@@ -156,9 +154,9 @@ class Trace:
     """One finished agent session: id fields plus a list of span dicts.
 
     The span/message/block shapes are documented in the module docstring and
-    built *only* by the ``add_*`` methods here, so the schema has one home.
-    Consumers read ``spans`` (and ``to_exchanges()``) directly — the data is
-    already in the dict shape both the MLflow logger and memory want.
+    built only by the ``add_*`` methods here, so the schema has one home.
+    Consumers read ``spans`` (and ``to_exchanges()``) directly; the data is
+    already in the dict shape the MLflow logger and memory read.
     """
 
     def __init__(self, trace_id: str, session_id: str, agent: str, project: str):
@@ -263,15 +261,15 @@ class Trace:
     def add_turn(self, *, root_id, root_name, prompt, root_ts, events, last_ts) -> None:
         """Append one AGENT subtree from a turn's ordered ``events``.
 
-        Each event is a tuple — ``("llm", ts, text, model, usage)`` or
-        ``("tool", ts, name, input, result[, usage])`` — in transcript order.
+        Each event is a tuple, ``("llm", ts, text, model, usage)`` or
+        ``("tool", ts, name, input, result[, usage])``, in transcript order.
         A tool event carries usage when the LLM call that emitted it produced
-        no text, so the call's tokens survive when it produces no llm span.  This is the
-        shared builder the four template translators use: it derives each span's
-        duration from the next event's timestamp (1s fallback for the last), and
-        threads the request "window" (the prompt, then each tool call+result)
-        into the following ``llm`` span's ``request`` — which is what memory's
-        ``to_exchanges`` reads.
+        no text, so the call's tokens survive when it produces no llm span.
+        This is the shared builder the four template translators use: it
+        derives each span's duration from the next event's timestamp (1s
+        fallback for the last), and threads the request "window" (the prompt,
+        then each tool call+result) into the following ``llm`` span's
+        ``request``, which memory's ``to_exchanges`` reads.
         """
         root = self.add_agent_root(
             root_id, root_name, start_time=root_ts, prompt=prompt
@@ -326,8 +324,8 @@ class Trace:
     def _root_end(self, root: dict, last_ts: float | None) -> float | None:
         """The turn's end: the bounding timestamp, and never before the turn's
         start.  A transcript can carry the next prompt's timestamp a few
-        milliseconds before the turn's own first record, which as the end
-        alone gave a negative duration.  The children's ends are left out
+        milliseconds before the turn's own first record, which taken alone
+        as the end gives a negative duration.  The children's ends are left out
         because the last child's end is a one-second fallback, and the root
         matches the autolog parser's, which ends at the bounding record."""
         candidates = [t for t in (last_ts, root["start_time"]) if t is not None]
@@ -359,7 +357,7 @@ class Trace:
         One ``llm`` span → one ``{turn_id, timestamp, new_messages, response}``
         exchange; ``turn_id`` is the span id (groups a turn's chunks back
         together downstream), ``request`` is already the windowed message list,
-        ``response`` the output blocks — so this is a straight projection.
+        ``response`` the output blocks, so this is a straight projection.
         """
         return [
             {
@@ -374,19 +372,19 @@ class Trace:
 
 
 # ===========================================================================
-# Readers — locate + read a platform's session record into raw records
+# Readers: locate + read a platform's session record into raw records
 # ===========================================================================
 
 
 class Reader(ABC):
     """Find this project's active session for an agent and read its records.
 
-    Each reader resolves *the latest session for this project* and reads it.  A
-    reader can also be pinned (:meth:`pin`) to a specific session — the startup
-    catch-up does this to re-read the *previous* session rather than whatever is
-    newest now.  :meth:`active_source` returns an opaque, agent-shaped token for
-    the session being read — a transcript path (claude/codex), a DB session id
-    (goose/opencode), or a session-dir name (cline) — which the server records
+    Each reader resolves the latest session for this project and reads it.  A
+    reader can also be pinned (:meth:`pin`) to a specific session; the startup
+    catch-up pins the previous session, since the newest is the live one.
+    :meth:`active_source` returns an opaque, agent-shaped token for the session
+    being read (a transcript path for claude/codex, a DB session id for
+    goose/opencode, or a session-dir name for cline), which the server records
     in ``state.yaml`` so the next session's catch-up can pin it back.  The token
     round-trips through YAML, so its native type (str/int) is preserved.
     """
@@ -418,7 +416,7 @@ class JsonlReader(Reader):
 
     A trailing half-written line is dropped (picked up next pass).  Subclasses
     supply :meth:`active_file`; the framing is identical for claude and codex.
-    A pinned reader reads that exact file instead of the newest.
+    A pinned reader reads the pinned file.
     """
 
     @abstractmethod
@@ -488,10 +486,10 @@ class CodexReader(JsonlReader):
     """The newest ``rollout-*.jsonl`` whose ``session_meta.cwd`` is this project.
 
     DSAGT always runs codex with ``CODEX_HOME=<project>/.codex-data`` (its MCP
-    config lives there — see agents/codex.py), so rollouts land under
-    ``<project>/.codex-data/sessions/YYYY/MM/DD/``, not the global
-    ``~/.codex/sessions/``.  Each rollout opens with a ``session_meta`` record
-    carrying the launch ``cwd``; the filter guards against stray files.
+    config is there; see agents/codex.py), so rollouts are written under
+    ``<project>/.codex-data/sessions/YYYY/MM/DD/``.  Each rollout opens with a
+    ``session_meta`` record carrying the launch ``cwd``; the filter guards
+    against stray files.
     """
 
     agent = "codex"
@@ -749,7 +747,7 @@ def _loads_dict(raw: str) -> dict:
 
 
 # ===========================================================================
-# Translators — raw records → Trace (pure, no I/O)
+# Translators: raw records → Trace (pure)
 # ===========================================================================
 
 
@@ -762,7 +760,7 @@ class Translator(ABC):
     ``Trace.add_turn`` turns into a span subtree.  A subclass supplies the small
     parse hooks (``_is_prompt`` / ``_prompt_text`` / ``_ts`` / ``_events`` and,
     where needed, ``_tool_results`` / ``_normalize`` / ``_prompt_indices``).
-    Claude overrides ``translate`` outright — its grammar exceeds this shape.
+    Claude overrides ``translate`` outright: its grammar exceeds this shape.
     """
 
     agent: str
@@ -887,7 +885,7 @@ class GooseTranslator(Translator):
 
 
 class OpenCodeTranslator(Translator):
-    """opencode flattened parts → Trace (call + result live in one tool part)."""
+    """opencode flattened parts → Trace (call and result are in one tool part)."""
 
     agent = "opencode"
     root_name = "opencode_conversation"
@@ -1006,17 +1004,17 @@ class CodexTranslator(Translator):
     """Codex rollout records → Trace (OpenAI Responses format).
 
     Normalizes the rollout into ``{ts, p}`` conversation items, then fits the
-    template — except the prompt is the *last* user message in a consecutive run
-    (Codex injects an AGENTS.md context message earlier), so ``_prompt_indices``
-    is overridden with that lookahead.
+    template, except that the prompt is the last user message in a consecutive
+    run (Codex injects an AGENTS.md context message earlier), so
+    ``_prompt_indices`` is overridden with that lookahead.
     """
 
     agent = "codex"
     root_name = "codex_conversation"
 
     def _normalize(self, records) -> list[dict]:
-        """Conversation items, each stamped with the model and — once per LLM
-        call — that call's token usage.
+        """Conversation items, each stamped with the model and, once per LLM
+        call, that call's token usage.
 
         A call's output is a run of ``response_item`` records closed by an
         ``event_msg/token_count`` whose ``last_token_usage`` is the call's
@@ -1121,11 +1119,11 @@ class CodexTranslator(Translator):
 
 
 class ClaudeTranslator(Translator):
-    """Claude transcript → Trace — bespoke; overrides the template.
+    """Claude transcript → Trace; overrides the template.
 
     Claude emits separate entries per thinking / text / tool_use, folds queued
     "steer" messages into the request window, splits a turn's duration across
-    multiple tool calls, and carries token usage — richer than the event
+    multiple tool calls, and carries token usage, which exceeds the event
     template, so it builds spans directly via ``Trace``'s ``add_*`` methods.
     """
 
@@ -1159,7 +1157,7 @@ class ClaudeTranslator(Translator):
         final_response: str | None = None
         last_ts = root_ts
         # Claude Code writes one record per content block and repeats the whole
-        # API response's ``usage`` on each — a thinking block, then four
+        # API response's ``usage`` on each: a thinking block, then four
         # tool_use blocks, five records, one call.  Usage is attached once per
         # ``message.id``, to the first span that call produces.
         counted: set[str] = set()
@@ -1216,8 +1214,8 @@ class ClaudeTranslator(Translator):
                         result=results.get(tid, ""),
                         tool_id=tid,
                         # The span layout mirrors MLflow's Claude Code autolog,
-                        # which has no LLM span for a tool-calling message — so
-                        # the call's usage rides on its first tool span.  MLflow
+                        # which has no LLM span for a tool-calling message, so
+                        # the call's usage is attached to its first tool span.  MLflow
                         # sums usage across every span, so the trace total is
                         # right and the layout the parity tests pin is kept.
                         usage=usage if idx_t == 0 else None,
@@ -1284,7 +1282,7 @@ class ClaudeTranslator(Translator):
             )
         if btype == "tool_result":
             return _tool_result_block(raw.get("content"), raw.get("tool_use_id"))
-        return None  # thinking / unknown — no conversational payload
+        return None  # a thinking or unknown block carries no conversational payload
 
     def _message_from_record(self, record) -> dict | None:
         msg = record.get("message") or {}
@@ -1338,11 +1336,11 @@ class ClaudeTranslator(Translator):
 
 
 # ===========================================================================
-# TraceCollector — the driver (read → translate → hand to consumers)
+# TraceCollector: the driver (read → translate → pass to consumers)
 # ===========================================================================
 
 # An agent appears here once both its reader and translator exist; the collector
-# runs for any agent in the table and is simply absent for the rest.
+# runs for any agent in the table and is absent for the rest.
 _PIPELINES = {
     "claude": lambda pd, pr, sr: (
         ClaudeReader(pd, projects_root=pr),
@@ -1376,9 +1374,9 @@ def make_trace_collector(
     episodic memory is enabled) are appended, each acking independently.
 
     ``source`` pins the reader to a specific session (the startup catch-up passes
-    the *previous* session's recorded :meth:`Reader.active_source` token), so it
-    re-reads that exact session instead of whatever is newest now — uniformly
-    across all agents (transcript path, DB session id, or session-dir name).
+    the previous session's recorded :meth:`Reader.active_source` token), so it
+    re-reads that session, uniformly across agents (transcript path, DB session
+    id, or session-dir name).
 
     ``sessions_root`` overrides where the codex/cline reader looks for session
     transcripts (each reader documents its own default): an application
@@ -1386,7 +1384,7 @@ def make_trace_collector(
     sessions dir (e.g. ``~/.codex/sessions``).  ``projects_root`` is the claude
     equivalent.  Both are ignored for agents whose reader has no such root.
 
-    ``ack_dir`` is where the per-consumer ack files land, resolved against
+    ``ack_dir`` is where the per-consumer ack files are written, resolved against
     ``project_dir`` (an absolute path is used as-is): an application keeps
     trace state beside its own (e.g. ``.nmstudio``); dsagt's is ``.dsagt``.
     """
@@ -1396,8 +1394,8 @@ def make_trace_collector(
     reader, translator = builder(project_dir, projects_root, sessions_root)
     if source is not None:
         reader.pin(source)
-    # Imported here (not at module top) so traces stays a lean leaf — the MLflow
-    # logger drags in mlflow, the heaviest thing in the pipeline.
+    # Imported here so this module stays a light import: the MLflow logger
+    # imports mlflow, the heaviest dependency in the pipeline.
     from dsagt.observability import MLflowSink
 
     consumers = [MLflowSink(tracking_uri, experiment), *(extra_consumers or [])]
@@ -1415,9 +1413,9 @@ def make_trace_collector(
 class TraceCollector:
     """Periodically read the session, translate it, and hand it to consumers.
 
-    A *consumer* is anything with a ``name`` and a ``write(trace)`` — the MLflow
-    logger and the memory indexer both qualify (no shared base needed).  Each
-    consumer keeps its own ack set (``<ack_dir>/trace_acks_<name>.json``), keyed
+    A *consumer* is anything with a ``name`` and a ``write(trace)``; the MLflow
+    logger and the memory indexer both qualify.  Each consumer keeps its own
+    ack set (``<ack_dir>/trace_acks_<name>.json``), keyed
     by transcript-qualified turn id (``<active_source>:<span_id>``).  The
     transcript, not the dsagt session, is the unit: a resumed conversation
     (``claude --continue``, ``codex exec resume``) starts a new dsagt session on
@@ -1426,8 +1424,8 @@ class TraceCollector:
     or an N+1 catch-up can only waste work, never double-log or lose a turn, and
     a failing consumer holds back only its own mark.
 
-    Completeness watermark: a periodic pass emits only *completed* turns (all but
-    the still-open last one); the deferred final turn flushes when a later prompt
+    A periodic pass emits only completed turns (all but the still-open last
+    one); the deferred final turn flushes when a later prompt
     bounds it or at end-of-session (``include_last=True``), and only once it
     holds a response, so a prompt still being answered is never acked as a
     stub.  An OS file lock serializes overlapping passes against the shared ack
@@ -1459,7 +1457,7 @@ class TraceCollector:
     def active_source(self):
         """The reader's session token (see :meth:`Reader.active_source`), or
         ``None``.  Recorded in ``state.yaml`` so the next session's catch-up can
-        pin this exact session — uniform across all agents.
+        pin this exact session, uniform across all agents.
         """
         try:
             return self._reader.active_source()
@@ -1494,8 +1492,8 @@ class TraceCollector:
 
         Returns the number of turns newly delivered to at least one consumer.
         ``include_last=True`` (end-of-session flush / per-turn hook) also emits
-        the otherwise-deferred final turn.  Blocking — call via
-        ``asyncio.to_thread`` from the event loop.
+        the deferred final turn.  Blocking; call it via ``asyncio.to_thread``
+        from the event loop.
         """
         with self._lock, self._lock_file():
             records = self._reader.read()
@@ -1539,7 +1537,7 @@ class TraceCollector:
                     consumer.write(trace.subset(emit_ids))
                     # Ack within the same per-consumer try as the write, so a
                     # failure is isolated to this consumer and turns already
-                    # written can't re-emit as duplicates on the next pass.
+                    # written cannot re-emit as duplicates on the next pass.
                     self._save_acks(
                         consumer.name, acks | {key_by_span[s] for s in emit_ids}
                     )

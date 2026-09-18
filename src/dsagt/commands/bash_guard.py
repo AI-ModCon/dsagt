@@ -1,13 +1,13 @@
-"""dsagt-bash-guard: the Claude Code PreToolUse hook that keeps bare python off project data.
+"""dsagt-bash-guard: the Claude Code PreToolUse hook that refuses a bare python call.
 
 Claude Code calls it before every Bash tool call with the call as JSON on
 stdin.  A command that runs ``python``, ``python3``, or ``uv run python``
 outside ``dsagt-run`` is refused (exit 2, the reason on stderr, which Claude
-Code shows the agent) with the recorded form to use instead.  Text alone did
-not close this: the agent's inspect-and-fix loop wrote scripts to its
-scratchpad and ran them bare because the harness refused a ``python -c``
-with ``#`` lines, and no wording of the instructions reaches that moment.
-The hook does, at the point the command is issued.
+Code shows the agent) with the recorded form to use instead.  The hook
+exists because the instructions alone are not read at the moment that
+matters: the agent's inspect-and-fix loop wrote scripts to its scratchpad
+and ran them bare after the harness refused a ``python -c`` with ``#``
+lines.  The hook acts at the point the command is issued.
 
 Allowed as they are: a call already under ``dsagt-run``, ``--help`` and
 ``--version``, ``python -m pytest``, and ``pip``.

@@ -1,18 +1,16 @@
 """
-DSAgt CLI — project initialization and session management.
+DSAgt CLI: project initialization and session management.
 
 ``dsagt init`` is the single, interactive, re-runnable place a user expresses
 every choice; the prompts mirror ``.dsagt/config.yaml`` 1:1 and it writes the
-per-agent instructions + MCP config.  ``dsagt start <project>`` refreshes the
-dynamic agent record (MCP config + native-skills mirror, idempotent) and then
-launches the agent — ``cd <project> && <agent>`` plus the refresh (the MCP
-server owns the session lifecycle, minting session ids into
-``.dsagt/state.yaml`` and catching up post-session extraction in the
-background at startup).
+per-agent instructions and MCP config.  ``dsagt start <project>`` refreshes
+the dynamic agent record (MCP config and native-skills mirror, idempotent)
+and then launches the agent: ``cd <project> && <agent>`` plus the refresh.
+The MCP server owns the session lifecycle, minting session ids into
+``.dsagt/state.yaml`` and running the catch-up in the background at startup.
 
-The agent talks to its provider directly — DSAGT never interposes on its
-traffic.  Self-logging goes to a serverless ``sqlite:///<pdir>/mlflow.db``
-store (no server to run).
+The agent talks to its provider directly.  Self-logging goes to the
+``sqlite:///<pdir>/mlflow.db`` store, which needs no server process.
 
 Usage:
     dsagt init [<project>]              # interactive; re-run to reconfigure
@@ -63,8 +61,8 @@ logger = logging.getLogger(__name__)
 # Interactive prompt helpers
 #
 # Selection-style prompts (agent, KB collections, skill sources) use
-# ``questionary`` for arrow-key navigation + space-to-toggle checkboxes — no
-# typing required.  Free-text (name / location) and y/N confirms stay plain.
+# ``questionary`` for arrow-key navigation and space-to-toggle checkboxes.
+# Free-text (name / location) and y/N confirms are plain ``input``.
 # These run only on the interactive (TTY) path; automation drives init via
 # flags and never reaches them.
 # ---------------------------------------------------------------------------
@@ -108,7 +106,7 @@ def _checkbox(message: str, choices: list[tuple[str, str, bool]]) -> list[str]:
         questionary.Choice(title=label, value=value, checked=checked)
         for value, label, checked in choices
     ]
-    # ``instruction=""`` suppresses questionary's own hint line — our message
+    # ``instruction=""`` suppresses questionary's own hint line; the message
     # already spells out the controls.
     answer = questionary.checkbox(message, choices=qchoices, instruction="").ask()
     if answer is None:
@@ -150,11 +148,11 @@ def _skills_block_for(source_names: list[str]) -> dict:
 
 
 def _episodic_block(enabled: bool) -> dict | None:
-    """The ``episodic`` config block, or ``None`` when the user didn't opt in.
+    """The ``episodic`` config block, or ``None`` when the user did not opt in.
 
     Enabling captures each completed turn into ``session_memory`` (mechanical
-    chunk + tag + embed).  ``None`` keeps a disabled project's config minimal
-    (``enabled: false`` is backfilled on read).
+    chunk, tag, and embed).  ``None`` keeps a disabled project's config
+    minimal; ``enabled: false`` is filled in from the defaults on read.
     """
     if not enabled:
         return None
@@ -174,13 +172,13 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
     Selection questions: agent platform, packaged KB document *collections*,
     skill-catalog *sources*, and the episodic-memory opt-in.  The bundled
     ``tools`` collection is always provisioned.
-    Project name + folder location are resolved by the caller.  Embedding /
-    chunk_size is a code default, not init choices.
+    Project name and folder location are resolved by the caller.  Embedding
+    and chunk_size are code defaults.
 
-    Interactive: questionary select/checkbox menus + y/N, pre-filled with the
-    project's current choices on re-init.  Non-interactive (no TTY): drive from
-    ``--include`` / ``--exclude`` / ``--episodic`` flags — the automation/test
-    path.
+    Interactive: questionary select/checkbox menus and y/N, pre-filled with
+    the project's current choices on re-init.  Non-interactive (no TTY): the
+    ``--include`` / ``--exclude`` / ``--episodic`` flags, the automation and
+    test path.
     """
     from dsagt.commands.setup_core_kb import COLLECTIONS, resolve_assets
     from dsagt.skills import KNOWN_SOURCES
@@ -196,7 +194,7 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
         )
 
         # Knowledge collections (heavy doc collections; default none).
-        # Labels are bare names — short enough to never wrap the terminal.
+        # Labels are bare names, short enough to never wrap the terminal.
         cur_colls = set(existing.get("knowledge", {}).get("collections", []))
         collections = _checkbox(
             "Knowledge collections (space toggles, ↑/↓ to move, enter confirms)",
@@ -240,7 +238,7 @@ def _collect_settings(args, interactive: bool, existing: dict, pdir: Path | None
         collections = [a for a in full if a in COLLECTIONS]
         skill_names = [a for a in full if a in KNOWN_SOURCES]
         # Episodic is flag-driven here (automation); omit --episodic to leave it
-        # off.  Re-pass it on re-init — like --include/--exclude, flags are
+        # off.  Re-pass it on re-init: like --include/--exclude, flags are
         # authoritative on the non-interactive path.
         episodic = _episodic_block(getattr(args, "episodic", False))
         readiness = _readiness_block(getattr(args, "readiness", True))
@@ -261,24 +259,25 @@ def _handle_destructive(
 ) -> None:
     """Detect destructive deltas on re-init and prompt delete-or-keep.
 
-    Non-interactive (no TTY): never deletes — warns and keeps, so automation
-    can't lose data and ``input()`` is never called on a closed stdin.
+    Non-interactive (no TTY): never deletes; it warns and keeps, so automation
+    cannot lose data and ``input()`` is never called on a closed stdin.
 
-    Never touches agent-populated data: ``tool_use`` / ``session_memory``
-    collections, ``.dsagt/`` memory, ``trace_archive/``, ``skills/``.
+    Agent-populated data is never deleted: the ``code_use`` and
+    ``session_memory`` collections, ``.dsagt/`` memory, ``trace_archive/``,
+    ``skills/``.
     """
     from dsagt.commands.setup_core_kb import asset_collection_name
 
     protected = {"code_use", "session_memory"}
 
-    # Agent switch → old platform's files are now stale.
+    # An agent switch leaves the previous platform's files stale.
     old_agent = existing.get("agent")
     new_agent = settings["agent"]
     if old_agent and old_agent != new_agent:
         setup = AGENTS[old_agent]()
         stale = [p for p in setup.owned_artifacts(pdir) if p.exists()]
         if stale:
-            print(f"\n  Switching agent {old_agent} → {new_agent} leaves stale files:")
+            print(f"\n  Switching agent {old_agent} to {new_agent} leaves stale files:")
             for p in stale:
                 print(f"    {p}")
             if interactive and _confirm("  Delete these stale files?", default=True):
@@ -293,7 +292,7 @@ def _handle_destructive(
             else:
                 print("  Kept (remove them manually if you want them gone).")
 
-    # Removed KB collections → their dirs are now orphaned.
+    # A KB collection dropped from the asset set leaves an orphaned dir.
     new_colls = set()
     for a in settings["assets"]:
         try:
@@ -321,13 +320,13 @@ def _handle_destructive(
 
 
 def _cmd_init(args):
-    """Create or reconfigure a BYOA project — interactive and re-runnable.
+    """Create or reconfigure a project, interactively and re-runnably.
 
     ``dsagt init`` is the single place a user expresses every choice; the
-    prompts mirror ``.dsagt/config.yaml`` 1:1.  On an existing project it
-    becomes a settings editor (prompts prefilled with current values) and
-    prompts before any destructive change (agent switch, removed collection).
-    Non-interactive (no TTY) drives from flags — the automation/test path.
+    prompts mirror ``.dsagt/config.yaml`` 1:1.  On an existing project it is
+    a settings editor (prompts prefilled with current values) and prompts
+    before any destructive change (agent switch, removed collection).
+    Non-interactive (no TTY) runs from flags, the automation and test path.
     """
     interactive = sys.stdin.isatty()
 
@@ -338,7 +337,7 @@ def _cmd_init(args):
     if not name:
         raise SystemExit("dsagt init: project name required.")
 
-    # Existing project? → re-init (settings editor).
+    # An existing project is re-initialized (settings editor).
     try:
         existing_pdir = project_dir(name)
     except FileNotFoundError:
@@ -348,9 +347,9 @@ def _cmd_init(args):
 
     # Location (first init only; re-init keeps the registered path).  The
     # prompt collects the full project directory and defaults to one that
-    # already ends in the project name.  If the user types a path that ends
-    # in the project name we take it as-is; otherwise we append the name —
-    # so both "~/proj/myproj" and "~/proj" land at "~/proj/myproj".
+    # already ends in the project name.  A typed path that ends in the
+    # project name is taken as is; otherwise the name is appended, so both
+    # "~/proj/myproj" and "~/proj" resolve to "~/proj/myproj".
     if reinit:
         location = existing_pdir.parent
         pdir_preview = existing_pdir
@@ -469,8 +468,8 @@ def _cmd_list(args):
         pdir = Path(path)
         cfg_file = pdir / ".dsagt" / "config.yaml"
 
-        # Best-effort: if the config is readable, show the agent.  If the
-        # project dir is gone or the config is broken, just show the path.
+        # If the config is readable, show the agent.  If the project dir is
+        # gone or the config is broken, show the path alone.
         agent = ""
         if cfg_file.exists():
             try:
@@ -486,7 +485,7 @@ def _cmd_mv(args):
     """Move a project to a new location."""
     location = Path(args.location).resolve()
     new_path = move_project(args.project, location)
-    print(f"  Moved {args.project} → {new_path}")
+    print(f"  Moved {args.project} to {new_path}")
 
 
 def _cmd_rm(args):
@@ -523,7 +522,7 @@ def _cmd_rm(args):
 
 
 def _cmd_rm_all(args) -> int:
-    """``dsagt rm --all`` — bulk-remove every registered project."""
+    """``dsagt rm --all``: bulk-remove every registered project."""
     projects = list_projects()
     if not projects:
         print("  No projects registered.")
@@ -579,15 +578,15 @@ def _cmd_traces(args):
 def _cmd_smoke_test(args):
     """Run the end-to-end smoke test (non-interactive, with assertions).
 
-    Thin wrapper around ``tests/smoke_test/run.sh`` so the script stays the
-    source of truth — bash is the right shape for orchestrating processes
-    and assertion checks.  CLI exposure is just for ergonomics.
+    A thin wrapper around ``tests/smoke_test/run.sh``, which holds the
+    procedure: bash is the right shape for orchestrating processes and
+    assertion checks.
 
     With ``--all``, run the harness in parallel for every agent in
     ``VALID_AGENTS``.  Each agent has its own project name (``smoke-test-X``)
-    so they don't collide on the sqlite MLflow store, kb_index, or registry
-    entries.  Output is per-agent log files; the summary prints in finish
-    order.
+    so the runs have separate sqlite MLflow stores, kb_index dirs, and
+    registry entries.  Output is per-agent log files; the summary prints in
+    finish order.
     """
     pkg_dir = Path(__file__).resolve().parent.parent.parent.parent
     script = pkg_dir / "tests" / "smoke_test" / "run.sh"
@@ -607,7 +606,7 @@ def _run_smoke_all(script: Path) -> int:
 
     Streams each agent's stdout/stderr to a per-agent log file so the
     terminal stays readable.  Prints the verdict for each agent as it
-    finishes, fastest first, so the operator sees progress as agents finish.
+    finishes, fastest first.
     """
     import tempfile
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -618,7 +617,7 @@ def _run_smoke_all(script: Path) -> int:
     print(f"[smoke-all] launching {len(agents)} parallel runs", flush=True)
     print(f"[smoke-all] log dir: {log_dir}", flush=True)
     for a in agents:
-        print(f"[smoke-all]   {a:7}  → {log_dir / f'smoke-{a}.log'}", flush=True)
+        print(f"[smoke-all]   {a:7}  {log_dir / f'smoke-{a}.log'}", flush=True)
 
     def _run_one(agent: str) -> tuple[str, int, float]:
         start = time.monotonic()
@@ -652,7 +651,7 @@ def _run_smoke_all(script: Path) -> int:
 
 
 # User-facing exception types that print as a one-line message at the CLI
-# boundary.  Everything else crashes loudly.
+# boundary.  Every other exception propagates with its traceback.
 _USER_ERRORS = (FileNotFoundError, FileExistsError, ValueError, RuntimeError)
 
 
@@ -662,10 +661,10 @@ def main(argv=None):
 
     load_user_env()
     argv = list(sys.argv[1:] if argv is None else argv)
-    # `dsagt mlflow <project>` is an unlisted alias for `traces` — the word
-    # people reach for when they want the MLflow viewer.  Rewritten before
-    # parsing (only the command slot: the first non-flag token) so argparse —
-    # and therefore --help — only ever knows `traces`.
+    # `dsagt mlflow <project>` is an unlisted alias for `traces`, the word
+    # people type when they want the MLflow viewer.  Rewritten before
+    # parsing (only the command slot: the first non-flag token) so argparse,
+    # and therefore --help, lists `traces` alone.
     for i, tok in enumerate(argv):
         if tok.startswith("-"):
             continue
@@ -708,7 +707,8 @@ def main(argv=None):
         nargs="+",
         metavar="ASSET",
         help="KB assets to provision into the project (or 'all' for "
-        "everything).  Default: the base-skill codes + the genesis skill catalog.",
+        "everything).  Default: the base-skill codes and the genesis skill "
+        "catalog.",
     )
     _kb_sel.add_argument(
         "--exclude",
@@ -738,16 +738,16 @@ def main(argv=None):
         "--agent",
         choices=VALID_AGENTS,
         default=None,
-        help="Agent platform.  Required on first start if init didn't set one; "
-        "thereafter, a per-run override (doesn't update the YAML default).",
+        help="Agent platform.  Required on first start if init did not set one; "
+        "thereafter, a per-run override that leaves the YAML default as is.",
     )
     p_start.add_argument(
         "--script",
         default=None,
         help="Path to a goose-run instructions file. When set, the agent runs "
-        "non-interactively (GOOSE_MODE=auto) against this script — used by "
-        "the smoke test to share the full dsagt start lifecycle (config "
-        "generation, memory extraction) with manual runs.",
+        "non-interactively (GOOSE_MODE=auto) against this script; the smoke "
+        "test uses it so a scripted run shares the full dsagt start lifecycle "
+        "(config generation, memory extraction) with a manual run.",
     )
     p_start.add_argument(
         "--max-turns",
@@ -764,13 +764,13 @@ def main(argv=None):
     p_info.add_argument(
         "--json",
         action="store_true",
-        help="Emit the structured report as JSON instead of formatted text",
+        help="Emit the structured report as JSON",
     )
 
     p_traces = sub.add_parser(
         "traces",
         help="Open the MLflow trace viewer over a project's store (runs catch-up "
-        "first, deep-links to the Traces tab, quiets the mlflow noise)",
+        "first, deep-links to the Traces tab, silences the mlflow warnings)",
     )
     p_traces.add_argument("project", help="Project name")
     p_traces.add_argument(
@@ -824,9 +824,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    # The CLI speaks to the user via ``print()``; library logs are diagnostic.
+    # The CLI addresses the user via ``print()``; library logs are diagnostic.
     # Default the console to WARNING so the init/start output stays readable
-    # over INFO chatter (embedder load, route registration, catalog indexing).
+    # over INFO lines (embedder load, route registration, catalog indexing).
     # ``--verbose`` opts into the full DEBUG stream.
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,

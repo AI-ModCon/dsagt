@@ -3,28 +3,26 @@ Code and Skill Registries.
 
 Two parallel registries for agent capabilities:
 
-**Codes** (CLI executables) — skill-standard directories
+**Codes** (CLI executables): skill-standard directories
 (`<project>/skills/<name>/SKILL.md`) whose frontmatter carries the machine
 fields (name, description, executable, parameters, dependencies, tags) on
 top of the skill-required name/description; a code is a skill whose
 frontmatter declares an executable, and codes and skills share one
-directory.  Agent-written scripts live beside their spec in
-`<project>/skills/<name>/scripts/`, making each registered code a
-self-contained, portable directory.  The skill-standard
-envelope means codes mirror into the agent's native skills dir unchanged
-(see ``AgentSetup.setup_skills``) — native discovery puts the exact
-runnable command in context at invocation time, alongside MCP discovery
-via ``search_registry``.
+directory.  Agent-written scripts are stored beside their spec in
+`<project>/skills/<name>/scripts/`, so each registered code is a
+self-contained, portable directory.  The skill-standard envelope means
+codes mirror into the agent's native skills dir unchanged (see
+``AgentSetup.setup_skills``); native discovery puts the exact runnable
+command in context at invocation time, alongside MCP discovery via
+``search_registry``.
 When registered, executables are wrapped with dsagt-run + uv run --with.
-The wrapper is baked *inside* the stored shell command by design: agents
-routinely run their own bash tools, sidestepping any MCP-mediated execution,
-so provenance has to be captured at the shell boundary.  Baking dsagt-run into
-the command the agent copies makes the bash path harmless — the residual
-failure mode is an agent reconstructing the command from memory and
-dropping the wrapper, which is why specs render the exact runnable command
-and agent instructions say to copy it verbatim.
+The wrapper is part of the stored shell command: agents run their own bash
+tools, outside any MCP-mediated execution, so provenance is captured at
+the shell boundary.  The remaining failure mode is an agent reconstructing
+the command from memory and dropping the wrapper, which is why specs render
+the exact runnable command and agent instructions say to copy it verbatim.
 
-**Skills** (agent instructions) — directories containing a SKILL.md with
+**Skills** (agent instructions): directories containing a SKILL.md with
 YAML frontmatter (name, description, tags) and optional reference docs.
 Stored in `<project>/skills/`. The agent reads SKILL.md and follows the
 workflow instructions.
@@ -43,10 +41,10 @@ from typing import TYPE_CHECKING
 import yaml
 
 if TYPE_CHECKING:
-    # Annotation-only.  A runtime import would pull the whole retrieval module
-    # into anything that touches the registry — including ``dsagt-run`` via the
-    # package ``__init__`` — even though the registry only ever holds an
-    # injected KB instance, never references the class.
+    # Annotation-only.  A runtime import would load the whole retrieval module
+    # into anything that imports the registry, including ``dsagt-run`` through
+    # the package ``__init__``; the registry holds an injected KB instance and
+    # names the class only in annotations.
     from dsagt.knowledge import KnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -57,11 +55,10 @@ logger = logging.getLogger(__name__)
 #: ``metadata.source`` says which kind an entry is.
 CODES_COLLECTION = "codes"
 
-#: External skill catalogs (fetched from GitHub repos) live in their own
-#: per-source collections named ``skills_catalog__<slug>``.  Keeping each
-#: source in its own collection lets a re-sync drop+rebuild one source's
-#: directory without disturbing other catalogs — no delete-by-metadata
-#: primitive needed.
+#: External skill catalogs (fetched from GitHub repos) are stored one per
+#: source in collections named ``skills_catalog__<slug>``, so a re-sync drops
+#: and rebuilds one source's collection and leaves the other catalogs as they
+#: are.
 CATALOG_COLLECTION_PREFIX = "skills_catalog__"
 
 
@@ -82,7 +79,7 @@ def _uv_run_prefix(deps: list[str]) -> str:
     return f"uv run --with {','.join(deps)} -- "
 
 
-#: Skill-standard name charset — agent native skill loaders (claude et al.)
+#: Skill-standard name charset: agent native skill loaders (claude et al.)
 #: require lowercase-hyphen names, and codes mirror into those dirs.
 _CODE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -144,7 +141,7 @@ def _generate_code_body(spec: dict) -> str:
     """
     lines = [
         f"\n# {spec['name']}\n\n",
-        "Run this registered code with the exact shell command below — copy "
+        "Run this registered code with the exact shell command below: copy "
         "it byte-for-byte (the `dsagt-run` prefix writes the execution "
         "record to `trace_archive/` when the process exits, so run it in the "
         "foreground and wait, however long it takes; never as a background "
@@ -169,11 +166,11 @@ def _generate_code_body(spec: dict) -> str:
 def _parse_frontmatter(path: Path) -> dict:
     """Parse YAML frontmatter from a markdown file.
 
-    Third-party skill catalogs (e.g. Genesis) ship SKILL.md files whose
-    frontmatter is *intended* as flat ``key: value`` but isn't strict YAML —
-    most commonly an unquoted ``description`` value that contains a colon
-    (``...readiness levels: Level 1...``), which PyYAML rejects as a nested
-    mapping. Rather than silently dropping such skills from discovery, fall back
+    Third-party skill catalogs (Genesis, for example) carry SKILL.md files
+    whose frontmatter is intended as flat ``key: value`` but is not strict
+    YAML, most commonly an unquoted ``description`` value that contains a
+    colon (``...readiness levels: Level 1...``), which PyYAML rejects as a
+    nested mapping. Rather than silently dropping such skills from discovery, fall back
     to a best-effort flat parse (:func:`_lenient_frontmatter`) on YAML error so
     ``name`` / ``description`` / ``tags`` are still recovered. dsagt-authored
     code/skill specs are valid YAML, so the fallback never fires for them.
@@ -188,23 +185,25 @@ def _parse_frontmatter(path: Path) -> dict:
         data = yaml.safe_load(parts[1])
     except yaml.YAMLError as e:
         # Benign: the frontmatter is flat ``key: value`` but not strict YAML;
-        # we recover the fields below.  DEBUG, not WARNING — nothing is lost
-        # and it's pure noise during ``dsagt init`` catalog indexing.
+        # the fields are recovered below.  DEBUG, not WARNING: nothing is lost
+        # and a warning per file is noise during ``dsagt init`` catalog
+        # indexing.
         logger.debug(
-            "Frontmatter in %s isn't strict YAML (%s); recovering flat fields.",
+            "Frontmatter in %s is not strict YAML (%s); recovering flat fields.",
             path,
             str(e).splitlines()[0],
         )
         return _lenient_frontmatter(parts[1])
-    # safe_load yields a scalar/list for a non-mapping body (e.g. a bare prose
-    # frontmatter); callers do ``spec.get(...)``, so always hand back a dict.
+    # safe_load gives a scalar or list for a non-mapping body (a bare prose
+    # frontmatter, for example); callers do ``spec.get(...)``, so a dict is
+    # always returned.
     return data if isinstance(data, dict) else _lenient_frontmatter(parts[1])
 
 
 def _lenient_frontmatter(block: str) -> dict:
-    """Best-effort flat ``key: value`` parse for frontmatter that isn't strict YAML.
+    """Best-effort flat ``key: value`` parse for frontmatter that is not strict YAML.
 
-    Splits each top-level line on its **first** colon (so a value may itself
+    Splits each top-level line on its first colon (so a value may itself
     contain colons); indented ``- item`` lines extend the previous key into a
     list, other indented lines continue the previous string value. Inline
     ``[...]`` / ``{...}`` values are parsed as YAML when they can be. Lines
@@ -249,18 +248,18 @@ def _lenient_frontmatter(block: str) -> dict:
 # Each parameter in a code spec may declare a `cli` field that pins how its
 # value should be placed on the command line.  Supported forms:
 #
-#   positional         — first positional slot
-#   positional:N       — Nth positional slot (0-based)
-#   --name             — `--name <value>` (spaced long flag)
-#   -n                 — `-n <value>`    (spaced short flag)
-#   --name=            — `--name=<value>` (glued long flag)
-#   -n=                — `-n=<value>`    (glued short flag)
-#   key=               — `key=<value>`   (dd-style, no dashes)
+#   positional           first positional slot
+#   positional:N         Nth positional slot (0-based)
+#   --name               `--name <value>` (spaced long flag)
+#   -n                   `-n <value>`    (spaced short flag)
+#   --name=              `--name=<value>` (glued long flag)
+#   -n=                  `-n=<value>`    (glued short flag)
+#   key=                 `key=<value>`   (dd-style, no dashes)
 #
-# A missing `cli` field defaults to `--<param_name>` (the convention the
-# agent was guessing before this field existed; avoids breaking old specs).
-# Parameters with `type: boolean` render as a bare flag when truthy and emit
-# nothing when falsy; positional booleans are not supported.
+# A missing `cli` field defaults to `--<param_name>`.  Parameters with
+# `type: boolean` render as a bare flag when truthy and emit nothing when
+# falsy; a boolean parameter must use a flag form (``render_arguments``
+# raises for any other).
 
 
 def _parse_cli(cli: str, param_name: str) -> dict:
@@ -290,7 +289,7 @@ def _parse_cli(cli: str, param_name: str) -> dict:
 def render_arguments(parameters: dict, values: dict) -> list[str]:
     """Render argv elements for *values* per each parameter's ``cli`` spec.
 
-    Returns only the parameter portion — caller prepends the executable.
+    Returns only the parameter portion; the caller prepends the executable.
     Positional args are emitted in declared position order, followed by all
     named/keyvalue args in declaration order.
     """
@@ -368,7 +367,7 @@ class CodeRegistry:
         ]
 
     def code_dirs(self) -> list[Path]:
-        """All code directories (for the native-skills mirror — see
+        """All code directories (for the native-skills mirror,
         ``AgentSetup.setup_skills``)."""
         return [p.parent for p in self._project_code_paths()]
 
@@ -482,10 +481,10 @@ class CodeRegistry:
     def _index_code(self, spec: dict, tool_path: Path) -> None:
         """Index a code file into the ``codes`` KB collection.
 
-        Errors propagate to the caller — a code that lives on disk but
-        isn't searchable in the KB is a half-broken state that the agent
-        cannot recover from (it would write a duplicate next time it
-        searched).  Atomic registration: in the index or not registered.
+        Errors propagate to the caller: a code that is on disk and absent
+        from the KB is a state the agent cannot recover from (it would write
+        a duplicate the next time it searched).  Registration is atomic: in
+        the index, or not registered.
         """
         self._kb.add_entries(
             texts=[tool_path.read_text()],
@@ -503,13 +502,12 @@ class SkillRegistry:
     """
     Manages the instruction skills installed in ``<project>/skills/``.
 
-    One layer: every skill a project has — the base skills ``dsagt init``
+    One layer: every skill a project has (the base skills ``dsagt init``
     installs from their upstream repositories, catalog skills added with
-    ``install_skill``, and skills the agent authors with ``save_skill`` —
+    ``install_skill``, and skills the agent authors with ``save_skill``)
     is a skill-standard directory ``<project>/skills/<name>/``.  The
     package holds no skills of its own.  Installed skills reach the agent
-    through the native mirror ``AgentSetup.setup_skills`` writes, with no KB
-    collection.
+    through the native mirror ``AgentSetup.setup_skills`` writes.
     """
 
     def __init__(
@@ -525,7 +523,7 @@ class SkillRegistry:
 
     def skill_dirs(self) -> list[Path]:
         """All skill directories in the project (for the native-skills
-        mirror — see ``AgentSetup.setup_skills``)."""
+        mirror, ``AgentSetup.setup_skills``)."""
         return [
             d
             for d in sorted(self.skills_dir.iterdir())
@@ -550,16 +548,15 @@ class SkillRegistry:
         """Write or update a skill in ``<project>/skills/<name>/``.
 
         ``spec`` carries the YAML frontmatter (``name``, ``description``,
-        optional ``tags``).  ``body`` is the markdown after the
-        frontmatter — typically the workflow / instructions the agent
-        will follow.  ``reference_files`` is an optional mapping
-        ``{relative_path: contents}`` for additional files the skill
-        wants in its directory (templates, schemas, etc.).
+        optional ``tags``).  ``body`` is the markdown after the frontmatter,
+        typically the workflow the agent follows.  ``reference_files`` is an
+        optional mapping ``{relative_path: contents}`` for additional files
+        in the skill's directory (templates, schemas).
 
-        Returns "added" or "updated".  Does **not** index into a KB:
-        saved skills land in ``<project>/skills/`` where every supported
-        agent natively auto-discovers them, so search only covers the
-        not-yet-installed *catalog* tier (see ``SkillRouter``).
+        Returns "added" or "updated".  A saved skill is written to
+        ``<project>/skills/``, where every supported agent discovers it
+        natively, so catalog search (``SkillRouter``) covers only skills
+        not yet installed.
         """
         name = spec.get("name")
         if not name:
@@ -570,8 +567,8 @@ class SkillRegistry:
         skill_dir.mkdir(parents=True, exist_ok=True)
 
         skill_md = skill_dir / "SKILL.md"
-        # Preserve hand-edited body when updating, unless caller passed
-        # an explicit replacement — same contract as CodeRegistry.save_tool.
+        # Preserve a hand-edited body when updating, unless the caller passed
+        # an explicit replacement, the same contract as CodeRegistry.save_tool.
         if body is None and skill_md.exists():
             existing = skill_md.read_text()
             parts = existing.split("---", 2)

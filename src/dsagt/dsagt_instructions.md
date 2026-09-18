@@ -61,17 +61,17 @@ To author a new skill, use the `skill-creator` skill installed in every project.
 
 Booleans render as a bare flag when truthy, nothing when falsy.
 
-When registering a new code via `save_code_spec`, set the `cli` field on every parameter so the next invocation doesn't have to guess, and set `role: input` or `role: output` on each parameter that names a file the code reads or writes: `dsagt-run` records those files on every run, and `reconstruct_pipeline` orders steps by them. Code names use lowercase letters, digits, and hyphens (e.g. `datacard-introspect`) — the skill-standard charset, since registered codes are mirrored into your native skills directory.
+When registering a new code via `save_code_spec`, set the `cli` field on every parameter so the next invocation renders it without guessing, and set `role: input` or `role: output` on each parameter that names a file the code reads or writes: `dsagt-run` records those files on every run, and `reconstruct_pipeline` orders steps by them. Code names use lowercase letters, digits, and hyphens (for example `datacard-introspect`), the skill-standard character set, since registered codes are linked into your native skills directory.
 
 ### 3. Code Preference Hierarchy
 
 When implementing any data operation, follow this hierarchy:
 
-1. **REGISTERED CODE** — Use an existing code (`search_registry`)
-2. **KB PACKAGE CODE** — Create a code leveraging a package documented in the KB
-3. **CUSTOM IMPLEMENTATION** — Write your script to `skills/<name>/scripts/` and register it
+1. **REGISTERED CODE**: use an existing code (`search_registry`)
+2. **KB PACKAGE CODE**: create a code that uses a package documented in the KB
+3. **CUSTOM IMPLEMENTATION**: write your script to `skills/<name>/scripts/` and register it
 
-Always exhaust higher-preference options before falling to lower ones.
+Exhaust each level before moving to the next.
 
 ### 4. Per-Operation Checks
 Every filter/transform has an associated check code. Run it before AND after:
@@ -118,21 +118,21 @@ Ask: "Do you have domain documents to add to the knowledge base?"
 
 If yes: use `kb_ingest` to index them.
 
-Review what's available: `kb_list_collections()`
+Review what is available: `kb_list_collections()`
 
 ### 3. Register User's Custom Codes
 
-Ask: "Do you have existing scripts or codes you'd like to incorporate?"
+Ask: "Do you have existing scripts or codes you would like to incorporate?"
 
 If yes, register them using `save_code_spec`.
 
 ### 4. Explore Available Resources
 
-Survey what's available before proceeding:
-- `get_registry()` — list all codes
-- `search_registry(query)` — semantic search for codes
-- `search_skills(query)` — find available skills
-- `kb_list_collections()` — list knowledge base collections
+Survey what is available before proceeding:
+- `get_registry()`: list all codes
+- `search_registry(query)`: semantic search for codes
+- `search_skills(query)`: find available skills
+- `kb_list_collections()`: list knowledge base collections
 
 ## THE ITERATIVE CYCLE
 
@@ -172,19 +172,19 @@ Write each code's script to `skills/<name>/scripts/` and register it via `save_c
 ## PIPELINE RECONSTRUCTION
 
 At any point, the `reconstruct_pipeline` tool (an MCP tool, not a shell command) reconstructs the pipeline from execution records:
-- `reconstruct_pipeline(format="bash", output="audit/pipeline.sh")` — bash script, saved to the path
-- `reconstruct_pipeline(format="snakemake")` — Snakemake workflow
+- `reconstruct_pipeline(format="bash", output="audit/pipeline.sh")`: bash script, saved to the path
+- `reconstruct_pipeline(format="snakemake")`: Snakemake workflow
 
 The script the tool returns lists the recorded runs in the order they ran, with a failed run kept as a comment, creates the recorded output directories first, writes a recorded stdout file with a redirect, and calls each recorded tool directly, without the `dsagt-run` wrapper, so it runs outside a DSAgt project. Save it with `output` rather than copying it by hand. Parameterize or trim it only when the user asks; never add the wrapper or configuration scaffolding of your own.
 
 ## PRINCIPLES
 
-1. **Setup first** — Extend KB and register user codes before iterating
-2. **Follow the hierarchy** — Registered code → KB package code → Custom implementation
-3. **Explore first** — Search registry and KB before writing new code
-4. **Iterate** — One manipulation step at a time; evaluate before proceeding
-5. **Generate paired codes** — Both check and operation for each step
-6. **Register everything** — Registry captures the complete pipeline
-7. **Audit everything** — Before/after reports for every operation
-8. **Confirm with user** — Domain scientist validates approach at each step
-9. **Transformations through registered codes** — Every artifact-writing operation is recorded; reported numbers come from code output
+1. **Setup first**: extend the KB and register user codes before iterating
+2. **Follow the hierarchy**: registered code → KB package code → custom implementation
+3. **Explore first**: search the registry and the KB before writing new code
+4. **Iterate**: one manipulation step at a time; evaluate before proceeding
+5. **Generate paired codes**: both check and operation for each step
+6. **Register everything**: the registry captures the complete pipeline
+7. **Audit everything**: before and after reports for every operation
+8. **Confirm with user**: the domain scientist validates the approach at each step
+9. **Transformations through registered codes**: every artifact-writing operation is recorded; reported numbers come from code output

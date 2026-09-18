@@ -1,13 +1,11 @@
 """MCP tools for explicit memory.
 
 User-confirmed facts that persist across sessions (``kb_remember`` /
-``kb_get_memories``).  These front :mod:`dsagt.memory` (``ExplicitMemory``); the
-``kb_`` tool-name prefix is historical (the tools were born in the knowledge
-server) and is kept for agent-facing backward compatibility.
+``kb_get_memories``).  These front :mod:`dsagt.memory` (``ExplicitMemory``).
 
-These definitions + handlers run inside the merged ``dsagt-server`` (see
-:mod:`dsagt.mcp.server`); ``create_memory_server`` is retained only as a
-test-facing constructor.
+These definitions and handlers run inside the merged ``dsagt-server`` (see
+:mod:`dsagt.mcp.server`); ``create_memory_server`` is a test-facing
+constructor.
 """
 
 import asyncio
@@ -49,7 +47,7 @@ async def _handle_kb_remember(
             "error": store_result.get("error", "Failed to store memory"),
         }
 
-    # Mirror into the VectorStore for semantic recall — optional infra.
+    # Mirror into the vector store for semantic recall.
     # The durable YAML write above already succeeded, so a mirror failure
     # degrades to pure-YAML explicit memory rather than failing the tool.
     try:
@@ -90,7 +88,7 @@ async def _handle_kb_get_memories(
 
 
 # ---------------------------------------------------------------------------
-# Tool defs + handler map (used by the merged server and the test wrapper)
+# Tool defs and handler map (used by the merged server and the test wrapper)
 # ---------------------------------------------------------------------------
 
 
@@ -101,10 +99,10 @@ def _memory_tools_and_handlers(
     """Build the explicit-memory ``(tool defs, handler map)``.
 
     Combined with the other concern modules' tools under one MCP ``Server`` by
-    :func:`dsagt.mcp.server.create_dsagt_server`.  ``ExplicitMemory`` lives in
-    ``<project>/.dsagt/`` alongside config.yaml and state.yaml — the
-    server-owned internals — with ``runtime_dir`` (falling back to the KB
-    index's parent) as the project dir.
+    :func:`dsagt.mcp.server.create_dsagt_server`.  ``ExplicitMemory`` is
+    stored in ``<project>/.dsagt/`` beside config.yaml and state.yaml, the
+    server-owned internals, with ``runtime_dir`` (else the KB index's
+    parent) as the project dir.
     """
     project_dir = Path(runtime_dir) if runtime_dir else kb.index_dir.parent
     memory = ExplicitMemory(runtime_dir=project_dir / ".dsagt")

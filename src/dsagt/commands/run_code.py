@@ -79,10 +79,10 @@ def _parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list
 
 
 def main(argv: list[str] | None = None) -> int:
-    # The agent runs this from its own shell (the instructions hand it the
-    # `dsagt-run --code …` prefix), not as a child of dsagt-server — so under
-    # codex/cline the credentials file is the only way a shared-store key or
-    # URI reaches the code.execute trace.
+    # The agent runs this from its own shell (the instructions give it the
+    # `dsagt-run --code …` prefix), so under codex/cline the credentials
+    # file is the only way a shared-store key or URI reaches the
+    # code.execute trace.
     from dsagt.session import load_user_env
 
     load_user_env()
@@ -95,8 +95,8 @@ def main(argv: list[str] | None = None) -> int:
     from dsagt.observability import init_tracing
 
     # The session is resolved before tracing starts so the `code.execute`
-    # trace root carries it — resolving it later inside run_and_record only
-    # stamps the on-disk record, and the trace lands unbucketed.
+    # trace root carries it; resolving it later inside run_and_record only
+    # stamps the on-disk record, and the trace is logged unbucketed.
     session_id = args.session or _current_session_tag_from_cwd()
     init_tracing("dsagt-run", session_id=session_id)
 

@@ -35,10 +35,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Annotation-only (this module has ``from __future__ import annotations``, so
-    # the hint is a string).  Importing KnowledgeBase at runtime would drag the
-    # whole retrieval module into ``dsagt-run``, which only writes provenance
-    # records to disk and never touches a KB — the embedding of those records
-    # happens later, on the MCP server's periodic pass via ``CodeUseIndexer``.
+    # the hint is a string).  Importing KnowledgeBase at runtime would load the
+    # whole retrieval module into ``dsagt-run``, which writes provenance records
+    # to disk; the MCP server's periodic pass embeds them through
+    # ``CodeUseIndexer``.
     from dsagt.knowledge import KnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -59,8 +59,8 @@ def _resolve_records_dir(explicit: str | None) -> Path:
     (exported by ``dsagt start`` and the MCP env block) → the cwd.  The
     directory must hold ``.dsagt/config.yaml``, the project config
     ``dsagt init`` writes.  The project is a fixed place, the agent's
-    working directory, so there is no walk up the tree: a ``cd`` into a
-    subdirectory before the command is the error, and the message names it.
+    working directory, so the directory is checked as given: a ``cd`` into
+    a subdirectory before the command is the error, and the message names it.
     """
     if explicit:
         return Path(explicit)
@@ -105,9 +105,8 @@ def file_roles_from_command(
     ``--name``/``-n`` flag takes the next token, a glued ``--name=``/``-n=``
     flag carries its value, and ``positional[:N]`` is the Nth bare token
     after the spec's own executable tokens.  The command must start with the
-    spec's executable (the part after ``dsagt-run --code <name> --``); a
-    command that does not is not this code's invocation and names nothing.
-    The agent records the mapping once at registration and the record gets
+    spec's executable (the part after ``dsagt-run --code <name> --``); any
+    other command names nothing.  The agent records the mapping once at registration and the record gets
     its files on every run, which is what the dependency graph in
     :func:`build_dependency_graph` reads.
     """
@@ -210,8 +209,7 @@ def files_from_arguments(command: list[str]) -> list[str]:
     A spec with no parameter roles, or an ad-hoc run with no spec, names no
     files; an argument that is a file when the command starts is one the
     command reads or overwrites, which is what the dependency graph and the
-    readiness reports need to know.  The first token, the executable, is
-    left out.
+    readiness reports read.  The first token, the executable, is left out.
     """
     return [arg for arg in command[1:] if _is_file(arg)]
 
@@ -398,11 +396,11 @@ def run_and_record(
             obs.event("code_failed", exit_code=return_code)
             obs.set_status("ERROR")
 
-        # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
-        # ~4KB per side so big code results don't bloat the trace store.  The
+        # Populate the MLflow trace UI's Input/Output tabs, truncated to about
+        # 4 KB per side to keep a large result out of the trace store.  The
         # span is a preview by contract: the full stdout/stderr is in
         # trace_archive/<code>_<ts>_<record_id>.json on the machine that ran
-        # the code, findable by the span's ``record_id`` attribute — and that
+        # the code, findable by the span's ``record_id`` attribute, and that
         # file is the only full copy, including when the store is a shared
         # server that other people read.
         obs.set_inputs(
@@ -509,7 +507,7 @@ def execution_metadata(record: dict) -> dict:
     meta: dict = {}
     meta["code_name"] = record.get("code_name") or "unknown"
     # A code run outside a minted session stores session_id: null, and ChromaDB
-    # rejects a null metadata value — which would fail the whole batch add and
+    # rejects a null metadata value, which would fail the whole batch add and
     # re-fail every pass.  Coerce null to "unknown".
     meta["session_id"] = record.get("session_id") or "unknown"
 
@@ -576,17 +574,16 @@ def index_trace_archive(
         if record_id:
             indexed_ids.add(record_id)
 
-    # No ``route=`` — see ``index_execution_record`` above.
     if texts:
         from contextlib import nullcontext
 
         from dsagt.observability import open_span
 
-        # Open a categorization root only when there is work to index — a quiet
-        # periodic pass produces no child spans, so wrapping it would just emit an
-        # empty, null-request trace.  Only the tagged background triggers pass a
-        # ``source``; the reconstruct-pipeline caller passes none and lets its
-        # kb.* writes inherit the tool's own trace.
+        # Open a categorization root only when there is work to index: a quiet
+        # periodic pass produces no child spans, and a root around it would be
+        # an empty, null-request trace.  Only the tagged background triggers
+        # pass a ``source``; the reconstruct-pipeline caller passes none, so
+        # its kb.* writes inherit the tool's own trace.
         cm = open_span("code_use.index", source=source) if source else nullcontext(None)
         with cm as span:
             kb.add_entries(
@@ -610,17 +607,17 @@ class CodeUseIndexer:
     """Idempotent, incremental indexer of ``dsagt-run`` records into ``code_use``.
 
     The code-execution counterpart to :class:`~dsagt.trace_scan.TraceScan`:
-    ``dsagt-run`` writes one JSON record per call to ``trace_archive/``, and each
-    :meth:`tick` embeds only the records not already indexed — tracked by
-    ``record_id`` in a persisted ack set — so re-ticks and cross-session
-    re-reads can never duplicate (the bug the prior cursor-less batch had).
+    ``dsagt-run`` writes one JSON record per call to ``trace_archive/``, and
+    each :meth:`tick` embeds only the records absent from a persisted ack set
+    keyed by ``record_id``, so re-ticks and cross-session re-reads never
+    duplicate an entry.
 
-    One primitive, three triggers, all safe to overlap: the MCP server's periodic pass
-    (current-session freshness), startup catch-up (the previous session's tail),
-    and the ``reconstruct_pipeline`` code (index-then-reconstruct, so a pipeline
-    review reflects the calls just made).  An OS file lock around
-    load→index→save serializes those callers — distinct instances in one
-    process, or a future cross-process ticker — against the shared ack file.
+    One primitive, three triggers, all safe to overlap: the MCP server's
+    periodic pass (current-session freshness), startup catch-up (the previous
+    session's tail), and the ``reconstruct_pipeline`` code (index, then
+    reconstruct, so a pipeline review includes the calls just made).  An OS
+    file lock around load, index, and save serializes those callers, distinct
+    instances in one process, against the shared ack file.
     """
 
     def __init__(self, kb: KnowledgeBase, project_dir: str | Path):
@@ -658,19 +655,18 @@ class CodeUseIndexer:
     def tick(self, *, source: str | None = None) -> int:
         """Index newly-arrived records; return how many were indexed this tick.
 
-        Passing ``source`` opens a ``dsagt.source=<source>`` categorization root
-        around the actual indexing (see :func:`index_trace_archive`) — but only
-        when records are indexed.  At the ``reconstruct_pipeline`` call site this
-        runs *inside* the registry tool's trace with no source, so its ``kb.*``
-        writes correctly inherit ``dsagt.source=registry``.  The background
-        callers use :meth:`tick_traced` so their writes don't orphan as untagged
-        roots.
+        Passing ``source`` opens a ``dsagt.source=<source>`` categorization
+        root around the indexing (see :func:`index_trace_archive`), only when
+        records are indexed.  At the ``reconstruct_pipeline`` call site this
+        runs inside the registry tool's trace with no source, so its ``kb.*``
+        writes inherit ``dsagt.source=registry``.  The background callers use
+        :meth:`tick_traced` so their writes are tagged.
         """
         with self._lock():
             acks = self._load_acks()
             before = len(acks)
             # index_trace_archive skips record_ids already in ``acks`` and adds
-            # the newly-indexed ones to it (mutates the set we pass).
+            # the newly-indexed ones to it (it mutates the set passed in).
             result = index_trace_archive(
                 self._trace_dir, self._kb, indexed_ids=acks, source=source
             )
@@ -681,13 +677,14 @@ class CodeUseIndexer:
     def tick_traced(self) -> int:
         """:meth:`tick` under a ``dsagt.source=code_use`` categorization root.
 
-        For the background triggers (the periodic pass, startup catch-up) that run off
-        any tool-call trace — otherwise the indexer's ``kb.add_entries`` /
-        ``kb.embed`` spans start their own untagged top-level traces, landing in
-        the ``unknown`` bucket and detached from the executions they index.  The
-        root is opened only when a tick actually indexes records, so a pass with
-        no new records emits no empty trace.  Runs on the caller's thread (callers
-        dispatch *this* to the embedding worker), so the span opens there.
+        For the background triggers (the periodic pass, startup catch-up), which
+        run outside any tool-call trace.  Without the root, the indexer's
+        ``kb.add_entries`` / ``kb.embed`` spans start their own untagged
+        top-level traces in the ``unknown`` bucket, detached from the executions
+        they index.  The root is opened only when a tick indexes records, so a
+        pass with no new records emits no empty trace.  Runs on the caller's
+        thread (callers dispatch *this* to the embedding worker), so the span
+        opens there.
         """
         return self.tick(source="code_use")
 
@@ -727,8 +724,8 @@ def readiness_reports(project_dir: Path, path: str) -> list[dict]:
     and gives, per run, the report file, the run's start time, and whether
     the file's content is what it was at the run (``unchanged``), from the
     record's hash against the file now.  The readiness paragraph asks the
-    agent to call this before a check, so a file checked at the end of one
-    stage is not checked again at the start of the next.  A record with no
+    agent to call this before a check, so the post report of one stage
+    serves as the pre report of the next.  A record with no
     hash for the file, from a run before hashes were recorded, reports
     ``unchanged`` as ``None``.
     """

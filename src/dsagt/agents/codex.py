@@ -5,38 +5,39 @@ Install: ``npm i -g @openai/codex`` (or ``brew install --cask codex``).
 Generates: ``AGENTS.md``, ``.codex-data/`` (the per-project ``CODEX_HOME``),
 ``.dsagt_env``.
 
-Codex's config layer has no per-workspace file — instead it reads
-``$CODEX_HOME/config.toml`` for everything (model, provider base_url, MCP
-servers).  We point ``CODEX_HOME`` at ``<working_dir>/.codex-data`` to
-keep state isolated per project, and :meth:`CodexSetup.write_dynamic`
-writes ``[mcp_servers.*]`` blocks with explicit env (codex starts MCP
-children with only the env written there, as cline does).
+Codex reads ``$CODEX_HOME/config.toml`` for everything (model, provider
+base_url, MCP servers) and has no per-workspace file.  ``CODEX_HOME`` is
+pointed at ``<working_dir>/.codex-data`` to keep state isolated per
+project, and :meth:`CodexSetup.write_dynamic` writes ``[mcp_servers.*]``
+blocks with explicit env (codex starts MCP children with only the env
+written there, as cline does).
 
-The user owns model + provider config in ``$CODEX_HOME/config.toml``
-(or via ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL`` env).  We don't write
-a model_providers block.
+The user owns model and provider config in ``$CODEX_HOME/config.toml``
+(or via ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL`` env); dsagt writes only
+the MCP sections.
 
-OTel support: **partial** (verified).
-Codex's ``codex-otel`` Rust crate emits OTel spans/logs/metrics, BUT:
+OTel support: partial (verified).  Codex's ``codex-otel`` Rust crate emits
+OTel spans, logs, and metrics, with these limits:
 
   * LLM-call spans (``stream_request``, ``handle_responses``) carry
     only ``tool_name``, ``gen_ai.usage.*_tokens``, and routing
-    metadata — **NOT** the request ``messages`` array, **NOT** the
-    assistant text response, **NOT** the tool-call arguments.  Cited
-    from ``codex-rs/core/src/session/turn.rs:1838-1867`` and
+    metadata: the request ``messages`` array, the assistant text
+    response, and the tool-call arguments are absent.  Cited from
+    ``codex-rs/core/src/session/turn.rs:1838-1867`` and
     ``codex-rs/otel/src/events/session_telemetry.rs:292-327``.
   * User prompts go to a separate log event (``codex.user_prompt``)
-    that is **REDACTED by default** — only emitted when the
-    ``[otel]`` table sets ``log_user_prompt = true``.
+    that is redacted by default and emitted only when the ``[otel]``
+    table sets ``log_user_prompt = true``.
   * Codex reads its OTel exporter settings from the ``[otel]`` table of
     ``~/.codex/config.toml``.
-  * Tool *results* go to ``codex.tool_result`` log events with full
-    args + output (``session_telemetry.rs:962-1000``).
+  * Tool results go to ``codex.tool_result`` log events with full
+    args and output (``session_telemetry.rs:962-1000``).
 
 Conversation history is recovered from
-``$CODEX_HOME/sessions/rollout-<ts>-<uuid>.jsonl`` (full assistant text
-+ tool calls + responses) by the trace pipeline's Codex reader/translator
-on the periodic pass — feeding MLflow and episodic memory like every other agent.
+``$CODEX_HOME/sessions/rollout-<ts>-<uuid>.jsonl`` (full assistant text,
+tool calls, and responses) by the Codex reader and translator on the
+periodic pass, which feeds MLflow and episodic memory the same way as
+for every other agent.
 
 Open Codex issues tracking richer OTel: openai/codex#12913,
 #10277, #6153, #16248.
@@ -70,16 +71,15 @@ The tools named in this file (`kb_remember`, `search_registry`, `save_code_spec`
 def _render_codex_config(mcp_env: dict) -> str:
     """Render the per-project ``$CODEX_HOME/config.toml`` body.
 
-    Emits only ``[mcp_servers.*]`` sections.  No top-level keys are
-    emitted, so the output can be safely appended to a copy of the user's
-    ``~/.codex/config.toml`` without colliding on top-level keys like
-    ``model`` or ``approval_policy``.  Batch-mode approval / sandbox are
-    set on the codex CLI directly
-    (``--dangerously-bypass-approvals-and-sandbox``) instead of here.
+    Emits only ``[mcp_servers.*]`` sections, so the output appends to a
+    copy of the user's ``~/.codex/config.toml`` without colliding on
+    top-level keys like ``model`` or ``approval_policy``.  Batch-mode
+    approval and sandbox are set on the codex CLI
+    (``--dangerously-bypass-approvals-and-sandbox``).
 
-    No ``[otel]`` block: DSAGT doesn't touch codex's native telemetry
-    (nor the ``log_user_prompt`` privacy override).  Codex's conversation
-    history is recovered post-hoc from its on-disk session rollout.
+    Codex's native telemetry, including the ``log_user_prompt`` privacy
+    setting, stays the user's: codex's conversation history is recovered
+    from its on-disk session rollout.
     """
     lines: list[str] = []
     lines.append("[mcp_servers.dsagt]")
@@ -99,8 +99,9 @@ class CodexSetup(AgentSetup):
     name = "codex"
     base_command = ["codex"]
     static_marker = "AGENTS.md"
-    # Project-local .agents/skills (repo-root, codex-discovered) — never the
-    # global ~/.agents/skills or ~/.codex; manifest-tracked, user skills safe.
+    # Project-local .agents/skills (repo-root, codex-discovered), never the
+    # global ~/.agents/skills or ~/.codex; manifest-tracked, so user skills
+    # are left in place.
     native_skills_dir = ".agents/skills"
     install_hint = (
         "Install with `npm i -g @openai/codex` or " "`brew install --cask codex`."
@@ -132,20 +133,21 @@ class CodexSetup(AgentSetup):
 
         Three concerns:
 
-        1. **MCP server registration.**  Codex looks up MCP servers in
-           ``$CODEX_HOME/config.toml``; children don't inherit parent
-           env, so the env block is explicit per server.
-        2. **Subscription auth propagation.**  Codex stores
-           ChatGPT-subscription tokens in ``~/.codex/auth.json``.  Our
-           isolated ``CODEX_HOME`` would have no auth → codex sends an
-           anonymous request to ``api.openai.com`` and 401s.  We copy
-           ``~/.codex/auth.json`` (if present) into ``.codex-data/``.
-           API-key users (``OPENAI_API_KEY`` set) don't need this.
-        3. **User config preservation.**  We copy ``~/.codex/config.toml``
-           as a base so user prefs (default model, approval mode, etc.)
-           carry through, then append our ``[mcp_servers.*]`` sections.
-           Top-level keys don't collide because ``_render_codex_config``
-           only emits MCP sections.
+        1. MCP server registration.  Codex looks up MCP servers in
+           ``$CODEX_HOME/config.toml``; children receive only the env
+           written there, so the env block is explicit per server.
+        2. Subscription auth propagation.  Codex stores
+           ChatGPT-subscription tokens in ``~/.codex/auth.json``.  Without
+           it the isolated ``CODEX_HOME`` has no auth, and codex sends an
+           anonymous request to ``api.openai.com`` and gets a 401.
+           ``~/.codex/auth.json`` (if present) is copied into
+           ``.codex-data/``.  API-key users (``OPENAI_API_KEY`` set) are
+           authenticated without it.
+        3. User config preservation.  ``~/.codex/config.toml`` is copied
+           as the base so user prefs (default model, approval mode, etc.)
+           carry through, then the ``[mcp_servers.*]`` sections are
+           appended.  ``_render_codex_config`` emits only MCP sections, so
+           top-level keys never collide.
         """
         del env, pdir
         import shutil
@@ -155,18 +157,17 @@ class CodexSetup(AgentSetup):
         codex_home.mkdir(parents=True, exist_ok=True)
         user_codex = Path.home() / ".codex"
 
-        # Propagate subscription auth from user's global codex state.
-        # auth.json holds OAuth/API tokens; we don't read its contents,
-        # just file-copy it so codex's normal auth flow works under our
-        # isolated CODEX_HOME.
+        # Propagate subscription auth from the user's global codex state.
+        # auth.json holds OAuth/API tokens; it is copied as a file, unread,
+        # so codex's normal auth flow works under the isolated CODEX_HOME.
         user_auth = user_codex / "auth.json"
         if user_auth.exists():
             dest_auth = codex_home / "auth.json"
             shutil.copy2(user_auth, dest_auth)
             dest_auth.chmod(0o600)
-            actions.append(f"Copied {user_auth} → {dest_auth}")
+            actions.append(f"Copied {user_auth} to {dest_auth}")
 
-        # Build config.toml = user's prefs + our MCP sections.
+        # Build config.toml: the user's prefs plus the MCP sections.
         config_path = codex_home / "config.toml"
         user_config = user_codex / "config.toml"
         base_toml = user_config.read_text() if user_config.exists() else ""
@@ -178,12 +179,12 @@ class CodexSetup(AgentSetup):
         return actions
 
     def runtime_env(self, config: dict) -> dict[str, str]:
-        """BYOA infrastructure: per-project ``CODEX_HOME`` (state dir).
+        """Per-project ``CODEX_HOME`` (state dir).
 
-        Isolates per-project MCP / config.toml from the global
+        Isolates per-project MCP config and config.toml from the global
         ``~/.codex``.  Codex has no ``--config`` flag, so the agent must
-        be launched with this ``CODEX_HOME`` set for our MCP servers to
-        register.
+        be launched with this ``CODEX_HOME`` set for the dsagt MCP server
+        to register.
         """
         env = super().runtime_env(config)
         env["CODEX_HOME"] = str(Path(config["project_dir"]) / ".codex-data")
