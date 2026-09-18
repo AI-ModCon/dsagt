@@ -704,3 +704,121 @@ class TestSignal:
         assert record["execution"]["return_code"] == -signal.SIGTERM
         assert "SIGTERM" in record["execution"]["stderr"]
         assert proc.returncode != 0
+
+
+# ---------------------------------------------------------------------------
+# File hashes and argument-derived files
+# ---------------------------------------------------------------------------
+
+
+class TestFileHashes:
+
+    def test_inputs_and_outputs_are_hashed(self, tmp_path, monkeypatch):
+        import hashlib
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "in.txt").write_text("alpha\n")
+        main(
+            [
+                "--code",
+                "copy",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--input-files",
+                "in.txt",
+                "--output-files",
+                "out.txt",
+                "--",
+                "cp",
+                "in.txt",
+                "out.txt",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        digest = hashlib.sha256(b"alpha\n").hexdigest()
+        assert record["execution"]["file_hashes"] == {
+            "in.txt": digest,
+            "out.txt": digest,
+        }
+
+    def test_a_missing_output_has_no_hash(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        main(
+            [
+                "--code",
+                "t",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--output-files",
+                "never.txt",
+                "--",
+                "true",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["file_hashes"] == {}
+
+
+class TestArgumentDerivedFiles:
+    """With no spec roles, an argument that is a file is an input, and one
+    that exists only after the run is an output."""
+
+    def test_ad_hoc_run_names_its_files(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "a.csv").write_text("x\n")
+        main(
+            [
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--",
+                "cp",
+                "a.csv",
+                "b.csv",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["input_files"] == ["a.csv"]
+        assert record["execution"]["output_files"] == ["b.csv"]
+
+    def test_a_spec_with_no_roles_falls_back_to_the_arguments(
+        self, tmp_path, monkeypatch
+    ):
+        from dsagt.registry import CodeRegistry
+
+        project = tmp_path / "proj"
+        (project / "trace_archive").mkdir(parents=True)
+        CodeRegistry(runtime_dir=project).save_tool(
+            {
+                "name": "aidrin",
+                "description": "d",
+                "executable": "cat",
+                "parameters": {
+                    "args": {"type": "string", "required": True, "cli": "positional"}
+                },
+            }
+        )
+        (project / "data").mkdir()
+        (project / "data" / "t.csv").write_text("a,b\n1,2\n")
+        monkeypatch.chdir(project)
+        main(
+            [
+                "--code",
+                "aidrin",
+                "--records-dir",
+                str(project / "trace_archive"),
+                "--stdout",
+                "audit/pre.json",
+                "--",
+                "cat",
+                "data/t.csv",
+            ]
+        )
+        record = json.loads(
+            next((project / "trace_archive").glob("*.json")).read_text()
+        )
+        assert record["execution"]["input_files"] == ["data/t.csv"]
+        assert record["execution"]["output_files"] == ["audit/pre.json"]
+        assert set(record["execution"]["file_hashes"]) == {
+            "data/t.csv",
+            "audit/pre.json",
+        }

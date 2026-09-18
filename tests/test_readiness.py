@@ -59,3 +59,21 @@ class TestInstructionsParagraph:
         assert "AI-readiness check" not in text
         assert "<!--" not in text
         assert "### 4. Per-Operation Checks" in text
+
+
+def test_docs_page_quotes_the_paragraph_verbatim():
+    """docs/readiness.md shows the inserted paragraph as a quote block; the
+    page drifts from the source unless a test holds them equal."""
+    from pathlib import Path
+
+    from dsagt.readiness import INSTRUCTIONS_PARAGRAPH
+
+    page = Path(__file__).resolve().parents[1] / "docs" / "readiness.md"
+    text = page.read_text()
+    start = text.index("> #### AI-readiness check")
+    end = text.index("\n## ", start)
+    quoted = "\n".join(
+        line[2:] if line.startswith("> ") else line[1:]
+        for line in text[start:end].rstrip("\n").split("\n")
+    )
+    assert quoted == INSTRUCTIONS_PARAGRAPH.rstrip("\n")

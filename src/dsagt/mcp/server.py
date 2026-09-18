@@ -563,7 +563,7 @@ def main():
 
     # A KB misconfig (e.g. embedding.backend='api' with no base_url/API key)
     # must not take down the whole server: the tool surface accepts kb=None and
-    # only KB-backed tools degrade, so fall back rather than crash all 20 tools.
+    # only KB-backed tools degrade, so fall back rather than crash every tool.
     try:
         kb = _build_kb_from_config(config, project_dir)
     except Exception as e:  # noqa: BLE001
