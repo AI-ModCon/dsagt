@@ -21,6 +21,7 @@ import fcntl
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -201,14 +202,24 @@ def _pump(source, sink, lines: list[str]) -> None:
         sink.flush()
 
 
-def _run_streaming(command: list[str]) -> tuple[int, str, str]:
+_FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+
+
+def _run_streaming(
+    command: list[str], *, parent: str | None = None
+) -> tuple[int, str, str]:
     """Run *command*, echoing its output as it arrives, and return the exit
     code with the full stdout and stderr.
 
     The child's two pipes are read on two threads, so a command that fills
     one while the other is being read cannot block.  Undecodable bytes are
     replaced, so a stray byte in a tool's log cannot lose the record of
-    the run.  Raises ``FileNotFoundError`` when the executable is absent.
+    the run.  A SIGTERM, SIGINT, or SIGHUP to this process is
+    forwarded to the child and the call returns the child's exit status
+    (negative, the signal number, as ``subprocess`` reports it), so the
+    caller writes the record for a run that was ended from outside; a
+    headless harness ends a turn that way.  Raises ``FileNotFoundError``
+    when the executable is absent.
     """
     proc = subprocess.Popen(
         command,
@@ -218,6 +229,13 @@ def _run_streaming(command: list[str]) -> tuple[int, str, str]:
         errors="replace",
         env=_child_env(),
     )
+    forwarded: list[int] = []
+
+    def forward(signum, _frame):
+        forwarded.append(signum)
+        proc.send_signal(signum)
+
+    previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED_SIGNALS}
     out_lines: list[str] = []
     err_lines: list[str] = []
     readers = [
@@ -228,7 +246,15 @@ def _run_streaming(command: list[str]) -> tuple[int, str, str]:
         reader.start()
     for reader in readers:
         reader.join()
-    return proc.wait(), "".join(out_lines), "".join(err_lines)
+    try:
+        return_code = proc.wait()
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    if forwarded:
+        name = signal.Signals(forwarded[0]).name
+        err_lines.append(f"dsagt-run: terminated by {name}\n")
+    return return_code, "".join(out_lines), "".join(err_lines)
 
 
 def run_and_record(
@@ -239,16 +265,34 @@ def run_and_record(
     record_id: str | None = None,
     input_files: list[str] | None = None,
     output_files: list[str] | None = None,
+    log_trace=log_execution_trace_if_tracing,
 ) -> int:
     """Execute a command, write an execution record, return the exit code.
 
     The command's output is echoed as it arrives and kept in full for the
     record, so a slow code shows progress and the record still holds
     everything it printed.
+
+    The run loads no tracing library: the record is the provenance, and the
+    ``code.execute`` trace is built from the record afterwards by *log_trace*,
+    called with the record's path.  The default logs in this process when
+    tracing is initialized here; ``dsagt-run`` passes a function that hands
+    the record to a detached process, because loading the store costs about a
+    second, which every recorded command would otherwise pay before it starts.
     """
     from dsagt.observability import obs, code_execute_span, truncate
 
     record_id = record_id or uuid.uuid4().hex[:12]
+    output_files = list(output_files or [])
+    # Each side the roles leave empty is filled from the arguments: a spec
+    # whose flags differ from the ones the agent used (fastp's -i against
+    # --in1) matches nothing on one side and must not silence the other.
+    derive_inputs = not input_files
+    derive_outputs = not output_files
+    if derive_inputs:
+        input_files = files_from_arguments(command)
+    file_hashes = {f: sha256_of(f) for f in input_files}
+    parent_record_id = os.environ.get("DSAGT_RUN_PARENT")
     if session_id is None:
         # The MCP server mints the session at startup and records it in
         # ``.dsagt/state.yaml``; read the current tag from there so this
@@ -260,63 +304,42 @@ def run_and_record(
         timestamp_start = datetime.now(timezone.utc).isoformat()
         start_perf = time.perf_counter()
 
-        try:
-            return_code, stdout, stderr = _run_streaming(command)
-        except FileNotFoundError:
-            return_code = 127
-            stdout = ""
-            stderr = f"dsagt-run: command not found: {command[0]}"
-        except (PermissionError, OSError) as e:
-            return_code = 1
-            stdout = ""
-            stderr = f"dsagt-run: execution error: {e}"
+    try:
+        return_code, stdout, stderr = _run_streaming(command, parent=record_id)
+    except FileNotFoundError:
+        return_code = 127
+        stdout = ""
+        stderr = f"dsagt-run: command not found: {command[0]}"
+    except (PermissionError, OSError) as e:
+        return_code = 1
+        stdout = ""
+        stderr = f"dsagt-run: execution error: {e}"
 
-        duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
-        timestamp_end = datetime.now(timezone.utc).isoformat()
-
-        # Attach execution summary to the span. Full payload still goes to
-        # trace_archive/<record_id>.json; the span only carries truncated
-        # summaries that render usefully in the MLflow UI.
-        obs.set_many(
-            {
-                "exit_code": return_code,
-                "duration_ms": duration_ms,
-                "n_input_files": len(input_files or []),
-                "n_output_files": len(output_files or []),
-                "command": truncate(" ".join(command), 256),
-                "stdout_len": len(stdout),
-                "stderr_len": len(stderr),
-            }
-        )
-        if stderr.strip():
-            obs.set("stderr_truncated", truncate(stderr, 256))
-        if return_code != 0:
-            obs.event("code_failed", exit_code=return_code)
-            obs.set_status("ERROR")
-
-        # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
-        # ~4KB per side so big code results don't bloat the trace store.  The
-        # span is a preview by contract: the full stdout/stderr is in
-        # trace_archive/<code>_<ts>_<record_id>.json on the machine that ran
-        # the code, findable by the span's ``record_id`` attribute — and that
-        # file is the only full copy, including when the store is a shared
-        # server that other people read.
-        obs.set_inputs(
-            {
-                "code": code_name,
-                "command": list(command),
-                "input_files": input_files or [],
-            }
-        )
-        obs.set_outputs(
-            {
-                "exit_code": return_code,
-                "duration_ms": duration_ms,
-                "stdout": truncate(stdout, 4096),
-                "stderr": truncate(stderr, 4096) if stderr else "",
-                "output_files": output_files or [],
-            }
-        )
+    duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
+    timestamp_end = datetime.now(timezone.utc).isoformat()
+    if derive_outputs:
+        # With no roles, an argument that did not exist before the run is an
+        # output, and so is one the run changed: a converter that replaces
+        # its output file names it on every run, not only the first.
+        rewritten = [
+            f
+            for f in input_files
+            if derive_inputs
+            and sha256_of(f) is not None  # still there: a moved file is not written
+            and file_hashes.get(f) not in (None, sha256_of(f))
+        ]
+        output_files = [
+            f
+            for f in new_files_from_arguments(command, input_files) + rewritten
+            if f not in output_files
+        ] + output_files
+    if return_code != 0:
+        # A declared output a failed run never wrote is left out, so the
+        # record names no producer for a file that does not exist.
+        output_files = [f for f in output_files if _is_file(f) or _is_dir(f)]
+    for f in output_files:
+        file_hashes[f] = sha256_of(f)
+    file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
 
     record = {
         "record_id": record_id,
@@ -333,8 +356,14 @@ def run_and_record(
             "output_files": output_files or [],
         },
     }
+    if parent_record_id:
+        # A run started by a recorded run (a loop script over samples): the
+        # parent's command replays it, so the reconstruction leaves it out.
+        record["parent_record_id"] = parent_record_id
 
-    _write_record(record, records_dir)
+    path = _write_record(record, records_dir)
+    if log_trace is not None:
+        log_trace(path)
     return return_code
 
 
@@ -662,6 +691,19 @@ def render_bash(
         "",
     ]
 
+    # The recorded commands assume the directories the session had made by
+    # hand; on a fresh copy the script makes them first.
+    output_dirs: list[str] = []
+    for record in records:
+        for f in record["execution"].get("output_files", []):
+            parent = str(Path(_relative_to_project(f, project_dir)).parent)
+            if parent not in (".", "") and parent not in output_dirs:
+                output_dirs.append(parent)
+    if output_dirs:
+        lines.append("mkdir -p " + " ".join(_shell_quote(d) for d in output_dirs))
+        lines.append("")
+
+    written: set[str] = set()
     for i, record in enumerate(records):
         code = record["code_name"]
         execution = record["execution"]
@@ -690,7 +732,14 @@ def render_bash(
             lines.append(f"#   failed with exit code {rc}; kept as a comment")
             lines.append(f"# {cmd_str}")
         else:
+            # A converter that refuses to overwrite fails on the second
+            # write of one output; the session removed the file by hand
+            # between runs, and that removal was never recorded.
+            for f in outputs:
+                if f in written:
+                    lines.append(f"rm -f {_shell_quote(f)}")
             lines.append(cmd_str)
+            written.update(outputs)
         lines.append("")
 
     return "\n".join(lines)

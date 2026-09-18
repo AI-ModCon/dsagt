@@ -80,11 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         print("dsagt-run: no command specified after '--'", file=sys.stderr)
         return 1
 
-    from dsagt.observability import init_tracing
-
-    # The session is resolved before tracing starts so the `code.execute`
-    # trace root carries it — resolving it later inside run_and_record only
-    # stamps the on-disk record, and the trace lands unbucketed.
+    # The session is resolved here so the record and the trace both carry it.
     session_id = args.session or _current_session_tag_from_cwd()
     init_tracing("dsagt-run", session_id=session_id)
 
@@ -113,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         record_id=args.record_id,
         input_files=input_files,
         output_files=output_files,
+        log_trace=_log_trace_detached(session_id, records_dir.parent),
     )
 
 
