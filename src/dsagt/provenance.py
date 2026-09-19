@@ -295,11 +295,8 @@ def files_from_arguments(command: list[str]) -> list[str]:
     ``data.csv``; ``x.py`` is the program, and as an input it would read as
     the product of whichever step wrote it).
     """
-    args = command[1:]
-    if command and Path(command[0]).name in _INTERPRETERS:
-        script = next((a for a in args if not a.startswith("-")), None)
-        if script is not None and _is_file(script):
-            args = [a for a in args if a != script]
+    script = script_argument(command)
+    args = [arg for i, arg in enumerate(command) if i > 0 and i != script]
     return [arg for arg in args if _is_file(arg) or _is_dir(arg)]
 
 

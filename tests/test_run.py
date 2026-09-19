@@ -1083,3 +1083,16 @@ class TestOutsideTheProject:
         }
         bash = render_bash([record], {0: []}, project_dir=tmp_path)
         assert "#   outside the project: /data/shared/big.csv" in bash
+
+
+def test_the_argument_after_a_stdin_script_is_an_input(tmp_path, monkeypatch):
+    from dsagt.provenance import files_from_arguments
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "rows.csv").write_text("a\n")
+    (tmp_path / "x.py").write_text("pass\n")
+    assert files_from_arguments(["python3", "-", "rows.csv"]) == ["rows.csv"]
+    assert files_from_arguments(["python3", "x.py", "rows.csv"]) == ["rows.csv"]
+    assert files_from_arguments(["uv", "run", "--", "python", "x.py", "rows.csv"]) == [
+        "rows.csv"
+    ]
