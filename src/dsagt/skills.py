@@ -1009,9 +1009,14 @@ def register_skill_scripts(
             spec = _code_spec(
                 {"name": skill_name}, {**overrides[script_rel], "script": script_rel}
             )
+            registry.save_tool(spec)
         else:
             spec = derive_code_spec(skill_name, script)
-        registry.save_tool(spec)
+            # A spec read from argparse never replaces one already stored:
+            # the agent may have saved roles or dependencies onto it with
+            # save_code_spec, and a second save_skill would drop them.
+            if registry.get_code(spec["name"]) is None:
+                registry.save_tool(spec)
         executable = registry.get_code(spec["name"])["executable"]
         stored.append(executable)
         for interpreter in ("python3", "python", "bash", "sh"):

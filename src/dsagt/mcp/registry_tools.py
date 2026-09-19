@@ -22,6 +22,7 @@ test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
 import asyncio
 import json
 import logging
+import re
 import subprocess
 import sys
 from functools import partial
@@ -143,10 +144,24 @@ async def _handle_save_code_spec(
         from dsagt.agents import refresh_native_skills
 
         refresh_native_skills(registry.runtime_dir)
+        stored = registry.get_code(spec["name"])
+        # A changed executable (added dependencies) makes the usage line in
+        # the owning skill's text stale; the shared registration rewrites it.
+        owner = re.search(r"\bskills/([^/\s]+)/(scripts/\S+)", stored["executable"])
+        if owner:
+            from dsagt.skills import rewrite_cli_invocations
+
+            skill, script_rel = owner.groups()
+            skill_dir = registry.runtime_dir / "skills" / skill
+            if (skill_dir / "SKILL.md").exists():
+                pairs = []
+                for interpreter in ("python3", "python", "bash", "sh"):
+                    for path in (script_rel, f"skills/{skill}/{script_rel}"):
+                        pairs.append((f"{interpreter} {path}", stored["executable"]))
+                rewrite_cli_invocations(skill_dir, pairs)
         tool_count = len(registry.list_codes_raw())
         obs.set("action", action)
         obs.set("registry_size", tool_count)
-        stored = registry.get_code(spec["name"])
         message = (
             f"Tool '{spec['name']}' {action} successfully. "
             f"Registry now contains {tool_count} tools.\n"

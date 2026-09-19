@@ -306,3 +306,34 @@ class TestGuessedWrapperLine:
         provenance = (project / "skills" / "trim-reads" / "PROVENANCE.txt").read_text()
         # Only the pairs that changed a line are on record, not all eight.
         assert provenance.count("rewritten by dsagt") == 2
+
+
+class TestAnAgentSavedSpecIsKept:
+
+    def test_a_second_registration_keeps_roles_and_dependencies(
+        self, tmp_path, fresh_project
+    ):
+        """vasp, both agents: save_code_spec added dependencies, a later
+        save_skill derived the spec again from argparse and dropped them."""
+        skill_src = _write_skill(tmp_path / "src")
+        project = fresh_project("p")
+        _via_copy(project, skill_src)
+        registry = CodeRegistry(runtime_dir=project)
+        spec = registry.get_code("trim-reads-trim")
+        registry.save_tool(
+            {
+                "name": "trim-reads-trim",
+                "description": spec["description"],
+                "executable": "python skills/trim-reads/scripts/trim.py",
+                "parameters": spec["parameters"],
+                "dependencies": ["pysam"],
+            }
+        )
+        with_deps = CodeRegistry(runtime_dir=project).get_code("trim-reads-trim")
+        assert "uv run --with pysam" in with_deps["executable"]
+        register_skill_scripts(project, "trim-reads")
+        again = CodeRegistry(runtime_dir=project).get_code("trim-reads-trim")
+        assert again["executable"] == with_deps["executable"]
+        # The skill's usage lines follow the stored command.
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        assert f"{with_deps['executable']} --reads data/s1.fq.gz" in text
