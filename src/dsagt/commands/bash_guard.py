@@ -4,10 +4,12 @@ Claude Code calls it before every Bash tool call with the call as JSON on
 stdin.  A command that runs ``python``, ``python3``, or ``uv run python``
 outside ``dsagt-run`` is refused (exit 2, the reason on stderr, which Claude
 Code shows the agent) with the recorded form to use instead.  The hook
-exists because the instructions alone are not read at the moment that
-matters: the agent's inspect-and-fix loop wrote scripts to its scratchpad
-and ran them bare after the harness refused a ``python -c`` with ``#``
-lines.  The hook acts at the point the command is issued.
+exists because the agent chooses a command at the moment it issues one,
+without rereading the instructions: in the headless runs it ran a skill's
+script by the bare line the skill's text gave, made quick comparisons in a
+heredoc, and, after Claude Code's shell check refused a multi-line
+``python -c`` holding a ``#`` comment, ran the same code from a scratchpad
+file.  The hook acts at the point the command is issued.
 
 Allowed as they are: a call already under ``dsagt-run``, ``--help`` and
 ``--version``, ``python -m pytest``, and ``pip``.
