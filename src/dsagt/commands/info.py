@@ -243,7 +243,7 @@ def _row_source_for(tags: dict, metadata: dict) -> str:
 
     Internal debug traces carry an explicit ``dsagt.source`` tag (see
     :data:`_INTERNAL_SOURCES`), set on the trace root by the MCP dispatch
-    shell, ``code_execute_span``, or the background emitters.  Agent traces
+    shell, ``log_execution_trace``, or the background emitters.  Agent traces
     carry ``dsagt.agent`` metadata, stamped by ``MLflowSink``.  The two are
     disjoint, so the bucket is a direct lookup; a trace with neither is
     ``"unknown"`` (background work is tagged, so this indicates a bug).

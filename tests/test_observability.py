@@ -496,21 +496,36 @@ def test_truncate_handles_none():
     assert truncate(None, 256) == ""
 
 
-def test_code_execute_span_attributes(_reset_tracing):
-    """code_execute_span sets record_id and code_name on the span."""
-    from dsagt.observability import obs, code_execute_span
+def test_log_execution_trace_is_backdated_to_the_run(_reset_tracing):
+    """The trace is logged after the run, from the record, and its span
+    carries the run's own start and end times."""
+    from dsagt.observability import log_execution_trace
 
-    with code_execute_span(record_id="abc123", code_name="fastp"):
-        obs.set("exit_code", 0)
-        obs.set("duration_ms", 42.5)
+    record = {
+        "record_id": "abc123",
+        "code_name": "fastp",
+        "execution": {
+            "exact_command": "fastp -i a.fq",
+            "timestamp_start": "2026-01-01T00:00:00+00:00",
+            "timestamp_end": "2026-01-01T00:00:42+00:00",
+            "duration_ms": 42000.0,
+            "return_code": 3,
+            "stdout": "",
+            "stderr": "boom",
+            "input_files": ["a.fq"],
+            "output_files": [],
+        },
+    }
+    assert log_execution_trace(record) is not None
 
-    spans = _spans_by_name()
-    assert "code.execute" in spans
-    span = spans["code.execute"]
+    span = _spans_by_name()["code.execute"]
     assert span.attributes["record_id"] == "abc123"
     assert span.attributes["code_name"] == "fastp"
-    assert span.attributes["exit_code"] == 0
-    assert span.attributes["duration_ms"] == 42.5
+    assert span.attributes["exit_code"] == 3
+    assert span.attributes["n_input_files"] == 1
+    assert span.end_time_ns - span.start_time_ns == 42 * 10**9
+    assert span.status.status_code.name == "ERROR"
+    assert [event.name for event in span.events] == ["code_failed"]
 
 
 def test_mlflow_agent_hint_is_off_by_default():

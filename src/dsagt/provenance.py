@@ -337,6 +337,14 @@ def _run_streaming(
     return return_code, "".join(out_lines), "".join(err_lines)
 
 
+def log_execution_trace_if_tracing(record_path: Path) -> None:
+    """Log the record's ``code.execute`` trace when this process has tracing on."""
+    from dsagt import observability
+
+    if observability._initialized:
+        observability.log_execution_trace(json.loads(Path(record_path).read_text()))
+
+
 def run_and_record(
     code_name: str,
     command: list[str],
@@ -346,6 +354,7 @@ def run_and_record(
     input_files: list[str] | None = None,
     output_files: list[str] | None = None,
     stdout_path: str | None = None,
+    log_trace=log_execution_trace_if_tracing,
 ) -> int:
     """Execute a command, write an execution record, return the exit code.
 
@@ -359,9 +368,14 @@ def run_and_record(
     line naming it; a code that prints its report (``aidrin``, the datacard
     codes) is then reproducible from the record and the reconstructed
     script, where a shell redirect in the agent's command is not.
-    """
-    from dsagt.observability import obs, code_execute_span, truncate
 
+    The run loads no tracing library: the record is the provenance, and the
+    ``code.execute`` trace is built from the record afterwards by *log_trace*,
+    called with the record's path.  The default logs in this process when
+    tracing is initialized here; ``dsagt-run`` passes a function that hands
+    the record to a detached process, because loading the store costs about a
+    second, which every recorded command would otherwise pay before it starts.
+    """
     record_id = record_id or uuid.uuid4().hex[:12]
     input_files = list(input_files or [])
     output_files = list(output_files or [])
@@ -383,86 +397,39 @@ def run_and_record(
         # dir by contract).  ``None`` if no session has been minted yet.
         session_id = _current_session_tag_from_cwd()
 
-    with code_execute_span(record_id, code_name):
-        timestamp_start = datetime.now(timezone.utc).isoformat()
-        start_perf = time.perf_counter()
+    timestamp_start = datetime.now(timezone.utc).isoformat()
+    start_perf = time.perf_counter()
 
-        try:
-            if stdout_path is None:
-                return_code, stdout, stderr = _run_streaming(command, parent=record_id)
-            else:
-                Path(stdout_path).parent.mkdir(parents=True, exist_ok=True)
-                with open(stdout_path, "w") as sink:
-                    return_code, stdout, stderr = _run_streaming(
-                        command, sink, parent=record_id
-                    )
-                print(
-                    f"dsagt-run: stdout written to {stdout_path} ({len(stdout)} bytes)"
+    try:
+        if stdout_path is None:
+            return_code, stdout, stderr = _run_streaming(command, parent=record_id)
+        else:
+            Path(stdout_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(stdout_path, "w") as sink:
+                return_code, stdout, stderr = _run_streaming(
+                    command, sink, parent=record_id
                 )
-        except FileNotFoundError:
-            return_code = 127
-            stdout = ""
-            stderr = f"dsagt-run: command not found: {command[0]}"
-        except (PermissionError, OSError) as e:
-            return_code = 1
-            stdout = ""
-            stderr = f"dsagt-run: execution error: {e}"
+            print(f"dsagt-run: stdout written to {stdout_path} ({len(stdout)} bytes)")
+    except FileNotFoundError:
+        return_code = 127
+        stdout = ""
+        stderr = f"dsagt-run: command not found: {command[0]}"
+    except (PermissionError, OSError) as e:
+        return_code = 1
+        stdout = ""
+        stderr = f"dsagt-run: execution error: {e}"
 
-        duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
-        timestamp_end = datetime.now(timezone.utc).isoformat()
-        if derive_outputs:
-            output_files = [
-                f
-                for f in new_files_from_arguments(command, input_files)
-                if f not in output_files
-            ] + output_files
-        for f in output_files:
-            file_hashes[f] = sha256_of(f)
-        file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
-
-        # Attach execution summary to the span. Full payload still goes to
-        # trace_archive/<record_id>.json; the span only carries truncated
-        # summaries that render usefully in the MLflow UI.
-        obs.set_many(
-            {
-                "exit_code": return_code,
-                "duration_ms": duration_ms,
-                "n_input_files": len(input_files or []),
-                "n_output_files": len(output_files or []),
-                "command": truncate(" ".join(command), 256),
-                "stdout_len": len(stdout),
-                "stderr_len": len(stderr),
-            }
-        )
-        if stderr.strip():
-            obs.set("stderr_truncated", truncate(stderr, 256))
-        if return_code != 0:
-            obs.event("code_failed", exit_code=return_code)
-            obs.set_status("ERROR")
-
-        # Populate the MLflow trace UI's Input/Output tabs, truncated to about
-        # 4 KB per side to keep a large result out of the trace store.  The
-        # span is a preview by contract: the full stdout/stderr is in
-        # trace_archive/<code>_<ts>_<record_id>.json on the machine that ran
-        # the code, findable by the span's ``record_id`` attribute, and that
-        # file is the only full copy, including when the store is a shared
-        # server that other people read.
-        obs.set_inputs(
-            {
-                "code": code_name,
-                "command": list(command),
-                "input_files": input_files or [],
-            }
-        )
-        obs.set_outputs(
-            {
-                "exit_code": return_code,
-                "duration_ms": duration_ms,
-                "stdout": truncate(stdout, 4096),
-                "stderr": truncate(stderr, 4096) if stderr else "",
-                "output_files": output_files or [],
-            }
-        )
+    duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
+    timestamp_end = datetime.now(timezone.utc).isoformat()
+    if derive_outputs:
+        output_files = [
+            f
+            for f in new_files_from_arguments(command, input_files)
+            if f not in output_files
+        ] + output_files
+    for f in output_files:
+        file_hashes[f] = sha256_of(f)
+    file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
 
     record = {
         "record_id": record_id,
@@ -475,6 +442,7 @@ def run_and_record(
             "stderr": stderr,
             "timestamp_start": timestamp_start,
             "timestamp_end": timestamp_end,
+            "duration_ms": duration_ms,
             "input_files": input_files,
             "output_files": output_files,
             "file_hashes": file_hashes,
@@ -487,7 +455,9 @@ def run_and_record(
         # parent's command replays it, so the reconstruction leaves it out.
         record["parent_record_id"] = parent_record_id
 
-    _write_record(record, records_dir)
+    path = _write_record(record, records_dir)
+    if log_trace is not None:
+        log_trace(path)
     return return_code
 
 

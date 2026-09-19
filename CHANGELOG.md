@@ -59,6 +59,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`dsagt-run` adds about 0.2 s to a command, down from 1.3 to 2 s.** The
+  run loads no trace store. It writes the record, then starts a detached
+  process that logs the `code.execute` trace from the record with the run's
+  start and end times; writers take a lock on `.dsagt/run_trace.lock`, and
+  an error goes to `.dsagt/run_trace.log`.
 - **Codes and skills share `skills/`.** A code is a skill directory whose
   frontmatter declares an executable; a project has no `codes/` directory,
   and `dsagt init` on a project with one moves each code under `skills/`.
