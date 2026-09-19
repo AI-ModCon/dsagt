@@ -90,7 +90,7 @@ All check reports are saved to `audit/` for the audit trail.
 - All data output goes in a `data/` subdirectory
 - All audit reports go in `audit/`
 - All session artifacts stay within the project directory. A script that is part of the pipeline goes under `skills/<name>/scripts/`; a one-off script run as `dsagt-run -- python <script>` is copied into `trace_archive/scripts/`, wherever it was written
-- The session's dsagt artifacts, when the user asks what dsagt recorded: the execution records in `trace_archive/`, the reports in `audit/`, the registered codes and installed skills in `skills/`, the trace store `mlflow.db`, the knowledge base `kb_index/`, and the session state in `.dsagt/`
+- The session's dsagt artifacts, when the user asks what dsagt recorded: the execution records in `trace_archive/` (each a JSON file with `record_id`, `code_name`, `session_id`, and under `execution`: `exact_command`, `return_code`, `stdout`, `stderr`, `timestamp_start`, `duration_ms`, `input_files`, `output_files`, `file_hashes`), the reports in `audit/`, the registered codes and installed skills in `skills/`, the trace store `mlflow.db`, the knowledge base `kb_index/`, and the session state in `.dsagt/`
 
 ## INITIAL SETUP PHASE
 

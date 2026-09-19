@@ -1004,29 +1004,38 @@ class TestScriptSnapshot:
         return json.loads(path.read_text())
 
     def test_a_script_file_is_copied_and_the_reconstruction_runs_the_copy(
-        self, tmp_path
+        self, tmp_path, monkeypatch
     ):
         from dsagt.provenance import render_bash
 
         script = tmp_path / "elsewhere" / "count.py"
         script.parent.mkdir()
         script.write_text("print(41 + 1)\n")
-        records = tmp_path / "proj" / "trace_archive"
-        rc = run_and_record("", [sys.executable, str(script)], records, log_trace=None)
-        assert rc == 0
+        project = tmp_path / "proj"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        records = project / "trace_archive"
+        for _ in range(2):
+            rc = run_and_record(
+                "", [sys.executable, str(script)], records, log_trace=None
+            )
+            assert rc == 0
 
-        record = self._record(records)
+        record = json.loads(sorted(records.glob("*.json"))[0].read_text())
         snapshot = record["execution"]["script_snapshot"]
-        copy = Path(snapshot["path"])
-        assert copy.parent == records / "scripts"
-        assert copy.name == f"{record['record_id']}_count.py"
+        # Relative to the project, like the record's other paths, and named
+        # by content, so two runs of one script share one copy.
+        assert snapshot["path"].startswith("trace_archive/scripts/")
+        assert snapshot["path"].endswith("_count.py")
+        assert len(list((records / "scripts").iterdir())) == 1
+        copy = project / snapshot["path"]
         # The program is neither an input nor an output of the run.
         assert record["execution"]["input_files"] == []
         assert record["execution"]["output_files"] == []
         script.write_text("print('edited later')\n")
         assert copy.read_text() == "print(41 + 1)\n"
 
-        bash = render_bash([record], {0: []}, project_dir=tmp_path / "proj")
+        bash = render_bash([record], {0: []}, project_dir=project)
         assert f"trace_archive/scripts/{copy.name}" in bash
         assert str(script) not in bash
 
@@ -1053,7 +1062,7 @@ class TestScriptSnapshot:
         record = self._record(records)
         snapshot = record["execution"]["script_snapshot"]
         assert snapshot["stdin"] is True
-        assert Path(snapshot["path"]).read_text().startswith("import sys")
+        assert (tmp_path / snapshot["path"]).read_text().startswith("import sys")
 
     def test_a_registered_code_and_a_dash_c_call_have_no_snapshot(self, tmp_path):
         script = tmp_path / "x.py"
@@ -1096,3 +1105,90 @@ def test_the_argument_after_a_stdin_script_is_an_input(tmp_path, monkeypatch):
     assert files_from_arguments(["uv", "run", "--", "python", "x.py", "rows.csv"]) == [
         "rows.csv"
     ]
+
+
+class TestFindingsFromThe0919Runs:
+
+    def test_a_rewritten_output_is_an_output_on_every_run(self, tmp_path, monkeypatch):
+        """With no roles, the second run of a converter found its output
+        already present, listed it as an input, and named no output."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "in.txt").write_text("a")
+        write = "import sys, time; open(sys.argv[2], 'w').write(str(time.time()))"
+        records = tmp_path / "trace_archive"
+        for _ in range(2):
+            run_and_record(
+                "",
+                [sys.executable, "-c", write, "in.txt", "out.txt"],
+                records,
+                log_trace=None,
+            )
+        runs = [json.loads(p.read_text())["execution"] for p in records.glob("*.json")]
+        second = max(runs, key=lambda e: e["timestamp_start"])
+        assert "out.txt" in second["output_files"]
+        assert (
+            second["file_hashes"]["out.txt"]
+            == __import__("hashlib")
+            .sha256((tmp_path / "out.txt").read_bytes())
+            .hexdigest()
+        )
+
+    def test_a_failed_run_names_no_output_it_did_not_write(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        records = tmp_path / "trace_archive"
+        rc = run_and_record(
+            "plot", ["false"], records, output_files=["plots/p.png"], log_trace=None
+        )
+        assert rc != 0
+        [path] = records.glob("*.json")
+        assert json.loads(path.read_text())["execution"]["output_files"] == []
+
+    def test_the_children_of_a_killed_parent_stay_in_the_reconstruction(self, tmp_path):
+        from dsagt.provenance import load_pipeline_records
+
+        def record(record_id, rc, parent=None):
+            raw = {
+                "record_id": record_id,
+                "code_name": "",
+                "execution": {
+                    "exact_command": ["true"],
+                    "return_code": rc,
+                    "timestamp_start": record_id,
+                },
+            }
+            if parent:
+                raw["parent_record_id"] = parent
+            (tmp_path / f"{record_id}.json").write_text(json.dumps(raw))
+
+        record("a-loop-killed", -15)
+        record("b-child", 0, parent="a-loop-killed")
+        record("c-loop-done", 0)
+        record("d-child", 0, parent="c-loop-done")
+        kept = [r["record_id"] for r in load_pipeline_records(tmp_path)]
+        assert kept == ["a-loop-killed", "b-child", "c-loop-done"]
+
+    def test_the_reconstruction_checks_the_inputs_no_step_writes(self, tmp_path):
+        from dsagt.provenance import render_bash
+
+        def record(inputs, outputs):
+            return {
+                "record_id": "r",
+                "code_name": "c",
+                "execution": {
+                    "exact_command": ["true"],
+                    "return_code": 0,
+                    "input_files": inputs,
+                    "output_files": outputs,
+                },
+            }
+
+        bash = render_bash(
+            [
+                record(["data/raw.csv"], ["data/clean.csv"]),
+                record(["data/clean.csv", "audit/card.md"], []),
+            ],
+            {0: [], 1: [0]},
+            project_dir=tmp_path,
+        )
+        assert "for f in data/raw.csv audit/card.md; do" in bash
+        assert bash.index("missing input") < bash.index("# Step 1")

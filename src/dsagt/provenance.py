@@ -250,8 +250,8 @@ def save_script_snapshot(
 
     An ad-hoc script is the agent's own, often written outside the project
     or as a heredoc, and edited or gone by the time the pipeline is
-    reconstructed; the copy under ``<records_dir>/scripts/`` is what the
-    reconstructed script runs.  A heredoc (``python - <<EOF``, or the
+    reconstructed; the copy under ``<records_dir>/scripts/``, named by its
+    content hash, is what the reconstructed script runs.  A heredoc (``python - <<EOF``, or the
     interpreter with no arguments and stdin piped) is read from stdin here
     and the run reads the copy in its place.  Returns the record's
     ``script_snapshot`` entry: the argument index (``None`` when the
@@ -278,9 +278,25 @@ def save_script_snapshot(
         return None
     scripts_dir = Path(records_dir) / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
-    copy = scripts_dir / f"{record_id}_{name}"
-    copy.write_bytes(content)
-    return {"argument": index, "path": str(copy), "stdin": from_stdin}
+    # Named by content, so a script run many times is stored once.
+    copy = scripts_dir / f"{hashlib.sha256(content).hexdigest()[:12]}_{name}"
+    if not copy.exists():
+        copy.write_bytes(content)
+    return {
+        "argument": index,
+        "path": _relative_to_cwd(copy),
+        "stdin": from_stdin,
+    }
+
+
+def _relative_to_cwd(path: Path) -> str:
+    """*path* relative to the working directory when it is under it, as the
+    record's other paths are, so a project that is moved keeps valid records."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(resolved)
 
 
 def files_from_arguments(command: list[str]) -> list[str]:
@@ -504,11 +520,23 @@ def run_and_record(
     duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
     timestamp_end = datetime.now(timezone.utc).isoformat()
     if derive_outputs:
+        # With no roles, an argument that did not exist before the run is an
+        # output, and so is one the run changed: a converter that replaces
+        # its output file names it on every run, not only the first.
+        rewritten = [
+            f
+            for f in input_files
+            if derive_inputs and file_hashes.get(f) not in (None, sha256_of(f))
+        ]
         output_files = [
             f
-            for f in new_files_from_arguments(command, input_files)
+            for f in new_files_from_arguments(command, input_files) + rewritten
             if f not in output_files
         ] + output_files
+    if return_code != 0:
+        # A declared output a failed run never wrote is left out, so the
+        # record names no producer for a file that does not exist.
+        output_files = [f for f in output_files if _is_file(f) or _is_dir(f)]
     for f in output_files:
         file_hashes[f] = sha256_of(f)
     file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
@@ -804,16 +832,22 @@ def load_pipeline_records(trace_dir: Path, session_id: str | None = None) -> lis
     if not trace_dir.is_dir():
         return []
 
-    records = []
+    loaded = []
     for path in trace_dir.glob("*.json"):
         raw = json.loads(path.read_text())
-        execution = raw.get("execution")
-        if not execution:
-            continue
+        if raw.get("execution"):
+            loaded.append(raw)
+    succeeded = {
+        r["record_id"] for r in loaded if r["execution"].get("return_code", 0) == 0
+    }
+    records = []
+    for raw in loaded:
         if session_id and raw.get("session_id") != session_id:
             continue
-        if raw.get("parent_record_id"):
-            # Started by another recorded run, whose command replays it.
+        if raw.get("parent_record_id") in succeeded:
+            # Started by another recorded run, whose command replays it.  The
+            # child of a run that failed or was killed is kept: the parent is
+            # rendered as a comment, and the child is the work that was done.
             continue
         records.append(raw)
 
@@ -936,6 +970,29 @@ def render_bash(
     ]
     if output_dirs:
         lines.append("mkdir -p " + " ".join(_shell_quote(d) for d in output_dirs))
+        lines.append("")
+
+    # A file a step reads that no earlier step writes has to be in place
+    # before the script starts: staged data, or a document written outside a
+    # recorded run.  Checked first, so a missing one stops the script at once
+    # and not at the step that reads it.
+    produced: set[str] = set()
+    required: list[str] = []
+    for record in records:
+        execution = record["execution"]
+        if execution.get("return_code", 0) != 0:
+            continue
+        for f in execution.get("input_files", []):
+            f = _relative_to_project(f, project_dir)
+            if f not in produced and f not in required:
+                required.append(f)
+        for f in execution.get("output_files", []):
+            produced.add(_relative_to_project(f, project_dir))
+    if required:
+        lines.append("# Inputs no recorded step writes; they must exist before step 1")
+        lines.append("for f in " + " ".join(_shell_quote(f) for f in required) + "; do")
+        lines.append('  [ -e "$f" ] || { echo "missing input: $f" >&2; exit 1; }')
+        lines.append("done")
         lines.append("")
 
     written: set[str] = set()
