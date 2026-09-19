@@ -1418,3 +1418,24 @@ class TestMcpEnvBlockShellPassthrough:
         block = _mcp_env_block(self._config())
         assert block
         assert not any(_CREDENTIAL_NAME.search(k) for k in block)
+
+
+def test_concurrent_registrations_are_all_kept(tmp_path):
+    """Seven ``dsagt init`` runs started together left one project in the
+    registry: a reader found the file truncated by another's write and saved
+    only its own entry."""
+    import subprocess
+    import sys
+
+    script = (
+        "import sys; from pathlib import Path; import dsagt.session as s\n"
+        "s.REGISTRY_DIR = Path(sys.argv[1]); s.REGISTRY_FILE = s.REGISTRY_DIR / 'projects.yaml'\n"
+        "for i in range(20): s.register_project(f'{sys.argv[2]}-{i}', s.REGISTRY_DIR / sys.argv[2])\n"
+    )
+    workers = [
+        subprocess.Popen([sys.executable, "-c", script, str(tmp_path), f"p{n}"])
+        for n in range(6)
+    ]
+    assert [w.wait() for w in workers] == [0] * 6
+    registry = yaml.safe_load((tmp_path / "projects.yaml").read_text())
+    assert len(registry) == 120

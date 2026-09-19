@@ -148,6 +148,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Concurrent `dsagt init` runs no longer erase the project registry.** A
+  run that read `~/dsagt-projects/projects.yaml` while another was writing it
+  found an empty file and saved only its own project. The registry is
+  changed under a lock and replaced in one step.
 - Tool arguments and results recorded on a trace are bounded before they
   reach the store, with credential-bearing keys (`headers`, `api_key`,
   `token`, …) redacted and common credential shapes inside strings (`Bearer …`,
