@@ -19,10 +19,12 @@ Project directory layout::
         kb_index/           # knowledge base collections
 """
 
+import fcntl
 import logging
 import os
 import re
 import shutil
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -251,16 +253,33 @@ def _load_registry() -> dict[str, str]:
 
 
 def _save_registry(registry: dict[str, str]) -> None:
-    """Save the project registry."""
+    """Replace the registry file in one step, so a reader never finds it
+    half written."""
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
-    REGISTRY_FILE.write_text(yaml.dump(registry, default_flow_style=False))
+    scratch = REGISTRY_FILE.with_name(REGISTRY_FILE.name + ".tmp")
+    scratch.write_text(yaml.dump(registry, default_flow_style=False))
+    os.replace(scratch, REGISTRY_FILE)
+
+
+@contextmanager
+def _registry_update():
+    """The registry as a dict to change in place; saved when the block ends.
+
+    The read, the change and the write happen under an exclusive lock, so
+    two ``dsagt init`` runs at once both end up registered.
+    """
+    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    with open(REGISTRY_DIR / ".projects.yaml.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        registry = _load_registry()
+        yield registry
+        _save_registry(registry)
 
 
 def register_project(name: str, path: Path) -> None:
     """Add or update a project in the registry."""
-    registry = _load_registry()
-    registry[name] = str(path.resolve())
-    _save_registry(registry)
+    with _registry_update() as registry:
+        registry[name] = str(path.resolve())
 
 
 def list_projects() -> dict[str, str]:
@@ -782,9 +801,8 @@ def remove_project(project_name: str, keep_files: bool = False) -> Path:
     if not keep_files and pdir.exists():
         shutil.rmtree(pdir)
 
-    registry = _load_registry()
-    registry.pop(project_name, None)
-    _save_registry(registry)
+    with _registry_update() as registry:
+        registry.pop(project_name, None)
     return pdir
 
 
