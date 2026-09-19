@@ -129,7 +129,9 @@ async def _handle_save_code_spec(
                 return (
                     f"'{spec['name']}' was not saved: {existing['name']} already "
                     f"runs {spec.get('executable', '')!r}. Run it as: "
-                    f"{existing['executable']}"
+                    f"{existing['executable']}\nTo give it parameter roles or "
+                    f"dependencies, save this spec again with the name "
+                    f"'{existing['name']}'."
                 )
             action = registry.save_tool(spec)
         except (KeyError, ValueError, OSError) as e:
