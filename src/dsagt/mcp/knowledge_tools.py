@@ -47,6 +47,35 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+#: The ingest and append jobs still running in this server process.
+_RUNNING_JOBS: set[asyncio.Task] = set()
+
+#: How long the server waits at exit for running jobs, in seconds.
+JOB_EXIT_WAIT_S = 300
+
+
+async def wait_for_running_jobs(timeout: float = JOB_EXIT_WAIT_S) -> None:
+    """Wait for the running ingest and append jobs, up to *timeout* seconds.
+
+    Called when the client closes the connection.  A headless agent runs one
+    server process per prompt, so an ingest started at the end of a prompt
+    was cancelled with the event loop seconds later, the documents were never
+    indexed, and the next server answered ``Unknown job``.
+    """
+    running = [task for task in _RUNNING_JOBS if not task.done()]
+    if not running:
+        return
+    logger.info("Waiting for %d knowledge-base job(s) before exit", len(running))
+    _, pending = await asyncio.wait(running, timeout=timeout)
+    if pending:
+        logger.warning(
+            "%d knowledge-base job(s) still running after %.0f s; the server "
+            "exits and their documents are not indexed",
+            len(pending),
+            timeout,
+        )
+
+
 @dataclass
 class _JobTracker:
     """Tracks background ingest/append jobs and their completion state."""
@@ -89,7 +118,9 @@ class _JobTracker:
                 if collection:
                     tracker.active_collections.discard(collection)
 
-        asyncio.get_event_loop().create_task(_run())
+        task = asyncio.get_event_loop().create_task(_run())
+        _RUNNING_JOBS.add(task)
+        task.add_done_callback(_RUNNING_JOBS.discard)
         return job_id
 
 

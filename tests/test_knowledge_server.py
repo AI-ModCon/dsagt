@@ -849,3 +849,25 @@ class TestKbSearchSchema:
     def test_kb_search_query_is_only_required(self, server):
         tool = self._get_tool(server, "kb_search")
         assert tool.input_schema["required"] == ["query"]
+
+
+def test_the_server_waits_for_a_running_job_at_exit():
+    """A headless agent runs one server per prompt; an ingest started at the
+    end of a prompt was cancelled with the loop and its documents lost."""
+    import asyncio
+
+    from dsagt.mcp.knowledge_tools import _JobTracker, wait_for_running_jobs
+
+    async def scenario():
+        tracker = _JobTracker()
+
+        async def ingest():
+            await asyncio.sleep(0.05)
+            return {"chunks": 3}
+
+        job_id = tracker.start(ingest(), collection="papers")
+        await wait_for_running_jobs(timeout=5)
+        return tracker.jobs[job_id]
+
+    job = asyncio.run(scenario())
+    assert job["status"] == "complete" and job["result"] == {"chunks": 3}

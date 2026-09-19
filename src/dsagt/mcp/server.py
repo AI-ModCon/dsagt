@@ -323,6 +323,9 @@ async def _run_stdio(
                 ready.set()
             await run_task
         finally:
+            from dsagt.mcp.knowledge_tools import wait_for_running_jobs
+
+            await wait_for_running_jobs()
             if not run_task.done():
                 run_task.cancel()
             for task in [run_task, *tasks]:
