@@ -6,6 +6,8 @@ exit code propagation, error handling, and env var fallbacks.
 """
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -992,3 +994,92 @@ class TestArgumentScanDetails:
             "tool.py",
             "case",
         ]
+
+
+class TestScriptSnapshot:
+    """An ad-hoc interpreter run keeps a copy of its script in the archive."""
+
+    def _record(self, records):
+        [path] = records.glob("*.json")
+        return json.loads(path.read_text())
+
+    def test_a_script_file_is_copied_and_the_reconstruction_runs_the_copy(
+        self, tmp_path
+    ):
+        from dsagt.provenance import render_bash
+
+        script = tmp_path / "elsewhere" / "count.py"
+        script.parent.mkdir()
+        script.write_text("print(41 + 1)\n")
+        records = tmp_path / "proj" / "trace_archive"
+        rc = run_and_record("", [sys.executable, str(script)], records, log_trace=None)
+        assert rc == 0
+
+        record = self._record(records)
+        snapshot = record["execution"]["script_snapshot"]
+        copy = Path(snapshot["path"])
+        assert copy.parent == records / "scripts"
+        assert copy.name == f"{record['record_id']}_count.py"
+        # The program is neither an input nor an output of the run.
+        assert record["execution"]["input_files"] == []
+        assert record["execution"]["output_files"] == []
+        script.write_text("print('edited later')\n")
+        assert copy.read_text() == "print(41 + 1)\n"
+
+        bash = render_bash([record], {0: []}, project_dir=tmp_path / "proj")
+        assert f"trace_archive/scripts/{copy.name}" in bash
+        assert str(script) not in bash
+
+    def test_a_heredoc_is_captured_from_stdin(self, tmp_path):
+        records = tmp_path / "trace_archive"
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dsagt.commands.run_code",
+                "--records-dir",
+                str(records),
+                "--",
+                sys.executable,
+                "-",
+                "7",
+            ],
+            input="import sys\nprint(int(sys.argv[1]) * 6)\n",
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert done.stdout.strip() == "42"
+        record = self._record(records)
+        snapshot = record["execution"]["script_snapshot"]
+        assert snapshot["stdin"] is True
+        assert Path(snapshot["path"]).read_text().startswith("import sys")
+
+    def test_a_registered_code_and_a_dash_c_call_have_no_snapshot(self, tmp_path):
+        script = tmp_path / "x.py"
+        script.write_text("pass\n")
+        records = tmp_path / "trace_archive"
+        run_and_record("x", [sys.executable, str(script)], records, log_trace=None)
+        run_and_record("", [sys.executable, "-c", "pass"], records, log_trace=None)
+        for path in records.glob("*.json"):
+            assert "script_snapshot" not in json.loads(path.read_text())["execution"]
+        assert not (records / "scripts").exists()
+
+
+class TestOutsideTheProject:
+
+    def test_the_reconstruction_names_an_argument_outside_the_project(self, tmp_path):
+        from dsagt.provenance import render_bash
+
+        record = {
+            "record_id": "r1",
+            "code_name": "",
+            "execution": {
+                "exact_command": ["wc", "-l", "/data/shared/big.csv"],
+                "return_code": 0,
+                "input_files": [],
+                "output_files": [],
+            },
+        }
+        bash = render_bash([record], {0: []}, project_dir=tmp_path)
+        assert "#   outside the project: /data/shared/big.csv" in bash

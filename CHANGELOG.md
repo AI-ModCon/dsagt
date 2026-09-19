@@ -8,6 +8,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **An ad-hoc interpreter run keeps a copy of its script.** `dsagt-run --
+  python x.py` copies `x.py` to `trace_archive/scripts/<record_id>_x.py`
+  (up to 1 MB), and a heredoc (`dsagt-run -- python3 - <<'EOF'`) is read from
+  stdin into the same place; the record names the copy under
+  `execution.script_snapshot` and the reconstructed script runs it, so a
+  script written outside the project, edited later, or never a file still
+  replays. The reconstruction lists a step's arguments outside the project
+  in a comment.
 - **Ad-hoc runs and `--stdout`.** `dsagt-run -- <command>` with no `--code`
   records a run without a spec (empty `code_name`, file prefix `adhoc`), so
   recording is separate from registration and any command that computes
