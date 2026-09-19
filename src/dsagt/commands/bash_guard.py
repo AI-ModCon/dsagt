@@ -1,17 +1,27 @@
-"""dsagt-bash-guard: the Claude Code PreToolUse hook that refuses a bare python call.
+"""dsagt-bash-guard: the Claude Code PreToolUse hook that puts a bare python call under ``dsagt-run``.
 
 Claude Code calls it before every Bash tool call with the call as JSON on
-stdin.  A command that runs ``python``, ``python3``, or ``uv run python``
-outside ``dsagt-run`` is refused (exit 2, the reason on stderr, which Claude
-Code shows the agent) with the recorded form to use instead.  The hook
-exists because the agent chooses a command at the moment it issues one,
-without rereading the instructions: in the headless runs it ran a skill's
-script by the bare line the skill's text gave, made quick comparisons in a
-heredoc, and, after Claude Code's shell check refused a multi-line
-``python -c`` holding a ``#`` comment, ran the same code from a scratchpad
-file.  The hook acts at the point the command is issued.
+stdin.  A command word that runs ``python``, ``python3``, ``uv run python``
+or a ``.py`` file outside ``dsagt-run`` gets ``dsagt-run --`` inserted in
+front of it, and the hook returns the rewritten command as the call's
+``updatedInput``; Claude Code then applies its own permission rules to the
+rewritten command.  A trailing ``> path`` on the call becomes ``--stdout
+path``, so the file is in the record.  The rest of the line (a ``cd``, a
+pipe, a heredoc, a loop around the call) is kept as written: ``dsagt-run``
+passes stdin and stdout through and keeps a copy of a heredoc's script.
 
-Allowed as they are: a call already under ``dsagt-run``, ``--help`` and
+A python call the scan cannot wrap in place (inside a quoted ``$(...)``,
+after ``xargs``, in a ``sh -c`` string) is refused (exit 2, the reason on
+stderr, which Claude Code shows the agent) with the recorded form to use.
+
+The hook exists because the agent chooses a command at the moment it issues
+one, without rereading the instructions.  In the headless runs a bare run
+had four triggers: a skill's text naming a bare command, a usage line the
+agent had written into its own skill, a quick comparison as a heredoc or
+``python -c``, and a script written to the scratchpad after Claude Code's
+shell check refused a multi-line ``python -c``.
+
+Left as they are: a call already under ``dsagt-run``, ``--help`` and
 ``--version``, ``python -m pytest``, and ``pip``.
 """
 
@@ -21,55 +31,143 @@ import json
 import re
 import sys
 
-# The segment's command word, after any VAR=value prefixes.
+# A command word that runs python, after shell keywords and VAR=value prefixes.
 _PYTHON = re.compile(
-    r"^\s*(?:\w+=\S*\s+)*(?:(?:uv\s+run\s+)?python3?(?=\s|$)|\.{0,2}/?\S+\.py(?=\s|$))"
+    r"\s*(?:(?:do|then|else|!|\{)\s+)*(?:\w+=\S*\s+)*"
+    r"(?P<word>(?:uv\s+run\s+)?python3?(?=\s|$)|\.{0,2}/?[^\s;&|()<>]+\.py(?=\s|$))"
 )
 _ALLOWED = re.compile(r"python3?\s+(?:-m\s+pytest|-m\s+pip|--version|--help)\b")
+_HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)(\w+)\2")
+# ``> path`` closing a call: not ``>>``, ``2>``, ``>&``, or a quoted path.
+_STDOUT_REDIRECT = re.compile(r"(?<![0-9&>])>\s*([^\s;&|<>'\"]+)\s*$")
+# A python call where no command starts that the scan finds.
+_UNWRAPPABLE = re.compile(
+    r"(?:\$\(|`|\bxargs\s+(?:-\S+\s+)*|\bsh\s+-l?c\s+['\"]\s*)"
+    r"(?:\w+=\S*\s+)*python3?(?=\s)(?!\s+(?:-m\s+pytest|-m\s+pip|--version|--help)\b)"
+)
 
 
-def _segments(command: str) -> list[str]:
-    """The parts of a shell line between ``;``, ``&&``, ``||`` and ``|``,
-    with quoted strings kept whole, so a ``python -c '...; ...'`` is one
-    segment and the form the refusal suggests is the whole call."""
-    import shlex
+def command_spans(command: str) -> list[tuple[int, int]] | None:
+    """The ``(start, end)`` offsets of each simple command in a shell line.
 
-    lexer = shlex.shlex(command, posix=False, punctuation_chars=";&|")
-    lexer.whitespace_split = True
-    segments: list[list[str]] = [[]]
-    try:
-        for token in lexer:
-            if token in (";", "&&", "||", "|", "&", ";;"):
-                segments.append([])
-            else:
-                segments[-1].append(token)
-    except ValueError:
-        # An unbalanced quote: one segment, judged as a whole.
-        return [command]
-    return [" ".join(seg) for seg in segments if seg]
+    Commands are separated by ``;``, ``&&``, ``||``, ``|``, ``&``, a newline
+    and ``(``.  Quoted strings and ``#`` comments are passed over, a
+    redirect's ``&`` (``2>&1``, ``&>``) separates nothing, and a heredoc's
+    body is skipped to its delimiter line, so text that is data is never
+    read as a command.  ``None`` when a quote is left open.
+    """
+    spans: list[tuple[int, int]] = []
+    start = 0
+    i = 0
+    pending: list[tuple[str, bool]] = []
+    n = len(command)
+    while i < n:
+        c = command[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c in "'\"":
+            close = i + 1
+            while close < n and command[close] != c:
+                if c == '"' and command[close] == "\\":
+                    close += 1
+                close += 1
+            if close >= n:
+                return None
+            i = close + 1
+            continue
+        if c == "#" and (i == 0 or command[i - 1].isspace()):
+            while i < n and command[i] != "\n":
+                i += 1
+            continue
+        if command.startswith("<<<", i):
+            i += 3
+            continue
+        heredoc = _HEREDOC.match(command, i)
+        if heredoc:
+            pending.append((heredoc.group(3), heredoc.group(1) == "-"))
+            i = heredoc.end()
+            continue
+        if c == "&" and (
+            (i > 0 and command[i - 1] in "<>") or command.startswith("&>", i)
+        ):
+            i += 1
+            continue
+        if c in ";&|\n(":
+            spans.append((start, i))
+            i += 1
+            if c == "\n":
+                for delimiter, strip_tabs in pending:
+                    while i < n:
+                        line_end = command.find("\n", i)
+                        line_end = n if line_end == -1 else line_end
+                        line = command[i:line_end]
+                        i = min(line_end + 1, n)
+                        if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                            break
+                pending = []
+            start = i
+            continue
+        i += 1
+    spans.append((start, n))
+    return [(s, e) for s, e in spans if command[s:e].strip()]
+
+
+def _bare_python_spans(command: str) -> list[tuple[int, int, int]] | None:
+    """``(start, end, word)`` of each command in *command* that runs python
+    outside ``dsagt-run``; *word* is the offset of the python command word."""
+    spans = command_spans(command)
+    if spans is None:
+        return None
+    found = []
+    for start, end in spans:
+        segment = command[start:end]
+        match = _PYTHON.match(segment)
+        if match is None or "dsagt-run" in segment or _ALLOWED.search(segment):
+            continue
+        found.append((start, end, start + match.start("word")))
+    return found
 
 
 def bare_python_call(command: str) -> str | None:
-    """The segment of *command* that runs python outside ``dsagt-run``, or ``None``.
+    """The first command in *command* that runs python outside ``dsagt-run``,
+    or ``None``.  A line with an open quote is judged as one command."""
+    found = _bare_python_spans(command)
+    if found is None:
+        bare = _PYTHON.match(command) and "dsagt-run" not in command
+        return command.strip() if bare else None
+    if not found:
+        return None
+    start, end, _ = found[0]
+    return command[start:end].strip()
 
-    A segment whose python is preceded by ``dsagt-run`` on the same segment
-    is the recorded form and passes.
+
+def recorded_form(command: str) -> str | None:
+    """*command* with each bare python call under ``dsagt-run``, or ``None``
+    when it holds none.
+
+    Raises ``ValueError`` for a python call that cannot be wrapped in place.
     """
-    for segment in _segments(command):
-        if "dsagt-run" in segment:
-            continue
-        if not _PYTHON.search(segment):
-            continue
-        if _ALLOWED.search(segment):
-            continue
-        return segment.strip()
-    return None
-
-
-#: Where Claude Code puts a session's temporary files.  A script written
-#: there is outside the project, so a record naming it replays only on the
-#: machine that ran it while the directory still exists.
-_SCRATCHPAD = re.compile(r"/(?:private/)?tmp/claude-[^\s'\"]*/scratchpad/")
+    found = _bare_python_spans(command)
+    if found is None:
+        if bare_python_call(command):
+            raise ValueError("the command has an open quote")
+        return None
+    # Right to left, so the earlier offsets stay valid.
+    for start, end, word in reversed(found):
+        call = command[word:end]
+        wrapper = "dsagt-run -- "
+        redirect = _STDOUT_REDIRECT.search(call)
+        if redirect and "<<" not in call:
+            wrapper = f"dsagt-run --stdout {redirect.group(1)} -- "
+            call = call[: redirect.start()].rstrip() + call[redirect.end() :]
+        command = command[:word] + wrapper + call + command[end:]
+    unwrappable = _UNWRAPPABLE.search(command)
+    if unwrappable:
+        raise ValueError(
+            f"`{unwrappable.group(0).strip()}` runs inside another command"
+        )
+    return command if found else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,26 +178,32 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if payload.get("tool_name") != "Bash":
         return 0
-    command = (payload.get("tool_input") or {}).get("command", "")
-    if _SCRATCHPAD.search(command):
+    tool_input = payload.get("tool_input") or {}
+    try:
+        rewritten = recorded_form(tool_input.get("command", ""))
+    except ValueError as err:
         print(
-            "dsagt: the scratchpad is outside the project, and a run that names a "
-            "file there replays nowhere else. Write the script under "
-            "skills/<name>/scripts/ and run it from the project directory.",
+            f"dsagt: bare python leaves no execution record, and {err}. Run the "
+            "python call on its own as `dsagt-run -- python ...` (or the "
+            "registered code's stored command); use --stdout <path> for a "
+            "report the command prints.",
             file=sys.stderr,
         )
         return 2
-    segment = bare_python_call(command)
-    if segment is None:
+    if rewritten is None:
         return 0
-    print(
-        "dsagt: bare python leaves no execution record. Run it as "
-        f"`dsagt-run -- {segment}` (or the registered code's stored command); "
-        "use --stdout <path> for a report the command prints, and run each "
-        "step of a chain under its own dsagt-run so its files are recorded.",
-        file=sys.stderr,
+    # No permissionDecision: Claude Code judges the rewritten command by the
+    # user's own permission rules.
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "updatedInput": {**tool_input, "command": rewritten},
+            }
+        },
+        sys.stdout,
     )
-    return 2
+    return 0
 
 
 if __name__ == "__main__":

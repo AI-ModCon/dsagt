@@ -42,8 +42,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `dsagt init`, `install_skill`, and `save_skill` call it and reply with the
   stored lines.
 - **`dsagt-bash-guard`.** The claude setup writes a `PreToolUse` hook into
-  `.claude/settings.json` that refuses a bare `python` call from the Bash
-  tool with the recorded form to use.
+  `.claude/settings.json` that puts a bare `python` call from the Bash tool
+  under `dsagt-run` (`python x.py > out.txt` becomes `dsagt-run --stdout
+  out.txt -- python x.py`) and returns the rewritten command to Claude Code,
+  whose permission rules then apply to it. A call it cannot wrap in place
+  (inside a quoted `$(...)`, after `xargs`, in a `sh -c` string) is refused
+  with the recorded form to use. `claude.bash_guard: false` in
+  `.dsagt/config.yaml` removes the hook at the next `dsagt start`.
 - **`kb_list_collections` and `kb_search(where=...)`.** Every collection is
   listed with its purpose, its metadata keys, and its chunk count, dsagt's
   own (`codes`, `code_use`, `session_memory`, `explicit_memory`) before their

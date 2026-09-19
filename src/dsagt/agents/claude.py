@@ -44,14 +44,16 @@ def _bash_guard_command() -> str:
     return str(Path(sys.executable).parent / _BASH_GUARD_SCRIPT)
 
 
-def _write_bash_guard_hook(working_dir: Path) -> list[str]:
+def _write_bash_guard_hook(working_dir: Path, enabled: bool = True) -> list[str]:
     """Write the bash guard into the project's Claude Code settings.
 
     ``.claude/settings.json`` is shared with the user's own settings, so the
     file is read and only the dsagt hook entry is set: an entry whose
     command names the guard is replaced (a reinstall moves the script), and
-    a user's other hooks are kept.  The guard refuses a bare ``python`` call
-    from the Bash tool with the recorded form to use (``dsagt-bash-guard``).
+    a user's other hooks are kept.  The guard puts a bare ``python`` call
+    from the Bash tool under ``dsagt-run`` (``dsagt-bash-guard``).  With
+    *enabled* false (``claude.bash_guard: false`` in the project config) the
+    dsagt entry is removed.
     """
     settings_path = working_dir / ".claude" / "settings.json"
     settings: dict = {}
@@ -70,11 +72,13 @@ def _write_bash_guard_hook(working_dir: Path) -> list[str]:
         )
     ]
     before = json.dumps(hooks.get("PreToolUse", []), sort_keys=True)
-    hooks["PreToolUse"] = [*kept, entry]
+    hooks["PreToolUse"] = [*kept, entry] if enabled else kept
     if json.dumps(hooks["PreToolUse"], sort_keys=True) == before:
         return []
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    if not enabled:
+        return [f"Removed the bash guard hook from {settings_path}"]
     return [f"Wrote the bash guard hook into {settings_path}"]
 
 
@@ -134,7 +138,8 @@ class ClaudeSetup(AgentSetup):
         mcp_path = working_dir / ".mcp.json"
         mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
         actions.append(f"Wrote {mcp_path}")
-        actions.extend(_write_bash_guard_hook(working_dir))
+        guard = (config.get("claude") or {}).get("bash_guard", True)
+        actions.extend(_write_bash_guard_hook(working_dir, enabled=guard))
 
         # Skills are mirrored into .claude/skills/ by AgentSetup.setup_skills
         # (driven by native_skills_dir) in dynamic_agent_record.  Claude reads

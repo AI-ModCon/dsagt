@@ -43,6 +43,15 @@ Every registered code runs through the `dsagt-run` wrapper. For each call it rec
 
 The wrapper is the point of code-mediated data access. A direct shell or editor call leaves only what the agent's transcript captures about the command and its output, a partial, agent-curated account; the `dsagt-run` record holds the exit code, timing, and input and output files, which is what `reconstruct_pipeline` reads, so a direct call breaks reconstruction.
 
+### The Claude Code hook
+
+Under Claude Code, `dsagt init` and `dsagt start` write a `PreToolUse` hook for the Bash tool into the project's `.claude/settings.json`, beside any hooks already there. The hook (`dsagt-bash-guard`) inserts `dsagt-run --` in front of a bare `python`, `python3`, `uv run python`, or `.py` call and hands the rewritten command back to Claude Code, which applies the user's own permission rules to it; a trailing `> path` becomes `--stdout path`. Calls already under `dsagt-run`, `python -m pytest`, `pip`, `--help`, and `--version` are left as written. A python call it cannot wrap in place (inside a quoted `$(...)`, after `xargs`, in a `sh -c` string) is refused with the form to use. To turn it off, set this in `.dsagt/config.yaml` and run `dsagt start`:
+
+```yaml
+claude:
+  bash_guard: false
+```
+
 ## Pipeline reconstruction
 
 The on-disk execution records are the canonical provenance chain. The agent calls `reconstruct_pipeline` to render the trace archive as a reproducible **bash script** (`format="bash"`) or **Snakemake workflow** (`format="snakemake"`). It flushes the latest records into the searchable index first, then lists the steps in the order they ran, each annotated with its input and output files and the steps it depends on; a run that exited non-zero is kept as a comment, and paths under the project are written relative to it. The files come from the spec's parameter roles (`role: input` or `role: output` on a parameter), which `dsagt-run` reads off the command line on every run; `--input-files` and `--output-files` override them.

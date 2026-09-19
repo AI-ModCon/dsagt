@@ -1,11 +1,11 @@
-"""The Claude Code PreToolUse hook that refuses bare python."""
+"""The Claude Code PreToolUse hook that puts bare python under dsagt-run."""
 
 import io
 import json
 
 import pytest
 
-from dsagt.commands.bash_guard import bare_python_call, main
+from dsagt.commands.bash_guard import bare_python_call, main, recorded_form
 
 
 @pytest.mark.parametrize(
@@ -19,7 +19,7 @@ from dsagt.commands.bash_guard import bare_python_call, main
         "ls | python3 count.py",
     ],
 )
-def test_bare_python_is_refused(command):
+def test_bare_python_is_found(command):
     assert bare_python_call(command) is not None
 
 
@@ -45,18 +45,82 @@ def test_recorded_and_harmless_forms_pass(command):
 def _run(payload: dict, monkeypatch, capsys) -> tuple[int, str]:
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
     rc = main([])
-    return rc, capsys.readouterr().err
+    captured = capsys.readouterr()
+    return rc, captured.err or captured.out
 
 
-def test_hook_refuses_with_the_recorded_form(monkeypatch, capsys):
-    rc, err = _run(
-        {"tool_name": "Bash", "tool_input": {"command": "python3 tally.py data/t.csv"}},
+def test_hook_returns_the_recorded_form_as_the_updated_input(monkeypatch, capsys):
+    rc, out = _run(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python3 tally.py data/t.csv", "timeout": 60000},
+        },
         monkeypatch,
         capsys,
     )
+    assert rc == 0
+    # No permissionDecision: the user's permission rules judge the new command.
+    assert json.loads(out) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": {
+                "command": "dsagt-run -- python3 tally.py data/t.csv",
+                "timeout": 60000,
+            },
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "command, rewritten",
+    [
+        (
+            "cd data && python3 fix.py 2>&1 | tail -5",
+            "cd data && dsagt-run -- python3 fix.py 2>&1 | tail -5",
+        ),
+        (
+            "FOO=1 uv run python scripts/plot.py > out/plot.txt",
+            "FOO=1 dsagt-run --stdout out/plot.txt -- uv run python scripts/plot.py",
+        ),
+        (
+            "for f in data/*.csv; do python3 tally.py $f; done",
+            "for f in data/*.csv; do dsagt-run -- python3 tally.py $f; done",
+        ),
+        ("x=$(python3 v.py)", "x=$(dsagt-run -- python3 v.py)"),
+        (
+            "python3 a.py && ./b.py x",
+            "dsagt-run -- python3 a.py && dsagt-run -- ./b.py x",
+        ),
+    ],
+)
+def test_each_bare_call_is_wrapped_where_it_stands(command, rewritten):
+    assert recorded_form(command) == rewritten
+
+
+def test_a_heredoc_body_is_data():
+    command = (
+        "python3 - <<'EOF'\nimport os; x = 1 # note\npython nested.py\nEOF\necho done"
+    )
+    assert recorded_form(command) == "dsagt-run -- " + command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(python3 v.py)"',
+        "ls *.csv | xargs python3 tally.py",
+        "sh -c 'python x.py'",
+        "python3 -c 'print(1",
+    ],
+)
+def test_a_call_that_cannot_be_wrapped_in_place_is_refused(
+    command, monkeypatch, capsys
+):
+    rc, err = _run(
+        {"tool_name": "Bash", "tool_input": {"command": command}}, monkeypatch, capsys
+    )
     assert rc == 2
-    assert "dsagt-run -- python3 tally.py data/t.csv" in err
-    assert "--stdout" in err
+    assert "dsagt-run -- python" in err
 
 
 def test_hook_passes_other_tools_and_recorded_python(monkeypatch, capsys):
@@ -124,21 +188,29 @@ def test_a_quoted_string_with_an_operator_stays_one_segment():
     )
 
 
-def test_a_shebang_executed_script_is_refused():
+def test_a_shebang_executed_script_is_found():
     assert bare_python_call("./convert.py data/in.csv") is not None
     assert bare_python_call("scripts/tally.py") is not None
 
 
-def test_a_scratchpad_path_is_refused(monkeypatch, capsys):
-    rc, err = _run(
-        {
-            "tool_name": "Bash",
-            "tool_input": {
-                "command": "dsagt-run -- python /private/tmp/claude-501/-Users-x/abc/scratchpad/stats.py data/t.csv"
-            },
-        },
-        monkeypatch,
-        capsys,
+def test_the_config_opt_out_removes_the_hook_and_keeps_user_hooks(tmp_path):
+    from dsagt.agents.claude import _write_bash_guard_hook
+
+    settings = tmp_path / ".claude" / "settings.json"
+    assert _write_bash_guard_hook(tmp_path, enabled=False) == []
+    assert not settings.exists()
+    _write_bash_guard_hook(tmp_path)
+    written = json.loads(settings.read_text())
+    written["hooks"]["PreToolUse"].insert(
+        0, {"matcher": "Write", "hooks": [{"type": "command", "command": "mine"}]}
     )
-    assert rc == 2
-    assert "outside the project" in err
+    settings.write_text(json.dumps(written))
+    assert _write_bash_guard_hook(tmp_path, enabled=False) == [
+        f"Removed the bash guard hook from {settings}"
+    ]
+    commands = [
+        h["command"]
+        for e in json.loads(settings.read_text())["hooks"]["PreToolUse"]
+        for h in e["hooks"]
+    ]
+    assert commands == ["mine"]
