@@ -214,3 +214,22 @@ def test_the_config_opt_out_removes_the_hook_and_keeps_user_hooks(tmp_path):
         for h in e["hooks"]
     ]
     assert commands == ["mine"]
+
+
+def test_a_recorded_run_asking_for_more_than_the_ceiling_is_refused(
+    monkeypatch, capsys
+):
+    call = {"command": "dsagt-run -- bash assemble_all.sh", "timeout": 2400000}
+    rc, err = _run({"tool_name": "Bash", "tool_input": call}, monkeypatch, capsys)
+    assert rc == 2 and "one sample per call" in err
+    call["timeout"] = 600000
+    assert _run({"tool_name": "Bash", "tool_input": call}, monkeypatch, capsys)[0] == 0
+    other = {"command": "sleep 5", "timeout": 2400000}
+    assert _run({"tool_name": "Bash", "tool_input": other}, monkeypatch, capsys)[0] == 0
+
+
+@pytest.mark.parametrize("keyword", ["until", "while", "if", "time"])
+def test_a_call_after_a_loop_or_condition_keyword_is_wrapped(keyword):
+    assert recorded_form(f"{keyword} python3 poll.py; do sleep 1; done").startswith(
+        f"{keyword} dsagt-run -- python3 poll.py"
+    )

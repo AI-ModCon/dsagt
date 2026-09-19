@@ -21,6 +21,11 @@ agent had written into its own skill, a quick comparison as a heredoc or
 ``python -c``, and a script written to the scratchpad after Claude Code's
 shell check refused a multi-line ``python -c``.
 
+A recorded run that asks for a timeout above Claude Code's ten-minute limit
+on one shell command is refused with the two forms that finish: in the
+headless runs the agent asked for 40 minutes, the harness ended the loop at
+ten, and 3 of 11 samples were done.
+
 Left as they are: a call already under ``dsagt-run``, ``--help`` and
 ``--version``, ``python -m pytest``, and ``pip``.
 """
@@ -33,7 +38,7 @@ import sys
 
 # A command word that runs python, after shell keywords and VAR=value prefixes.
 _PYTHON = re.compile(
-    r"\s*(?:(?:do|then|else|!|\{)\s+)*(?:\w+=\S*\s+)*"
+    r"\s*(?:(?:do|then|else|elif|if|while|until|time|!|\{)\s+)*(?:\w+=\S*\s+)*"
     r"(?P<word>(?:uv\s+run\s+)?python3?(?=\s|$)|\.{0,2}/?[^\s;&|()<>]+\.py(?=\s|$))"
 )
 _ALLOWED = re.compile(r"python3?\s+(?:-m\s+pytest|-m\s+pip|--version|--help)\b")
@@ -45,6 +50,10 @@ _UNWRAPPABLE = re.compile(
     r"(?:\$\(|`|\bxargs\s+(?:-\S+\s+)*|\bsh\s+-l?c\s+['\"]\s*)"
     r"(?:\w+=\S*\s+)*python3?(?=\s)(?!\s+(?:-m\s+pytest|-m\s+pip|--version|--help)\b)"
 )
+
+
+#: Claude Code's limit on one Bash call, in the unit of ``tool_input.timeout``.
+CEILING_MS = 600_000
 
 
 def command_spans(command: str) -> list[tuple[int, int]] | None:
@@ -179,6 +188,19 @@ def main(argv: list[str] | None = None) -> int:
     if payload.get("tool_name") != "Bash":
         return 0
     tool_input = payload.get("tool_input") or {}
+    command = tool_input.get("command", "")
+    if (tool_input.get("timeout") or 0) > CEILING_MS and (
+        "dsagt-run" in command or bare_python_call(command)
+    ):
+        print(
+            "dsagt: Claude Code ends one shell command at ten minutes whatever "
+            "timeout is asked for, and a run it ends loses its remaining work. "
+            "Split this run into calls that each finish under ten minutes (one "
+            "sample per call, not a loop over all of them), or give it to a "
+            "subagent and wait for its result.",
+            file=sys.stderr,
+        )
+        return 2
     try:
         rewritten = recorded_form(tool_input.get("command", ""))
     except ValueError as err:
