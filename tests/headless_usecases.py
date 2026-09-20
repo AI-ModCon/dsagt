@@ -57,6 +57,9 @@ CLAUDE_ALLOWED_TOOLS = [
     "Bash(test:*)", "Bash(seq:*)", "Bash(date:*)", "Bash(basename:*)", "Bash(dirname:*)",
     "Bash(cd:*)", "Bash(export:*)", "Bash(sqlite3:*)", "Bash(jq:*)",
     "Bash(*/.tools/*)", "Bash(~/dsagt-projects/.tools/*)",
+    # A script the agent wrote to Claude Code's session scratchpad and runs by
+    # its absolute path; with a person present this is an approval prompt.
+    "Bash(/private/tmp/claude-*)", "Bash(/tmp/claude-*)",
 ]  # fmt: skip
 
 CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-5"

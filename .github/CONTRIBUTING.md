@@ -48,7 +48,7 @@ python tests/headless_usecases.py use_cases/<case> <name>            # --only N,
   entries for `python`, `uv run`, `dsagt-run`, `pip`, the shell utilities the
   walkthroughs use, the walkthrough binaries (`aidrin`, `fastp`, `megahit`,
   `h5dump`), a project-local `./script` or `.venv*/bin/` executable, and
-  anything under `~/dsagt-projects/.tools/`. A tool outside the list is a
+  anything under `~/dsagt-projects/.tools/`, and a script under Claude Code's session scratchpad (`/private/tmp/claude-*`), where the agent writes its one-off scripts. A tool outside the list is a
   denial, so a run that reaches for one fails in a way an interactive session
   would not; a walkthrough that needs a new binary adds its entry before the
   run is judged.
