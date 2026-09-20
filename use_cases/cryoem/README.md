@@ -163,9 +163,10 @@ The merge and the curation are the two data operations on the particle tables, s
 asks for them as registered codes: each run is then an execution record, and the AI-readiness
 check has a before and an after to measure. The merge has two input tables and no single
 "before" file, so the check pairs are: `particles.csv` is the merge's after and the curation's
-before, and `particles_curated.csv` is the curation's after. Each report is written by
-`dsagt-run --code aidrin --stdout audit/<file> -- aidrin ...`, so the report is the run's
-recorded output. The two reports on the particle tables carry the gain post-condition 4 is
+before, and `particles_curated.csv` is the curation's after. The check runs on the ground-truth tables as they arrive and
+on the output of each transformation: the derived metadata, the scored table, `particles.csv`,
+and `particles_curated.csv`. Each check's execution record holds the report. The two reports on the
+particle tables carry the gain post-condition 4 is
 judged on. Expected across the curation step:
 
 | Metric | before → after | Reading |
@@ -230,7 +231,7 @@ Show me the contents of my project folder in a tree format, with the artifacts d
 ```
 
 **Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes and installed skills under
+`trace_archive/` (the readiness reports are the `aidrin` records among them), the registered codes and installed skills under
 `skills/`, the trace store `mlflow.db`, and the session's outputs, with a line on what each
 is. The agent may print the tree through a command; the reply then summarizes it.
 
@@ -239,10 +240,10 @@ is. The agent may print the tree through a command; the reply then summarizes it
 1. Knowledge base contains `cryoppp` collection with repo code, docs, and appended papers.
 2. `skills/aidrin/` is present (installed at init); the code registry includes the two CryoPPP codes (the STAR-to-CSV converter and the box-file generator), the metadata-derivation code, and the quality-scoring code.
 3. Quality-scored CSV exists with tier distribution; `particles.csv` (merged) and `particles_curated.csv` (curated) exist with `trace_archive/` records for both operations.
-4. `audit/` holds a check report for each tabular stage boundary: `micrograph_metadata.csv` (the derive stage's after and the score stage's before), the scored CSV, `particles.csv`, and `particles_curated.csv`. The two reports on the particle tables show curation reduced outliers (~0.041 → ~0.029).
+4. `trace_archive/` holds an `aidrin` record, which is the check report, for each table the pipeline wrote: `micrograph_metadata.csv`, the scored CSV, `particles.csv`, and `particles_curated.csv`. The two reports on the particle tables show curation returned the outlier score to the selected set's value (~0.041 → ~0.029).
 5. A datacard exists for the processed dataset.
 6. `pipeline.sh` exists, saved by `reconstruct_pipeline`.
-7. Code execution records in `trace_archive/` document the full provenance chain, including one record per check run, each naming its report in `audit/` as the run's output.
+7. Code execution records in `trace_archive/` document the full provenance chain, including one record per check run, each naming the table it read.
 8. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history.
 
 ## What This Tests

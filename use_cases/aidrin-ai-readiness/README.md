@@ -181,7 +181,7 @@ Show me the contents of my project folder in a tree format, with the artifacts d
 
 **Expect:** a listing of the whole project directory, including the registered codes and
 installed skills under `skills/`, with a line on what each entry is. The listing marks the
-execution records in `trace_archive/`, the reports in `audit/`, the datacard, the trace
+execution records in `trace_archive/` (each `aidrin` record holds that metric's report), the datacard, the trace
 store `mlflow.db`, and the session's other outputs.
 
 ## Post-Conditions

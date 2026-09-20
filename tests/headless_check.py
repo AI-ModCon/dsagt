@@ -373,6 +373,27 @@ def json_fields_match(path: str, reference: str, *fields: str):
     return observe
 
 
+def tables_with_a_readiness_record(project: Project):
+    """How many of the tables the pipeline wrote have an aidrin record that read them."""
+    written = {
+        f
+        for r in project.records
+        if r["code_name"] != "aidrin" and r["execution"]["return_code"] == 0
+        for f in r["execution"]["output_files"]
+        if f.lower().endswith((".csv", ".tsv", ".parquet", ".xlsx", ".xls"))
+    }
+    checked = {
+        f
+        for r in project.records_of(r"^aidrin$")
+        if r["execution"]["return_code"] == 0
+        for f in r["execution"]["input_files"]
+    }
+    return (
+        "tables the pipeline wrote that have a readiness record",
+        f"{len(written & checked)} of {len(written)}",
+    )
+
+
 def codes_with_parameter(parameter: str):
     def observe(project: Project):
         having = [
@@ -448,9 +469,7 @@ WALKTHROUGHS = {
             pipeline_script_saved,
         ],
         "outcome": [
-            count_of(
-                "check reports in audit/ (four stage boundaries)", "audit/*aidrin*.json"
-            ),
+            tables_with_a_readiness_record,
             count_of("datacards", "**/*datacard*.md"),
             datacard_validation,
         ],
