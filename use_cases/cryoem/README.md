@@ -172,9 +172,27 @@ post-condition 4 is judged on. Expected across the curation step:
 | `outliers` (overall) | **0.041 → 0.029** | curation removed ~30% of outliers |
 | `class-imbalance` (Class Number, passthrough) | **22.2 → 11.1** | markedly more balanced |
 
-Curation produced a cleaner, more balanced particle set — a **measurable** AI-readiness gain, with
-`outliers` (and `class-imbalance`, if the agent proposes it) as the headline indicators and
-`completeness`/`duplicity` confirming the data was already structurally sound.
+A score is comparable only before and after one operation on the same table. Read in run
+order, the reports seem to get worse and then recover, because they describe different
+tables:
+
+| Table | `outliers` | `class-imbalance` |
+|---|---|---|
+| selected particles (input) | 0.029 | 11.1 |
+| excluded particles (input) | 0.038 | 10.2 |
+| `micrograph_metadata.csv` (84 rows of per-micrograph statistics) | 0.075 | n/a |
+| the scored micrograph CSV | 0.055 | n/a |
+| `particles.csv` (merged) | 0.041 | 22.2 |
+| `particles_curated.csv` | 0.029 | 11.1 |
+
+The micrograph table scores highest because means, spreads, minima and maxima over 84 rows
+have long tails; adding the score columns lowers the average without cleaning anything. The
+merge joins two populations with different distributions and 22 more 2D classes, so the merged
+table scores worse than either input. Curation returns the particle table to the selected
+set's values. What the step shows is that the check measures the merge's effect and the
+curation's removal of it: `outliers` (and `class-imbalance`, if the agent proposes it) move,
+and `completeness` and `duplicity` confirm the data was structurally sound throughout. The
+curated table is as AI-ready as the selected input, no more.
 
 ### 6. Generate a datacard
 
