@@ -60,10 +60,27 @@ python tests/headless_usecases.py use_cases/<case> <name>            # --only N,
 - The driver sets `BASH_MAX_TIMEOUT_MS` to the per-prompt timeout for a claude run. Claude Code's default ends a shell command at ten minutes by moving it to the background, and a headless turn that then ends kills it; an interactive session lets it finish.
 - Keep the machine awake and on power. A model request that spans a sleep
   waits for the wake, and the driver's timeout counts wall time.
-- Judge the run by the README's post-conditions, the `trace_archive/` records
-  (count, exit codes, `input_files` and `output_files`), whether the
-  reconstructed script replays on a fresh copy, and the reply to the last
-  prompt. The log shows where the agent left the walkthrough's intent.
+- Judge a run with `python tests/headless_check.py use_cases/<case> <name> [<name> ...]`,
+  which scores two kinds of result apart. Mechanical checks are properties of
+  dsagt that hold whatever the agent chose: skills and codes installed and
+  mirrored, every record complete and naming a registered code, one
+  `code.execute` trace per record, no error in the logs, the pipeline script
+  saved. A mechanical failure is a dsagt regression, and the script exits 1.
+  Outcome observations depend on the agent (a value in a converted file,
+  whether the datacard validated, how many samples were assembled); they are
+  printed as values per run. Run a walkthrough at least three times before
+  reading an outcome: with the same tree and inputs a run moves by a
+  post-condition or two. An outcome leads to work only when it recurs in most
+  runs and a person working interactively would meet it too, and the fix is
+  usually the README's text.
+- A headless session cannot show some things, and they are not scored: a step
+  that needs a second answer from a person (the datacard skill's question
+  batches), the last prompt's conversation trace (collected at the next
+  session start), what a reply contains when the content was shown in tool
+  output, and behavior after a permission denial, which interactively is a
+  request for approval.
+- A walkthrough's checks are its entry in `WALKTHROUGHS` in
+  `tests/headless_check.py`; a new walkthrough with post-conditions adds one.
 - A prompt is what a user would type. A change that exists only so an
   unattended run gets through (an answer to a question the agent would ask, a
   path that differs per machine) goes in `--subst`, not in the README.
