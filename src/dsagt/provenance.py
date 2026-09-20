@@ -95,6 +95,18 @@ def _current_session_tag_from_cwd() -> str | None:
     return session.current_session_tag(cwd, project)
 
 
+def _without_uv_wrapper(tokens: list[str]) -> list[str]:
+    """*tokens* with a leading ``uv run ... --`` removed.
+
+    A spec with dependencies stores ``uv run --with <deps> -- <command>``;
+    an agent that runs the command without the wrapper still ran this
+    code, and the roles apply to the arguments either way.
+    """
+    if tokens[:2] == ["uv", "run"] and "--" in tokens:
+        return tokens[tokens.index("--") + 1 :]
+    return tokens
+
+
 def file_roles_from_command(
     spec: dict, command: list[str]
 ) -> tuple[list[str], list[str]]:
@@ -120,7 +132,8 @@ def file_roles_from_command(
         if executable.startswith("dsagt-run")
         else executable
     )
-    prefix = shlex.split(inner)
+    prefix = _without_uv_wrapper(shlex.split(inner))
+    command = _without_uv_wrapper(list(command))
     if command[: len(prefix)] != prefix:
         return [], []
     args = command[len(prefix) :]
@@ -204,16 +217,37 @@ def _is_file(arg: str) -> bool:
         return False
 
 
+_INTERPRETERS = ("python", "python3", "bash", "sh", "zsh", "Rscript", "perl", "node")
+
+
 def files_from_arguments(command: list[str]) -> list[str]:
-    """The arguments of *command* that are existing regular files.
+    """The arguments of *command* that are existing files or directories.
 
     A spec with no parameter roles, or an ad-hoc run with no spec, names no
-    files; an argument that is a file when the command starts is one the
+    files; an argument that exists when the command starts is one the
     command reads or overwrites, which is what the dependency graph and the
-    readiness reports need to know.  The first token, the executable, is
-    left out.
+    readiness reports need to know.  A directory counts (a simulation case,
+    a dataset directory); it gets no hash.  The executable is left out, and
+    so is the script an interpreter runs (``python x.py data.csv`` reads
+    ``data.csv``; ``x.py`` is the program, and as an input it would read as
+    the product of whichever step wrote it).
     """
-    return [arg for arg in command[1:] if _is_file(arg)]
+    # A spec with dependencies stores `uv run --with <deps> -- python x.py ...`;
+    # the interpreter and its script are found past that wrapper.
+    inner = _without_uv_wrapper(command)
+    args = inner[1:]
+    if inner and Path(inner[0]).name in _INTERPRETERS:
+        script = next((a for a in args if not a.startswith("-")), None)
+        if script is not None and _is_file(script):
+            args = [a for a in args if a != script]
+    return [arg for arg in args if _is_file(arg) or _is_dir(arg)]
+
+
+def _is_dir(arg: str) -> bool:
+    try:
+        return Path(arg).is_dir()
+    except OSError:
+        return False
 
 
 def new_files_from_arguments(command: list[str], before: list[str]) -> list[str]:
@@ -265,13 +299,16 @@ def _run_streaming(
     headless harness ends a turn that way.  Raises ``FileNotFoundError``
     when the executable is absent.
     """
+    env = _child_env()
+    if parent:
+        env["DSAGT_RUN_PARENT"] = parent
     proc = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         errors="replace",
-        env=_child_env(),
+        env=env,
     )
     forwarded: list[int] = []
 
@@ -329,10 +366,15 @@ def run_and_record(
     record_id = record_id or uuid.uuid4().hex[:12]
     input_files = list(input_files or [])
     output_files = list(output_files or [])
-    derive_from_arguments = not input_files and not output_files
-    if derive_from_arguments:
+    # Each side the roles leave empty is filled from the arguments: a spec
+    # whose flags differ from the ones the agent used (fastp's -i against
+    # --in1) matches nothing on one side and must not silence the other.
+    derive_inputs = not input_files
+    derive_outputs = not output_files
+    if derive_inputs:
         input_files = files_from_arguments(command)
     file_hashes = {f: sha256_of(f) for f in input_files}
+    parent_record_id = os.environ.get("DSAGT_RUN_PARENT")
     if session_id is None:
         # The MCP server mints the session at startup and records it in
         # ``.dsagt/state.yaml``; read the current tag from there so this
@@ -355,61 +397,31 @@ def run_and_record(
         stdout = ""
         stderr = f"dsagt-run: execution error: {e}"
 
-        duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
-        timestamp_end = datetime.now(timezone.utc).isoformat()
-        if derive_from_arguments:
-            output_files = [
-                f
-                for f in new_files_from_arguments(command, input_files)
-                if f not in output_files
-            ] + output_files
-        for f in output_files:
-            file_hashes[f] = sha256_of(f)
-        file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
-
-        # Attach execution summary to the span. Full payload still goes to
-        # trace_archive/<record_id>.json; the span only carries truncated
-        # summaries that render usefully in the MLflow UI.
-        obs.set_many(
-            {
-                "exit_code": return_code,
-                "duration_ms": duration_ms,
-                "n_input_files": len(input_files or []),
-                "n_output_files": len(output_files or []),
-                "command": truncate(" ".join(command), 256),
-                "stdout_len": len(stdout),
-                "stderr_len": len(stderr),
-            }
-        )
-        if stderr.strip():
-            obs.set("stderr_truncated", truncate(stderr, 256))
-        if return_code != 0:
-            obs.event("code_failed", exit_code=return_code)
-            obs.set_status("ERROR")
-
-        # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
-        # ~4KB per side so big code results don't bloat the trace store.  The
-        # span is a preview by contract: the full stdout/stderr is in
-        # trace_archive/<code>_<ts>_<record_id>.json on the machine that ran
-        # the code, findable by the span's ``record_id`` attribute — and that
-        # file is the only full copy, including when the store is a shared
-        # server that other people read.
-        obs.set_inputs(
-            {
-                "code": code_name,
-                "command": list(command),
-                "input_files": input_files or [],
-            }
-        )
-        obs.set_outputs(
-            {
-                "exit_code": return_code,
-                "duration_ms": duration_ms,
-                "stdout": truncate(stdout, 4096),
-                "stderr": truncate(stderr, 4096) if stderr else "",
-                "output_files": output_files or [],
-            }
-        )
+    duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
+    timestamp_end = datetime.now(timezone.utc).isoformat()
+    if derive_outputs:
+        # With no roles, an argument that did not exist before the run is an
+        # output, and so is one the run changed: a converter that replaces
+        # its output file names it on every run, not only the first.
+        rewritten = [
+            f
+            for f in input_files
+            if derive_inputs
+            and sha256_of(f) is not None  # still there: a moved file is not written
+            and file_hashes.get(f) not in (None, sha256_of(f))
+        ]
+        output_files = [
+            f
+            for f in new_files_from_arguments(command, input_files) + rewritten
+            if f not in output_files
+        ] + output_files
+    if return_code != 0:
+        # A declared output a failed run never wrote is left out, so the
+        # record names no producer for a file that does not exist.
+        output_files = [f for f in output_files if _is_file(f) or _is_dir(f)]
+    for f in output_files:
+        file_hashes[f] = sha256_of(f)
+    file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
 
     record = {
         "record_id": record_id,
@@ -432,9 +444,7 @@ def run_and_record(
         # parent's command replays it, so the reconstruction leaves it out.
         record["parent_record_id"] = parent_record_id
 
-    path = _write_record(record, records_dir)
-    if log_trace is not None:
-        log_trace(path)
+    _write_record(record, records_dir)
     return return_code
 
 
@@ -705,6 +715,9 @@ def load_pipeline_records(trace_dir: Path, session_id: str | None = None) -> lis
             continue
         if session_id and raw.get("session_id") != session_id:
             continue
+        if raw.get("parent_record_id"):
+            # Started by another recorded run, whose command replays it.
+            continue
         records.append(raw)
 
     records.sort(key=lambda r: r["execution"].get("timestamp_start", ""))
@@ -819,6 +832,9 @@ def render_bash(
             parent = str(Path(_relative_to_project(f, project_dir)).parent)
             if parent not in (".", "") and parent not in output_dirs:
                 output_dirs.append(parent)
+    output_dirs = [
+        d for d in output_dirs if not any(o.startswith(d + "/") for o in output_dirs)
+    ]
     if output_dirs:
         lines.append("mkdir -p " + " ".join(_shell_quote(d) for d in output_dirs))
         lines.append("")
