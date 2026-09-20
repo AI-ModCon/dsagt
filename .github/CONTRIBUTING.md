@@ -57,6 +57,7 @@ python tests/headless_usecases.py use_cases/<case> <name>            # --only N,
   sandbox. A ChatGPT account's usage budget is small: run codex walkthroughs
   one at a time, and resume a cut run with `--from` after the reset the error
   names.
+- The driver sets `BASH_MAX_TIMEOUT_MS` to the per-prompt timeout for a claude run. Claude Code's default ends a shell command at ten minutes by moving it to the background, and a headless turn that then ends kills it; an interactive session lets it finish.
 - Keep the machine awake and on power. A model request that spans a sleep
   waits for the wake, and the driver's timeout counts wall time.
 - Judge the run by the README's post-conditions, the `trace_archive/` records

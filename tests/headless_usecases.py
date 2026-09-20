@@ -151,6 +151,11 @@ def main() -> int:
         )
     build_command = COMMANDS[agent]
     env = agent_env(config)
+    # Claude Code ends one shell command at BASH_MAX_TIMEOUT_MS (ten minutes
+    # by default) by moving it to the background, and a headless turn that
+    # then ends takes the command with it.  A person's session stays open, so
+    # only the driver needs the larger limit.
+    env.setdefault("BASH_MAX_TIMEOUT_MS", str(args.timeout * 1000))
     project_dir = Path(config["project_dir"])
 
     prompts = prompts_from(Path(args.use_case_dir) / "README.md")
