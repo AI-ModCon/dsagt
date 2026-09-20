@@ -7,6 +7,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
+- **A run ended by a signal is recorded.** A run ended by SIGTERM, SIGINT, or
+  SIGHUP still writes its record with the signal's status.
+- **File hashes in every record.** `execution.file_hashes` holds the SHA-256
+  of each input before the run and each output after it. When a spec has no
+  parameter roles, an argument that is an existing
+  file is an input and one that exists only after the run is an output.
+- **`readiness_reports` tool.** The AIDRIN report on record for a data file:
+  the report made while the file had its present content, with the text taken
+  from that run's record, or how to make one when there is none, and the
+  reports from before the file changed.
+- **`reconstruct_pipeline(output=...)`** saves the script under the project;
+  the bash script creates the recorded output directories first and removes
+  a repeated output before the step that rewrites it.
+- **One install path for every skill.** `skills.register_skill_scripts`
+  registers each `scripts/*.py` and `*.sh` of an installed skill as a code
+  (spec from the overrides table or the script's argparse calls) and
+  rewrites the skill's bare invocations to the stored `dsagt-run` line;
+  `dsagt init`, `install_skill`, and `save_skill` call it and reply with the
+  stored lines.
+- **`kb_list_collections` and `kb_search(where=...)`.** Every collection is
+  listed with its purpose, its metadata keys, and its chunk count, dsagt's
+  own (`codes`, `code_use`, `session_memory`, `explicit_memory`) before their
+  first write; `kb_search` takes a metadata filter.
+- **The MCP env block carries the launching shell's activated environment**
+  (`PATH`, `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHONPATH`, the library paths,
+  the `module` variables, plus `mcp.env_passthrough` from the config), copied
+  at `dsagt init` and `dsagt start`; a credential name is refused.
 - **Shared tracking server.** `MLFLOW_TRACKING_URI` in the shell redirects all
   self-logging — CLI, MCP server, `dsagt-run` — to a remote MLflow server
   instead of the project's sqlite file; `MLFLOW_TRACKING_API_KEY` authenticates
@@ -69,8 +97,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   failed re-clone keeps the previous cache, and a set-aside clone a crashed
   sync left behind is never a source.
 - `uv` is a dependency of dsagt: codes with declared Python dependencies run
-  through `uv run --with` and `install_dependencies` installs through `uv pip`,
-  so a `pip install` of dsagt is the whole install.
+  through `uv run --with`, so a `pip install` of dsagt is the whole install.
 - `dsagt-run` appends the directory of its own interpreter to the command's
   PATH, so a CLI that is a dsagt dependency resolves under pipx or
   `uv tool install`, where only dsagt's own commands are linked onto PATH.
@@ -98,7 +125,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `add_skill_source` with `force` re-clones it on request. An init with a
   warm cache needs no network.
 
+### Removed
+
+- **`scan-directory`** and the bundled-code layer (`src/dsagt/codes/`,
+  `CodeRegistry.ensure_bundled_copies`). The base skills' codes are the
+  examples.
+- **`run_command`, `read_file`, `http_request`.** Execution in the user's
+  environment is `dsagt-run`'s, from the agent's shell; reads are the
+  agent's own tools.
+- **`install_dependencies`, and the install `save_code_spec` ran for a spec
+  with dependencies.** Both installed into dsagt-server's own interpreter,
+  which is not the environment the agent's shell runs a command in. A code's
+  declared dependencies reach its run through the `uv run --with` prefix in
+  its stored `executable`. The server has 17 tools.
+- **The embedding backend's fallback credential names.** `APIEmbedder` read
+  `LLM_API_KEY` and `OPENAI_API_KEY` after `EMBEDDING_API_KEY`, and
+  `OPENAI_BASE_URL` after `EMBEDDING_BASE_URL`; the server also read
+  `embedding.api_key` from the project config. The key comes from
+  `EMBEDDING_API_KEY` and the URL from `EMBEDDING_BASE_URL`, in the shell or
+  `~/.config/dsagt/env`. A setup that exported an `OPENAI_`- or `LLM_`-named
+  key for the embedder exports `EMBEDDING_API_KEY` instead.
+- **`tests/manual_walkthroughs/`.** The two hand-tests described roo, a
+  `dsagt mlflow` command, and per-agent OTel, none of which the tree has;
+  `dsagt smoke-test` covers the same ground.
+
 ### Fixed
+
+- **`search_skills` describes the catalogs it searches.** Its description said
+  it spanned installed skills; an installed skill is discovered natively and
+  is not indexed, so the search covers the synced external catalogs, and the
+  description gives the marker each hit carries.
+- **A second `save_skill` keeps the spec the agent saved.** The argparse-derived
+  spec replaced one that `save_code_spec` had given dependencies or roles;
+  it is now written only when the code does not exist, and `save_code_spec`
+  rewrites the owning skill's usage lines to the stored command. A file a
+  command moved away is an input, not an output.
+- **Records.** With no declared file parameters, an argument the run changed
+  is an output (a converter's second run named none). A failed run lists only
+  the outputs that exist. The reconstructed pipeline script keeps the
+  finished children of a loop script that was killed.
+- **Concurrent `dsagt init` runs no longer erase the project registry.** A
+  run that read `~/dsagt-projects/projects.yaml` while another was writing it
+  found an empty file and saved only its own project. The registry is
+  changed under a lock and replaced in one step.
 - Tool arguments and results recorded on a trace are bounded before they
   reach the store, with credential-bearing keys (`headers`, `api_key`,
   `token`, …) redacted and common credential shapes inside strings (`Bearer …`,
