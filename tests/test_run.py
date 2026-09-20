@@ -465,11 +465,54 @@ class TestMain:
         monkeypatch.setattr(obs_module, "_initialized", False)
         monkeypatch.setattr(obs_module, "_default_session_id", None)
 
-        assert main(["--code", "t", "--records-dir", str(tmp_path), "--", "true"]) == 0
+        from dsagt.commands import run_code
+
+        # The trace is logged by a detached process; run that step in-process.
+        monkeypatch.setattr(
+            run_code,
+            "_log_trace_detached",
+            lambda session_id, project_dir: lambda path: run_code.log_trace(
+                path, session_id
+            ),
+        )
+        records = tmp_path / "trace_archive"
+        assert main(["--code", "t", "--records-dir", str(records), "--", "true"]) == 0
 
         assert obs_module._default_session_id == "test-7"
         trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
         assert trace.info.trace_metadata.get("mlflow.trace.session") == "test-7"
+
+    def test_the_trace_is_logged_by_a_detached_process(self, tmp_path, monkeypatch):
+        """``main`` loads no trace store: it hands the record's path to a
+        ``--log-trace`` process started in the project directory."""
+        import subprocess
+
+        from dsagt.commands import run_code
+
+        (tmp_path / ".dsagt").mkdir()
+        (tmp_path / ".dsagt" / "config.yaml").write_text("project: test\n")
+        started = []
+        real_popen = subprocess.Popen
+
+        def popen(argv, **kw):
+            if "--log-trace" not in argv:
+                return real_popen(argv, **kw)
+            started.append((argv, kw))
+
+        monkeypatch.setattr(subprocess, "Popen", popen)
+        records = tmp_path / "trace_archive"
+        assert main(["--records-dir", str(records), "--", "true"]) == 0
+
+        [(argv, kw)] = started
+        [record] = records.glob("*.json")
+        assert argv[1:5] == [
+            "-m",
+            "dsagt.commands.run_code",
+            "--log-trace",
+            str(record.resolve()),
+        ]
+        assert kw["cwd"] == tmp_path and kw["start_new_session"] is True
+        assert run_code._log_trace_detached(None, tmp_path / "elsewhere") is None
 
     def test_record_files_come_from_the_spec_roles(self, tmp_path, monkeypatch):
         """Without --input-files/--output-files, dsagt-run reads the spec of

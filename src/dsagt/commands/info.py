@@ -243,15 +243,14 @@ _INTERNAL_SOURCES = frozenset(
 
 
 def _row_source_for(tags: dict, metadata: dict) -> str:
-    """Bucket a trace by who emitted it, from the metadata DSAGT itself stamps.
+    """Bucket a trace by its emitter, from the metadata DSAGT itself stamps.
 
-    No span inspection: internal debug traces carry an explicit ``dsagt.source``
-    tag (see :data:`_INTERNAL_SOURCES`), set on the trace root by the MCP
-    dispatch shell / ``code_execute_span`` / the background emitters.  Agent
-    traces carry ``dsagt.agent`` metadata, stamped by ``MLflowSink``.  Neither
-    overlaps, so the bucket is a direct lookup; anything else (a stray trace
-    with neither — background work is tagged, so this shouldn't occur)
-    is ``"unknown"``.
+    Internal debug traces carry an explicit ``dsagt.source`` tag (see
+    :data:`_INTERNAL_SOURCES`), set on the trace root by the MCP dispatch
+    shell, ``log_execution_trace``, or the background emitters.  Agent traces
+    carry ``dsagt.agent`` metadata, stamped by ``MLflowSink``.  The two are
+    disjoint, so the bucket is a direct lookup; a trace with neither is
+    ``"unknown"`` (background work is tagged, so this indicates a bug).
     """
     src = (tags or {}).get("dsagt.source")
     if src:

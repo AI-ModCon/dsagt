@@ -28,8 +28,11 @@ Layout (top → bottom)
                           └─ obs          (annotate the span you're inside)
                tagging:   open_span(source=…) → _attach_trace_metadata
                           (dsagt.source set on the trace's root only)
-               factories: kb_* · registry_* · code_execute_span
-  replay sink  MLflowSink  (Trace → backdated spans; a traces.TraceCollector consumer)
+               factories: kb_* · registry_*
+               log_execution_trace  (one code.execute trace from an
+                            execution record, backdated to the run)
+  replay sink  MLflowSink  (Trace to backdated spans; a traces.TraceCollector
+                            consumer)
 
 ``traced`` and ``child_span`` *open* a span; ``obs`` *annotates* whichever span
 is currently open.  All three no-op when tracing was never initialized, so
@@ -787,31 +790,104 @@ def registry_reconstruct_pipeline_span(fmt: str | None):
 # Code execution spans (dsagt-run).
 
 
-def code_execute_span(record_id: str, code_name: str):
-    """Span around a single ``dsagt-run`` code execution.
+def log_execution_trace(record: dict) -> str | None:
+    """Log one ``dsagt-run`` execution record as a ``code.execute`` trace.
 
-    A *top-level, categorization-root* span: the agent CLI spawns ``dsagt-run``
-    in its own process tree, so this trace stands alone in the store rather than
-    nesting under any MCP-dispatch span.  It carries ``record_id`` (correlates
-    to the ``trace_archive`` record) and ``code_name``, and is tagged
-    ``dsagt.source=execution`` — its own bucket, distinct from the four MCP tool
-    categories, since these are actual code runs rather than meta-ops.
+    The span is backdated to the record's start and end, so the trace can be
+    written after the run, from another process, without the run paying for
+    the store.  A top-level, categorization-root span: the agent's shell
+    spawns ``dsagt-run`` in its own process tree, so this trace stands alone
+    in the store.  It carries ``record_id`` (correlates to the
+    ``trace_archive`` record) and ``code_name``, and is tagged
+    ``dsagt.source=execution``, a bucket distinct from the four MCP tool
+    categories because these are code runs in the user's environment.  The
+    span holds previews: the command, and stdout and stderr cut to about
+    4 KB, since the full output is in the record on the machine that ran the
+    code, and that file is the only full copy when the store is a shared
+    server other people read.  Returns the trace id, or ``None`` when tracing
+    is not initialized.
     """
-    from mlflow.entities import SpanType
+    if not _initialized:
+        return None
+    import mlflow
+    from mlflow.entities import SpanEvent, SpanStatusCode, SpanType
+    from mlflow.tracing.trace_manager import InMemoryTraceManager
 
-    @contextmanager
-    def _wrapper():
-        with open_span(
-            "code.execute", span_type=SpanType.TOOL, source="execution"
-        ) as span:
-            if span is None:
-                yield None
-                return
-            span.set_attribute("record_id", record_id)
-            span.set_attribute("code_name", code_name)
-            yield span
+    from dsagt import __version__
 
-    return _wrapper()
+    execution = record["execution"]
+    command = execution["exact_command"]
+    stdout = execution.get("stdout", "")
+    stderr = execution.get("stderr", "")
+    return_code = execution["return_code"]
+    start_ns = _iso_to_ns(execution["timestamp_start"])
+    end_ns = _iso_to_ns(execution["timestamp_end"])
+    duration_ms = execution.get("duration_ms", round((end_ns - start_ns) / 1e6, 3))
+
+    attributes = {
+        "record_id": record["record_id"],
+        "code_name": record["code_name"],
+        "exit_code": return_code,
+        "duration_ms": duration_ms,
+        "n_input_files": len(execution.get("input_files", [])),
+        "n_output_files": len(execution.get("output_files", [])),
+        "command": truncate(" ".join(command), 256),
+        "stdout_len": len(stdout),
+        "stderr_len": len(stderr),
+    }
+    if stderr.strip():
+        attributes["stderr_truncated"] = truncate(stderr, 256)
+    span = mlflow.start_span_no_context(
+        name="code.execute",
+        span_type=SpanType.TOOL,
+        start_time_ns=start_ns,
+        inputs=bound(
+            {
+                "code": record["code_name"],
+                "command": list(command),
+                "input_files": execution.get("input_files", []),
+            }
+        ),
+        attributes=attributes,
+    )
+    span.set_outputs(
+        bound(
+            {
+                "exit_code": return_code,
+                "duration_ms": duration_ms,
+                "stdout": truncate(stdout, 4096),
+                "stderr": truncate(stderr, 4096) if stderr else "",
+                "output_files": execution.get("output_files", []),
+            }
+        )
+    )
+    if return_code != 0:
+        span.add_event(
+            SpanEvent(
+                "code_failed", timestamp=end_ns, attributes={"exit_code": return_code}
+            )
+        )
+        span.set_status(SpanStatusCode.ERROR)
+
+    metadata = {"dsagt.version": __version__}
+    if user := _current_user():
+        metadata["mlflow.trace.user"] = user
+    if _default_agent:
+        metadata["dsagt.agent"] = _default_agent
+    session = record.get("session_id") or _default_session_id
+    if session:
+        metadata["mlflow.trace.session"] = session
+    with InMemoryTraceManager.get_instance().get_trace(span.trace_id) as in_mem:
+        in_mem.info.trace_metadata = {**in_mem.info.trace_metadata, **metadata}
+        in_mem.info.tags = {**in_mem.info.tags, "dsagt.source": "execution"}
+    span.end(end_time_ns=end_ns)
+    return span.trace_id
+
+
+def _iso_to_ns(timestamp: str) -> int:
+    from datetime import datetime
+
+    return int(datetime.fromisoformat(timestamp).timestamp() * 1e9)
 
 
 # ===========================================================================
