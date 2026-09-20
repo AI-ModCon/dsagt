@@ -133,7 +133,7 @@ ls "$PROJ/skills/"
 ### 5. Author the converter skill with skill-creator
 
 ```text
-Use the skill-creator skill to author a new project skill named "vasp-to-isaac". Following the pymatgen skill you just installed, its converter should use `pymatgen.io.vasp` — `Incar.from_file` (ENCUT, NSW, ISPIN, LDAUU), `Poscar.from_file` (formula, atom counts), and `Outcar` (final energy, energy(sigma->0), total magnetization, max force) — to read a VASP slab calc directory and emit an ISAAC-style JSON record. The mock has no vasprun.xml, so take energy/forces from the OUTCAR. Target the shape in data/expected_isaac_record.json. Save it with save_skill.
+Use the skill-creator skill to author a new project skill named "vasp-to-isaac". Following the pymatgen skill you just installed, its converter should use `pymatgen.io.vasp` — `Incar.from_file` (ENCUT, NSW, ISPIN, LDAUU), `Poscar.from_file` (formula, atom counts), and `Outcar` (`final_energy`, which is the energy(sigma->0) of the last ionic step, and the total magnetization) — to read a VASP slab calc directory and emit an ISAAC-style JSON record. The mock has no vasprun.xml, and `Outcar` has no attribute for the ionic-step count, the largest residual force, or the VASP version, so read those three from the OUTCAR text: the number of `free  energy   TOTEN` lines (one per ionic step), the last TOTAL-FORCE block, and the header line. Target the shape in data/expected_isaac_record.json. Save it with save_skill.
 ```
 
 **Expect:** the agent reads `skill-creator`'s template and the `pymatgen` skill's IO

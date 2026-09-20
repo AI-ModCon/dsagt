@@ -203,12 +203,14 @@ curated table is as AI-ready as the selected input, no more.
 Use the datacard-generator skill to write a Level 1 datacard for the curated cryo-EM data.
 ```
 
-The skill asks which capabilities the card covers, the dataset name, a contact, and a license.
-Answer:
+The skill asks its questions in batches: first which capabilities the card covers, then the
+fields that identify the dataset. One answer covers them:
 
 ```text
 Discoverability only. Name the dataset "EMPIAR-10017 curated particles". The contact is
-Jane Doe, jane@example.org. There is no license yet.
+Jane Doe, jane@example.org. There is no license yet. Take every other field from the data
+and the two papers, mark what they do not give as unknown, and ask nothing further. When
+the card is written, validate it with the skill's validator and fix what it reports.
 ```
 
 ### 7. Reconstruct the pipeline

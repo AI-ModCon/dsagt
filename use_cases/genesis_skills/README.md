@@ -87,7 +87,7 @@ since init.
 ### 3. Generate the datacard for the finished dataset
 
 ```text
-Use the datacard-generator skill to write a Level 1 datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the data dictionary and measurement protocol under mock_data/domain/ — don't invent them, and note anything the documents leave unspecified rather than asking. Include basic statistics for the numeric columns. Save it to audit/catalyst_screening_datacard.md.
+Use the datacard-generator skill to write a Level 1 datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the data dictionary and measurement protocol under mock_data/domain/ — don't invent them, and note anything the documents leave unspecified rather than asking. Include basic statistics for the numeric columns. Save it to audit/catalyst_screening_datacard.md, then validate it with the skill's validator and fix what it reports.
 ```
 
 **Expect:** the agent reads the installed skill's `SKILL.md` and the two domain
@@ -101,7 +101,7 @@ leave unspecified (contact, creator) carry a placeholder such as "unspecified".
 ### 4. Validate the metadata
 
 ```text
-Use the croissant-validator skill to check the Croissant/JSON-LD metadata for this dataset (generate it from the datacard if needed), and report any schema errors.
+Use the croissant-validator skill to check the Croissant/JSON-LD metadata for this dataset (generate it from the datacard if needed, giving no creator or URL that the domain documents do not state), and report any schema errors.
 ```
 
 **Expect:** the validator skill runs and reports a clean pass or names specific

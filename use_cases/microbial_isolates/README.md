@@ -141,12 +141,13 @@ them to completion before replying.
 ### 5. Generate datacard
 
 ```text
-Use the datacard-generator skill to write a Level 1 datacard for the assembled data under
-data/assemblies/. Take the values from the data and the reports, and note anything unknown
-rather than asking.
+Use the datacard-generator skill to write a Level 1 datacard (discoverability only) for the
+assembled data under data/assemblies/. Take the values from the data and the reports, and
+note anything unknown rather than asking. Validate the card with the skill's validator and
+fix what it reports.
 ```
 
-`datacard-generator` is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search. Level 1 means discoverability only: the card sets `supports_discoverability` and no other capability flag.
+`datacard-generator` is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search. Level 1 means discoverability only: the card sets `supports_discoverability` and no other capability flag. The skill's own text allows accessibility beside it, which is why the prompt says which one is meant.
 
 ### 6. Reconstruct pipeline
 

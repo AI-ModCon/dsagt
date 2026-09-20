@@ -106,15 +106,14 @@ groups under `boundary_conditions/`, coordinate arrays from the grid files,
 time from `info.json`, and the root attributes `dataset_name`, `grid_type`,
 `n_spatial_dims`, `n_trajectories`, `simulation_parameters`.
 
-### 2. Register the converter and the checker as codes
+### 2. Register the checker beside the converter
 
 ```text
-Register two codes. convert-to-well runs
-`python skills/blastnet-to-well/scripts/convert_to_well_format.py` with a
-positional trajectory directory and the options --output-file and --dry-run.
-check-well-output runs `python skills/check-well-output/scripts/check_well_output.py` with
+save_skill registered the converter as a code and its reply gave the command to
+run it by. Register the checker as a second code: check-well-output runs `python skills/check-well-output/scripts/check_well_output.py` with
 positional candidate and reference files and the options --rtol, --atol,
---spot-check, --n-points, and --seed. Run --help on each first to confirm.
+--spot-check, --n-points, and --seed. Run --help on both codes first to confirm
+their options.
 ```
 
 **Verify:** `Search the registry for WELL conversion codes.` → both specs under `skills/`.
@@ -122,7 +121,7 @@ positional candidate and reference files and the options --rtol, --atol,
 ### 3. Dry run
 
 ```text
-Run the registered convert-to-well code, with its exact command, as a dry run on
+Run the converter's registered code, with its exact command, as a dry run on
 data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000 and tell me the grid
 size, the number of snapshots, and which WELL fields it would write. info.json
 says 3 snapshots and 13 variables; tell me if the dry run disagrees.
@@ -135,7 +134,7 @@ says 3 snapshots and 13 variables; tell me if the dry run disagrees.
 
 ```text
 Convert data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000 to
-well_output/lifted_hydrogen_jet_traj_5000.hdf5 by running the registered convert-to-well
+well_output/lifted_hydrogen_jet_traj_5000.hdf5 by running the converter's registered
 code with its exact command.
 ```
 
@@ -152,7 +151,7 @@ Spot-check well_output/lifted_hydrogen_jet_traj_5000.hdf5 against
 data/holdout/well_output/lifted_hydrogen_jet_traj_5000.hdf5 with 10 random
 points per dataset by running the registered check-well-output code with its exact
 command. If anything differs, fix the converter in the skill, reconvert with the
-registered convert-to-well code, and check again. When the spot-check passes, run the
+converter's registered code, and check again. When the spot-check passes, run the
 full comparison the same way. After the check passes, update the skill's SKILL.md so
 its rules match the converter.
 ```
@@ -221,7 +220,7 @@ is. The agent may print the tree through a command; the reply then summarizes it
 ## Post-Conditions
 
 1. `skills/blastnet-to-well/` exists with a `SKILL.md` whose mapping rules agree with the final converter, the two documents under `references/`, and the converter under `scripts/`.
-2. Code registry contains `convert-to-well` and `check-well-output` specs under `skills/`.
+2. Code registry contains the converter's code, registered by `save_skill` from the skill's script, and `check-well-output`, both under `skills/`.
 3. `well_output/lifted_hydrogen_jet_traj_5000.hdf5` exists and the full checker run reports an exact match to the holdout reference.
 4. `trace_archive/` holds every converter and checker run, including the failed checks that drove the fixes.
 5. A datacard for the converted dataset exists under `audit/`, in the Genesis template, and `datacard-validate` accepts it.
