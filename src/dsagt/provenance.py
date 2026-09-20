@@ -338,6 +338,14 @@ def _run_streaming(
     return return_code, "".join(out_lines), "".join(err_lines)
 
 
+def log_execution_trace_if_tracing(record_path: Path) -> None:
+    """Log the record's ``code.execute`` trace when this process has tracing on."""
+    from dsagt import observability
+
+    if observability._initialized:
+        observability.log_execution_trace(json.loads(Path(record_path).read_text()))
+
+
 def run_and_record(
     code_name: str,
     command: list[str],
@@ -361,8 +369,6 @@ def run_and_record(
     the record to a detached process, because loading the store costs about a
     second, which every recorded command would otherwise pay before it starts.
     """
-    from dsagt.observability import obs, code_execute_span, truncate
-
     record_id = record_id or uuid.uuid4().hex[:12]
     input_files = list(input_files or [])
     output_files = list(output_files or [])
@@ -382,9 +388,8 @@ def run_and_record(
         # dir by contract).  ``None`` if no session has been minted yet.
         session_id = _current_session_tag_from_cwd()
 
-    with code_execute_span(record_id, code_name):
-        timestamp_start = datetime.now(timezone.utc).isoformat()
-        start_perf = time.perf_counter()
+    timestamp_start = datetime.now(timezone.utc).isoformat()
+    start_perf = time.perf_counter()
 
     try:
         return_code, stdout, stderr = _run_streaming(command, parent=record_id)
@@ -400,25 +405,11 @@ def run_and_record(
     duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
     timestamp_end = datetime.now(timezone.utc).isoformat()
     if derive_outputs:
-        # With no roles, an argument that did not exist before the run is an
-        # output, and so is one the run changed: a converter that replaces
-        # its output file names it on every run, not only the first.
-        rewritten = [
-            f
-            for f in input_files
-            if derive_inputs
-            and sha256_of(f) is not None  # still there: a moved file is not written
-            and file_hashes.get(f) not in (None, sha256_of(f))
-        ]
         output_files = [
             f
-            for f in new_files_from_arguments(command, input_files) + rewritten
+            for f in new_files_from_arguments(command, input_files)
             if f not in output_files
         ] + output_files
-    if return_code != 0:
-        # A declared output a failed run never wrote is left out, so the
-        # record names no producer for a file that does not exist.
-        output_files = [f for f in output_files if _is_file(f) or _is_dir(f)]
     for f in output_files:
         file_hashes[f] = sha256_of(f)
     file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
@@ -434,6 +425,7 @@ def run_and_record(
             "stderr": stderr,
             "timestamp_start": timestamp_start,
             "timestamp_end": timestamp_end,
+            "duration_ms": duration_ms,
             "input_files": input_files,
             "output_files": output_files,
             "file_hashes": file_hashes,
@@ -444,7 +436,9 @@ def run_and_record(
         # parent's command replays it, so the reconstruction leaves it out.
         record["parent_record_id"] = parent_record_id
 
-    _write_record(record, records_dir)
+    path = _write_record(record, records_dir)
+    if log_trace is not None:
+        log_trace(path)
     return return_code
 
 
