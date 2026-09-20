@@ -39,7 +39,7 @@ DSAgt wraps every registered code with `dsagt-run` for provenance capture and `u
 
 ## Execution record
 
-Every registered code runs through the `dsagt-run` wrapper. For each call it records the command, arguments, exit code, duration, input/output file counts, and truncated stderr to `<project>/trace_archive/<record_id>.json`, and emits a `code.execute` span to the [trace store](observability.md). The MCP server incrementally indexes those records into the `code_use` collection, so past executions are searchable.
+Every registered code runs through the `dsagt-run` wrapper. For each call it records the command, arguments, exit code, duration, input and output files, and truncated stderr to `<project>/trace_archive/<record_id>.json`, and, once the command has exited, a detached process logs a `code.execute` span with the run's own start and end times to the [trace store](observability.md), so the wrapper adds about 0.2 s to a command. An error from that process is appended to `.dsagt/run_trace.log`. The MCP server incrementally indexes those records into the `code_use` collection, so past executions are searchable.
 
 The wrapper is the point of code-mediated data access. A direct shell or editor call isn't recordless — the agent's transcript still captures whatever it chose to report about the command and its stdout/stderr — but that's a partial, agent-curated account, not the structured `dsagt-run` record of exit code, timing, and input/output files. Only the wrapped record carries what `reconstruct_pipeline` needs, so a direct call still breaks reconstruction.
 

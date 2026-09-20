@@ -820,10 +820,81 @@ class TestNestedRuns:
             r.get("code_name"): r
             for r in (json.loads(p.read_text()) for p in records.glob("*.json"))
         }
-        outer, child = by_name["loop"], by_name["inner"]
+
+
+class TestRolesAndArgumentsPerSide:
+
+    def test_arguments_fill_the_side_the_roles_leave_empty(self, tmp_path, monkeypatch):
+        """fastp's spec names -i and -o; the agent ran --in1/--out1. The role
+        match gives nothing on either side, and the scan fills both."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "in.fq").write_text("@r\nA\n+\nF\n")
+        main(
+            [
+                "--code",
+                "fastp",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--",
+                "cp",
+                "in.fq",
+                "out.fq",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["input_files"] == ["in.fq"]
+        assert record["execution"]["output_files"] == ["out.fq"]
+
+    def test_role_inputs_keep_and_outputs_come_from_the_scan(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "in.fq").write_text("x\n")
+        main(
+            [
+                "--code",
+                "t",
+                "--records-dir",
+                str(tmp_path / "records"),
+                "--input-files",
+                "in.fq",
+                "--",
+                "cp",
+                "in.fq",
+                "out.fq",
+            ]
+        )
+        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        assert record["execution"]["input_files"] == ["in.fq"]
+        assert record["execution"]["output_files"] == ["out.fq"]
+
+
+class TestNestedRuns:
+
+    def test_a_nested_run_carries_its_parent_and_the_reconstruction_skips_it(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+        import sys
+
+        from dsagt.provenance import load_pipeline_records
+
+        monkeypatch.chdir(tmp_path)
+        records = tmp_path / "records"
+        inner = f"{sys.executable} -m dsagt.commands.run_code --code inner --records-dir {records} -- echo inner"
+        script = tmp_path / "loop.sh"
+        script.write_text(f"#!/bin/bash\n{inner}\n")
+        monkeypatch.delenv("DSAGT_RUN_PARENT", raising=False)
+        rc = main(["--records-dir", str(records), "--", "bash", str(script)])
+        assert rc == 0
+        by_name = {
+            r.get("code_name"): r
+            for r in (json.loads(p.read_text()) for p in records.glob("*.json"))
+        }
+        outer, child = by_name[""], by_name["inner"]
         assert "parent_record_id" not in outer
         assert child["parent_record_id"] == outer["record_id"]
-        assert [r["code_name"] for r in load_pipeline_records(records)] == ["loop"]
+        assert [r["code_name"] for r in load_pipeline_records(records)] == [""]
         assert "DSAGT_RUN_PARENT" not in os.environ
 
 

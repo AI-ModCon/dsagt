@@ -23,7 +23,13 @@ def _make_parser() -> argparse.ArgumentParser:
         description="Wrap a code command and capture execution provenance.",
     )
     parser.add_argument(
-        "--code", required=True, help="Name of the code being executed."
+        "--code", default=None, help="Name of the registered code being executed."
+    )
+    parser.add_argument(
+        "--log-trace",
+        default=None,
+        metavar="RECORD",
+        help=argparse.SUPPRESS,  # internal: log the trace of a written record
     )
     parser.add_argument(
         "--session",
