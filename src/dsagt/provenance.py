@@ -52,18 +52,16 @@ CODE_USE_COLLECTION = "code_use"
 # ---------------------------------------------------------------------------
 
 
-def _resolve_records_dir(explicit: str | None) -> Path:
-    """Determine the records directory.
+def _resolve_records_dir() -> Path:
+    """The project's ``trace_archive/``.
 
-    Priority: explicit ``--records-dir`` flag → ``$DSAGT_PROJECT_DIR``
-    (exported by ``dsagt start`` and the MCP env block) → the cwd.  The
-    directory must hold ``.dsagt/config.yaml``, the project config
-    ``dsagt init`` writes.  The project is a fixed place, the agent's
-    working directory, so there is no walk up the tree: a ``cd`` into a
+    ``$DSAGT_PROJECT_DIR`` (exported by ``dsagt start`` and the MCP env
+    block) names the project, and the working directory is it otherwise.  The
+    directory must hold ``.dsagt/config.yaml``, the project config ``dsagt
+    init`` writes.  The project is a fixed place, the agent's working
+    directory, so the directory is checked as given: a ``cd`` into a
     subdirectory before the command is the error, and the message names it.
     """
-    if explicit:
-        return Path(explicit)
     env_dir = os.environ.get("DSAGT_PROJECT_DIR")
     if env_dir:
         project, source = Path(env_dir).resolve(), "DSAGT_PROJECT_DIR"
@@ -72,7 +70,7 @@ def _resolve_records_dir(explicit: str | None) -> Path:
     if not (project / ".dsagt" / "config.yaml").exists():
         raise ValueError(
             f"{source} ({project}) is not a dsagt project: no .dsagt/config.yaml. "
-            "Run dsagt-run from the project directory, or pass --records-dir."
+            "Run dsagt-run from the project directory."
         )
     return project / "trace_archive"
 
@@ -184,13 +182,6 @@ def file_roles_from_command(
     return inputs, outputs
 
 
-def _parse_file_list(raw: str | None) -> list[str]:
-    """Split a comma-separated file list, stripping whitespace."""
-    if not raw:
-        return []
-    return [f.strip() for f in raw.split(",") if f.strip()]
-
-
 def sha256_of(path: str) -> str | None:
     """The SHA-256 of a regular file, or ``None`` for a path that is not one.
 
@@ -223,8 +214,7 @@ _INTERPRETERS = ("python", "python3", "bash", "sh", "zsh", "Rscript", "perl", "n
 def files_from_arguments(command: list[str]) -> list[str]:
     """The arguments of *command* that are existing files or directories.
 
-    A spec with no parameter roles, or an ad-hoc run with no spec, names no
-    files; an argument that exists when the command starts is one the
+    A spec with no parameter roles names no files; an argument that exists when the command starts is one the
     command reads or overwrites, which is what the dependency graph and the
     readiness reports need to know.  A directory counts (a simulation case,
     a dataset directory); it gets no hash.  The executable is left out, and
@@ -232,11 +222,8 @@ def files_from_arguments(command: list[str]) -> list[str]:
     ``data.csv``; ``x.py`` is the program, and as an input it would read as
     the product of whichever step wrote it).
     """
-    # A spec with dependencies stores `uv run --with <deps> -- python x.py ...`;
-    # the interpreter and its script are found past that wrapper.
-    inner = _without_uv_wrapper(command)
-    args = inner[1:]
-    if inner and Path(inner[0]).name in _INTERPRETERS:
+    args = command[1:]
+    if command and Path(command[0]).name in _INTERPRETERS:
         script = next((a for a in args if not a.startswith("-")), None)
         if script is not None and _is_file(script):
             args = [a for a in args if a != script]
@@ -405,11 +392,25 @@ def run_and_record(
     duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
     timestamp_end = datetime.now(timezone.utc).isoformat()
     if derive_outputs:
+        # With no roles, an argument that did not exist before the run is an
+        # output, and so is one the run changed: a converter that replaces
+        # its output file names it on every run, not only the first.
+        rewritten = [
+            f
+            for f in input_files
+            if derive_inputs
+            and sha256_of(f) is not None  # still there: a moved file is not written
+            and file_hashes.get(f) not in (None, sha256_of(f))
+        ]
         output_files = [
             f
-            for f in new_files_from_arguments(command, input_files)
+            for f in new_files_from_arguments(command, input_files) + rewritten
             if f not in output_files
         ] + output_files
+    if return_code != 0:
+        # A declared output a failed run never wrote is left out, so the
+        # record names no producer for a file that does not exist.
+        output_files = [f for f in output_files if _is_file(f) or _is_dir(f)]
     for f in output_files:
         file_hashes[f] = sha256_of(f)
     file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
@@ -701,16 +702,22 @@ def load_pipeline_records(trace_dir: Path, session_id: str | None = None) -> lis
     if not trace_dir.is_dir():
         return []
 
-    records = []
+    loaded = []
     for path in trace_dir.glob("*.json"):
         raw = json.loads(path.read_text())
-        execution = raw.get("execution")
-        if not execution:
-            continue
+        if raw.get("execution"):
+            loaded.append(raw)
+    succeeded = {
+        r["record_id"] for r in loaded if r["execution"].get("return_code", 0) == 0
+    }
+    records = []
+    for raw in loaded:
         if session_id and raw.get("session_id") != session_id:
             continue
-        if raw.get("parent_record_id"):
-            # Started by another recorded run, whose command replays it.
+        if raw.get("parent_record_id") in succeeded:
+            # Started by another recorded run, whose command replays it.  The
+            # child of a run that failed or was killed is kept: the parent is
+            # rendered as a comment, and the child is the work that was done.
             continue
         records.append(raw)
 

@@ -22,6 +22,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`dsagt-run` takes one option.** `--code` names the registered code and
+  the command follows `--`. `--input-files`, `--output-files`, `--session`,
+  `--record-id` and `--records-dir` are gone: no agent command ever used
+  them, and each value is derived (the project from `DSAGT_PROJECT_DIR` or
+  the working directory, the session from `.dsagt/state.yaml`, the record id
+  from the run, the files from the spec's roles and the arguments). The trace
+  logger is `python -m dsagt.commands.log_trace <record>`, which takes the
+  session from the record.
+- **`dsagt-run` adds about 0.2 s to a command, down from 1.3 to 2 s.** The
+  run loads no trace store. It writes the record, then starts a detached
+  process that logs the `code.execute` trace from the record with the run's
+  start and end times; writers take a lock on `.dsagt/run_trace.lock`, and
+  an error goes to `.dsagt/run_trace.log`.
+- **Codes and skills share `skills/`.** A code is a skill directory whose
+  frontmatter declares an executable; a project has no `codes/` directory,
+  and `dsagt init` on a project with one moves each code under `skills/`.
+- **The native skills mirror is a relative symlink per skill directory**, so
+  the agent reads the live files; a skill whose description exceeds Claude
+  Code's cap is copied with the description truncated.
+- **A skill source is fetched as a GitHub tarball** over HTTPS (the shell's
+  `GITHUB_TOKEN` when present); the user's git is the fallback for a
+  repository the API refuses and for a URL that is not GitHub.
+- **Trace acknowledgements are keyed by transcript**, so a resumed
+  conversation (`claude --continue`, `codex exec resume`) logs only its new
+  turns, and the final flush emits the last turn only once it holds a
+  response.
+- **Section 1 of the instructions** defines a pipeline step as a command
+  that produces or transforms a dataset file, and says it runs as a
+  registered code by its stored line. The foreground rule names a background
+  subagent as forbidden beside a background task.
+- `search_registry` lists hits by rank instead of a rank-fusion score.
+- The startup catch-up reuses the server's knowledge base, so one embedder
+  serves the session.
+
 - AIDRIN has one path: the code registry. The `aidrin` package is a dependency
   of dsagt, so the CLI is in dsagt's Python environment; every `dsagt init`
   registers `aidrin` as a code, so each call the agent makes through it is an
