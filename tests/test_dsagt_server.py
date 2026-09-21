@@ -53,7 +53,6 @@ def test_merged_server_exposes_all_tools(tmp_path):
         "get_registry",
         "search_registry",
         "save_code_spec",
-        "install_dependencies",
         "reconstruct_pipeline",
         "readiness_reports",
         # knowledge (5)

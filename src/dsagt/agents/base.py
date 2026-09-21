@@ -43,7 +43,6 @@ _BLOCK_END = "<!-- dsagt:end -->"
 _DSAGT_MCP_ALWAYS_ALLOW = [
     "add_skill_source",
     "get_registry",
-    "install_dependencies",
     "install_skill",
     "kb_append",
     "kb_get_memories",

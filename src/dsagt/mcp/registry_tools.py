@@ -1,9 +1,9 @@
 """MCP tools for the tool registry, execution, and provenance.
 
-The "tool lifecycle" surface of ``dsagt-server``: define a tool spec
-(``save_code_spec``), discover tools (``get_registry`` / ``search_registry``),
-install a code's dependencies (``install_dependencies``), read the readiness
-reports on record (``readiness_reports``), and reconstruct a reproducible
+The code-lifecycle surface of ``dsagt-server``: define a code spec
+(``save_code_spec``), discover codes (``get_registry`` / ``search_registry``),
+read the readiness reports on record (``readiness_reports``), and
+reconstruct a reproducible
 pipeline from the recorded executions (``reconstruct_pipeline``).  Execution
 in the user's environment is ``dsagt-run``'s, from the agent's own shell, and
 reads are the agent's own tools, so the server runs nothing for the agent.
@@ -23,8 +23,6 @@ import asyncio
 import json
 import logging
 import re
-import subprocess
-import sys
 from functools import partial
 from pathlib import Path
 
@@ -36,7 +34,6 @@ from dsagt.knowledge import KnowledgeBase
 from dsagt.mcp.server import build_dispatch_server
 from dsagt.observability import (
     obs,
-    registry_install_deps_span,
     registry_reconstruct_pipeline_span,
     registry_save_code_span,
 )
@@ -44,27 +41,6 @@ from dsagt.provenance import CodeUseIndexer, readiness_reports, reconstruct_pipe
 from dsagt.registry import CODES_COLLECTION, CodeRegistry
 
 logger = logging.getLogger(__name__)
-
-
-def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
-    """Install packages using uv pip install. Returns a status string."""
-    cmd = ["uv", "pip", "install", "--python", sys.executable] + packages
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if result.returncode == 0:
-            output = result.stdout.strip()
-            return f"Successfully installed: {', '.join(packages)}\n{output}"
-        else:
-            return (
-                f"Installation failed (exit code {result.returncode}):\n"
-                f"{result.stderr.strip()}"
-            )
-    except subprocess.TimeoutExpired:
-        return f"Installation timed out after {timeout}s for: {', '.join(packages)}"
-    except FileNotFoundError:
-        return (
-            "Error: 'uv' command not found. Install uv: https://github.com/astral-sh/uv"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -169,16 +145,6 @@ async def _handle_save_code_spec(
             "The dsagt-run prefix writes the execution record; run this line, "
             "not the command you supplied."
         )
-        deps = spec.get("dependencies", [])
-        if deps:
-            with registry_install_deps_span(deps):
-                dep_result = await asyncio.to_thread(_install_dependencies, deps)
-                if dep_result.startswith("Successfully installed:"):
-                    obs.set("status", "ok")
-                else:
-                    obs.set("status", "failed")
-                    obs.event("install_failed", message=dep_result[:256])
-            message += f"\n\nDependency installation:\n{dep_result}"
         return message
 
 
@@ -294,45 +260,6 @@ async def _handle_reconstruct_pipeline(
         return script
 
 
-async def _handle_install_dependencies(
-    arguments: dict,
-    *,
-    registry: CodeRegistry,
-) -> str:
-    code_name = arguments.get("code_name")
-    tools = registry.list_codes_raw()
-    if not tools:
-        return "Registry is empty. No tools registered yet."
-
-    all_deps = []
-    codes_with_deps = []
-    for tool in tools:
-        if code_name and tool.get("name") != code_name:
-            continue
-        code_deps = tool.get("dependencies", [])
-        if code_deps:
-            all_deps.extend(code_deps)
-            codes_with_deps.append(tool["name"])
-
-    if not all_deps:
-        scope = f"tool '{code_name}'" if code_name else "registry"
-        return f"No dependencies declared in {scope}."
-
-    seen = set()
-    unique_deps = [d for d in all_deps if not (d in seen or seen.add(d))]
-
-    with registry_install_deps_span(unique_deps):
-        obs.set("scope_code", code_name)
-        obs.set("n_tools_with_deps", len(codes_with_deps))
-        result = await asyncio.to_thread(_install_dependencies, unique_deps)
-        if result.startswith("Successfully installed:"):
-            obs.set("status", "ok")
-        else:
-            obs.set("status", "failed")
-            obs.event("install_failed", message=result[:256])
-        return f"Installing dependencies for: {', '.join(codes_with_deps)}\n\n{result}"
-
-
 # ---------------------------------------------------------------------------
 # Tool defs + handler map (used by the merged server and the test wrapper)
 # ---------------------------------------------------------------------------
@@ -358,9 +285,6 @@ def _registry_tools_and_handlers(
         ),
         "readiness_reports": partial(
             _handle_readiness_reports, runtime_dir=runtime_dir
-        ),
-        "install_dependencies": partial(
-            _handle_install_dependencies, registry=registry
         ),
     }
 
@@ -547,19 +471,6 @@ def _registry_tools_and_handlers(
                     },
                 },
                 "required": ["path"],
-            },
-        ),
-        types.Tool(
-            name="install_dependencies",
-            description="Install Python dependencies for one or all tools in the registry.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "code_name": {
-                        "type": "string",
-                        "description": "Install deps for a specific tool (omit for all)",
-                    },
-                },
             },
         ),
     ]

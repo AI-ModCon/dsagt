@@ -29,7 +29,7 @@ TOOLS = [
     ),
     types.Tool(
         name="spawn",
-        description="Run a chatty child process, as `run_command` does.",
+        description="Run a chatty child process, as the KB ingest does.",
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
