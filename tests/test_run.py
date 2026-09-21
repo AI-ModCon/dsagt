@@ -975,3 +975,41 @@ class TestFilesFromArguments:
         assert files_from_arguments(["python3.12", "convert.py", "data.csv"]) == [
             "data.csv"
         ]
+
+
+def test_a_uv_wrapped_interpreter_still_leaves_the_script_out(tmp_path, monkeypatch):
+    """The wrapper comes off before the interpreter is recognised."""
+    from dsagt.provenance import files_from_arguments, new_files_from_arguments
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "validate.py").write_text("")
+    (tmp_path / "card.md").write_text("x\n")
+    command = [
+        "uv",
+        "run",
+        "--with",
+        "pyyaml",
+        "--",
+        "python",
+        "validate.py",
+        "card.md",
+    ]
+    assert files_from_arguments(command) == ["card.md"]
+    assert new_files_from_arguments(command, ["card.md"]) == []
+
+
+def test_the_dsagt_run_path_imports_nothing_heavy():
+    """dsagt-run pays provenance's import on every recorded command, so the
+    retrieval stack stays behind TYPE_CHECKING and function-scope imports."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import dsagt.provenance, sys; "
+        "print([m for m in ('chromadb', 'torch', 'onnxruntime', 'mlflow') "
+        "if m in sys.modules])"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert done.stdout.strip() == "[]"
