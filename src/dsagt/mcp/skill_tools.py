@@ -385,9 +385,11 @@ def _skill_tools_and_handlers(
         types.Tool(
             name="search_skills",
             description=(
-                "Search agent skills by name, tag, or description. Spans installed "
-                "skills and the external installable catalog. Catalog hits are marked "
-                "'[catalog]' — use install_skill to add one to this project."
+                "Search the synced external skill catalogs by query or tag: the "
+                "skills this project can install, each hit marked "
+                "'[catalog · install_skill to add]'. The agent discovers an "
+                "installed skill natively, and 'skill_name' returns that skill's "
+                "spec from <project>/skills/."
             ),
             inputSchema={
                 "type": "object",

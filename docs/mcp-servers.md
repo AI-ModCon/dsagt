@@ -49,8 +49,8 @@ Discover, install, and author agent skills, and manage external skill sources. S
 
 | Tool | Description |
 |------|-------------|
-| `search_skills` | Search the external corpus (hits are tagged `[catalog]`); `skill_name` looks up one installed skill |
-| `install_skill` | Copy a skill from the corpus into `<project>/skills/` and mirror it into the agent's native skills dir |
+| `search_skills` | Search the external corpus (each hit tagged `[catalog · install_skill to add]`); `skill_name` looks up one installed skill |
+| `install_skill` | Copy a skill from the corpus into `<project>/skills/` and link it into the agent's native skills directory |
 | `save_skill` | Register an agent-authored skill into `<project>/skills/<name>/SKILL.md` |
 | `add_skill_source` | Enable + index an external skill source (a known name or a Git URL) into the searchable corpus |
 | `list_skill_sources` | List known and synced external skill sources |
