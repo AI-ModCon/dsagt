@@ -204,7 +204,7 @@ All 19 tools live on the single `dsagt-server` (stdio), split across four concer
 
 **Registry (5):**
 
-- `search_registry` — semantic search over registered + bundled code specs. Side effects: reads data.
+- `search_registry` — semantic search over registered + built-in code specs. Side effects: reads data.
 - `get_registry` — list every registered code with its MCP-compatible schema. Side effects: reads data.
 - `save_code_spec` — register a code as `skills/<name>/SKILL.md` (executable auto-wrapped with `dsagt-run` + `uv run --with`). Side effects: writes to the project dir; indexes into ChromaDB.
 - `reconstruct_pipeline` — render `trace_archive/` as a dependency-ordered execution history. Side effects: reads data.

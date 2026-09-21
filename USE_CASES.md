@@ -2,7 +2,7 @@
 
 Each walkthrough is `use_cases/<name>/README.md`. All eight are published; every one except `plasma_turbulence` has been run end to end (that one has no runnable XGC case available).
 
-| Use case | What it does | DSAgt capabilities exercised |
+| Use case | Summary | DSAgt capabilities exercised |
 |---|---|---|
 | `microbial_isolates` | Registers fastp and megahit as codes and builds a reproducible short-read QC and assembly pipeline over real sequencing reads. | Registering external binaries as codes, registry search, pipeline planning from best-practice documents, provenance across many samples, datacard base skill, pipeline reconstruction |
 | `cryoem` | Curates EMPIAR-10017 micrographs by ingesting cryo-EM quality knowledge, registering curation codes, and running a preprocessing pipeline with the AI-readiness check measuring the curation step. | Knowledge ingest and append, semantic search, KB-guided code generation, code registration and execution with provenance, the AI-readiness check firing unprompted, datacard base skill |

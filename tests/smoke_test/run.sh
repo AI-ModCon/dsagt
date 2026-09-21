@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# DSAGT smoke test — non-interactive end-to-end exercise.
+# DSAGT smoke test: non-interactive end-to-end exercise.
 #
 # Drives the SAME `dsagt start` lifecycle as an interactive run (config
 # generation → agent in the foreground → post-session catch-up extraction).
-# Serverless: there are no services to start or stop — all self-logging
-# lands in the project's sqlite MLflow store.  Only the agent-launch
+# Serverless: there are no services to start or stop; all self-logging
+# goes to the project's sqlite MLflow store.  Only the agent-launch
 # step swaps from interactive to batch (`--script`).
 #
 # TWO sessions run back-to-back: session 1 exercises ingest, code
@@ -12,8 +12,8 @@
 # and explicit memory; session 2 exercises cross-session recall,
 # registry persistence, and the startup catch-up path.
 #
-# BYOA: the user's shell must already have the agent's provider creds
-# (per `dsagt init` hints).  No .env handling.
+# The user's shell must already have the agent's provider creds (per
+# `dsagt init` hints).
 #
 # Run from anywhere:
 #   bash tests/smoke_test/run.sh
@@ -25,13 +25,13 @@ set -uo pipefail
 
 AGENT="${DSAGT_SMOKE_AGENT:-${1:-goose}}"   # arg or env var, default goose
 # Per-agent project name so each agent's mlflow.db, trace_archive, and
-# kb_index/ survive across runs — crucial for cross-agent comparison
-# (e.g., why does claude use 10x the tokens codex does?).  Without this,
-# `dsagt rm` at the start of each run wipes the previous agent's state.
+# kb_index/ survive across runs, which cross-agent comparison (token use
+# per agent, for example) depends on.  Without this, `dsagt rm` at the
+# start of each run wipes the previous agent's state.
 PROJECT="smoke-test-${AGENT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DSAGT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-# Project lives at the default ``dsagt init`` location so smoke-test
+# The project is created at the default ``dsagt init`` location so smoke-test
 # artifacts stay out of the dsagt source tree.  PDIR mirrors
 # DEFAULT_PROJECTS_BASE in src/dsagt/session.py.
 PDIR="${HOME}/dsagt-projects/${PROJECT}"
@@ -41,9 +41,8 @@ case "${AGENT}" in
     cline)
         # dsagt start --script hard-errors for cline: its headless CLI
         # (verified 3.0.34) never loads MCP servers, so a scripted session
-        # has no dsagt tools to exercise — see agents/cline.py.  Skip rather
-        # than report red checks; drop this arm when cline ships MCP in
-        # headless mode.
+        # has no dsagt tools to exercise (see agents/cline.py).  Skip rather
+        # than report red checks.
         echo "[smoke] SKIP: cline headless CLI loads no MCP servers (see agents/cline.py) — hand-test via tests/manual_walkthroughs/ instead"
         exit 0
         ;;
@@ -58,17 +57,17 @@ echo "[smoke] Agent: ${AGENT}"
 cd "${DSAGT_ROOT}"
 
 # ---------------------------------------------------------------------------
-# 1. Clean slate (idempotent — silent if nothing exists)
+# 1. Clean slate (idempotent; silent if nothing exists)
 # ---------------------------------------------------------------------------
 dsagt rm "${PROJECT}" -y >/dev/null 2>&1 || true
 rm -rf "${PDIR}"
 
 # Wipe claude code's per-directory session history for the smoke project.
-# Claude stashes one .jsonl per past session under ~/.claude/projects/<encoded-cwd>/
+# Claude writes one .jsonl per past session under ~/.claude/projects/<encoded-cwd>/
 # (path with all '/' replaced by '-').  Without this, claude's project-memory
 # layer can leak details from prior runs into the current one and the agent
-# reports things that didn't happen — false hangs, fake api errors, ghost
-# duplicates.  Only relevant for --agent claude.
+# reports things that did not happen: false hangs, fake api errors, duplicate
+# results.  Only relevant for --agent claude.
 if [[ "${AGENT}" == "claude" ]]; then
     smoke_path_encoded=$(echo "${PDIR}" | sed 's|/|-|g')
     rm -rf "${HOME}/.claude/projects/${smoke_path_encoded}"
@@ -76,13 +75,13 @@ fi
 
 # ---------------------------------------------------------------------------
 # 2. Init at the default ``~/dsagt-projects/`` location so smoke artifacts
-#    don't pollute the dsagt source tree.  --episodic so session turns land
-#    in the ``session_memory`` collection (asserted below).  The default KB
+#    stay out of the dsagt source tree.  --episodic so session turns are
+#    written to the ``session_memory`` collection (asserted below).  The default KB
 #    set includes the genesis skill catalog, which the skill-install prompt
 #    relies on.
 # ---------------------------------------------------------------------------
 # Force the non-interactive (flag-driven) init path regardless of TTY by
-# closing stdin — `dsagt init` prompts only when stdin is a TTY.
+# closing stdin; `dsagt init` prompts only when stdin is a TTY.
 dsagt init "${PROJECT}" --agent "${AGENT}" --episodic < /dev/null
 
 # Substitute {{SMOKE_DIR}} → absolute smoke_test/ path before the agent
@@ -106,7 +105,7 @@ sed "s|{{SMOKE_DIR}}|${SCRIPT_DIR}|g" "${SCRIPT_DIR}/script2.txt" > "${RENDERED_
 #    follow-up SIGKILL after WALL_CLOCK_GRACE catches the agent if it
 #    swallows the term signal.
 #
-#    Output tees to a per-session log — the retrieval and recall
+#    Output tees to a per-session log; the retrieval and recall
 #    assertions grep it for facts the agent can only have gotten from
 #    the KB / memory (process substitution keeps $! on dsagt itself).
 # ---------------------------------------------------------------------------
@@ -181,42 +180,42 @@ check "greet spec written"           "test -f '${PDIR}/skills/greet/SKILL.md'"
 check "base-skill code mirrored natively" "find '${PDIR}' -path '*skills/datacard-introspect/SKILL.md' | grep -q ."
 check "greet mirrored natively"       "find '${PDIR}' -path '*skills/greet/SKILL.md' | grep -q ."
 # The execution went through dsagt-run iff the record captured greet's
-# actual stdout — an agent that ran the script by hand can't fake the
-# trace_archive record.  Match only the greeting prefix: it proves our
-# custom --greeting arg flowed through the registered code, while
-# tolerating an agent flubbing which word goes in the name slot (goose
+# actual stdout; an agent that ran the script by hand cannot fake the
+# trace_archive record.  Match only the greeting prefix: it shows our
+# custom --greeting arg passed through the registered code, while
+# tolerating an agent that puts the wrong word in the name slot (goose
 # produced "Ahoy, Ahoy!").
 check "greet executed via dsagt-run" "grep -l 'Ahoy,' '${PDIR}/trace_archive/'*greet*.json"
 check "greet re-run in session 2"    "test \$(ls '${PDIR}/trace_archive/'*greet*.json | wc -l) -ge 2"
 check "datacard-introspect record"   "ls '${PDIR}/trace_archive/'*datacard-introspect*.json"
 
 # -- knowledge base ----------------------------------------------------------
-# Both files are written by dsagt-server's kb_ingest MCP tool — chroma.sqlite3
-# is the actual vector DB, chroma_ids.json the internal-collection manifest
+# Both files are written by dsagt-server's kb_ingest MCP tool: chroma.sqlite3
+# is the vector DB, chroma_ids.json the internal-collection manifest
 # (route.json marks routed *external* collections, which ingest never
 # creates).  Checking only `test -d kb_index/knowledge` is too weak: an agent
-# can satisfy it by hand-crafting an empty directory tree, masking a broken
-# MCP wiring (which is exactly what we hit when cline's dsagt server crashed
-# silently and the LLM compensated by mkdir-ing the path).
+# can satisfy it by creating an empty directory tree by hand, masking a
+# broken MCP wiring (an agent whose dsagt server crashed silently has
+# compensated by creating the path with mkdir).
 check "knowledge ingested (ids)"     "test -f '${PDIR}/kb_index/knowledge/chroma_ids.json'"
 check "knowledge ingested (vectors)" "test -f '${PDIR}/kb_index/knowledge/chroma.sqlite3'"
-# GRT-42 lives only in knowledge/troubleshooting.md — the agent answering
-# with it proves retrieval reached the ingested docs.
+# GRT-42 appears only in knowledge/troubleshooting.md; the agent answering
+# with it shows retrieval read the ingested docs.
 check "kb retrieval answered (GRT-42)" "grep -q 'GRT-42' '${SESSION_LOG_1}'"
 
 # -- skills ------------------------------------------------------------------
 check "catalog skill installed"      "ls '${PDIR}/skills/'*/SKILL.md"
 
 # -- memory ------------------------------------------------------------------
-# Explicit memory lives with the server-owned internals in .dsagt/.  Only
+# Explicit memory is stored with the server-owned internals in .dsagt/.  Only
 # kb_remember (called deliberately by the agent in response to "Put this in
 # explicit memory") populates the file; checking non-empty catches the
-# hallucination case where the agent claims it stored a fact but didn't
-# actually call the tool.
+# hallucination case where the agent claims it stored a fact but did not
+# call the tool.
 check "explicit memory recorded"     "test -s '${PDIR}/.dsagt/explicit_memories.yaml'"
 # Cross-session recall: session 2's answer must carry the stored fact's
-# tokens, which only kb_get_memories (or episodic retrieval) can supply —
-# session 2 never saw samples.csv.
+# tokens, which only kb_get_memories (or episodic retrieval) can supply;
+# session 2 never read samples.csv.
 check "cross-session recall"         "grep -qi 'null' '${SESSION_LOG_2}' && grep -qi 'status' '${SESSION_LOG_2}'"
 # Episodic memory (enabled via --episodic) chunks+embeds every turn into
 # the session_memory collection on the periodic pass.
@@ -238,9 +237,9 @@ check "dsagt info runs"              "dsagt info '${PROJECT}'"
 
 # ---------------------------------------------------------------------------
 # 6. Agent LLM-call transparency: the trace pipeline recovers every agent's
-#    turns from its on-disk transcript (the periodic pass + graceful-shutdown flush,
-#    backstopped by session 2's startup catch-up), so agent traces in the
-#    store are a hard requirement for all five agents.
+#    turns from its on-disk transcript (the periodic pass, the shutdown flush,
+#    and session 2's startup catch-up), so agent traces in the store are a
+#    hard requirement for all five agents.
 # ---------------------------------------------------------------------------
 # The store is whichever one the session logged to: MLFLOW_TRACKING_URI when
 # set (a shared tracking server), else the project's serverless sqlite file.
@@ -259,10 +258,9 @@ df = mlflow.search_traces(
 )
 # MLflowSink stamps every replayed agent trace with "dsagt.trace_id" in
 # its trace metadata; DSAGT's internal MCP/dsagt-run debug traces carry a
-# "dsagt.source" tag instead — the positive marker is the reliable
-# filter.  A service.name span heuristic previously counted internal
-# spans lacking that attribute as agent traces, masking a codex reader
-# that collected nothing.
+# "dsagt.source" tag instead; the positive marker is the filter.  A
+# span-attribute heuristic would count internal spans lacking that
+# attribute as agent traces and mask a reader that collected nothing.
 n = sum(
     1
     for _, row in df.iterrows()

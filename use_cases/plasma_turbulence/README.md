@@ -1,6 +1,6 @@
 ---
 title: Plasma Turbulence Training Data (XGC)
-domain: Plasma physics — gyrokinetic turbulence simulation (XGC) training-data prep
+domain: Plasma physics, gyrokinetic turbulence simulation (XGC) training-data prep
 summary: >-
   Register the XGC preprocessing scripts as codes and drive them through
   DSAgt with provenance: check an ADIOS2 BP5 simulation case, summarize its
@@ -12,7 +12,7 @@ order: 80
 
 # DSAgt Demo: XGC Training-Data Preparation
 
-> **Estimated time:** ~30 minutes on an HPC login node — not a 10-minute demo.
+> **Estimated time:** ~30 minutes on an HPC login node, not a 10-minute demo.
 > XGC output is HPC-scale ADIOS2 BP5 data (up to ~1.3M mesh nodes). No case is
 > hosted with this demo: point the paths below at your own XGC run. The
 > walkthrough needs only `adios2`; the training-ready dataset class in the
@@ -44,7 +44,7 @@ for the variable reference. Representative cases:
 
 - DSAgt installed with the `plasma-turbulence` extra
   (`pip install "dsagt[plasma-turbulence] @ git+https://github.com/AI-ModCon/dsagt.git"`),
-  which brings `adios2`.
+  which installs `adios2`.
 - An agent platform installed and **already authenticated**.
 - An XGC case directory of your own (the KSTART case in the table above is the
   smallest of the three and the one the expected values below refer to).

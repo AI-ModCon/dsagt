@@ -1,29 +1,29 @@
-"""DSAGT MCP Server — the single ``dsagt-server`` (registry + knowledge).
+"""DSAGT MCP Server: the single ``dsagt-server``.
 
 One process, one :class:`~dsagt.knowledge.KnowledgeBase`, one ``init_tracing``,
-one MCP server per agent — a single embedder and a single Chroma owner back
+one MCP server per agent: a single embedder and a single Chroma owner back
 every concern.  Single ownership matters for the ``skills_catalog__*``
 collections, which are written under the skill concern and read under the
 registry concern: one owner removes any write-here/read-there hazard across
-them.  Heavy work runs off the event loop (``kb_ingest`` → background job
-thread; the collectors in worker threads), so one process costs little
+them.  Heavy work runs off the event loop (``kb_ingest`` in a background job
+task; the collectors in worker threads), so one process costs little
 isolation.
 
-Tool *definitions* and *handlers* are defined in their concern modules
+Tool definitions and handlers are defined in their concern modules
 (:mod:`~dsagt.mcp.registry_tools` / :mod:`~dsagt.mcp.knowledge_tools` /
 :mod:`~dsagt.mcp.memory_tools` / :mod:`~dsagt.mcp.skill_tools`); this module
 composes their ``(tools, handlers)`` under one dispatch shell
 (:func:`build_dispatch_server`) and owns the shared-KB startup.  The factory
-imports are *lazy* (inside :func:`create_dsagt_server` / :func:`main`) so the
+imports are lazy (inside :func:`create_dsagt_server` / :func:`main`) so the
 concern modules can import :func:`build_dispatch_server` from here without a
 cycle.
 """
 
 import os
 
-# Set before any import that may pull in a native runtime (e.g.
+# Set before any import that may load a native runtime (e.g.
 # ``dsagt.knowledge`` below): prevents a fatal OpenMP crash when multiple
-# libraries each bundle their own libomp.
+# libraries each include their own libomp.
 os.environ["PYTHONUNBUFFERED"] = "1"
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
@@ -65,30 +65,28 @@ def build_dispatch_server(
     """Wrap a ``(tools, handlers)`` pair in a configured MCP ``Server``.
 
     One dispatch contract for every concern module: reject arguments outside
-    the tool's own ``input_schema``, run the handler, catch + wrap what it
-    raises, then format by return type — a handler that returns ``str`` passes
+    the tool's own ``input_schema``, run the handler, catch and wrap what it
+    raises, then format by return type: a handler that returns ``str`` passes
     through, one that returns ``dict`` is JSON-encoded.  Registry handlers
     return ``str`` and never raise; knowledge handlers return ``dict`` and raise
     ``ValueError`` on bad input; both are covered.
 
-    Argument validation and the outer error boundary live here because the SDK
-    stopped providing them: through mcp 1.x the ``@server.call_tool()`` decorator
-    validated against ``inputSchema`` and turned any escaping exception into an
-    error result, and the v2 lowlevel server does neither.  Two consequences
-    shape the code below.  Nothing may escape this function — the v2 runner
-    converts an exception into a JSON-RPC protocol error, which tears down the
-    request instead of handing the agent something it can read and retry — and
+    Argument validation and the outer error boundary are here because the
+    mcp v2 lowlevel server provides neither.  Two consequences shape the code
+    below.  Nothing may escape this function, because the v2 runner converts
+    an exception into a JSON-RPC protocol error, which tears down the request
+    instead of handing the agent something it can read and retry from; and
     every rejection carries ``is_error``, the only signal on the wire that a
     call failed.  The tool name is client-controlled, so an unknown one is a
     rejection, not a bug.
 
-    ``tool_category`` maps tool name → concern (``memory`` / ``skill`` /
+    ``tool_category`` maps tool name to concern (``memory`` / ``skill`` /
     ``knowledge`` / ``registry``).  Each call opens one categorization-root span
     (named for the tool) tagged ``dsagt.source=<category>``; the subsystem spans
-    the handler opens (``kb.*`` / ``registry.*``) nest under it — and inherit the
-    category, so the source reflects the tool the agent called, not whichever
-    subsystem did the work.  Tracing no-ops outside a project, so this is inert
-    in the single-concern test servers / one-shot tools.
+    the handler opens (``kb.*`` / ``registry.*``) nest under it and inherit the
+    category, so the source reflects the tool the agent called rather than
+    the subsystem that did the work.  Tracing is inert outside a project, so
+    this has no effect in the single-concern test servers or one-shot tools.
 
     ``ready`` is the startup gate: ``initialize`` and ``tools/list`` are answered
     at once, and a tool call waits on it, so the session, the trace store, and
@@ -127,7 +125,7 @@ def build_dispatch_server(
         # mcp server dispatches without validating against input_schema, so
         # malformed calls are rejected here and handlers assume valid input.
         arguments = params.arguments or {}
-        # The tool name is client-controlled — an agent inventing one, or holding
+        # The tool name is client-controlled: an agent inventing one, or holding
         # a stale name across a restart, must get a rejection back rather than an
         # escaping KeyError, which the runner turns into a JSON-RPC protocol
         # error that tears down the request instead of informing the agent.
@@ -137,8 +135,8 @@ def build_dispatch_server(
         if ready is not None:
             await ready.wait()
         # Validation runs inside the span so a malformed call is traced like any
-        # other — an agent looping on bad arguments is exactly what the debug
-        # view exists to show.  An unknown name has no category to tag and stays
+        # other; an agent looping on bad arguments is what the debug view
+        # exists to show.  An unknown name has no category to tag and stays
         # untraced.
         rejection: str | None = None
         with open_span(tool_name, source=tool_category.get(tool_name)) as span:
@@ -155,10 +153,11 @@ def build_dispatch_server(
                 result = {"status": "error", "error": f"Unexpected error: {e}"}
             if span is not None:
                 # The trace-level Request/Inputs/Outputs are read from this
-                # categorization root; record the call's arguments and result so
-                # the MLflow UI shows them as the trace's request and response.  Both are
-                # agent-controlled and land verbatim in mlflow.db, so they go
-                # through ``bound``: credential keys redacted, leaves truncated.
+                # categorization root; record the call's arguments and result
+                # so the MLflow UI shows them as the trace's request and
+                # response.  Both are agent-controlled and are written verbatim
+                # to mlflow.db, so they go through ``bound``: credential keys
+                # redacted, leaves truncated.
                 span.set_inputs(bound(arguments))
                 span.set_outputs(bound(result))
                 if isinstance(result, dict) and result.get("status") == "error":
@@ -189,17 +188,18 @@ _SERVER_STARTED_AT = time.time()
 async def _pin_trace_source(collector, project_dir, interval: float) -> None:
     """Record this session's trace-source token into ``state.yaml`` as soon as it exists.
 
-    The token is what the *next* session's startup catch-up re-reads, so turns
+    The token is what the next session's startup catch-up re-reads, so turns
     lost to an ungraceful kill still reach the store.  It cannot be taken at
     startup: the reader resolves "newest transcript", and until the agent's
-    first message that is the previous session's.  Nor on the periodic pass: its
-    first tick lands ~50 s in, after KB build and the embedder load, and a
-    scripted session is over by then — which loses the whole session.
+    first message that is the previous session's.  Nor on the periodic pass:
+    its first tick runs about 50 s in, after the KB build and the embedder
+    load, and a scripted session is over by then, which loses the whole
+    session.
 
     So poll fast, and accept a source only once it is provably this session's:
     a path modified since the process started (a transcript's mtime advances on
     every append, so a late first look only delays the pin to the next turn),
-    or a non-path token — a DB session id, a session-dir name — that differs
+    or a non-path token (a DB session id, a session-dir name) that differs
     from the previous session's.  Exits once recorded; failure is logged, never
     fatal.
     """
@@ -237,12 +237,12 @@ async def _pin_trace_source(collector, project_dir, interval: float) -> None:
 
 
 async def _periodic_pass(collector, tool_indexer, interval: float, project_dir) -> None:
-    """Periodically run the trace collector + tool-use indexer on wall-clock time.
+    """Periodically run the trace collector and tool-use indexer on wall-clock time.
 
     Runs regardless of tool traffic, so a quiet session (the agent thinking,
     editing with its own tools, plain chat) is still captured.  Both block on
-    disk (+ MLflow / embedding), so they run in a worker thread to keep handlers
-    responsive; a failure is logged, never fatal.
+    disk, MLflow, and embedding, so they run in a worker thread to keep
+    handlers responsive; a failure is logged, never fatal.
     """
     while True:
         await asyncio.sleep(interval)
@@ -255,9 +255,9 @@ async def _periodic_pass(collector, tool_indexer, interval: float, project_dir) 
                 logger.warning("Trace pass failed: %s", e)
         if tool_indexer is not None:
             try:
-                # tick_traced (not tick): opens a code_use categorization root on
-                # the worker thread so the indexer's kb.* writes nest under it
-                # instead of orphaning as untagged top-level traces.
+                # tick_traced opens a code_use categorization root on the
+                # worker thread so the indexer's kb.* writes nest under it as
+                # tagged traces.
                 n = await asyncio.to_thread(tool_indexer.tick_traced)
                 if n:
                     logger.info("Tool-use pass: indexed %d record(s)", n)
@@ -351,7 +351,7 @@ async def _run_stdio(
 
 
 # ---------------------------------------------------------------------------
-# Composition — merge the four concern modules' tools under one Server
+# Composition: merge the four concern modules' tools under one Server
 # ---------------------------------------------------------------------------
 
 
@@ -362,9 +362,9 @@ def create_dsagt_server(
     runtime_dir: str | Path | None = None,
     ready: asyncio.Event | None = None,
 ):
-    """Compose the registry + knowledge + memory + skill tools under one ``Server``.
+    """Compose the registry, knowledge, memory, and skill tools under one ``Server``.
 
-    Test-facing API: build the registries + a (mock) KB, then drive the
+    Test-facing API: build the registries and a (mock) KB, then drive the
     returned server via ``call_tool_sync()``.  ``main()`` constructs the real
     deps from project config before calling this.  Factory imports are lazy to
     keep the concern modules' top-level import of :func:`build_dispatch_server`
@@ -375,7 +375,7 @@ def create_dsagt_server(
     from dsagt.mcp.registry_tools import _registry_tools_and_handlers
     from dsagt.mcp.skill_tools import _skill_tools_and_handlers
 
-    # (category, group) — the category is the dsagt.source bucket stamped on
+    # (category, group): the category is the dsagt.source bucket stamped on
     # every trace rooted at one of that group's tools.
     groups = [
         ("registry", _registry_tools_and_handlers(registry, kb)),
@@ -404,11 +404,11 @@ def create_dsagt_server(
 def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     """Construct the one shared KnowledgeBase from project config.
 
-    The single home for embedding-backend selection + the cross-backend
-    leakage guard that the two former server mains duplicated near-verbatim.
+    The one place embedding-backend selection and the cross-backend leakage
+    guard are defined.
     """
-    # embedding is a backfilled code default (not a written config choice);
-    # chunk_size default in KnowledgeBase itself.
+    # embedding is a code default filled in from DEFAULTS; the chunk_size
+    # default is in KnowledgeBase itself.
     emb_config = config.get("embedding", {})
 
     backend = (emb_config.get("backend") or "local").lower()
@@ -470,8 +470,8 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
         api_key=api_key,
         recency_half_life_days=_recency_half_life(config),
     )
-    # Background-load the embedder so the model is ready when the agent's first
-    # search / kb call lands (otherwise the first call pays the model load).
+    # Background-load the embedder so the model is ready at the agent's first
+    # search or kb call, which otherwise pays the model load.
     kb.preload_default_embedder()
     return kb
 
@@ -480,8 +480,8 @@ def _spawn_catch_up(project_dir: Path, config: dict, kb=None) -> None:
     """Run :func:`dsagt.session.catch_up_extraction` in a daemon thread.
 
     Best-effort background catch-up of the previous session's post-session
-    work (tool-use indexing now; episodic stub later).  Daemon so it never
-    holds the server open; exceptions are logged, never propagated.
+    work.  Daemon so it never holds the server open; exceptions are logged,
+    never propagated.
     """
 
     def _run() -> None:
@@ -500,17 +500,17 @@ def main():
     """Entry point for ``dsagt-server``.
 
     All configuration comes from the project directory:
-    - ``./.dsagt/config.yaml`` → project path + non-secret settings
-    - ``EMBEDDING_*`` env vars → embedding credentials
+    - ``./.dsagt/config.yaml``: project path and non-secret settings
+    - ``EMBEDDING_*`` env vars: embedding credentials
 
-    No CLI arguments.  By contract the agent's launch one-liner is
-    ``cd <pdir> && <agent>``, so cwd is project_dir for the MCP children it
-    spawns.
+    The agent's launch one-liner is ``cd <pdir> && <agent>``, so cwd is
+    project_dir for the MCP children it spawns, and the server takes no
+    CLI arguments.
 
     The server owns the session lifecycle: it appends a new entry to
     ``.dsagt/state.yaml`` (minting the session id) and spawns a background
-    thread that catches up post-session extraction for the *previous*
-    session — no reliable session-end trigger needed.
+    thread that runs the catch-up for the previous session, which needs no
+    session-end trigger.
     """
     from dsagt.observability import (
         find_project_config,
@@ -525,8 +525,9 @@ def main():
         session_tag,
     )
 
-    # First: agents that don't pass their shell to MCP children (codex, cline)
-    # can only reach a shared store or an API embedder through this file.
+    # First: for an agent that starts MCP children from the env block alone
+    # (codex, cline), this file is the one source of a shared-store key or
+    # an API embedder key.
     load_user_env()
 
     project_dir, _cfg = find_project_config()
@@ -539,9 +540,9 @@ def main():
 
     log_file = project_dir / "dsagt_server.log"
     # Default INFO; users opt into DEBUG via DSAGT_LOG_LEVEL=DEBUG.  At DEBUG,
-    # transitive libraries (httpcore, urllib3, llama_index, chromadb) flood
-    # stderr with one line per network op — when an agent pipes the MCP
-    # server's stderr into its own debug stream, human output gets buried.
+    # transitive libraries (httpcore, urllib3, llama_index, chromadb) write
+    # one stderr line per network op, and an agent that pipes the MCP
+    # server's stderr into its own debug stream then buries the human output.
     _level_name = os.environ.get("DSAGT_LOG_LEVEL", "INFO").upper()
     _level = getattr(logging, _level_name, logging.INFO)
     logging.basicConfig(
@@ -552,11 +553,11 @@ def main():
             logging.StreamHandler(),
         ],
     )
-    logger.info("Server starting — project_dir: %s, log: %s", project_dir, log_file)
+    logger.info("Server starting: project_dir: %s, log: %s", project_dir, log_file)
 
     cfg_file = project_dir / ".dsagt" / "config.yaml"
-    # Backfill code defaults (embedding, etc.) the same way ``load_config``
-    # does — the written config carries only the user's init choices.
+    # Fill in code defaults (embedding, etc.) the same way ``load_config``
+    # does; the written config carries only the user's init choices.
     config = resolve_env_vars(
         _deep_merge(DEFAULTS, yaml.safe_load(cfg_file.read_text()) or {})
     )
@@ -574,10 +575,10 @@ def main():
         )
         kb = None
 
-    # Bundled tools are pre-embedded in the shared ~/dsagt-projects/kb_index/
-    # by ``dsagt init`` (shared cache, one-time per machine) and copied into
-    # the project's kb_index at init.  No bundled embedding work happens
-    # here; save_code_spec incurs a single embed at save time.
+    # Bundled tools are embedded into the shared ~/dsagt-projects/kb_index/
+    # by ``dsagt init`` (shared cache, once per machine) and copied into
+    # the project's kb_index at init, so the server embeds nothing at
+    # startup; save_code_spec embeds one entry at save time.
     registry = CodeRegistry(
         runtime_dir=str(project_dir),
         kb=kb,
@@ -612,11 +613,11 @@ def main():
 
         init_tracing("dsagt-server", session_id=session_id)
 
-        # Catch up post-session extraction for the previous session in the
-        # background.  Daemon thread: best-effort, never fails startup.
+        # Run the catch-up for the previous session in the background.
+        # Daemon thread: best-effort, never fails startup.
         _spawn_catch_up(project_dir, config, kb=kb)
 
-        # The periodic trace pass: read the live transcript → MLflow.  The
+        # The periodic pass: read the live transcript into MLflow.  The
         # loop is agent-agnostic; ``make_trace_collector`` returns a collector
         # for any agent with a registered (reader, translator) pair and
         # ``None`` otherwise.  Best-effort — a collector that can't be built

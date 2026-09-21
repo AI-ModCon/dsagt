@@ -1,6 +1,6 @@
 ---
 title: Microbial Isolates
-domain: Genomics — short-read QC and assembly with `fastp` + `megahit`
+domain: Genomics, short-read QC and assembly with `fastp` + `megahit`
 summary: >-
   Register short-read QC and assembly codes, follow the genomics best-practice
   documents, and build a reproducible isolate-processing pipeline against real
@@ -23,7 +23,8 @@ This guide documents a reproducible DSAgt demonstration for microbial isolate da
 - An agent platform installed and **already authenticated** (e.g., `claude` for Claude Code, or
   `goose`).
 - fastp and megahit, installed by [`scripts/setup_env.sh`](scripts/setup_env.sh)
-  (see Setup); conda is optional, the script fetches micromamba when neither is present
+  (see Setup); conda is optional, and the script fetches micromamba when neither
+  conda nor micromamba is present
 
 ## Setup
 
@@ -63,7 +64,7 @@ PROJ=~/dsagt-projects/isolate-pipeline
 
 (The default local embedder needs no key. To use a hosted embedder instead, set
 `embedding.backend: api` in `$PROJ/.dsagt/config.yaml` and export `EMBEDDING_API_KEY`
-in your shell — never written to disk.)
+in your shell; dsagt never writes it to disk.)
 
 ### 3. Collect data and reference material into the project
 
@@ -84,7 +85,7 @@ tar xzf microbial_isolates.tar.gz -C "$PROJ" --exclude='./setup'
 dsagt start isolate-pipeline
 ```
 
-The agent launches from the project directory with the MCP server connected. Serverless — there are no background services to clean up.
+The agent launches from the project directory with the MCP server connected; there are no background services to clean up.
 
 ## Execution
 

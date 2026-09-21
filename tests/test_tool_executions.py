@@ -159,7 +159,7 @@ class TestExecutionMetadata:
     def test_null_session_coerced_to_unknown(self):
         """Regression: a record written outside a minted session stores
         session_id: null.  ``.get(default)`` returns None for a present-but-null
-        key, and a None metadata value makes ChromaDB reject the whole batch —
+        key, and a None metadata value makes ChromaDB reject the whole batch,
         so it must coerce to 'unknown'."""
         record = {"code_name": "ls", "session_id": None}
         meta = execution_metadata(record)
@@ -168,7 +168,7 @@ class TestExecutionMetadata:
 
 
 # ---------------------------------------------------------------------------
-# CodeUseIndexer — idempotent, incremental pass indexing
+# CodeUseIndexer: idempotent, incremental pass indexing
 # ---------------------------------------------------------------------------
 
 
@@ -183,7 +183,7 @@ class TestCodeUseIndexer:
 
     def test_incremental_and_idempotent(self, tmp_path):
         """Each tick indexes only new records; a re-tick with nothing new is a
-        no-op (the bug the cursor-less batch had — re-indexing everything)."""
+        no-op."""
         with patch("dsagt.knowledge.Embedder.create") as mock_make:
             mock_embedder = MagicMock()
             mock_embedder.embed = fake_embed
@@ -212,7 +212,7 @@ class TestCodeUseIndexer:
             kb.close()
 
     def test_tick_traced_opens_no_span_when_nothing_to_index(self, tmp_path):
-        """A pass with no new records must open NO categorization root —
+        """A pass with no new records must open no categorization root;
         otherwise the MLflow trace list fills with empty, null-request traces."""
         pdir = tmp_path / "proj"
         (pdir / ".dsagt").mkdir(parents=True)
@@ -451,7 +451,7 @@ class TestIndexTraceArchive:
             kb.close()
 
     def test_idempotent_reindex(self, tmp_path):
-        """Running index_trace_archive twice doesn't duplicate entries."""
+        """Running index_trace_archive twice does not duplicate entries."""
         trace_dir = tmp_path / "trace_archive"
         self._write_records(trace_dir, [make_wrapper_record(record_id="t1")])
 

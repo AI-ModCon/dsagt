@@ -4,7 +4,7 @@ All commands are available after [installation](index.md#installation) and activ
 
 ## Project Management
 
-<!-- Shared with README.md — edit there, not here. -->
+<!-- Shared with README.md. Edit there, not here. -->
 {%
    include-markdown "../README.md"
    start="<!-- md-shared:cli:start -->"

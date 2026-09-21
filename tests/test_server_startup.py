@@ -3,12 +3,12 @@ Process-level ``dsagt-server`` entry-point tests.
 
 The single merged server (``dsagt.mcp.server:main``) is spawned as a subprocess
 to verify the entry point is wired and fails fast + clearly on a misconfigured
-project — without needing a live MLflow backend or network access.
+project, without a live MLflow backend or network access.
 
 The full boot (init_tracing → shared KB → 20-tool MCP handshake) needs the
 embedding model and a real agent, so it is exercised by ``dsagt smoke-test``,
-not here.  The stdio transport itself — handshake, tools/list, tools/call over
-JSON-RPC — is covered by ``test_mcp_wire.py`` against a config-free server; the
+not here.  The stdio transport itself (handshake, tools/list, tools/call over
+JSON-RPC) is covered by ``test_mcp_wire.py`` against a config-free server; the
 20-tool composition + dispatch contract in-process by ``test_dsagt_server.py``;
 ``_build_kb_from_config``'s credential validation by
 ``test_dsagt_server.py::TestBuildKbFromConfig``.
@@ -38,7 +38,7 @@ class TestServerEntryPoint:
 
     def test_mints_session_into_state_on_boot(self, tmp_path):
         """The server owns the session lifecycle: on boot it appends a session
-        entry to ``.dsagt/state.yaml`` (serverless — no MLflow backend needed).
+        entry to ``.dsagt/state.yaml`` (serverless; no MLflow backend needed).
 
         Session minting happens before the (slow) KB build, so the state file
         appears within a second; we poll for it, then terminate.

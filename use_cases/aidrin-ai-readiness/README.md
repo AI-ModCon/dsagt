@@ -1,8 +1,8 @@
 ---
 title: AIDRIN
-domain: AI data readiness — `aidrin` metrics (quality, fairness, privacy) on UCI Adult
+domain: AI data readiness, `aidrin` metrics (quality, fairness, privacy) on UCI Adult
 summary: >-
-  Apply AIDRIN through DSAgt to a single tabular dataset (UCI Adult) — 15
+  Apply AIDRIN through DSAgt to a single tabular dataset (UCI Adult), 15
   metrics spanning data-quality, impact-on-AI, fairness-and-bias, and
   data-governance.
 status: published
@@ -13,7 +13,7 @@ order: 50
 
 > **Estimated time:** ~15 minutes
 
-This tutorial demonstrates [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) on a single tabular dataset — metrics from all four of AIDRIN's
+This tutorial demonstrates [AIDRIN](https://github.com/idtlab/AIDRIN) (AI Data Readiness Inspector) on a single tabular dataset: metrics from all four of AIDRIN's
 categories, with execution provenance.
 For how the `aidrin` skill and code are set up and what rules the agent follows, see the
 [AI-Readiness Check](../../docs/readiness.md) page.
@@ -85,7 +85,7 @@ four categories:
 Then give me a readiness verdict organized by the four categories.
 ```
 
-**Expect** — the exact commands and representative results (positional args; JSON to stdout):
+**Expect:** the exact commands and representative results (positional args; JSON to stdout):
 
 **Data quality**
 
@@ -126,7 +126,7 @@ The agent should produce a four-part verdict: **quality** is clean (complete, no
 moderate `hours.per.week` outliers); **impact** shows `education.num`/`age` as the strongest income
 predictors; **fairness** flags a large gender gap in the target (men ~2.8× more likely `>50K`); and
 **governance** flags severe re-identification risk (`k = 1`, `l = 1`) on the `age,sex,race`
-quasi-identifiers — bin or suppress before sharing.
+quasi-identifiers; bin or suppress before sharing.
 
 ### 3. Batch several metrics from one config
 

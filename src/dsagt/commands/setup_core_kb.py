@@ -1,18 +1,19 @@
 """
-Knowledge-base asset builder — the engine behind ``dsagt init``'s KB setup.
-``session._provision_kb`` calls :func:`resolve_assets` + :func:`ensure_assets`
-to build the requested assets into the shared ``~/dsagt-projects/kb_index/``
-once, then copies them per project.
+Knowledge-base asset builder for ``dsagt init``'s KB setup.
+``session._provision_kb`` calls :func:`resolve_assets` and
+:func:`ensure_assets` to build the requested assets into the shared
+``~/dsagt-projects/kb_index/`` once, then copies them per project.
 
 Asset namespace (the ``--include`` / ``--exclude`` selectors on ``dsagt init``):
 - ``codes``                the base-skill code specs (cheap, local)
 - skill catalogs           ``genesis`` (default), ``scientific``, ``composio``, …
-- scientific collections   ``nemo_curator`` (clones the external repo; docs + papers only, not source)
+- scientific collections   ``nemo_curator`` (fetches the external repository;
+                           docs and papers only)
 
-:data:`DEFAULT_ASSETS` (the base-skill codes + the genesis skill catalog) is the
-cheap set installed automatically on a machine's first project.  Embedding
-config comes from the project's ``.dsagt/config.yaml`` (local backend by
-default — no credentials needed).
+:data:`DEFAULT_ASSETS` (the base-skill codes and the genesis skill catalog)
+is the cheap set installed automatically on a machine's first project.
+Embedding config comes from the project's ``.dsagt/config.yaml``; the
+default local backend needs no credentials.
 """
 
 import logging
@@ -39,28 +40,26 @@ logger = logging.getLogger(__name__)
 DEFAULT_INDEX_DIR = REGISTRY_DIR / "kb_index"
 
 # Default exclusion patterns applied to every core-KB ingest unless a
-# collection overrides them.  Goal: skip content that has low retrieval
-# value for an agent learning to *use* a library, while keeping docs,
-# tutorials, examples (concrete usage patterns), the main library source
-# (call signatures + docstrings + type hints), and packaging metadata
-# the agent needs to install dependencies correctly.
+# collection overrides them.  They skip content with low retrieval value
+# for an agent learning to use a library, and keep docs, tutorials,
+# examples (concrete usage patterns), the main library source (call
+# signatures, docstrings, type hints), and packaging metadata the agent
+# needs to install dependencies correctly.
 #
-# What's excluded and why:
+# Excluded, with the reason:
 # - tests/, test/, conftest.py, test_*.py, *_test.py
-#       Test internals teach how the library is *tested*, not how it's used.
+#       Test internals describe how the library is tested, not how it is
+#       used.
 # - __pycache__/, .git/, *.egg-info/, .pytest_cache/, .mypy_cache/
-#       Build/cache artifacts.  Pure noise.
+#       Build and cache artifacts.
 # - _*.py
-#       Python convention for private modules — implementation detail, not API.
+#       Python convention for private modules: implementation detail.
 # - CHANGELOG*, HISTORY*
-#       Historical, not how-to-use.
+#       Historical.
 #
-# Notably NOT excluded:
-# - pyproject.toml, setup.py, setup.cfg
-#       Packaging metadata.  The agent uses these to determine which
-#       version of a library to install when registering a tool that
-#       depends on it ("uv pip install nemo_curator>=X.Y").  Without
-#       pyproject.toml in the index, the agent has to guess.
+# Kept: pyproject.toml, setup.py, setup.cfg.  The agent uses this packaging
+# metadata to determine which version of a library to install when
+# registering a tool that depends on it ("uv pip install nemo_curator>=X.Y").
 DEFAULT_EXCLUDE_PATTERNS = [
     "tests",
     "test",
@@ -102,12 +101,11 @@ quality assessment strategies.
                 "type": "github",
                 "url": "https://github.com/NVIDIA-NeMo/Curator",
                 "branch": "main",
-                # Docs only — the library source (and the notebook/script
-                # tutorials) are deliberately omitted.  A vector index is a
-                # poor way to retrieve code (the agent's native file search
-                # beats it), and skipping the source tree keeps ingestion
-                # fast for onboarding.  clone_github still pulls the top-level
-                # files (README, pyproject.toml, …) for install metadata.
+                # Docs only.  The agent's native file search retrieves code
+                # better than a vector index, and skipping the source tree
+                # and the notebook/script tutorials keeps ingestion fast at
+                # onboarding.  clone_github also copies the top-level files
+                # (README, pyproject.toml, …) for install metadata.
                 "include": ["docs"],
             },
         ],
@@ -130,7 +128,7 @@ def _github_api_headers() -> dict[str, str]:
     """The API headers, with the shell's GitHub token when it has one.
 
     The token is read from the shell for the request and written nowhere;
-    a private repository needs it, a public one does not.
+    a private repository needs it.
     """
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "dsagt"}
     # gh, GitHub Actions runners and many setups export GH_TOKEN instead.
@@ -217,9 +215,9 @@ def clone_github(
     fallback is the user's git for a repository the API refuses, which is a
     private repository the shell has no ``GITHUB_TOKEN`` for but the user's
     ssh key can reach.  When *include* is set, the named subdirectories are
-    copied AND any top-level files at the repo root (README, pyproject.toml,
-    setup.py, LICENSE, etc.).  Top-level files are usually small and contain
-    critical packaging metadata the agent needs to install dependencies
+    copied along with any top-level files at the repo root (README,
+    pyproject.toml, setup.py, LICENSE, etc.).  Top-level files are small and
+    hold the packaging metadata the agent needs to install dependencies
     correctly when it registers tools against the library.  The commit the
     tree was taken at and the *branch* (or tag) asked for are written to
     ``<dest>/SOURCE_COMMIT`` and ``<dest>/SOURCE_REF`` so a consumer can
@@ -255,7 +253,7 @@ def clone_github(
                 if src.exists():
                     shutil.copytree(src, dest / subdir, dirs_exist_ok=True)
             # Plus any top-level files at the repo root (pyproject.toml,
-            # setup.py, README, LICENSE, ...).  These are tiny and the
+            # setup.py, README, LICENSE, ...).  These are small and the
             # agent uses them to resolve install commands.
             for f in tmp_path.iterdir():
                 if f.is_file():
@@ -276,7 +274,7 @@ def download_arxiv(paper_id: str, dest: Path):
             tar_path.write_bytes(response.content)
             try:
                 with tarfile.open(tar_path, "r:*") as tar:
-                    # FIX 3: Add filter parameter for Python 3.14 compatibility
+                    # ``filter`` is required from Python 3.14.
                     tar.extractall(dest / paper_id, filter="data")
                 tar_path.unlink()
                 return
@@ -302,24 +300,21 @@ def setup_collection(
 ) -> dict:
     """Download sources and ingest a collection.
 
-    When *kb* is provided, the existing KnowledgeBase is reused — its
-    embedder cache stays warm so the local model isn't reloaded per
-    collection.  When None (default for backwards
-    compat with direct callers), a fresh KB is constructed and closed
-    around this call.
+    When *kb* is provided, the existing KnowledgeBase is reused, so its
+    loaded embedder serves every collection.  When None, a fresh KB is
+    constructed and closed around this call.
 
     ``ensure_assets`` always passes a shared *kb* so a multi-asset build
-    pays the model-load cost once, not N times.  It also prints the
-    user-facing progress line, so this function stays quiet.
+    pays the model-load cost once.  It also prints the user-facing
+    progress line, so this function prints only the per-collection result.
     """
     with tempfile.TemporaryDirectory() as tmp:
         download_dir = Path(tmp) / name
         download_dir.mkdir()
 
-        # Download all sources.  If any source fails, raise immediately —
-        # silently skipping a 404 arxiv URL or a broken git clone produces
-        # a half-built collection the user can't see is incomplete.  Better
-        # to fail loudly and have the user re-run after fixing the issue.
+        # Download all sources.  A failed source raises immediately:
+        # skipping a 404 arxiv URL or a broken git clone would produce a
+        # half-built collection the user cannot tell is incomplete.
         for source in config["sources"]:
             if source["type"] == "github":
                 clone_github(
@@ -376,7 +371,7 @@ def _current_dsagt_version() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Installable KB assets — the namespace for ``dsagt init``'s
+# Installable KB assets: the namespace for ``dsagt init``'s
 # ``--include`` / ``--exclude`` selectors.
 #
 # Three kinds, all built into the shared ``~/dsagt-projects/kb_index/`` and
@@ -385,20 +380,20 @@ def _current_dsagt_version() -> str:
 #   <catalog>      a skill-catalog source from ``skills.KNOWN_SOURCES``
 #                  (e.g. "genesis", "k-dense-ai", "composio", "antigravity")
 #   <collection>   a heavy scientific doc collection from ``COLLECTIONS``
-#                  (e.g. "nemo_curator" — clones external repos)
+#                  (e.g. "nemo_curator", which fetches an external repository)
 #
 # DEFAULT_ASSETS is the cheap core a first-ever ``dsagt init`` installs
 # automatically; everything else is opt-in via ``--include``.
 # ---------------------------------------------------------------------------
 
-#: The default per-project / first-init asset set: the base-skill codes + the
-#: genesis skill catalog.  Kept deliberately cheap (one small local embed +
-#: one git clone) so onboarding needs no manual step.
+#: The default per-project / first-init asset set: the base-skill codes and
+#: the genesis skill catalog.  Kept cheap (one small local embed and one
+#: repository fetch) so onboarding needs no manual step.
 DEFAULT_ASSETS: tuple[str, ...] = ("codes", "genesis")
 
 
 def all_assets() -> list[str]:
-    """Every installable asset name, in canonical install order (cheap → heavy)."""
+    """Every installable asset name, in canonical install order (cheap to heavy)."""
     from dsagt.skills import KNOWN_SOURCES
 
     return ["codes", *KNOWN_SOURCES, *COLLECTIONS]
@@ -426,9 +421,8 @@ def resolve_assets(
 
     - ``include`` and ``exclude`` are mutually exclusive.
     - The literal ``"all"`` expands to every installable asset.
-    - No selector → :data:`DEFAULT_ASSETS`.
-    - ``--exclude all`` → ``[]`` (empty stub; the project's KB is created but
-      holds no bundled content).
+    - No selector gives :data:`DEFAULT_ASSETS`.
+    - ``--exclude all`` gives ``[]``: the project's KB is created empty.
 
     Returns names in canonical install order so a build pays the cheap
     (local) assets before the heavy (network) ones.
@@ -470,7 +464,7 @@ def _model_is_cached(model_id: str) -> bool:
         from huggingface_hub import try_to_load_from_cache
 
         # The local embedder loads the repository's ONNX export; a str path
-        # back means the file is cached (None / sentinel ⇒ not cached).
+        # back means the file is cached (None or a sentinel means it is not).
         return isinstance(try_to_load_from_cache(model_id, "onnx/model.onnx"), str)
     except Exception:
         return True
@@ -568,8 +562,8 @@ def ensure_assets(
 
     Idempotent: an asset whose collection already exists is skipped unless
     *rebuild*, so a second ``dsagt init`` pays nothing.  Reuses *kb* when
-    given (keeps the embedder model warm); otherwise constructs and closes
-    one.  Best-effort per asset for catalogs (a clone failure warns and
+    given (one embedder load); otherwise constructs and closes one.
+    Best-effort per asset for catalogs (a clone failure warns and
     continues); a heavy-collection failure propagates.
 
     Returns ``{"built": [...], "skipped": [...]}``.
@@ -578,8 +572,8 @@ def ensure_assets(
 
     index_dir.mkdir(parents=True, exist_ok=True)
 
-    # Decide what actually needs building first, so we stay silent and cheap
-    # when a later init's requested set is already cached.
+    # Decide what needs building first, so a later init whose requested set
+    # is already cached prints nothing and loads no model.
     to_build = [
         a
         for a in asset_names
@@ -610,9 +604,9 @@ def ensure_assets(
     built: list[str] = []
     try:
         # The model loads on the first embed below; announce it so the load
-        # (or one-time download) isn't a silent pause.  Distinguish the two so
-        # we don't claim a download when the model is already cached.  API
-        # backend has no local model to load.
+        # (or one-time download) is a labeled pause.  The two are told apart
+        # so a cached model is announced as a load.  The API backend has no
+        # local model to load.
         if embedding_backend == "local":
             from dsagt.knowledge import LocalEmbedder
 
@@ -634,7 +628,7 @@ def ensure_assets(
                 try:
                     sync_source(asset, kb=kb, force=rebuild)
                     built.append(asset)
-                except Exception as e:  # noqa: BLE001 — best-effort, keep going
+                except Exception as e:  # noqa: BLE001  best-effort, keep going
                     print(f"    skipped {asset} ({e})", flush=True)
             else:  # heavy scientific collection
                 print(

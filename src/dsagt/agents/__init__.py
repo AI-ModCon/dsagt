@@ -5,28 +5,27 @@ Generates platform-specific config files (MCP server entries, agent
 instructions, env vars) from the single ``.dsagt/config.yaml``.  Launches
 the agent process in the foreground and blocks until it exits.
 
-BYOA: each agent talks directly to its own provider.  DSAGT forces no
-telemetry env on the agent — agent LLM-call history is recovered
-post-hoc from the agent's on-disk session record, not by native OTel
-emission.  We set only ``MLFLOW_TRACKING_URI`` (so the MCP servers and
-any MLflow client log to the project's store) and per-project state
-dirs.  Model selection / API keys / provider base URLs are the user's
+Each agent talks directly to its own provider, and its LLM-call history
+is recovered from the agent's on-disk session record.  The agent's
+environment gets ``MLFLOW_TRACKING_URI`` (so the MCP servers and any
+MLflow client log to the project's store) and per-project state dirs.
+Model selection, API keys, and provider base URLs are the user's
 responsibility.
 
-Each agent's quirks live in its own module — see ``base.py`` for the
-:class:`AgentSetup` ABC and one of the subclass modules
-(``claude.py``, ``goose.py``, ``cline.py``, ``codex.py``, ``opencode.py``)
-for the platform-specific details.
+Each agent's platform-specific details are defined in its own module:
+``base.py`` holds the :class:`AgentSetup` ABC, and ``claude.py``,
+``goose.py``, ``cline.py``, ``codex.py``, and ``opencode.py`` hold the
+subclasses.
 
 Public API exported here:
 
-- :func:`agent_env` — build the env dict for an agent process.
-- :func:`agent_command` — argv list for interactive launch.
-- :func:`static_agent_record` — write instructions + state dirs.
-- :func:`static_agent_files_present` — has the static record been written?
-- :func:`dynamic_agent_record` — write runtime-dependent files.
-- :func:`refresh_native_skills` — re-run the native-skills mirror on demand.
-- :func:`launch_agent` — fork the agent and block until exit.
+- :func:`agent_env`: build the env dict for an agent process.
+- :func:`agent_command`: argv list for interactive launch.
+- :func:`static_agent_record`: write instructions and state dirs.
+- :func:`static_agent_files_present`: whether the static record exists.
+- :func:`dynamic_agent_record`: write runtime-dependent files.
+- :func:`refresh_native_skills`: re-run the native-skills mirror on demand.
+- :func:`launch_agent`: fork the agent and block until exit.
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Agent registry (string name → setup class)
+# Agent registry (string name to setup class)
 # ---------------------------------------------------------------------------
 
 _AGENT_CLASSES: tuple[type[AgentSetup], ...] = (
@@ -69,7 +68,7 @@ AGENTS: dict[str, type[AgentSetup]] = {cls.name: cls for cls in _AGENT_CLASSES}
 def _setup_for(agent_name: str) -> AgentSetup:
     """Return a fresh :class:`AgentSetup` instance for ``agent_name``.
 
-    Raises ``KeyError`` with a helpful message if the agent isn't registered.
+    Raises ``KeyError`` naming the registered agents when the name is unknown.
     """
     cls = AGENTS.get(agent_name)
     if cls is None:
@@ -110,10 +109,9 @@ def agent_env(config: dict) -> dict:
 
     env["MLFLOW_TRACKING_URI"] = resolve_tracking_uri(config)
 
-    # BYOA: only dsagt-owned env (per-project state dirs).  DSAGT forces
-    # no telemetry env on the agent — agent traces are recovered post-hoc
-    # from the on-disk transcript.  Provider credentials live in the
-    # user's shell.
+    # Only dsagt-owned env (per-project state dirs).  Agent traces are
+    # recovered from the on-disk transcript, and provider credentials are
+    # read from the user's shell.
     env.update(setup.runtime_env(config))
 
     return env
@@ -129,10 +127,10 @@ def static_agent_record(
     agent: str,
     working_dir: str | Path,
 ) -> list[str]:
-    """Write the agent's static project files: instructions + state dirs.
+    """Write the agent's static project files: instructions and state dirs.
 
     Idempotent.  If the dsagt marker is already in the instructions file,
-    the write is skipped — preserves any user edits made between init
+    the write is skipped, which preserves any user edits made between init
     and start.  The instructions carry the AI-readiness check paragraph
     when the project keeps that check on (``readiness.auto_assess``).
     """
@@ -160,9 +158,8 @@ def dynamic_agent_record(
       - Resolved the agent and stored it in ``config["agent"]``
       - Built ``env`` via :func:`agent_env`
 
-    No launch shim is written — ``dsagt init`` collapses to config +
-    instructions + MCP config; the user starts the agent directly in the
-    project dir or via ``dsagt start``.
+    ``dsagt init`` writes config, instructions, and MCP config; the user
+    starts the agent directly in the project dir or via ``dsagt start``.
     """
     setup = _setup_for(config["agent"])
     actions = setup.write_dynamic(
@@ -180,12 +177,12 @@ def dynamic_agent_record(
 def refresh_native_skills(working_dir: str | Path) -> list[str]:
     """Re-run the native-skills mirror for the project's configured agent.
 
-    Called by the MCP tools right after a skill is installed/created or a
+    Called by the MCP tools right after a skill is installed or created or a
     code is registered, so the native skills dir is current the moment the
-    files land — the next session auto-discovers them no matter how the agent
-    is launched (bare or ``dsagt start``).  An already-running session
+    files are written, and the next session auto-discovers them however the
+    agent is launched (bare or ``dsagt start``).  An already-running session
     enumerates its skills at startup (agent-side behavior), but can use a
-    fresh skill right away by reading its SKILL.md — which is all native
+    fresh skill right away by reading its SKILL.md, which is all native
     invocation does.  Idempotent (manifest-tracked, the same mirror
     :func:`dynamic_agent_record` runs at init/start).
 
@@ -193,7 +190,7 @@ def refresh_native_skills(working_dir: str | Path) -> list[str]:
     agent: a directory before ``dsagt init`` has no native skills dir (the
     test-facing ``create_*_server`` wrappers over bare tmp dirs).
     """
-    # Lazy: session drags in knowledge/provenance at module level, which this
+    # Lazy: session imports knowledge/provenance at module level, which this
     # package (imported by the CLI at cold start) must not pay for.
     from dsagt.session import read_config_file
 
@@ -244,7 +241,7 @@ __all__ = [
     "launch_agent",
     "static_agent_files_present",
     "static_agent_record",
-    # Re-exported for tests + other in-tree consumers
+    # Re-exported for tests and other in-tree consumers
     "_build_mcp_servers_dict",
     "_mcp_env_block",
     "_mcp_server_args",

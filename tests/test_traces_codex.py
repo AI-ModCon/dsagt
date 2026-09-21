@@ -146,8 +146,8 @@ def test_durations_are_bounded_per_turn():
     for s in trace.spans:
         if s["parent_id"] is not None:
             assert s["end_time"] is not None and s["end_time"] > s["start_time"]
-    # turn 1's final LLM is bounded by turn 2's prompt? No — turns are
-    # independent, so its last span falls back to 1s, not the gap to turn 2.
+    # Turns are independent, so turn 1's final LLM is not bounded by turn 2's
+    # prompt: its last span falls back to 1s, not the gap to turn 2.
     roots = [s for s in trace.spans if s["parent_id"] is None]
     t1_last_llm = [
         s
@@ -208,7 +208,7 @@ def test_end_to_end_through_the_sink(mlflow_sqlite):
     # the tool-bearing turn rendered llm + tool spans under its agent root
     shapes = {len(t.data.spans) for t in traces}
     # tool-bearing turn: root + 2 llm + 2 tool = 5; second turn: root + 1 llm = 2.
-    # Pin both — `5 in shapes` alone would pass even if turn 2 collapsed.
+    # Pin both: `5 in shapes` alone would pass even if turn 2 collapsed.
     assert shapes == {5, 2}
 
 
@@ -232,8 +232,8 @@ def _token_count(ts, *, input_tokens, output_tokens, cached=0):
 
 
 def test_token_usage_and_model_are_carried_once_per_llm_call():
-    """A call's ``token_count`` lands on its assistant message, or on its first
-    tool call when the call produced no text — so a tool-only call still
+    """A call's ``token_count`` is recorded on its assistant message, or on its
+    first tool call when the call produced no text, so a tool-only call still
     counts.  OpenAI's cached count is a subset of input and passes through."""
     records = [
         _rec("2026-06-19T15:00:00.000Z", "session_meta", {"cwd": "/p"}),

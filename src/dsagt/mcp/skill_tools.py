@@ -1,19 +1,19 @@
 """MCP tools for skill discovery, install, and catalog sources.
 
-The full skill surface of ``dsagt-server``, consolidated from the two former
-servers: register a project skill (``save_skill``), enable + list external
-catalog sources (``add_skill_source`` / ``list_skill_sources``), search the
-catalog (``search_skills``), and install a catalog skill into the project
-(``install_skill``).  The catalog data plane + router live in
-:mod:`dsagt.skills`; these handlers are the thin MCP wiring over it.
+The skill surface of ``dsagt-server``: register a project skill
+(``save_skill``), enable and list external catalog sources
+(``add_skill_source`` / ``list_skill_sources``), search the catalog
+(``search_skills``), and install a catalog skill into the project
+(``install_skill``).  The catalog store and router are defined in
+:mod:`dsagt.skills`; these handlers are the MCP layer over it.
 
-Installed/created skills are natively auto-discovered by every supported agent,
-so ``search_skills`` covers only the not-yet-installed *catalog* tier (plus the
-no-embedder keyword fallback).
+Installed and created skills are natively auto-discovered by every supported
+agent, so ``search_skills`` covers the not-yet-installed catalog tier (plus
+the no-embedder keyword fallback).
 
-These definitions + handlers run inside the merged ``dsagt-server`` (see
-:mod:`dsagt.mcp.server`); ``create_skill_server`` is retained only as a
-test-facing constructor.
+These definitions and handlers run inside the merged ``dsagt-server`` (see
+:mod:`dsagt.mcp.server`); ``create_skill_server`` is a test-facing
+constructor.
 """
 
 import asyncio
@@ -42,9 +42,9 @@ async def _handle_save_skill(
 
     Writes SKILL.md to ``<project>/skills/<name>/`` and mirrors it into the
     agent's native skills dir immediately, where every supported agent
-    auto-discovers it from its next session.  No KB indexing —
-    ``search_skills`` covers only the not-yet-installed *catalog* tier, since
-    installed skills are already natively discoverable.
+    auto-discovers it from its next session.  Installed skills are natively
+    discoverable, so ``search_skills`` covers the not-yet-installed catalog
+    tier and the skill is left out of the KB.
     """
     spec = arguments["spec"]
     if isinstance(spec, str):
@@ -164,10 +164,11 @@ async def _handle_install_skill(
 ) -> str:
     """Install a catalog skill into ``<project>/skills/<name>/``.
 
-    The skill's files land on disk and are mirrored into the agent's native
-    skills dir immediately — usable right away (the agent reads/follows its
-    SKILL.md, which is all native invocation does); hands-free auto-discovery
-    kicks in at the agent's next session, with no user action.
+    The skill's files are written to disk and mirrored into the agent's
+    native skills dir immediately, so the skill is usable right away (the
+    agent reads and follows its SKILL.md, which is all native invocation
+    does); auto-discovery takes effect at the agent's next session, with no
+    user action.
     """
     from dsagt.skills import SkillRouter
 
@@ -197,11 +198,11 @@ async def _handle_install_skill(
             "call delete_skill to remove it."
         )
 
-    # Bare confirmation by design: the install→use model and the
+    # A bare confirmation: the install-then-use model and the
     # license/PROVENANCE capture are already in the agent's instructions and on
-    # disk (PROVENANCE.txt), so repeating them on every install is just noise.
+    # disk (PROVENANCE.txt).
     verb = "Updated" if info["action"] == "updated" else "Installed"
-    reply = f"{verb} '{info['name']}' → {info['dest_dir']}/"
+    reply = f"{verb} '{info['name']}' at {info['dest_dir']}/"
     if stored:
         reply += " Its scripts are registered codes; run each as:\n" + "\n".join(
             f"Run it as: {line}" for line in stored
@@ -215,7 +216,7 @@ async def _handle_add_skill_source(
     kb: KnowledgeBase,
     runtime_dir: Path,
 ) -> dict:
-    """Enable a skill source (known name or git URL): clone + index the catalog.
+    """Enable a skill source (known name or git URL): fetch and index the catalog.
 
     ``force`` re-clones a cached source so skills added upstream since the
     first sync are indexed; without it a cached clone is only re-indexed.
@@ -254,18 +255,17 @@ async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> d
     """List known skill sources, each flagged synced/available with its count.
 
     A source is ``synced`` (searchable via ``search_skills``) only after an
-    ``add_skill_source`` call has cloned + indexed it; otherwise it is
-    ``available`` (known name + URL, nothing indexed yet).  Reporting the
-    flag + ``indexed`` count inline lets the agent tell the two apart from
-    this one list.
+    ``add_skill_source`` call has fetched and indexed it; otherwise it is
+    ``available`` (known name and URL, nothing indexed).  The flag and the
+    ``indexed`` count are reported inline so the agent can tell the two
+    apart from this one list.
     """
     from dsagt.registry import CATALOG_COLLECTION_PREFIX, catalog_collection
     from dsagt.skills import KNOWN_SOURCES, SkillRouter, _repo_slug
 
     synced = {c for c in kb.collections if c.startswith(CATALOG_COLLECTION_PREFIX)}
 
-    # Single source of truth for the per-source synced/indexed view (shared
-    # with the CLI `skills list --catalog`).
+    # The one definition of the per-source synced/indexed view.
     sources = {
         s["name"]: {
             "url": s["url"],
@@ -276,8 +276,8 @@ async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> d
         for s in SkillRouter(kb=kb).list_sources()
     }
 
-    # Surface any synced catalog whose source isn't in KNOWN_SOURCES (added
-    # by raw GitHub URL) so the count is never silently dropped.
+    # List any synced catalog whose source is absent from KNOWN_SOURCES
+    # (added by raw GitHub URL) so its count is reported.
     known_colls = {
         catalog_collection(_repo_slug(s["url"])) for s in KNOWN_SOURCES.values()
     }
@@ -291,14 +291,14 @@ async def _handle_list_skill_sources(arguments: dict, *, kb: KnowledgeBase) -> d
             "add_skill_source <name|url> to sync a source whose synced=false; "
             "then search_skills to browse. search_skills only sees synced sources."
             if any_synced
-            else "No catalog synced yet — add_skill_source <name|url> "
+            else "No catalog synced yet: add_skill_source <name|url> "
             "(e.g. 'k-dense-ai') to enable one, then search_skills to browse."
         ),
     }
 
 
 # ---------------------------------------------------------------------------
-# Tool defs + handler map (used by the merged server and the test wrapper)
+# Tool defs and handler map (used by the merged server and the test wrapper)
 # ---------------------------------------------------------------------------
 
 
@@ -311,7 +311,7 @@ def _skill_tools_and_handlers(
 
     Combined with the other concern modules' tools under one MCP ``Server`` by
     :func:`dsagt.mcp.server.create_dsagt_server`.  ``runtime_dir`` (the project
-    dir, where skills install + sources persist) falls back to the skill
+    dir, where skills install and sources persist) falls back to the skill
     registry's ``runtime_dir`` then the KB index's parent.
     """
     rt: Path | None = Path(runtime_dir) if runtime_dir else None
@@ -340,16 +340,16 @@ def _skill_tools_and_handlers(
                 "Register a skill (agent workflow / instructions) into "
                 "<project>/skills/<name>/SKILL.md, mirrored into the agent's "
                 "native skills dir immediately so future sessions "
-                "auto-discover it — no restart or user action needed.  "
-                "Symmetric with save_code_spec — use this when you've "
+                "auto-discover it with no restart or user action.  "
+                "Symmetric with save_code_spec: use this when you have "
                 "designed a reusable instruction set you want future "
                 "sessions to load automatically."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    # ``anyOf`` for spec mirrors save_code_spec — accept
-                    # both structured object and JSON-encoded string for
+                    # ``anyOf`` for spec mirrors save_code_spec: accept
+                    # both a structured object and a JSON-encoded string for
                     # MCP clients that serialize nested args.
                     "spec": {
                         "description": "Skill spec (object or JSON-encoded string)",
@@ -438,8 +438,8 @@ def _skill_tools_and_handlers(
                 "Enable an external agent-skill source (a known name: "
                 "'genesis', 'k-dense-ai', 'anthropic', 'antigravity', "
                 "'composio'; or a git URL on any host). "
-                "Clones it and indexes its skills into the searchable catalog "
-                "(search_skills). Does NOT load them into context."
+                "Fetches it and indexes its skills into the searchable catalog "
+                "(search_skills); the skills stay out of context until installed."
             ),
             inputSchema={
                 "type": "object",
@@ -461,7 +461,7 @@ def _skill_tools_and_handlers(
         ),
         types.Tool(
             name="list_skill_sources",
-            description="List known + synced external skill sources and their indexed catalogs.",
+            description="List known and synced external skill sources and their indexed catalogs.",
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
@@ -490,11 +490,11 @@ def _skill_tools_and_handlers(
             name="install_skill",
             description=(
                 "Install a skill from the external catalog (found via search_skills) "
-                "into this project. Copies SKILL.md + scripts/references and mirrors "
-                "it into the agent's native skills dir — usable immediately (read and "
-                "follow its SKILL.md); future sessions auto-discover it natively with "
-                "no user action. A skill already in <project>/skills/ (a base skill, "
-                "or one installed earlier) is left as it is."
+                "into this project. Copies SKILL.md, scripts, and references and "
+                "mirrors it into the agent's native skills dir, usable immediately "
+                "(read and follow its SKILL.md); future sessions auto-discover it "
+                "natively with no user action. A skill already in <project>/skills/ "
+                "(a base skill, or one installed earlier) is left as it is."
             ),
             inputSchema={
                 "type": "object",

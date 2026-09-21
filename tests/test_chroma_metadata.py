@@ -1,8 +1,8 @@
 """
-Tests for Phase 2 Step 1: ChromaIndex metadata support and KnowledgeBase.add_entries.
+Tests for ChromaIndex metadata support and KnowledgeBase.add_entries.
 
 Tests the metadata-aware add/search on ChromaIndex, the where parameter
-threading through KnowledgeBase.search, and the new add_entries method
+threading through KnowledgeBase.search, and the add_entries method
 for structured entry ingestion.
 """
 
@@ -38,14 +38,14 @@ def fake_embed(texts: list[str]) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# ChromaIndex — metadata on add
+# ChromaIndex: metadata on add
 # ---------------------------------------------------------------------------
 
 
 class TestChromaIndexMetadataAdd:
 
     def test_add_without_metadata(self):
-        """add() without metadatas works as before."""
+        """add() without metadatas stores the entries."""
         idx = ChromaIndex(collection_name="test_no_meta")
         emb = np.random.randn(3, 8).astype(np.float32)
         idx.add(emb)
@@ -85,7 +85,7 @@ class TestChromaIndexMetadataAdd:
 
 
 # ---------------------------------------------------------------------------
-# ChromaIndex — where filter on search
+# ChromaIndex: where filter on search
 # ---------------------------------------------------------------------------
 
 
@@ -154,7 +154,7 @@ class TestChromaIndexWhereSearch:
 
 
 # ---------------------------------------------------------------------------
-# ChromaIndex — persistence with metadata
+# ChromaIndex: persistence with metadata
 # ---------------------------------------------------------------------------
 
 
@@ -180,7 +180,7 @@ class TestChromaIndexPersistence:
 
 
 # ---------------------------------------------------------------------------
-# KnowledgeBase.search — where parameter
+# KnowledgeBase.search: where parameter
 # ---------------------------------------------------------------------------
 
 
@@ -271,7 +271,7 @@ class TestAddEntries:
             kb.close()
 
     def test_add_entries_creates_collection(self, mock_kb):
-        """add_entries creates a new collection if it doesn't exist."""
+        """add_entries creates a new collection if it does not exist."""
         result = mock_kb.add_entries(
             texts=["fact one", "fact two"],
             collection="new_coll",

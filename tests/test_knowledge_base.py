@@ -107,7 +107,7 @@ class TestAPIEmbedder:
         client.close()
 
     def test_model_name_sent_verbatim(self):
-        """The model string is sent unchanged — no provider prefix.
+        """The model string is sent unchanged, with no provider prefix.
 
         Gateways route by alias, so lab-specific suffixes
         (``text-embedding-3-small-project``) and HuggingFace-style names
@@ -124,7 +124,7 @@ class TestAPIEmbedder:
             client.close()
 
     def test_embeddings_url_built_from_base_url(self):
-        """The embeddings route hangs off the (``/v1``) base URL root."""
+        """The embeddings route is under the (``/v1``) base URL root."""
         client = APIEmbedder(
             api_key="k",
             base_url="https://gw.example.com/v1/",
@@ -208,7 +208,7 @@ class TestAPIEmbedderErrors:
 
     @patch("dsagt.knowledge.time.sleep")
     def test_authentication_error_propagates_immediately(self, mock_sleep):
-        """A 401 must NOT be retried — this is a misconfiguration, not transient."""
+        """A 401 is not retried: it is a misconfiguration, not a transient error."""
         client = APIEmbedder(api_key="bad-key", base_url="http://test")
         with patch.object(
             client._client,
@@ -231,7 +231,7 @@ class TestAPIEmbedderErrors:
             with pytest.raises(httpx.HTTPStatusError):
                 client.embed(["test"])
 
-        # max_attempts is 6 — that's 6 calls and 5 sleeps between them.
+        # max_attempts is 6: 6 calls and 5 sleeps between them.
         assert mock_post.call_count == 6
         assert mock_sleep.call_count == 5
         # Each sleep should respect the Retry-After 60s hint.
@@ -273,7 +273,7 @@ class TestAPIEmbedderErrors:
 
     @patch("dsagt.knowledge.time.sleep")
     def test_rate_limit_body_hint_honored_without_header(self, mock_sleep):
-        """When there's no Retry-After header, a 429 body hint is parsed."""
+        """When there is no Retry-After header, a 429 body hint is parsed."""
         body = {
             "error": {
                 "message": (
@@ -469,7 +469,7 @@ class TestIngestExcludePatterns:
             collection_name="full",
             file_types=["py", "md"],
         )
-        # All py + md files except the .pyc which isn't in file_types.
+        # All py + md files except the .pyc, which is not in file_types.
         # 8 .py files (mylib/__init__.py, mylib/core.py, mylib/_internal.py,
         # mylib/tests/__init__.py, mylib/tests/test_core.py,
         # tests/test_integration.py, tests/conftest.py, examples/quickstart.py)
@@ -506,9 +506,9 @@ class TestIngestExcludePatterns:
     def test_exclude_private_modules(self, kb, repo_layout):
         """Pattern '_*.py' excludes private modules.
 
-        Note: _*.py also matches __init__.py because the basename starts
-        with underscore.  This is the documented behavior — callers who
-        want to keep __init__.py should use a more specific pattern.
+        _*.py also matches __init__.py because the basename starts with an
+        underscore.  This is the documented behavior; callers who want to
+        keep __init__.py use a more specific pattern.
         """
         result = kb.ingest(
             repo_layout,
@@ -523,8 +523,8 @@ class TestIngestExcludePatterns:
 
     def test_exclude_pycache_dir(self, kb, repo_layout):
         """__pycache__ should be excluded by directory-segment match."""
-        # Pre-populate the cache with a parseable .py file so it actually
-        # shows up in the file list when we DON'T filter.
+        # Pre-populate the cache with a parseable .py file so it appears
+        # in the file list when the filter is off.
         (repo_layout / "mylib" / "__pycache__" / "fake.py").write_text("x = 1\n")
 
         result_unfiltered = kb.ingest(
@@ -555,8 +555,8 @@ class TestIngestExcludePatterns:
         assert result["files"] == 3
 
     def test_default_patterns_keep_packaging_metadata(self, kb, tmp_path):
-        """pyproject.toml / setup.py / setup.cfg must NOT be excluded by
-        the default set — the agent uses them to install dependencies
+        """pyproject.toml / setup.py / setup.cfg must not be excluded by
+        the default set; the agent uses them to install dependencies
         when registering tools that depend on the library.
         """
         from dsagt.commands.setup_core_kb import DEFAULT_EXCLUDE_PATTERNS
@@ -585,21 +585,19 @@ class TestIngestExcludePatterns:
 
 
 class TestCollectFilesDirectly:
-    """Unit tests for KnowledgeBase._collect_files extracted from ingest().
+    """Unit tests for KnowledgeBase._collect_files.
 
-    The whole point of pulling this helper out of ingest() was to make
-    file-discovery and exclude-pattern logic testable WITHOUT spinning up
-    an embedder, an index, or a chunker.  These tests exercise the helper
-    directly: no mocked Embedder.create context, no add_entries call, no
-    cleanup of cached collections.  If a regression in the file-walk or
-    fnmatch logic ever lands, these tests fail in milliseconds and point
-    at the exact problem instead of being buried under ingest() setup.
+    The helper is separate from ingest() so file discovery and the
+    exclude-pattern logic are testable without an embedder, an index, or a
+    chunker.  These tests call the helper directly, so a regression in the
+    file walk or the fnmatch logic fails here in milliseconds and names the
+    problem.
     """
 
     @pytest.fixture
     def kb(self, tmp_path):
-        # Build a minimal KB.  We don't call any method that would touch
-        # the embedder, so the embedder kwargs don't matter.
+        # Build a minimal KB.  No method called here reaches the embedder,
+        # so the embedder kwargs are arbitrary.
         return KnowledgeBase(
             index_dir=tmp_path / "index",
             default_embedder="local",
@@ -649,7 +647,7 @@ class TestCollectFilesDirectly:
         assert sorted(files_none) == sorted(files_empty)
 
     def test_returns_paths_not_strings(self, kb, repo):
-        """Result is list[Path], not list[str] — _chunk_file expects Path."""
+        """Result is list[Path], not list[str]: _chunk_file expects Path."""
         files = kb._collect_files(repo, ["py"], exclude_patterns=None)
         assert all(isinstance(f, Path) for f in files)
 
@@ -703,7 +701,7 @@ class TestKnowledgeBaseIngest:
         assert result["files"] > 0
         assert result["chunks"] > 0
 
-        # Collection should now be listed
+        # The collection is listed after ingest.
         assert "test_docs" in kb.collections
 
     def test_ingest_copies_description(self, kb, source_folder):
@@ -900,7 +898,7 @@ class TestGetParser:
 
     @pytest.fixture
     def kb(self, tmp_path):
-        # New __init__ doesn't create an embedder, but mock to be safe
+        # __init__ builds no embedder; the mock keeps a lazy build from loading a model.
         with patch("dsagt.knowledge.Embedder.create"):
             kb = KnowledgeBase(index_dir=tmp_path / "index")
             yield kb
@@ -954,9 +952,9 @@ class TestContextManager:
 class TestStoreEmbedderConstruction:
     """One embedder per store, built lazily from explicit args.
 
-    Per-collection embedder routing was removed: the store fixes a single
-    embedder at construction, so the explicit args the KB was given flow
-    straight through to ``Embedder.create`` (named, no kwargs dict) on first use.
+    The store fixes a single embedder at construction, so the explicit args
+    the KB was given pass through to ``Embedder.create`` (named, no kwargs
+    dict) on first use.
     """
 
     def test_store_builds_embedder_from_args(self, tmp_path):
@@ -998,7 +996,7 @@ class TestStoreEmbedderConstruction:
 
 
 class TestBM25Tokenize:
-    """The tokenizer drives recall — verify identifier-style splits land."""
+    """The tokenizer drives recall; verify the identifier-style splits."""
 
     def test_lowercases(self):
         from dsagt.knowledge import _bm25_tokenize
@@ -1105,7 +1103,7 @@ class TestRRFMerge:
     def test_skips_negative_indices(self):
         from dsagt.knowledge import _rrf_merge
 
-        # Backends pad with -1 when fewer than k results; must not pollute scores.
+        # Backends pad with -1 when fewer than k results; padding must not enter the scores.
         merged = _rrf_merge([[0, -1, -1], [0, 1, 2]])
         idxs = [idx for idx, _ in merged]
         assert -1 not in idxs
@@ -1216,7 +1214,7 @@ class TestHybridSearch:
             assert bm25_path.exists()
 
             kb.add_entries(texts=["gamma document"], collection="memory")
-            # BM25 must now know about all three docs.
+            # BM25 indexes all three docs after the append.
             bm25 = kb._store._get_bm25("memory")
             assert bm25.size == 3
             kb.close()

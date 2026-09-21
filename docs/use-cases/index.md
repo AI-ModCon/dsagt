@@ -27,7 +27,7 @@ present. Larger data comes from the Google Drive folder linked above.
 
 !!! note "Adding a use case"
     Drop a `README.md` with frontmatter (`title`, `domain`, `summary`) into a
-    `use_cases/<name>/` folder — it is auto-added to this table, its body is
-    inlined as its own page, and it appears in the nav. Folders without
-    frontmatter are left out entirely. See
+    `use_cases/<name>/` folder; it is added to this table, its body is
+    inlined as its own page, and it appears in the nav. A folder without
+    frontmatter is left out. See
     [`hooks/gen_use_cases.py`](https://github.com/AI-ModCon/dsagt/blob/main/hooks/gen_use_cases.py).

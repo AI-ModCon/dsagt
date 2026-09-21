@@ -2,32 +2,32 @@
 OpenCode (sst) agent setup.
 
 Install: ``npm i -g opencode-ai``.
-Generates: ``AGENTS.md`` (auto-loaded from cwd, same convention codex uses)
-and ``opencode.json`` (per-project config with MCP servers + provider
-interpolation references).
+Generates: ``AGENTS.md`` (auto-loaded from cwd, the same convention codex
+uses) and ``opencode.json`` (per-project config with MCP servers and
+provider interpolation references).
 
 Traces: opencode's turns come from its on-disk session database through the
 periodic pass (``traces.OpenCodeReader``), the same way as every agent's;
 MCP-server spans (kb.*, registry.*) and dsagt-run tool.execute spans are
 emitted live.
 
-Auth model: opencode reads creds via ``{env:VAR}`` interpolation in its
-``opencode.json`` provider block, so we can keep BYOA-pure — the file
-references the user's shell env vars rather than baking values.  Tested
-config layout per https://opencode.ai/docs/config/ and ``mcp.ts`` source.
+Auth: opencode reads credentials via ``{env:VAR}`` interpolation in its
+``opencode.json`` provider block, so the file references the user's shell
+env vars and no credential value is written to disk.  Config layout per
+https://opencode.ai/docs/config/ and the ``mcp.ts`` source.
 
 MCP config: ``./opencode.json``'s top-level ``mcp`` key.  Each entry is
 ``{"type": "local", "command": [...], "environment": {...}}`` for stdio
-servers.  We write this directly — ``opencode mcp add`` is interactive
-only (no flags), so non-interactive setup must hand-write the JSON.
+servers.  dsagt writes the JSON itself because ``opencode mcp add`` is
+interactive only (no flags).
 
-Model whitelist: pass-through for known providers (pulled from models.dev)
-and fully user-controlled for custom providers via ``provider.<id>.models``.
+Model list: pass-through for known providers (pulled from models.dev)
+and user-controlled for custom providers via ``provider.<id>.models``.
 opencode passes model names through unchanged.
 
 Batch mode: ``opencode run --dir <path> --dangerously-skip-permissions
--m <provider/model> <prompt>``.  ``--dir`` is the cwd flag (not ``-C`` /
-``--cwd``).  Stdin appends to the prompt when not a TTY.
+-m <provider/model> <prompt>``.  ``--dir`` is the cwd flag.  Stdin appends
+to the prompt when not a TTY.
 """
 
 from __future__ import annotations
@@ -50,22 +50,22 @@ def _render_opencode_config(
     present_creds: dict[str, bool],
     opencode_model: str | None = None,
 ) -> str:
-    """Render ``opencode.json`` body.
+    """Render the ``opencode.json`` body.
 
-    *mcp_env* — env vars baked into each MCP server's ``environment``
+    *mcp_env*: env vars written into each MCP server's ``environment``
     block (DSAGT_PROJECT_DIR, MLFLOW_TRACKING_URI, EMBEDDING_*).
 
-    *present_creds* — flags (``OPENAI_API_KEY``, ``OPENAI_BASE_URL``,
-    ``ANTHROPIC_API_KEY``, ``ANTHROPIC_BASE_URL``) — only emit provider
-    blocks whose API key the user has set.
+    *present_creds*: flags (``OPENAI_API_KEY``, ``OPENAI_BASE_URL``,
+    ``ANTHROPIC_API_KEY``, ``ANTHROPIC_BASE_URL``); a provider block is
+    emitted only when the user has set its API key.
 
-    *opencode_model* — ``<provider>/<model>`` string from
-    ``OPENCODE_MODEL`` env.  Lab-gateway-aliased names like
-    ``claude-haiku-4-5-20251001-v1-project`` aren't in models.dev, so
-    opencode rejects them under standard providers unless declared in
-    ``provider.<id>.models``.  We register the model there at init
-    time and set the top-level ``model`` so interactive ``opencode``
-    sessions pick it up without a ``-m`` flag.
+    *opencode_model*: ``<provider>/<model>`` string from the
+    ``OPENCODE_MODEL`` env.  A lab-gateway-aliased name like
+    ``claude-haiku-4-5-20251001-v1-project`` is absent from models.dev, so
+    opencode rejects it under a standard provider unless it is declared in
+    ``provider.<id>.models``.  The model is registered there at init time
+    and the top-level ``model`` is set, so an interactive ``opencode``
+    session uses it without a ``-m`` flag.
     """
     config: dict = {
         "$schema": "https://opencode.ai/config.json",
@@ -93,7 +93,7 @@ def _render_opencode_config(
         providers["anthropic"] = {"options": opts}
 
     # Register the user's chosen model under its provider's ``models``
-    # map so opencode accepts gateway-aliased names that aren't in
+    # map so opencode accepts a gateway-aliased name that is absent from
     # models.dev.  Without this, ``-m openai/<custom-name>`` fails with
     # ProviderModelNotFoundError.
     if opencode_model and "/" in opencode_model:
@@ -138,18 +138,18 @@ class OpenCodeSetup(AgentSetup):
         pdir: Path,
     ) -> list[str]:
         """Write ``<pdir>/opencode.json`` with MCP server registrations and
-        provider interpolation refs.  Auth keys never land on disk —
-        ``{env:VAR}`` is a reference, opencode resolves it at run time
+        provider interpolation refs.  Auth keys are never written to disk:
+        ``{env:VAR}`` is a reference, and opencode resolves it at run time
         from the user's shell.
         """
         del pdir
         actions: list[str] = []
         mcp_env = _mcp_env_block(config)
-        # Detect which provider blocks to emit by probing the env we'll
-        # pass to the agent (which mirrors os.environ).  We only emit
-        # blocks for providers the user actually has creds for; an empty
-        # ``{env:VAR}`` interpolation would leave opencode trying to
-        # auth with a blank string.
+        # Decide which provider blocks to emit from the env passed to the
+        # agent (which mirrors os.environ).  A block is emitted only for a
+        # provider the user has credentials for; an empty ``{env:VAR}``
+        # interpolation would leave opencode authenticating with a blank
+        # string.
         present = {
             name: bool(env.get(name))
             for name in (
@@ -186,10 +186,10 @@ class OpenCodeSetup(AgentSetup):
         """Single ``opencode run`` call with the script as the prompt.
 
         ``--dir`` is opencode's cwd flag.  ``--dangerously-skip-permissions``
-        lets unattended runs auto-approve all tool calls.  ``-m`` overrides
-        the model from ``OPENCODE_MODEL`` (must be ``<provider>/<name>``
-        format — opencode rejects bare model names without a provider
-        prefix).  ``max_turns`` is unused — opencode has no turn cap CLI.
+        lets unattended runs auto-approve all tool calls.  ``-m`` sets the
+        model from ``OPENCODE_MODEL``, in ``<provider>/<name>`` form, since
+        opencode rejects a bare model name without a provider prefix.
+        ``max_turns`` is unused; opencode has no turn-cap option.
         """
         del config, max_turns
         text = script_path.read_text().strip()
@@ -201,8 +201,8 @@ class OpenCodeSetup(AgentSetup):
                 "opencode batch mode requires OPENCODE_MODEL in the shell "
                 "env, formatted as '<provider>/<name>' (e.g. "
                 "'openai/claude-haiku-4-5-20251001-v1-project'), plus the "
-                "matching {ANTHROPIC,OPENAI}_API_KEY / _BASE_URL — BYOA: "
-                "the agent must be pre-configured in the shell."
+                "matching {ANTHROPIC,OPENAI}_API_KEY / _BASE_URL: the agent "
+                "must be configured in the shell before launch."
             )
         cmd = [
             "opencode",

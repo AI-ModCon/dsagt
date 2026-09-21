@@ -1,4 +1,4 @@
-"""greet — the smoke test's registerable, executable fixture CLI.
+"""greet: the smoke test's registerable, executable fixture CLI.
 
 Stdlib-only so registration + execution via dsagt-run needs no
 dependency install.  The GRT-42 empty-name error code is documented in

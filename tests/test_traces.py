@@ -1,8 +1,8 @@
-"""Fixture tests for the canonical trace waist + Claude translator (Phase 2).
+"""Fixture tests for the ``Trace`` data model and the Claude translator.
 
 Pure, no disk / no network.  Two things under test:
 - ``to_exchanges`` projects LLM spans onto the conversational shape the episodic
-  indexer chunks + embeds (carrying ``turn_id`` + content) — the seam.
+  indexer chunks + embeds (carrying ``turn_id`` + content).
 - ``ClaudeTranslator`` turns raw transcript records into a ``Trace``
   with the autolog-style AGENT/LLM/TOOL span layout.
 """
@@ -86,8 +86,8 @@ def test_to_exchanges_uses_request_window_directly():
 
 
 def test_projection_carries_turn_id_and_content():
-    """The waist's whole justification: to_exchanges carries ``turn_id`` (groups
-    a turn's chunks) and the real content the episodic indexer embeds."""
+    """to_exchanges carries ``turn_id`` (groups a turn's chunks) and the
+    content the episodic indexer embeds."""
     exchanges = _windowed_trace().to_exchanges()
     assert all(ex["turn_id"] for ex in exchanges)  # span id, for chunk grouping
     flat = json.dumps(exchanges)
@@ -218,8 +218,9 @@ def test_translate_empty_transcript_is_none():
 
 
 def test_spans_get_real_durations_not_a_now_end():
-    """#1 — every span ends via the next-timestamp model, never an open end_time
-    (which the sink would otherwise stamp as wall-clock now → absurd duration)."""
+    """#1: every span ends via the next-timestamp model, never an open end_time
+    (which the sink would otherwise stamp as wall-clock now, giving a wrong
+    duration)."""
     trace = _translate(_single_turn_records())
     for span in trace.spans:
         assert span["start_time"] is not None and span["end_time"] is not None
@@ -230,7 +231,7 @@ def test_spans_get_real_durations_not_a_now_end():
 
 
 def test_skill_injection_user_message_is_not_taken_as_the_prompt():
-    """#2 — a user entry following a Skill tool result (commandName) is an
+    """#2: a user entry following a Skill tool result (commandName) is an
     injection, not the human prompt; the real prompt is selected instead."""
     records = [
         _user("2026-06-19T15:00:00.000Z", "real prompt"),
@@ -248,7 +249,7 @@ def test_skill_injection_user_message_is_not_taken_as_the_prompt():
 
 
 def test_local_command_stdout_is_not_taken_as_the_prompt():
-    """#2 — slash-command stdout echoes are skipped when finding the prompt."""
+    """#2: slash-command stdout echoes are skipped when finding the prompt."""
     records = [
         _user("2026-06-19T15:00:00.000Z", "real prompt"),
         _asst("2026-06-19T15:00:01.000Z", {"type": "text", "text": "answer"}),
@@ -262,7 +263,7 @@ def test_local_command_stdout_is_not_taken_as_the_prompt():
 
 
 def test_steer_message_folds_into_the_llm_window():
-    """#3 — a queue-operation/enqueue steer message becomes a user message in
+    """#3: a queue-operation/enqueue steer message becomes a user message in
     the following text turn's input window."""
     records = [
         _user("2026-06-19T15:00:00.000Z", "start a long task"),
@@ -323,7 +324,7 @@ def test_translate_segments_one_agent_subtree_per_turn():
     assert len(roots) == 2
     assert roots[0]["attributes"]["prompt"] == "first question"
     assert roots[1]["attributes"]["prompt"] == "second question"
-    # Turn 2's tool + final-answer LLM hang off turn 2's root, not turn 1's.
+    # Turn 2's tool + final-answer LLM are under turn 2's root, not turn 1's.
     t2 = [s for s in trace.spans if s["parent_id"] == roots[1]["span_id"]]
     assert {s["kind"] for s in t2} == {"LLM", "TOOL"}
     assert roots[1]["attributes"]["response"] == "second answer"
@@ -343,7 +344,7 @@ def test_each_turn_is_self_contained_no_cross_turn_duration_borrow():
 
 def test_translate_skips_a_leading_partial_turn():
     """Records before the first prompt in the batch belong to an already-processed
-    turn (incremental read) — they produce no subtree, which is what keeps
+    turn (incremental read); they produce no subtree, which is what keeps
     cursor-driven reads idempotent at turn granularity."""
     records = [
         _asst(
@@ -359,7 +360,7 @@ def test_translate_skips_a_leading_partial_turn():
 
 
 # ---------------------------------------------------------------------------
-# ClaudeReader — whole-file read
+# ClaudeReader: whole-file read
 # ---------------------------------------------------------------------------
 
 
@@ -404,7 +405,7 @@ def test_reader_leaves_a_partial_trailing_line(tmp_path):
         fh.write('{"a": 2')
     assert [r["a"] for r in reader.read()] == [1]
 
-    # Once the line completes, it's read.
+    # Once the line completes, it is read.
     with open(f, "a") as fh:
         fh.write("}\n")
     assert [r["a"] for r in reader.read()] == [1, 2]
@@ -438,10 +439,10 @@ def test_reader_no_transcripts_is_empty(tmp_path):
 
 
 def test_usage_counted_once_per_api_call_across_split_records():
-    """Claude Code writes one record per content block — a thinking block, then
-    N tool_use blocks — all sharing one ``message.id`` and each repeating the
+    """Claude Code writes one record per content block (a thinking block, then
+    N tool_use blocks), all sharing one ``message.id`` and each repeating the
     whole call's ``usage``.  A real session had 18 records for 6 calls.  The
-    usage must land exactly once per call, on the first span the call
+    usage must be recorded exactly once per call, on the first span the call
     produces, and a thinking-only record (no span) must not swallow it."""
     call = {
         "input_tokens": 36,

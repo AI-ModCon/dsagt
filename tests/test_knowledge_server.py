@@ -2,7 +2,7 @@
 Tests for the knowledge base MCP server.
 
 Tests the tool handlers and setup_runtime_kb utility.
-The KnowledgeBase is mocked — these tests verify the server's
+The KnowledgeBase is mocked; these tests verify the server's
 handler logic, argument parsing, error handling, and response formatting.
 
 Ingest and append are background jobs: the handler returns immediately
@@ -295,7 +295,7 @@ class TestIngest:
                     "file_types": ["md", "txt"],
                 },
             )
-            # New server always passes collection_name to kb.ingest
+            # The server always passes collection_name to kb.ingest
             mock_kb.ingest.assert_called_once_with(
                 folder,
                 collection_name="docs2",
@@ -421,7 +421,7 @@ class TestJobStatus:
         assert "Unknown job" in result["error"]
 
     def test_running_job(self, server, mock_kb, tmp_path):
-        """A job that hasn't completed reports running status."""
+        """A job that has not completed reports running status."""
         folder = tmp_path / "slow_docs"
         folder.mkdir()
 
@@ -449,7 +449,7 @@ class TestJobStatus:
                 assert initial["status"] == "started"
                 job_id = initial["job_id"]
 
-                # Immediately check — should still be running
+                # Immediate check: still running
                 status = await _call_tool_async(
                     server, "kb_job_status", {"job_id": job_id}
                 )
@@ -523,7 +523,7 @@ class TestAppend:
 
 
 # ---------------------------------------------------------------------------
-# kb_search — error handling (transport-closed diagnostics)
+# kb_search: error handling (transport-closed diagnostics)
 # ---------------------------------------------------------------------------
 
 
@@ -666,7 +666,7 @@ class TestSetupRuntimeKb:
         """Copies (not symlinks) collection directories from base to runtime.
 
         Copy semantics pin each project to whatever bundled content was
-        current at first start — different projects on the same machine
+        current at first start: different projects on the same machine
         may run different dsagt versions, and a symlink would let one
         project's ``setup-kb --rebuild`` mutate every project's view.
         """
@@ -699,7 +699,7 @@ class TestSetupRuntimeKb:
         runtime = tmp_path / "runtime"
         setup_runtime_kb(base, runtime)
 
-        # Mutate the base — simulating ``dsagt setup-kb --rebuild``.
+        # Mutate the base, simulating ``dsagt setup-kb --rebuild``.
         (coll / "chroma_ids.json").write_text("v2 newer")
 
         # Project copy stays at v1.
@@ -763,7 +763,7 @@ class TestOpenMPWorkaround:
 
 
 # ---------------------------------------------------------------------------
-# kb_search — multi-collection fan-out (moved from the former memory test file)
+# kb_search: multi-collection fan-out
 # ---------------------------------------------------------------------------
 
 
@@ -773,7 +773,7 @@ class TestKbSearchMultiCollection:
         """Multi-collection search delegates once to kb.search with collections=.
 
         Fan-out + fusion across collections is kb.search's job (covered by
-        TestFederatedSearch in test_knowledge_base.py); the handler just forwards.
+        TestFederatedSearch in test_knowledge_base.py); the handler forwards.
         """
         mock_kb.search.return_value = [
             make_search_result("result", "/file.md", 0, 0.9),
@@ -811,7 +811,7 @@ class TestKbSearchMultiCollection:
 
     def test_multi_collection_merges_results(self, server, mock_kb):
         """The handler returns kb.search's already-fused, sorted results."""
-        # kb.search owns fusion now; it returns one merged, descending list.
+        # kb.search owns fusion; it returns one merged, descending list.
         mock_kb.search.return_value = [
             make_search_result("result_1", "/file_1.md", score=0.9),
             make_search_result("result_2", "/file_2.md", score=0.7),

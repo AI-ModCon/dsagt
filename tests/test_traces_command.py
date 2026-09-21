@@ -1,4 +1,4 @@
-"""Tests for ``dsagt traces`` — the frictionless MLflow viewer launcher."""
+"""Tests for ``dsagt traces``, the MLflow viewer launcher."""
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def test_launch_survives_catchup_failure(tmp_path):
             traces_cmd.subprocess, "run", return_value=MagicMock(returncode=0)
         ),
     ):
-        # A hiccup in catch-up must not stop the viewer from opening.
+        # A failure in catch-up must not stop the viewer from opening.
         assert traces_cmd.run("proj") == 0
 
 
@@ -107,7 +107,7 @@ def test_non_http_backend_is_served_locally_and_its_dsn_never_printed(
     tmp_path, monkeypatch, capsys
 ):
     """A ``postgresql://`` store is served by ``mlflow ui`` like the default
-    sqlite file — with no local ``mlflow.db`` to gate on — and its DSN, which
+    sqlite file (with no local ``mlflow.db`` to gate on), and its DSN, which
     carries credentials, is passed to the viewer but never echoed as a link."""
     pdir = tmp_path / "proj"
     pdir.mkdir()  # no mlflow.db: the store is elsewhere

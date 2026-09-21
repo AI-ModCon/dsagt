@@ -1,6 +1,6 @@
 """Fixture tests for the Goose SQLite translator + reader.
 
-Translator records mirror what ``GooseReader`` yields (``{role, content, ts}``
+Translator records mirror what ``GooseReader`` produces (``{role, content, ts}``
 with parsed content_json blocks); the reader test builds a tiny sessions.db.
 """
 

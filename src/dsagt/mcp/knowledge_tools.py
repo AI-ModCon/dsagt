@@ -1,26 +1,26 @@
 """MCP tools for knowledge-base retrieval.
 
-Semantic search over document collections + background ingest/append jobs.
+Semantic search over document collections and background ingest/append jobs.
 Long-running operations (ingest, append) run in the background and return
 immediately with a ``job_id``; poll ``kb_job_status`` for completion.
 
-Multi-collection search fans out and rank-fuses *below* this tool boundary, in
-:meth:`dsagt.knowledge.KnowledgeBase.search` — the agent just names collection(s).
-Server configuration (chunk_size) is read from the project's
-.dsagt/config.yaml.  Embedding credentials flow through env vars (EMBEDDING_API_KEY,
-EMBEDDING_BASE_URL, EMBEDDING_MODEL) from the shell or from the per-agent MCP
-config env block that ``dsagt init`` writes.
+Multi-collection search fans out and rank-fuses below this tool boundary, in
+:meth:`dsagt.knowledge.KnowledgeBase.search`; the agent names the
+collections.  Server configuration (chunk_size) is read from the project's
+.dsagt/config.yaml.  Embedding credentials come from env vars
+(EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL) set in the shell or
+in the per-agent MCP config env block that ``dsagt init`` writes.
 
-These definitions + handlers run inside the merged ``dsagt-server`` (see
+These definitions and handlers run inside the merged ``dsagt-server`` (see
 :mod:`dsagt.mcp.server`); ``create_knowledge_server`` is a test-facing
-constructor.  Explicit-memory tools (``kb_remember`` / etc.) live in
-:mod:`dsagt.mcp.memory_tools`; skill-source tools in
+constructor.  Explicit-memory tools (``kb_remember`` and ``kb_get_memories``)
+are defined in :mod:`dsagt.mcp.memory_tools`; skill-source tools in
 :mod:`dsagt.mcp.skill_tools`.
 """
 
 import os
 
-# Prevent a fatal OpenMP crash when multiple native libraries each bundle
+# Prevent a fatal OpenMP crash when multiple native libraries each include
 # their own libomp.  Must precede the ``dsagt.knowledge`` import below.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
@@ -121,9 +121,9 @@ async def _handle_kb_search(
     if not collection_arg and not collections_arg:
         return {"status": "error", "error": "Provide 'collection' or 'collections'"}
 
-    # Build ChromaDB where clause from the filter arguments.  ChromaDB
+    # Build the ChromaDB where clause from the filter arguments.  ChromaDB
     # requires single-filter dicts or $and-wrapped lists; an empty dict
-    # would be invalid, so we only pass where when there are real filters.
+    # is invalid, so where is passed only when there are filters.
     where = dict(arguments.get("where") or {})
     where.update(
         {
@@ -148,9 +148,9 @@ async def _handle_kb_search(
         where = {"$and": [{k: v} for k, v in where.items()]}
 
     # Document-content filter (over the chunk text itself, complementary to the
-    # metadata ``where``).  ``regex`` is the powerful leg — ChromaDB ``$regex``,
-    # with ``(?i)`` for case-insensitive; ``contains`` is a case-sensitive
-    # substring.  Both narrow the candidate pool before vector ranking.
+    # metadata ``where``).  ``regex`` is ChromaDB ``$regex``, with ``(?i)`` for
+    # case-insensitive; ``contains`` is a case-sensitive substring.  Both
+    # narrow the candidate pool before vector ranking.
     doc_filters = []
     if arguments.get("regex"):
         doc_filters.append({"$regex": arguments["regex"]})
@@ -162,9 +162,9 @@ async def _handle_kb_search(
         else {"$and": doc_filters} if doc_filters else None
     )
 
-    # Fan-out + rank-fusion across collections lives in KnowledgeBase.search;
-    # the tool just names collection(s).  A single internal collection routes
-    # straight to its store; multiple/external targets federate by RRF.
+    # Fan-out and rank-fusion across collections are in KnowledgeBase.search;
+    # the tool names the collections.  A single internal collection queries
+    # its store directly; multiple or external targets are fused by RRF.
     try:
         all_results = await asyncio.to_thread(
             kb.search,
@@ -280,7 +280,7 @@ async def _handle_kb_ingest(
         "message": (
             f"Ingestion started. "
             f"Poll kb_job_status(job_id='{job_id}') every 10 seconds. "
-            f"DO NOT call ingest again -- the job is running in the "
+            f"DO NOT call ingest again; the job is running in the "
             f"background. Large folders may take several minutes."
         ),
     }
@@ -398,7 +398,7 @@ async def _handle_kb_job_status(arguments: dict, *, job_tracker: _JobTracker) ->
 
 
 # ---------------------------------------------------------------------------
-# Tool defs + handler map (used by the merged server and the test wrapper)
+# Tool defs and handler map (used by the merged server and the test wrapper)
 # ---------------------------------------------------------------------------
 
 
@@ -487,11 +487,11 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                     },
                     "code_name": {
                         "type": "string",
-                        "description": "Filter by registered-code name — code execution records (ChromaDB collections only)",
+                        "description": "Filter by registered-code name (code execution records; ChromaDB collections only)",
                     },
                     "tool_name": {
                         "type": "string",
-                        "description": "Filter by agent tool-call name — session memory (ChromaDB collections only)",
+                        "description": "Filter by agent tool-call name (session memory; ChromaDB collections only)",
                     },
                     "source_type": {
                         "type": "string",
@@ -573,7 +573,7 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
             description=(
                 "Add documents to an existing collection. Uses the same embedding "
                 "model and vector DB the collection was created with. "
-                "Returns immediately with a job_id -- poll kb_job_status for progress."
+                "Returns immediately with a job_id; poll kb_job_status for progress."
             ),
             inputSchema={
                 "type": "object",

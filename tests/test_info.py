@@ -1,8 +1,8 @@
 """
 Unit tests for ``dsagt info`` reporting logic.
 
-Feeds a synthetic traces DataFrame into ``_report()`` so we can assert the
-grouping, token sums, and error surfacing without spinning up MLflow.
+Feeds a synthetic traces DataFrame into ``_report()`` to assert the
+grouping, token sums, and error reporting without starting MLflow.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def test_is_error_handles_enum_reprs(state, expected):
 def config():
     return {
         "agent": "claude",
-        # BYOA: the agent owns its LLM model; the info header surfaces the
+        # The agent brings its own LLM model; the info header shows the
         # embedding model dsagt configures.
         "embedding": {"model": "bge-test"},
     }
@@ -257,7 +257,7 @@ def test_episodic_and_code_use_bucket_as_internal_sources(config):
     sources = {row["source"]: row for row in r["by_source"]}
     assert sources["episodic"]["traces"] == 1
     assert sources["code_use"]["traces"] == 1
-    # Agent-vs-internal split (the headline): 1 agent turn, 2 internal.
+    # The agent-vs-internal split: 1 agent turn, 2 internal.
     agent_traces = sum(
         row["traces"]
         for row in r["by_source"]
@@ -268,7 +268,7 @@ def test_episodic_and_code_use_bucket_as_internal_sources(config):
 
 
 def test_agent_vs_internal_split_counts_unknown_as_internal(config):
-    """An orphaned/uncategorized trace (no source, no agent) is bookkeeping —
+    """An orphaned/uncategorized trace (no source, no agent) is bookkeeping:
     it counts as internal/debug, never as an agent turn."""
     from dsagt.commands.info import _INTERNAL_SOURCES
 
@@ -298,7 +298,7 @@ def test_agent_vs_internal_split_counts_unknown_as_internal(config):
         for row in r["by_source"]
         if row["source"] not in _INTERNAL_SOURCES and row["source"] != "unknown"
     )
-    assert agent_traces == 1  # not 2 — the unknown is internal/debug
+    assert agent_traces == 1  # not 2: the unknown is internal/debug
 
 
 def test_report_missing_source_falls_back_to_unknown(config):
@@ -355,8 +355,8 @@ def _write_project(tmp_path, monkeypatch, raw_yaml: str):
 
 
 def test_config_sources_classifies_shell(tmp_path, monkeypatch):
-    """${VAR} resolves from os.environ — that's the only source for
-    user-provided values now (no .env file is consulted)."""
+    """${VAR} resolves from os.environ, the one source for user-provided
+    values."""
     _write_project(
         tmp_path,
         monkeypatch,
@@ -429,7 +429,7 @@ def test_config_sources_skips_internal_sections(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _kb_collections — read chunks.jsonl, count entries, break down by source
+# _kb_collections: read chunks.jsonl, count entries, break down by source
 # ---------------------------------------------------------------------------
 
 
@@ -490,7 +490,7 @@ def test_kb_collections_skips_dirs_without_chunks_jsonl(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _kb_retrieval — pull kb.search spans out of a synthetic traces frame
+# _kb_retrieval: pull kb.search spans out of a synthetic traces frame
 # ---------------------------------------------------------------------------
 
 
@@ -578,7 +578,7 @@ def test_kb_retrieval_ignores_non_kb_spans():
 
 
 # ---------------------------------------------------------------------------
-# _project_created — best-effort project-start date
+# _project_created: best-effort project-start date
 # ---------------------------------------------------------------------------
 
 
@@ -601,8 +601,8 @@ def test_project_created_returns_none_when_dir_missing(tmp_path):
 
 def test_run_reads_remote_store_when_tracking_uri_is_set(tmp_path, monkeypatch):
     """With ``MLFLOW_TRACKING_URI`` pointing at a shared server there is no
-    local ``mlflow.db`` — ``dsagt info`` must query the remote store rather
-    than short-circuit on the missing file."""
+    local ``mlflow.db``; ``dsagt info`` queries the remote store rather than
+    short-circuiting on the missing file."""
     from unittest.mock import patch
 
     import dsagt.commands.info as info_cmd
