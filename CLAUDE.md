@@ -49,5 +49,5 @@ uv run mkdocs build --strict                                # docs, what CI runs
 
 ## Exceptions
 
-- Run only the test file relevant to a change; the unit suite takes about 50 s. `test_*_integration.py` and `test_server_startup.py` load the local embedder, spawn subprocesses, or install into the venv; `test_mcp_wire.py` spawns `tests/wire_server.py` and speaks JSON-RPC over stdio.
+- Run only the test file relevant to a change; the unit suite takes about 50 s. `test_*_integration.py` and `test_server_startup.py` load the local embedder or spawn subprocesses; `test_mcp_wire.py` spawns `tests/wire_server.py` and speaks JSON-RPC over stdio.
 - Use `python -m pytest`; the bare `pytest` binary on this machine resolves the wrong interpreter.

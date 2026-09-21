@@ -1,4 +1,4 @@
-# Test site configuration — mirrors runtime dsagt_config.yaml structure.
+# Test site configuration — mirrors the runtime .dsagt/config.yaml structure.
 #
 # Copy to tests/test_site_config.yaml and fill in your institution's values.
 # Integration tests FAIL if this file is missing or values are incomplete.
