@@ -196,7 +196,7 @@ Page: [CLI](https://ai-modcon.github.io/dsagt/cli/).
 | `dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline] [--all]` | End-to-end install verification (default agent `goose`); `--all` runs every agent in parallel |
 <!-- md-shared:cli:end -->
 
-For tests, troubleshooting, and other developer-facing material, see [docs/developer.md](docs/developer.md).
+For tests, troubleshooting, and other developer-facing material, see [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md), which the site serves as its [Developer Guide](https://ai-modcon.github.io/dsagt/developer/). [agent-card.md](agent-card.md) is the Genesis agent card: the tool inventory, the runtime and dependency facts, and the intended uses and limitations.
 
 ## Acknowledgments
 
