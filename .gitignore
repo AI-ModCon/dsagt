@@ -150,8 +150,6 @@ tests/test_site_config.yaml
 .dsagt_env
 goose.yaml
 .goosehints
-.roomodes
-.roo/mcp.json
 cline_mcp.json
 .clinerules/
 
