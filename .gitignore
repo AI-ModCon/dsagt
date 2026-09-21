@@ -141,6 +141,9 @@ docs/_templates/
 # Local configuration overrides
 config.local.yaml
 .goosehints.local
+# Institution-specific integration-test values; the tracked file is
+# tests/test_site_config.yaml.example
+tests/test_site_config.yaml
 
 # Generated agent artifacts (created by dsagt start)
 .mcp.json
