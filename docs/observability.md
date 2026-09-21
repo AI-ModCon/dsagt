@@ -1,6 +1,6 @@
 # Observability
 
-DSAgt logs traces to a serverless **MLflow** store, an SQLite file at `~/dsagt-projects/<project>/mlflow.db`.
+DSAgt logs traces to one **MLflow** store: the shared tracking server `MLFLOW_TRACKING_URI` names, or, when it is unset, a serverless SQLite file at `<project>/mlflow.db`, which keeps a project self-contained in its directory.
 
 ![DSAgt observability](assets/observability.png)
 
