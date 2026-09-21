@@ -386,29 +386,23 @@ class APIEmbedder(Embedder):
         self.model = model or os.getenv(
             "EMBEDDING_MODEL", "text-embedding-3-small-project"
         )
-        self.base_url = (
-            base_url or os.getenv("EMBEDDING_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-        )
-        # EMBEDDING_API_KEY is the canonical name; LLM_API_KEY/OPENAI_API_KEY
-        # are accepted as fallbacks for setups where the embedding endpoint
-        # shares the LLM endpoint's auth.
-        self.api_key = (
-            api_key
-            or os.getenv("EMBEDDING_API_KEY")
-            or os.getenv("LLM_API_KEY")
-            or os.getenv("OPENAI_API_KEY")
-        )
+        self.base_url = base_url or os.getenv("EMBEDDING_BASE_URL")
+        # The embedding backend is dsagt's own service, so it has its own
+        # credential: the shell or ``~/.config/dsagt/env`` supplies
+        # EMBEDDING_API_KEY.  An LLM-provider key is the agent's, and dsagt
+        # neither reads nor writes one.
+        self.api_key = api_key or os.getenv("EMBEDDING_API_KEY")
         self.timeout = timeout
         self.batch_size = batch_size
 
         if not self.base_url:
             raise ValueError(
                 "Embedding API base URL required via argument or "
-                "EMBEDDING_BASE_URL / OPENAI_BASE_URL env var"
+                "the EMBEDDING_BASE_URL env var"
             )
         if not self.api_key:
             raise ValueError(
-                "API key required via argument or EMBEDDING_API_KEY env var"
+                "API key required via argument or the EMBEDDING_API_KEY env var"
             )
 
         # ``base_url`` is the OpenAI-style root (typically ending in ``/v1``);

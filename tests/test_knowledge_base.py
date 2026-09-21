@@ -17,14 +17,6 @@ import pytest
 
 from dsagt.knowledge import APIEmbedder, KnowledgeBase, CODE_LANGUAGES
 
-
-@pytest.fixture(autouse=True)
-def _fake_api_env(monkeypatch):
-    """Set dummy API credentials for unit tests without leaking into other modules."""
-    monkeypatch.setenv("LLM_API_KEY", "test-key")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://test")
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -99,21 +91,14 @@ class TestAPIEmbedder:
     def test_missing_base_url_raises(self):
         """Constructor raises ValueError when no base URL is available."""
         with patch.dict(os.environ, {}, clear=True):
-            env = os.environ.copy()
-            env.pop("OPENAI_BASE_URL", None)
-            with patch.dict(os.environ, env, clear=True):
-                with pytest.raises(ValueError, match="base URL required"):
-                    APIEmbedder(api_key="test-key", base_url=None)
+            with pytest.raises(ValueError, match="base URL required"):
+                APIEmbedder(api_key="test-key", base_url=None)
 
     def test_missing_api_key_raises(self):
         """Constructor raises ValueError when no API key is available."""
         with patch.dict(os.environ, {}, clear=True):
-            env = os.environ.copy()
-            env.pop("LLM_API_KEY", None)
-            env.pop("OPENAI_API_KEY", None)
-            with patch.dict(os.environ, env, clear=True):
-                with pytest.raises(ValueError, match="API key required"):
-                    APIEmbedder(api_key=None, base_url="http://test")
+            with pytest.raises(ValueError, match="API key required"):
+                APIEmbedder(api_key=None, base_url="http://test")
 
     def test_explicit_api_key(self):
         """Constructor accepts an explicit API key."""

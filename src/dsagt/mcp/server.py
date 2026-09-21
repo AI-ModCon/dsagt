@@ -441,7 +441,7 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
         base_url = emb_config.get("base_url") or ""
         # Credentials are never on disk: the api key comes from the shell env
         # (EMBEDDING_API_KEY), threaded into MCP children via the env block.
-        api_key = os.environ.get("EMBEDDING_API_KEY") or emb_config.get("api_key") or ""
+        api_key = os.environ.get("EMBEDDING_API_KEY") or ""
         if not base_url:
             raise ValueError(
                 "embedding.backend='api' requires embedding.base_url in "

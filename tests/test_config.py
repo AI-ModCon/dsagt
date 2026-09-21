@@ -1067,9 +1067,6 @@ class TestAgentEnv:
             "project": "test",
             "agent": agent,
             "project_dir": project_dir,
-            "mlflow": {"port": 5001},
-            "llm": {"model": "test-model"},
-            "embedding": {"api_key": "test-key"},
         }
 
     def test_dsagt_vars_set(self):
