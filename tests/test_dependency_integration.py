@@ -1,15 +1,14 @@
 """
-Integration test for dependency installation during tool registration.
+Integration test for a registered code's declared dependencies.
 
-Registers a tool with a real dependency (cowsay), installs it via the
-registry server, then executes the tool through the pipeline's CodeRegistry
-to verify the package is usable.
-
-This test actually modifies the venv (installs and uninstalls cowsay).
+Registers a code that needs a package the venv does not have (cowsay), then
+runs the code by its stored line.  The ``uv run --with`` prefix in that line
+is what supplies the dependency, so the run succeeds while the venv running
+the server stays as it was.
 
 Skip conditions:
   - uv not available on PATH
-  - cowsay already installed (test would be meaningless)
+  - cowsay already installed (the test would prove nothing)
 
 Usage:
     pytest test_dependency_integration.py -v
@@ -17,6 +16,7 @@ Usage:
 
 import importlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -52,22 +52,6 @@ pytestmark = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module", autouse=True)
-def uninstall_cowsay_after():
-    """Ensure cowsay is uninstalled after all tests in this module."""
-    yield
-    subprocess.run(
-        ["uv", "pip", "uninstall", "cowsay", "--python", sys.executable],
-        capture_output=True,
-        timeout=30,
-    )
-
-
 from mcp_helpers import call_tool_sync as call_tool
 
 # ---------------------------------------------------------------------------
@@ -75,9 +59,8 @@ from mcp_helpers import call_tool_sync as call_tool
 # ---------------------------------------------------------------------------
 
 
-def test_register_and_run_tool_with_dependency(tmp_path):
-    """End-to-end: register a tool with a dependency, install it, run the tool."""
-    # 1. Write a test script that imports cowsay
+def test_a_declared_dependency_reaches_the_run(tmp_path):
+    """End to end: register a code with a dependency, run its stored line."""
     script = tmp_path / "cowsay_tool.py"
     script.write_text(textwrap.dedent("""\
         import argparse
@@ -92,13 +75,10 @@ def test_register_and_run_tool_with_dependency(tmp_path):
         print(json.dumps({"cow_says": output, "status": "ok"}))
     """))
 
-    # 2. Create a registry server with a fresh CodeRegistry
-    registry = CodeRegistry(
-        runtime_dir=str(tmp_path / "runtime"),
-    )
+    project = tmp_path / "runtime"
+    registry = CodeRegistry(runtime_dir=str(project))
     server = create_registry_server(registry)
 
-    # 3. Register the tool with dependencies
     spec = {
         "name": "cowsay-tool",
         "description": "Print a cow saying a message",
@@ -113,24 +93,34 @@ def test_register_and_run_tool_with_dependency(tmp_path):
         },
     }
     text = call_tool(server, "save_code_spec", {"spec": spec})
-
-    # Verify the tool was saved and deps were installed
     assert "added" in text
-    assert "Successfully installed" in text
 
-    # 4. Verify the spec is in the skill file with dsagt-run wrapping
-    tool = registry.get_code("cowsay-tool")
-    assert tool is not None
-    assert tool["dependencies"] == ["cowsay"]
-    assert "dsagt-run" in tool["executable"]
+    # The dependency is in the stored line, which is what the agent runs.
+    stored = registry.get_code("cowsay-tool")
+    assert stored["dependencies"] == ["cowsay"]
+    assert "dsagt-run --code cowsay-tool --" in stored["executable"]
+    assert "uv run --with cowsay --" in stored["executable"]
 
-    # 5. Execute the tool directly via subprocess (as the agent would)
+    (project / ".dsagt").mkdir(parents=True, exist_ok=True)
+    (project / ".dsagt" / "config.yaml").write_text("project: dep-test\n")
+    env = {**os.environ, "DSAGT_PROJECT_DIR": str(project)}
     result = subprocess.run(
-        ["python", str(script), "--message", "hello"],
+        f"{stored['executable']} --message hello",
+        shell=True,
         capture_output=True,
         text=True,
+        cwd=project,
+        env=env,
+        timeout=300,
     )
-    assert result.returncode == 0, f"Tool failed: {result.stderr}"
+    assert result.returncode == 0, f"run failed: {result.stderr}"
     output = json.loads(result.stdout)
     assert output["status"] == "ok"
     assert "hello" in output["cow_says"]
+
+    # The run supplied cowsay to itself; the interpreter the server runs on
+    # is the one it was.
+    probe = subprocess.run(
+        [sys.executable, "-c", "import cowsay"], capture_output=True, text=True
+    )
+    assert probe.returncode != 0, "the venv gained cowsay; a run must not install"
