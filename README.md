@@ -27,7 +27,7 @@ DSAgt connects an MCP-compatible AI coding agent to code registration, a semanti
 <!-- md-shared:install:start -->
 
 ```bash
-python3.12 -m venv ~/.venvs/dsagt          # or: conda create -n dsagt python=3.12 && conda activate dsagt
+python3.13 -m venv ~/.venvs/dsagt          # or: conda create -n dsagt python=3.13 && conda activate dsagt
 source ~/.venvs/dsagt/bin/activate         # (Windows venv: ~\.venvs\dsagt\Scripts\activate)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
 dsagt --version                            # 0.2.1
