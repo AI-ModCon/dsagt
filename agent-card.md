@@ -393,4 +393,4 @@ DSAgt executes arbitrary CLI codes registered by the agent. The registry wraps c
 
 - Full documentation: https://ai-modcon.github.io/dsagt/
 - Source code: https://github.com/AI-ModCon/dsagt
-- Use case walkthroughs: `use_cases/`, eight in all, summarized in `USE_CASES.md`
+- Use case walkthroughs: `use_cases/`, eight in all, at https://ai-modcon.github.io/dsagt/use-cases/
