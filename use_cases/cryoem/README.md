@@ -176,9 +176,7 @@ judged on. Expected across the curation step:
 | `outliers` (overall) | **0.041 → 0.029** | curation removed ~30% of outliers |
 | `class-imbalance` (Class Number, passthrough) | **22.2 → 11.1** | markedly more balanced |
 
-A score is comparable only before and after one operation on the same table. Read in run
-order, the reports seem to get worse and then recover, because they describe different
-tables:
+The reports cover different tables, so the numbers are not a trend:
 
 | Table | `outliers` | `class-imbalance` |
 |---|---|---|
