@@ -1037,13 +1037,7 @@ class TestAgentRecord:
 
 class TestResolveRecordsDirProjectAware:
     """``_resolve_records_dir`` reads the project's ``.dsagt/config.yaml``
-    from cwd as the single source of truth — no env-var chain."""
-
-    def test_explicit_overrides_cwd(self, tmp_path):
-        from dsagt.provenance import _resolve_records_dir
-
-        result = _resolve_records_dir("/custom")
-        assert result == Path("/custom")
+    from the cwd, or from ``DSAGT_PROJECT_DIR`` when it is set."""
 
     def test_cwd_with_config(self, tmp_path, monkeypatch):
         """With no DSAGT_PROJECT_DIR the cwd is the project. A
@@ -1055,10 +1049,10 @@ class TestResolveRecordsDirProjectAware:
         (tmp_path / ".dsagt").mkdir()
         (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         monkeypatch.chdir(tmp_path)
-        assert _resolve_records_dir(None) == tmp_path / "trace_archive"
+        assert _resolve_records_dir() == tmp_path / "trace_archive"
         monkeypatch.setenv("DSAGT_PROJECT_DIR", "/stale/proj/dir")
         with pytest.raises(ValueError, match="DSAGT_PROJECT_DIR"):
-            _resolve_records_dir(None)
+            _resolve_records_dir()
 
 
 # ---------------------------------------------------------------------------

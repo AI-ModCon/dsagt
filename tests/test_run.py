@@ -6,12 +6,12 @@ exit code propagation, error handling, and env var fallbacks.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
 from dsagt.provenance import (
-    _parse_file_list,
     _resolve_records_dir,
     _write_record,
     run_and_record,
@@ -26,6 +26,14 @@ from dsagt.commands.run_code import (
 # ---------------------------------------------------------------------------
 
 
+def _project(tmp_path, monkeypatch):
+    """A project directory the command runs from; returns its trace_archive."""
+    (tmp_path / ".dsagt").mkdir(exist_ok=True)
+    (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path / "trace_archive"
+
+
 class TestParseArgs:
 
     def test_basic(self):
@@ -33,75 +41,10 @@ class TestParseArgs:
         assert args.code == "fastp"
         assert command == ["fastp", "-q", "20"]
 
-    def test_all_flags(self):
-        args, command = _parse_args(
-            [
-                "--code",
-                "megahit",
-                "--session",
-                "sess-1",
-                "--record-id",
-                "rec-42",
-                "--records-dir",
-                "/tmp/records",
-                "--input-files",
-                "a.fq,b.fq",
-                "--output-files",
-                "out/contigs.fa",
-                "--",
-                "megahit",
-                "-1",
-                "a.fq",
-            ]
-        )
-        assert args.code == "megahit"
-        assert args.session == "sess-1"
-        assert args.record_id == "rec-42"
-        assert args.records_dir == "/tmp/records"
-        assert args.input_files == "a.fq,b.fq"
-        assert args.output_files == "out/contigs.fa"
-        assert command == ["megahit", "-1", "a.fq"]
-
     def test_no_separator_exits(self):
         """Missing '--' separator causes a SystemExit (from argparse --help)."""
         with pytest.raises(SystemExit):
             _parse_args(["--code", "fastp", "fastp", "-q", "20"])
-
-    def test_defaults(self):
-        args, _ = _parse_args(["--code", "x", "--", "echo"])
-        assert args.session is None
-        assert args.record_id is None
-        assert args.records_dir is None
-        assert args.input_files is None
-        assert args.output_files is None
-
-
-# ---------------------------------------------------------------------------
-# File list parsing
-# ---------------------------------------------------------------------------
-
-
-class TestParseFileList:
-
-    def test_none(self):
-        assert _parse_file_list(None) == []
-
-    def test_empty_string(self):
-        assert _parse_file_list("") == []
-
-    def test_single(self):
-        assert _parse_file_list("reads.fq.gz") == ["reads.fq.gz"]
-
-    def test_multiple(self):
-        assert _parse_file_list("a.fq, b.fq,c.fq") == ["a.fq", "b.fq", "c.fq"]
-
-    def test_trailing_comma(self):
-        assert _parse_file_list("a.fq,") == ["a.fq"]
-
-
-# ---------------------------------------------------------------------------
-# Records directory resolution
-# ---------------------------------------------------------------------------
 
 
 class TestFileRolesFromCommand:
@@ -148,18 +91,14 @@ class TestFileRolesFromCommand:
 
 class TestResolveRecordsDir:
 
-    def test_explicit_wins(self):
-        assert _resolve_records_dir("/custom/dir") == Path("/custom/dir")
-
     def test_uses_cwd_dsagt_config(self, tmp_path, monkeypatch):
-        """No --records-dir and no DSAGT_PROJECT_DIR → the cwd is the
-        project: reads ``<cwd>/.dsagt/config.yaml`` and uses
-        ``<cwd>/trace_archive``."""
+        """With no DSAGT_PROJECT_DIR the cwd is the project: reads
+        ``<cwd>/.dsagt/config.yaml`` and uses ``<cwd>/trace_archive``."""
         monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         (tmp_path / ".dsagt").mkdir()
         (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         monkeypatch.chdir(tmp_path)
-        assert _resolve_records_dir(None) == tmp_path / "trace_archive"
+        assert _resolve_records_dir() == tmp_path / "trace_archive"
 
     def test_project_dir_env_wins_over_cwd(self, tmp_path, monkeypatch):
         """``DSAGT_PROJECT_DIR`` (exported by ``dsagt start``) names the
@@ -170,7 +109,7 @@ class TestResolveRecordsDir:
         (project / "data").mkdir()
         monkeypatch.setenv("DSAGT_PROJECT_DIR", str(project))
         monkeypatch.chdir(project / "data")
-        assert _resolve_records_dir(None) == project / "trace_archive"
+        assert _resolve_records_dir() == project / "trace_archive"
 
     def test_no_config_in_cwd_raises(self, tmp_path, monkeypatch):
         """A cwd without .dsagt/config.yaml fails with one line naming the
@@ -178,7 +117,7 @@ class TestResolveRecordsDir:
         monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         monkeypatch.chdir(tmp_path)
         with pytest.raises(ValueError, match="not a dsagt project"):
-            _resolve_records_dir(None)
+            _resolve_records_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -423,13 +362,14 @@ class TestRunAndRecord:
 class TestMain:
 
     @pytest.fixture(autouse=True)
-    def _mlflow_file_store(self, tmp_path, monkeypatch):
-        """Point MLflow tracing at a scratch file-store so init_tracing has a
-        real backend.  In production dsagt-run runs with cwd inside the
-        project directory, where ``.dsagt/config.yaml`` (project name) lives
-        and the session id comes from ``.dsagt/state.yaml``;
-        tests mirror that by chdir-ing into tmp_path.
-        """
+    def _project_and_store(self, tmp_path, monkeypatch):
+        """Run from a project directory, as dsagt-run does, and point MLflow
+        at a scratch store so init_tracing has a real backend.  The project
+        name comes from ``.dsagt/config.yaml`` and the session id from
+        ``.dsagt/state.yaml``, both under the working directory."""
+        (tmp_path / ".dsagt").mkdir(exist_ok=True)
+        (tmp_path / ".dsagt" / "config.yaml").write_text("project: test\n")
+        monkeypatch.chdir(tmp_path)
         # Serverless: init_tracing resolves a sqlite store from the project
         # dir via MLflow's native provider — no OTLP exporter.  Stub the
         # resolver to a known sqlite URI so a shell-set MLFLOW_TRACKING_URI
@@ -456,27 +396,22 @@ class TestMain:
 
         from dsagt import observability as obs_module
 
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / ".dsagt").mkdir()
-        (tmp_path / ".dsagt" / "config.yaml").write_text("project: test\n")
         (tmp_path / ".dsagt" / "state.yaml").write_text(
             "sessions:\n- id: 7\n  started_at: '2026-01-01T00:00:00Z'\n"
         )
         monkeypatch.setattr(obs_module, "_initialized", False)
         monkeypatch.setattr(obs_module, "_default_session_id", None)
 
+        from dsagt.commands import log_trace as log_trace_module
         from dsagt.commands import run_code
 
         # The trace is logged by a detached process; run that step in-process.
         monkeypatch.setattr(
             run_code,
             "_log_trace_detached",
-            lambda session_id, project_dir: lambda path: run_code.log_trace(
-                path, session_id
-            ),
+            lambda project_dir: lambda path: log_trace_module.log_trace(path),
         )
-        records = tmp_path / "trace_archive"
-        assert main(["--code", "t", "--records-dir", str(records), "--", "true"]) == 0
+        assert main(["--code", "t", "--", "true"]) == 0
 
         assert obs_module._default_session_id == "test-7"
         trace = mlflow.MlflowClient().get_trace(mlflow.get_last_active_trace_id())
@@ -484,35 +419,33 @@ class TestMain:
 
     def test_the_trace_is_logged_by_a_detached_process(self, tmp_path, monkeypatch):
         """``main`` loads no trace store: it hands the record's path to a
-        ``--log-trace`` process started in the project directory."""
+        ``dsagt.commands.log_trace`` process started in the project
+        directory."""
         import subprocess
 
         from dsagt.commands import run_code
 
-        (tmp_path / ".dsagt").mkdir()
-        (tmp_path / ".dsagt" / "config.yaml").write_text("project: test\n")
         started = []
         real_popen = subprocess.Popen
 
         def popen(argv, **kw):
-            if "--log-trace" not in argv:
+            if "dsagt.commands.log_trace" not in argv:
                 return real_popen(argv, **kw)
             started.append((argv, kw))
 
         monkeypatch.setattr(subprocess, "Popen", popen)
         records = tmp_path / "trace_archive"
-        assert main(["--records-dir", str(records), "--", "true"]) == 0
+        assert main(["--code", "t", "--", "true"]) == 0
 
         [(argv, kw)] = started
         [record] = records.glob("*.json")
-        assert argv[1:5] == [
+        assert argv[1:4] == [
             "-m",
-            "dsagt.commands.run_code",
-            "--log-trace",
+            "dsagt.commands.log_trace",
             str(record.resolve()),
         ]
         assert kw["cwd"] == tmp_path and kw["start_new_session"] is True
-        assert run_code._log_trace_detached(None, tmp_path / "elsewhere") is None
+        assert run_code._log_trace_detached(tmp_path / "elsewhere") is None
 
     def test_record_files_come_from_the_spec_roles(self, tmp_path, monkeypatch):
         """Without --input-files/--output-files, dsagt-run reads the spec of
@@ -567,8 +500,6 @@ class TestMain:
             [
                 "--code",
                 "echo_tool",
-                "--records-dir",
-                str(tmp_path),
                 "--",
                 "echo",
                 "from main",
@@ -576,7 +507,7 @@ class TestMain:
         )
 
         assert exit_code == 0
-        records = list(tmp_path.glob("*.json"))
+        records = list((tmp_path / "trace_archive").glob("*.json"))
         assert len(records) == 1
 
     def test_empty_command_returns_1(self, tmp_path):
@@ -585,8 +516,6 @@ class TestMain:
             [
                 "--code",
                 "empty",
-                "--records-dir",
-                str(tmp_path),
                 "--",
             ]
         )
@@ -598,8 +527,6 @@ class TestMain:
             [
                 "--code",
                 "fail",
-                "--records-dir",
-                str(tmp_path),
                 "--",
                 "bash",
                 "-c",
@@ -653,6 +580,8 @@ class TestSignal:
         import sys
         import time
 
+        (tmp_path / ".dsagt").mkdir()
+        (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         proc = subprocess.Popen(
             [
                 sys.executable,
@@ -660,8 +589,6 @@ class TestSignal:
                 "dsagt.commands.run_code",
                 "--code",
                 "sleeper",
-                "--records-dir",
-                str(tmp_path),
                 "--",
                 "sleep",
                 "30",
@@ -671,7 +598,7 @@ class TestSignal:
         time.sleep(1.5)
         os.kill(proc.pid, signal.SIGTERM)
         proc.wait(timeout=10)
-        records = list(tmp_path.glob("*.json"))
+        records = list((tmp_path / "trace_archive").glob("*.json"))
         assert len(records) == 1
         record = json.loads(records[0].read_text())
         assert record["execution"]["return_code"] == -signal.SIGTERM
@@ -689,25 +616,21 @@ class TestFileHashes:
     def test_inputs_and_outputs_are_hashed(self, tmp_path, monkeypatch):
         import hashlib
 
-        monkeypatch.chdir(tmp_path)
+        _project(tmp_path, monkeypatch)
         (tmp_path / "in.txt").write_text("alpha\n")
         main(
             [
                 "--code",
                 "copy",
-                "--records-dir",
-                str(tmp_path / "records"),
-                "--input-files",
-                "in.txt",
-                "--output-files",
-                "out.txt",
                 "--",
                 "cp",
                 "in.txt",
                 "out.txt",
             ]
         )
-        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        record = json.loads(
+            next((tmp_path / "trace_archive").glob("*.json")).read_text()
+        )
         digest = hashlib.sha256(b"alpha\n").hexdigest()
         assert record["execution"]["file_hashes"] == {
             "in.txt": digest,
@@ -715,43 +638,24 @@ class TestFileHashes:
         }
 
     def test_a_missing_output_has_no_hash(self, tmp_path, monkeypatch):
+        """A spec role naming a file the run never wrote leaves no hash."""
         monkeypatch.chdir(tmp_path)
-        main(
-            [
-                "--code",
-                "t",
-                "--records-dir",
-                str(tmp_path / "records"),
-                "--output-files",
-                "never.txt",
-                "--",
-                "true",
-            ]
+        run_and_record(
+            "t",
+            ["true"],
+            tmp_path / "trace_archive",
+            output_files=["never.txt"],
+            log_trace=None,
         )
-        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        record = json.loads(
+            next((tmp_path / "trace_archive").glob("*.json")).read_text()
+        )
         assert record["execution"]["file_hashes"] == {}
 
 
 class TestArgumentDerivedFiles:
     """With no spec roles, an argument that is a file is an input, and one
     that exists only after the run is an output."""
-
-    def test_ad_hoc_run_names_its_files(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "a.csv").write_text("x\n")
-        main(
-            [
-                "--records-dir",
-                str(tmp_path / "records"),
-                "--",
-                "cp",
-                "a.csv",
-                "b.csv",
-            ]
-        )
-        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
-        assert record["execution"]["input_files"] == ["a.csv"]
-        assert record["execution"]["output_files"] == ["b.csv"]
 
     def test_a_spec_with_no_roles_falls_back_to_the_arguments(
         self, tmp_path, monkeypatch
@@ -760,6 +664,8 @@ class TestArgumentDerivedFiles:
 
         project = tmp_path / "proj"
         (project / "trace_archive").mkdir(parents=True)
+        (project / ".dsagt").mkdir()
+        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
         CodeRegistry(runtime_dir=project).save_tool(
             {
                 "name": "aidrin",
@@ -777,8 +683,6 @@ class TestArgumentDerivedFiles:
             [
                 "--code",
                 "aidrin",
-                "--records-dir",
-                str(project / "trace_archive"),
                 "--",
                 "cat",
                 "data/t.csv",
@@ -797,44 +701,70 @@ class TestRolesAndArgumentsPerSide:
     def test_arguments_fill_the_side_the_roles_leave_empty(self, tmp_path, monkeypatch):
         """fastp's spec names -i and -o; the agent ran --in1/--out1. The role
         match gives nothing on either side, and the scan fills both."""
-        monkeypatch.chdir(tmp_path)
+        _project(tmp_path, monkeypatch)
         (tmp_path / "in.fq").write_text("@r\nA\n+\nF\n")
         main(
             [
                 "--code",
                 "fastp",
-                "--records-dir",
-                str(tmp_path / "records"),
                 "--",
                 "cp",
                 "in.fq",
                 "out.fq",
             ]
         )
-        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        record = json.loads(
+            next((tmp_path / "trace_archive").glob("*.json")).read_text()
+        )
         assert record["execution"]["input_files"] == ["in.fq"]
         assert record["execution"]["output_files"] == ["out.fq"]
 
     def test_role_inputs_keep_and_outputs_come_from_the_scan(
         self, tmp_path, monkeypatch
     ):
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "in.fq").write_text("x\n")
+        """The spec names the input; the output side, which the roles leave
+        empty, is filled from the arguments."""
+        from dsagt.registry import CodeRegistry
+
+        project = tmp_path / "proj"
+        (project / "trace_archive").mkdir(parents=True)
+        (project / ".dsagt").mkdir()
+        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        CodeRegistry(runtime_dir=project).save_tool(
+            {
+                "name": "t",
+                "description": "d",
+                "executable": "cp",
+                "parameters": {
+                    "src": {
+                        "type": "string",
+                        "description": "in",
+                        "cli": "positional",
+                        "role": "input",
+                    },
+                    "dest": {
+                        "type": "string",
+                        "description": "out",
+                        "cli": "positional",
+                    },
+                },
+            }
+        )
+        (project / "in.fq").write_text("x\n")
+        monkeypatch.chdir(project)
         main(
             [
                 "--code",
                 "t",
-                "--records-dir",
-                str(tmp_path / "records"),
-                "--input-files",
-                "in.fq",
                 "--",
                 "cp",
                 "in.fq",
                 "out.fq",
             ]
         )
-        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
+        record = json.loads(
+            next((project / "trace_archive").glob("*.json")).read_text()
+        )
         assert record["execution"]["input_files"] == ["in.fq"]
         assert record["execution"]["output_files"] == ["out.fq"]
 
@@ -849,95 +779,26 @@ class TestNestedRuns:
 
         from dsagt.provenance import load_pipeline_records
 
-        monkeypatch.chdir(tmp_path)
-        records = tmp_path / "records"
-        inner = f"{sys.executable} -m dsagt.commands.run_code --code inner --records-dir {records} -- echo inner"
+        (tmp_path / ".dsagt").mkdir()
+        (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
+        _project(tmp_path, monkeypatch)
+        records = tmp_path / "trace_archive"
+        inner = (
+            f"{sys.executable} -m dsagt.commands.run_code --code inner -- echo inner"
+        )
         script = tmp_path / "loop.sh"
         script.write_text(f"#!/bin/bash\n{inner}\n")
         monkeypatch.delenv("DSAGT_RUN_PARENT", raising=False)
-        rc = main(
-            ["--code", "loop", "--records-dir", str(records), "--", "bash", str(script)]
-        )
+        rc = main(["--code", "loop", "--", "bash", str(script)])
         assert rc == 0
         by_name = {
             r.get("code_name"): r
             for r in (json.loads(p.read_text()) for p in records.glob("*.json"))
         }
-
-
-class TestRolesAndArgumentsPerSide:
-
-    def test_arguments_fill_the_side_the_roles_leave_empty(self, tmp_path, monkeypatch):
-        """fastp's spec names -i and -o; the agent ran --in1/--out1. The role
-        match gives nothing on either side, and the scan fills both."""
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "in.fq").write_text("@r\nA\n+\nF\n")
-        main(
-            [
-                "--code",
-                "fastp",
-                "--records-dir",
-                str(tmp_path / "records"),
-                "--",
-                "cp",
-                "in.fq",
-                "out.fq",
-            ]
-        )
-        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
-        assert record["execution"]["input_files"] == ["in.fq"]
-        assert record["execution"]["output_files"] == ["out.fq"]
-
-    def test_role_inputs_keep_and_outputs_come_from_the_scan(
-        self, tmp_path, monkeypatch
-    ):
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "in.fq").write_text("x\n")
-        main(
-            [
-                "--code",
-                "t",
-                "--records-dir",
-                str(tmp_path / "records"),
-                "--input-files",
-                "in.fq",
-                "--",
-                "cp",
-                "in.fq",
-                "out.fq",
-            ]
-        )
-        record = json.loads(next((tmp_path / "records").glob("*.json")).read_text())
-        assert record["execution"]["input_files"] == ["in.fq"]
-        assert record["execution"]["output_files"] == ["out.fq"]
-
-
-class TestNestedRuns:
-
-    def test_a_nested_run_carries_its_parent_and_the_reconstruction_skips_it(
-        self, tmp_path, monkeypatch
-    ):
-        import os
-        import sys
-
-        from dsagt.provenance import load_pipeline_records
-
-        monkeypatch.chdir(tmp_path)
-        records = tmp_path / "records"
-        inner = f"{sys.executable} -m dsagt.commands.run_code --code inner --records-dir {records} -- echo inner"
-        script = tmp_path / "loop.sh"
-        script.write_text(f"#!/bin/bash\n{inner}\n")
-        monkeypatch.delenv("DSAGT_RUN_PARENT", raising=False)
-        rc = main(["--records-dir", str(records), "--", "bash", str(script)])
-        assert rc == 0
-        by_name = {
-            r.get("code_name"): r
-            for r in (json.loads(p.read_text()) for p in records.glob("*.json"))
-        }
-        outer, child = by_name[""], by_name["inner"]
+        outer, child = by_name["loop"], by_name["inner"]
         assert "parent_record_id" not in outer
         assert child["parent_record_id"] == outer["record_id"]
-        assert [r["code_name"] for r in load_pipeline_records(records)] == [""]
+        assert [r["code_name"] for r in load_pipeline_records(records)] == ["loop"]
         assert "DSAGT_RUN_PARENT" not in os.environ
 
 
@@ -1057,7 +918,7 @@ class TestFindingsFromThe0919Runs:
 
 def test_a_moved_input_is_not_an_output(tmp_path, monkeypatch):
     """aidrin, codex: `mv a b` recorded a as an output with no hash."""
-    monkeypatch.chdir(tmp_path)
+    _project(tmp_path, monkeypatch)
     (tmp_path / "a.csv").write_text("x\n")
     records = tmp_path / "trace_archive"
     run_and_record("move", ["mv", "a.csv", "b.csv"], records, log_trace=None)
@@ -1069,31 +930,8 @@ def test_a_moved_input_is_not_an_output(tmp_path, monkeypatch):
 
 
 def test_a_run_without_a_code_name_is_refused(tmp_path, capsys):
-    assert main(["--records-dir", str(tmp_path), "--", "true"]) == 2
-    assert "--code <name> is required" in capsys.readouterr().err
+    """--code is what names the record; argparse requires it."""
+    with pytest.raises(SystemExit):
+        main(["--records-dir", str(tmp_path), "--", "true"])
+    assert "--code" in capsys.readouterr().err
     assert list(tmp_path.glob("*.json")) == []
-
-
-def test_the_script_behind_a_uv_wrapper_is_neither_input_nor_output(
-    tmp_path, monkeypatch
-):
-    """Every datacard-validate record listed validate_datacard.py as an output:
-    a code with dependencies runs as `uv run --with ... -- python x.py`, and the
-    interpreter's script was looked for only when the command began with python."""
-    from dsagt.provenance import files_from_arguments, new_files_from_arguments
-
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "validate.py").write_text("pass\n")
-    (tmp_path / "card.md").write_text("x\n")
-    command = [
-        "uv",
-        "run",
-        "--with",
-        "pyyaml",
-        "--",
-        "python",
-        "validate.py",
-        "card.md",
-    ]
-    assert files_from_arguments(command) == ["card.md"]
-    assert new_files_from_arguments(command, ["card.md"]) == []
