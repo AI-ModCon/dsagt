@@ -77,3 +77,25 @@ def test_codex_first_prompt_execs_and_later_prompts_resume_last():
 
 def test_every_supported_agent_has_a_command_builder():
     assert set(hu.COMMANDS) == {"claude", "codex"}
+
+
+@pytest.mark.parametrize(
+    "from_n, only, expected",
+    [
+        (1, None, [1, 2, 3]),
+        (2, None, [2, 3]),
+        (0, None, [1, 2, 3]),
+        (1, {1, 2}, [1, 2]),
+        (1, {2, 3}, [2, 3]),
+        (2, {3}, [3]),
+    ],
+)
+def test_selected_prompts(from_n, only, expected):
+    assert hu.selected_prompts(3, from_n, only) == expected
+
+
+def test_a_selection_starting_at_prompt_one_starts_the_session():
+    """``--only 1,2`` starts a session; ``--only 2,3`` continues one."""
+    assert hu.selected_prompts(3, 1, {1, 2})[0] == 1
+    assert hu.selected_prompts(3, 1, {2, 3})[0] != 1
+    assert hu.selected_prompts(3, 0, None)[0] == 1

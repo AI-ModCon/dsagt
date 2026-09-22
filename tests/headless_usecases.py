@@ -82,6 +82,18 @@ def prompts_from(readme: Path) -> list[str]:
     ]
 
 
+def selected_prompts(count: int, from_n: int, only: set[int] | None) -> list[int]:
+    """The prompt numbers to run, in order.
+
+    The first of them starts the session; every later one continues it, so
+    ``--only 2,3`` and ``--from 2`` continue a session the earlier prompts
+    opened, while any selection that begins at prompt 1 starts a new one.
+    """
+    return [
+        n for n in range(1, count + 1) if n >= from_n and (only is None or n in only)
+    ]
+
+
 def claude_command(prompt: str, *, model: str | None, first: bool) -> list[str]:
     cmd = ["claude", "-p", prompt, "--model", model or CLAUDE_DEFAULT_MODEL]
     if not first:
@@ -147,9 +159,10 @@ def main() -> int:
     log = Path(args.log) if args.log else project_dir / "headless_run.log"
     log.parent.mkdir(parents=True, exist_ok=True)
 
-    first = args.from_n == 1 and only is None
+    selected = selected_prompts(len(prompts), args.from_n, only)
+    first = bool(selected) and selected[0] == 1
     for n, prompt in enumerate(prompts, start=1):
-        if n < args.from_n or (only is not None and n not in only):
+        if n not in selected:
             continue
         for key, value in subs.items():
             prompt = prompt.replace(key, value)
