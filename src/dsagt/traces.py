@@ -1402,22 +1402,31 @@ def make_trace_collector(
     )
 
 
+def _holds_response(trace: "Trace", root: dict) -> bool:
+    """Whether a turn has been answered, i.e. holds an LLM span."""
+    return any(c["kind"] == "LLM" for c in trace.children(root["span_id"]))
+
+
 class TraceCollector:
     """Periodically read the session, translate it, and hand it to consumers.
 
     A *consumer* is anything with a ``name`` and a ``write(trace)`` — the MLflow
     logger and the memory indexer both qualify (no shared base needed).  Each
     consumer keeps its own ack set (``<ack_dir>/trace_acks_<name>.json``), keyed
-    by session-qualified turn id (``<session_id>:<span_id>``) so the
-    per-transcript ``turn-N`` indices can't collide across sessions in the
-    shared file.  A re-pass or an N+1 catch-up can only waste work, never
-    double-log or lose a turn, and a failing consumer holds back only its own
-    mark.
+    by transcript-qualified turn id (``<active_source>:<span_id>``).  The
+    transcript, not the dsagt session, is the unit: a resumed conversation
+    (``claude --continue``, ``codex exec resume``) starts a new dsagt session on
+    the same transcript, and its earlier turns are already acked, while two
+    transcripts' ``turn-N`` indices stay distinct in the shared file.  A re-pass
+    or an N+1 catch-up can only waste work, never double-log or lose a turn, and
+    a failing consumer holds back only its own mark.
 
     Completeness watermark: a periodic pass emits only *completed* turns (all but
     the still-open last one); the deferred final turn flushes when a later prompt
-    bounds it or at end-of-session (``include_last=True``).  An OS file lock
-    serializes overlapping passes against the shared ack files.
+    bounds it or at end-of-session (``include_last=True``), and only once it
+    holds a response, so a prompt still being answered is never acked as a
+    stub.  An OS file lock serializes overlapping passes against the shared ack
+    files.
     """
 
     def __init__(
@@ -1497,16 +1506,23 @@ class TraceCollector:
                 return 0
 
             roots = trace.roots()
-            candidates = roots if include_last else roots[:-1]
-            # Ack keys are session-qualified.  span_id is a per-transcript record
-            # index ("turn-N"), so the same ids recur in every session's
-            # transcript; a bare span_id would collide across sessions in the
-            # shared, never-reset ack file and suppress every turn after the
-            # first session.  Qualifying by session id matches the key MLflowSink
-            # already uses for its own idempotency (``{trace_id}:{span_id}``).
-            key_by_span = {
-                r["span_id"]: f"{self._session_id}:{r['span_id']}" for r in candidates
-            }
+            candidates = roots[:-1]
+            # The last root is the deferred final turn only once it holds a
+            # response.  A turn with no LLM span yet is the open turn of a
+            # session still running on this transcript: the startup catch-up
+            # of a resumed conversation reads the live transcript, and emitting
+            # the open turn would ack it as a partial for good.  Tool spans
+            # don't count — an agent that calls a tool before it answers has
+            # written children to a turn it has not finished.
+            if include_last and roots and _holds_response(trace, roots[-1]):
+                candidates = roots
+            # Ack keys are transcript-qualified.  span_id is unique within one
+            # transcript only ("turn-N" is a record index), and the ack file is
+            # shared by every session of the project.  A resumed conversation is
+            # a new dsagt session on the same transcript, so a session-qualified
+            # key would log its earlier turns again under each new session.
+            source = self._reader.active_source()
+            key_by_span = {r["span_id"]: f"{source}:{r['span_id']}" for r in candidates}
             if not key_by_span:
                 return 0
 

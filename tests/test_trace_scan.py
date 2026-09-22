@@ -109,7 +109,7 @@ def test_periodic_collect_emits_complete_turns_and_defers_the_open_last(scan_env
     )
     # roots = [u1, u2, u3]; periodic emits roots[:-1] = u1, u2; u3 deferred.
     assert collector.collect() == 2
-    assert collector._load_acks("mlflow") == {"proj:s:u1", "proj:s:u2"}
+    assert collector._load_acks("mlflow") == {f"{f}:u1", f"{f}:u2"}
 
 
 def test_collect_is_idempotent(scan_env):
@@ -141,7 +141,7 @@ def test_deferred_turn_emits_once_a_later_prompt_bounds_it(scan_env):
         _user("2026-06-19T15:00:04.000Z", "q3", "u3"),
     )
     assert collector.collect() == 1  # u2 now emitted; u3 deferred
-    assert collector._load_acks("mlflow") == {"proj:s:u1", "proj:s:u2"}
+    assert collector._load_acks("mlflow") == {f"{f}:u1", f"{f}:u2"}
 
 
 def test_final_flush_emits_the_deferred_last_turn(scan_env):
@@ -156,7 +156,62 @@ def test_final_flush_emits_the_deferred_last_turn(scan_env):
     assert collector.collect() == 1  # u1; u2 deferred
     assert collector.collect(include_last=True) == 1  # end-of-session flush emits u2
     assert collector.collect(include_last=True) == 0  # idempotent
-    assert collector._load_acks("mlflow") == {"proj:s:u1", "proj:s:u2"}
+    assert collector._load_acks("mlflow") == {f"{f}:u1", f"{f}:u2"}
+
+
+def test_final_flush_skips_an_open_last_turn(scan_env):
+    """A resumed conversation's startup catch-up reads the live transcript,
+    whose last record is the new session's prompt with no response yet; the
+    flush leaves that turn for a later pass instead of acking a stub.
+    """
+    collector, f, _ = scan_env
+    _append(
+        f,
+        _user("2026-06-19T15:00:00.000Z", "q1", "u1"),
+        _asst("2026-06-19T15:00:01.000Z", {"type": "text", "text": "a1"}),
+        _user("2026-06-19T15:00:02.000Z", "q2 (being answered)", "u2"),
+    )
+    assert collector.collect(include_last=True) == 1  # u1 only
+    assert collector._load_acks("mlflow") == {f"{f}:u1"}
+    _append(f, _asst("2026-06-19T15:00:03.000Z", {"type": "text", "text": "a2"}))
+    assert collector.collect(include_last=True) == 1  # u2, now answered
+    assert collector._load_acks("mlflow") == {f"{f}:u1", f"{f}:u2"}
+
+
+def test_final_flush_skips_a_last_turn_that_has_only_called_a_tool(scan_env):
+    """A turn mid tool-use is open too: its tool spans are not a response.
+
+    The agent calls its MCP tools before it answers, so the open turn a
+    catch-up reads usually holds children already; acking it there would log
+    the turn without the response and token usage it is about to get.
+    """
+    collector, f, _ = scan_env
+    _append(
+        f,
+        _user("2026-06-19T15:00:00.000Z", "q1", "u1"),
+        _asst("2026-06-19T15:00:01.000Z", {"type": "text", "text": "a1"}),
+        _user("2026-06-19T15:00:02.000Z", "q2 (being answered)", "u2"),
+        _asst(
+            "2026-06-19T15:00:03.000Z",
+            {
+                "type": "tool_use",
+                "id": "t1",
+                "name": "Bash",
+                "input": {"command": "ls"},
+            },
+        ),
+        _user(
+            "2026-06-19T15:00:04.000Z",
+            [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}],
+            "u3",
+            tool_use_result=True,
+        ),
+    )
+    assert collector.collect(include_last=True) == 1  # u1 only; u2 still open
+    assert collector._load_acks("mlflow") == {f"{f}:u1"}
+    _append(f, _asst("2026-06-19T15:00:05.000Z", {"type": "text", "text": "a2"}))
+    assert collector.collect(include_last=True) == 1  # u2, now answered
+    assert collector._load_acks("mlflow") == {f"{f}:u1", f"{f}:u2"}
 
 
 def test_collect_on_empty_transcript_is_zero(scan_env):
@@ -164,6 +219,19 @@ def test_collect_on_empty_transcript_is_zero(scan_env):
     f.write_text("")
     assert collector.collect() == 0
     assert collector.collect(include_last=True) == 0
+
+
+def _answered_turn(trace, span_id):
+    """An AGENT root with one LLM span: a turn that holds its response."""
+    trace.add_agent_root(span_id, "c", start_time=None, prompt="")
+    trace.add_llm_span(
+        f"{span_id}-0",
+        parent_id=span_id,
+        start_time=None,
+        end_time=None,
+        request=[],
+        response=[],
+    )
 
 
 class _Recorder:
@@ -179,6 +247,12 @@ class _Recorder:
 
 
 class _FakeReader:
+    def __init__(self, source="transcript-a"):
+        self._source = source
+
+    def active_source(self):
+        return self._source
+
     def read(self):
         return [{"x": 1}]  # non-empty so collect proceeds; translator ignores
 
@@ -194,8 +268,8 @@ class _FakeTranslator:
 def test_consumers_ack_independently(tmp_path):
     # Two AGENT roots → two complete turns (include_last emits both).
     trace = Trace("t", "p:s", "claude", "p")
-    trace.add_agent_root("r1", "c", start_time=None, prompt="")
-    trace.add_agent_root("r2", "c", start_time=None, prompt="")
+    _answered_turn(trace, "r1")
+    _answered_turn(trace, "r2")
     good = _Recorder("good")
     bad = _Recorder("bad", fail=True)
     collector = TraceCollector(
@@ -211,8 +285,8 @@ def test_consumers_ack_independently(tmp_path):
     # to the good consumer); the failing one logs and holds its mark back.
     assert collector.collect(include_last=True) == 2
     assert good.seen == [{"r1", "r2"}]
-    # Acks are session-qualified (<session_id>:<span_id>).
-    assert collector._load_acks("good") == {"p:s:r1", "p:s:r2"}
+    # Acks are transcript-qualified (<active_source>:<span_id>).
+    assert collector._load_acks("good") == {"transcript-a:r1", "transcript-a:r2"}
     assert collector._load_acks("bad") == set()  # wedged consumer didn't advance
 
     # Good is fully caught up; bad retries (and fails again) — good doesn't redo.
@@ -227,7 +301,7 @@ def test_consumers_ack_independently(tmp_path):
 def test_ack_dir_overrides_where_ack_files_land(tmp_path):
     """An application embedding the pipeline keeps trace state beside its own."""
     trace = Trace("t", "p:s", "claude", "p")
-    trace.add_agent_root("r1", "c", start_time=None, prompt="")
+    _answered_turn(trace, "r1")
     rec = _Recorder("rec")
     collector = TraceCollector(
         _FakeReader(),
@@ -243,52 +317,66 @@ def test_ack_dir_overrides_where_ack_files_land(tmp_path):
     assert not (tmp_path / ".dsagt").exists()
 
 
-def test_acks_are_session_qualified_no_cross_session_collision(tmp_path):
-    """Two sessions in one project share the ack file, but each turn is keyed by
-    ``<session_id>:<span_id>`` — so session B's turns (the same per-transcript
-    ``turn-N`` indices) are not suppressed by session A's acks.  Regression for
-    the cross-session collision that silently dropped every session after the
-    first.
-    """
-
-    def _trace(session_id):
-        # Both sessions produce the SAME index-based span ids ("r1"/"r2").
-        t = Trace("t", session_id, "claude", "p")
-        t.add_agent_root("r1", "c", start_time=None, prompt="")
-        t.add_agent_root("r2", "c", start_time=None, prompt="")
-        return t
-
-    rec_a = _Recorder("mlflow")
-    collector_a = TraceCollector(
-        _FakeReader(),
-        _FakeTranslator(_trace("p:1")),
+def _two_turn_collector(tmp_path, *, session_id, source, recorder, turns=("r1", "r2")):
+    trace = Trace("t", session_id, "claude", "p")
+    for turn in turns:
+        _answered_turn(trace, turn)
+    return TraceCollector(
+        _FakeReader(source),
+        _FakeTranslator(trace),
         project="p",
-        session_id="p:1",
+        session_id=session_id,
         project_dir=tmp_path,
-        consumers=[rec_a],
+        consumers=[recorder],
+    )
+
+
+def test_acks_are_transcript_qualified_no_cross_transcript_collision(tmp_path):
+    """Two sessions in one project share the ack file, and each turn is keyed by
+    ``<active_source>:<span_id>``, so a second transcript's turns (the same
+    per-transcript ``turn-N`` indices) are not suppressed by the first's acks.
+    """
+    rec_a = _Recorder("mlflow")
+    collector_a = _two_turn_collector(
+        tmp_path, session_id="p:1", source="transcript-a", recorder=rec_a
     )
     assert collector_a.collect(include_last=True) == 2
 
-    # Session B: new collector, SAME project_dir (shared ack file), new session
-    # id, identical span ids.  Must still emit both turns.
     rec_b = _Recorder("mlflow")
-    collector_b = TraceCollector(
-        _FakeReader(),
-        _FakeTranslator(_trace("p:2")),
-        project="p",
-        session_id="p:2",
-        project_dir=tmp_path,
-        consumers=[rec_b],
+    collector_b = _two_turn_collector(
+        tmp_path, session_id="p:2", source="transcript-b", recorder=rec_b
     )
     assert collector_b.collect(include_last=True) == 2
     assert rec_b.seen == [{"r1", "r2"}]
-    # Both sessions' qualified keys coexist in the one shared ack file.
     assert collector_b._load_acks("mlflow") == {
-        "p:1:r1",
-        "p:1:r2",
-        "p:2:r1",
-        "p:2:r2",
+        "transcript-a:r1",
+        "transcript-a:r2",
+        "transcript-b:r1",
+        "transcript-b:r2",
     }
+
+
+def test_resumed_transcript_emits_only_its_new_turns(tmp_path):
+    """A resumed conversation is a new dsagt session on the same transcript
+    (``claude --continue``, ``codex exec resume``); the turns the earlier
+    session logged are not logged again under the new session id.
+    """
+    rec_a = _Recorder("mlflow")
+    collector_a = _two_turn_collector(
+        tmp_path, session_id="p:1", source="transcript-a", recorder=rec_a
+    )
+    assert collector_a.collect(include_last=True) == 2
+
+    rec_b = _Recorder("mlflow")
+    collector_b = _two_turn_collector(
+        tmp_path,
+        session_id="p:2",
+        source="transcript-a",
+        recorder=rec_b,
+        turns=("r1", "r2", "r3"),
+    )
+    assert collector_b.collect(include_last=True) == 1
+    assert rec_b.seen == [{"r3"}]
 
 
 def test_make_trace_collector_sessions_root(tmp_path):
