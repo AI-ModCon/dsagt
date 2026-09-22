@@ -13,7 +13,7 @@ order: 20
 
 # DSAgt Demo: Cryo-EM Data Curation Pipeline
 
-> **Estimated time:** ~45 minutes of session time. Setup pulls a **~0.5 GB data
+> **Estimated time:** ~20 minutes of session time. Setup pulls a **~0.5 GB data
 > download** (84 micrograph previews and the ground-truth particle tables), two
 > open-access papers, and the CryoPPP repository, then KB-ingests the repository
 > (minutes on the local embedder) before any pipeline work.
@@ -106,7 +106,10 @@ The agent should return chunks describing quality metrics: CTF resolution, defoc
 ### 3. Register CryoPPP processing codes
 
 ```text
-Look at the scripts in repos/cryoppp/ and register any data-processing or evaluation codes you find. Run --help on each script to discover its interface.
+Register the two CryoPPP scripts convert_start_to_csv_file.py and
+generate_box_files_for_each_micrographs.py from repos/cryoppp/ as codes. They have
+hard-coded paths and no command-line interface, so wrap each in a small CLI script under
+codes/<name>/scripts/ that takes its input and output paths as arguments.
 ```
 
 **Verify:**
@@ -138,8 +141,10 @@ The agent should search the knowledge base, write the script, and register it vi
 ```text
 Run the pipeline on the EMPIAR-10017 dataset in data/cryoem/10017/:
 1. Scan the directory to understand what's there
-2. Profile the micrograph metadata
-3. Run the quality scoring code on the metadata
+2. Derive per-micrograph metadata from the ground-truth particle tables in
+   data/cryoem/10017/ground_truth/ (defocus U, defocus V, and defocus angle per particle,
+   aggregated per micrograph) into data/cryoem/micrograph_metadata.csv, with a registered code
+3. Run the quality scoring code on that metadata
 4. Register a code that merges the two ground-truth particle tables in
    data/cryoem/10017/ground_truth/ into data/cryoem/particles.csv, adding a selected flag
    (1 for the selected table, 0 for excluded), and run it
@@ -149,14 +154,16 @@ Run the pipeline on the EMPIAR-10017 dataset in data/cryoem/10017/:
    the particle data?
 ```
 
+The Lite archive carries no CTF-fit, motion, or ice-thickness columns, so the derived metadata
+holds only the defocus parameters; the CryoCRAB score therefore tops out at 2 and every
+micrograph lands in the low tier. The measurable gain of this pipeline is in the particle tables.
+
 The merge and the curation are the two data operations of this pipeline, so the prompt asks
 for them as registered codes: each run is then an execution record, and the AI-readiness check
-has a before and an after to measure.
-
-Steps 4 and 5 are where the check shows: the agent runs the readiness
-metrics around each tabular operation — the merge (a no-op delta, which is itself informative)
-and the curation filter, where `particles.csv` before and `particles_curated.csv` after differ.
-Expected across the curation step:
+has a before and an after to measure. The merge has two input tables and no single "before"
+file, so the check pairs are: `particles.csv` is the merge's after and the curation's before,
+and `particles_curated.csv` is the curation's after; the two reports on those files are what
+post-condition 4 is judged on. Expected across the curation step:
 
 | Metric | before → after | Reading |
 |---|---|---|
@@ -181,12 +188,23 @@ Use the datacard-generator skill to write a Level 1 datacard for the curated cry
 Reconstruct the pipeline from the execution records as a bash script.
 ```
 
+### 8. Review the project artifacts
+
+```text
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+```
+
+**Expect:** a listing of the project directory that marks the execution records in
+`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
+with a line on what each is.
+
 ## Post-Conditions
 
 1. Knowledge base contains `cryoppp` collection with repo code, docs, and appended papers.
-2. `skills/aidrin/` is present (installed at init); the code registry includes the CryoPPP processing codes and the quality-scoring code.
+2. `skills/aidrin/` is present (installed at init); the code registry includes the two CryoPPP codes (the STAR-to-CSV converter and the box-file generator), the metadata-derivation code, and the quality-scoring code.
 3. Quality-scored CSV exists with tier distribution; `particles.csv` (merged) and `particles_curated.csv` (curated) exist with `trace_archive/` records for both operations.
-4. The check ran before and after the merge and the curation, and its reports show curation reduced outliers (~0.041 → ~0.029).
+4. The check ran on `particles.csv` and on `particles_curated.csv`, and the two reports show curation reduced outliers (~0.041 → ~0.029).
 5. A datacard exists for the processed dataset.
 6. A reconstructed pipeline script is available.
 7. Code execution records in `trace_archive/` document the full provenance chain, including one record per check run.
@@ -206,6 +224,7 @@ Reconstruct the pipeline from the execution records as a bash script.
 | AI-readiness check run unprompted (before and after the tabular steps) | 5 |
 | Base-skill use (`datacard-generator`) | 6 |
 | Pipeline reconstruction | 7 |
+| Review of the session's artifacts | 8 |
 
 ## Cleanup
 

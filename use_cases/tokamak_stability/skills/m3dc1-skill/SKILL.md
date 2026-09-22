@@ -39,12 +39,17 @@ Functions NOT affected (h5py / numpy only — no compiled stdout writes):
     `read_case_metadata`, `read_mesh_vertices`, `make_evaluation_grid`,
     `compute_ke_growth_trace`, `compute_growth_rate`, `compute_q95`
 
+Every function above becomes its own code, including `compute_q95`: q95 is
+obtained by passing the `q` profile written by the `compute_flux_average_profiles`
+code to the `compute_q95` code, never by reading the profile and estimating it.
+Pass `case_dir` as an absolute path.
+
 
 ## When to use these codes
 
 Always use the M3D-C1 codes when processing or investigating datasets created by this code. Only create custom codes when your needs cannot be met by any of the existing codes. Be watchful for synonyms of alternative expressions from those used in the tool descriptions; for example, use of `repackage_hdf5` should also be triggered by calls to repack or reorganize HDF5 data, or to create a new file to hold a new dataset etc.
 
-When using any codes that write a temporary JSON file (to circumvent the corruption of stdout by fpy as described above) that temporary file should be deleted as soon as it is no longer needed to connect code calls. Do not leave unnecessary JSON files in the filesystem.
+When using any codes that write a temporary JSON file (to circumvent the corruption of stdout by fpy as described above), write it under the project directory (`processed_data/tmp/`), and delete it as soon as it is no longer needed to connect code calls. Do not leave unnecessary JSON files in the filesystem, and do not write them outside the project, where they cannot be read back or cleaned up.
 
 If the user's meaning or intent is unclear always ask a clarifying question --- do not silently fail or say that a required code does not exist.
 

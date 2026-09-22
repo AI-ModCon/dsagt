@@ -61,10 +61,12 @@ def _in_case_dir(case_dir: Path):
     The m3dc1 library reads auxiliary files (geqdsk, equilibrium data) using
     relative paths from the working directory. This context manager provides
     that guarantee for m3dc1-dependent functions while leaving the global cwd
-    restored on exit, even if an exception is raised.
+    restored on exit, even if an exception is raised. Callers pass an absolute
+    path: a file path built from a relative ``case_dir`` before the chdir would
+    be resolved a second time inside it.
     """
     old = os.getcwd()
-    os.chdir(case_dir)
+    os.chdir(Path(case_dir).resolve())
     try:
         yield
     finally:
@@ -167,7 +169,7 @@ def read_snapshot_time(
         Simulation time as a float. Returns ``nan`` if the snapshot is not
         found.
     """
-    case_dir = Path(case_dir)
+    case_dir = Path(case_dir).resolve()
     snap_file = case_dir / f"time_{time_idx:03d}.h5"
 
     alfven_time = float("nan")
@@ -264,7 +266,7 @@ def read_case_metadata(case_dir: str | Path) -> dict:
         ``"psi_lcfs"``
             ψ at the last closed flux surface (internal units).
     """
-    case_dir = Path(case_dir)
+    case_dir = Path(case_dir).resolve()
     result: dict = {}
     result["params"] = read_c1input(case_dir)
     result["snapshots"] = list_time_snapshots(case_dir)
@@ -473,7 +475,7 @@ def compute_flux_average_profiles(
     if fields is None:
         fields = ["p", "j", "ne", "q"]
 
-    case_dir = Path(case_dir)
+    case_dir = Path(case_dir).resolve()
     c1h5 = str(case_dir / "C1.h5")
     result: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
@@ -530,7 +532,7 @@ def compute_miller_geometry(
     import fpy
     import m3dc1 as m1
 
-    case_dir = Path(case_dir)
+    case_dir = Path(case_dir).resolve()
     c1h5 = str(case_dir / "C1.h5")
 
     with _in_case_dir(case_dir):
@@ -589,7 +591,7 @@ def compute_perturbed_fields(
 
     skip = set(skip_fields) if skip_fields is not None else set(_DEFAULT_SKIP)
 
-    case_dir = Path(case_dir)
+    case_dir = Path(case_dir).resolve()
     c1h5 = str(case_dir / "C1.h5")
     sim_eq = fpy.sim_data(c1h5, time=-1)
     sim_lin = fpy.sim_data(c1h5, time=time_idx)
@@ -703,7 +705,7 @@ def evaluate_field_on_grid(
     import fpy
     from m3dc1 import eval_field
 
-    case_dir = Path(case_dir)
+    case_dir = Path(case_dir).resolve()
     c1h5 = str(case_dir / "C1.h5")
 
     if isinstance(fields, str):
@@ -790,7 +792,7 @@ def compute_poloidal_spectrum(
     import fpy
     import m3dc1 as m1
 
-    case_dir = Path(case_dir)
+    case_dir = Path(case_dir).resolve()
     c1h5 = str(case_dir / "C1.h5")
 
     with _in_case_dir(case_dir):

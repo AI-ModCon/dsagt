@@ -23,6 +23,19 @@ python -m pytest tests/test_config.py -q   # a single file
 python -m pytest -m integration -v         # integration (needs creds)
 ```
 
+A walkthrough under `use_cases/` is validated by running its Execution prompts
+through a headless agent:
+
+```bash
+dsagt init <name> --agent claude|codex --location ~/dsagt-projects   # then stage data per the README
+python tests/headless_usecases.py use_cases/<case> <name>            # --only N,M --from N --subst KEY=VALUE
+```
+
+The driver reads the agent from the project's config, continues one session
+across the prompts, and appends each response to `<project>/headless_run.log`.
+Judge the run by the README's post-conditions and the `trace_archive/` record
+count, not by the log alone.
+
 ## Lint & format
 
 CI enforces both on `src/` and `tests/` (scientific scripts under `use_cases/`

@@ -57,14 +57,9 @@ are fine for the rest. Then:
 
 ```bash
 PROJ=~/dsagt-projects/blastnet-well
-# Demo data (one BlastNet trajectory, three snapshots, and its holdout WELL
-# reference file) from the DSAgt use-case data folder:
-# https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
 curl -L "https://drive.usercontent.google.com/download?id=1xUZhlr6uCahSbOLiLt5wcwMzehdpaUjL&export=download&confirm=t" \
   -o combustion_simulation_data.tar.gz
 tar xzf combustion_simulation_data.tar.gz -C "$PROJ"
-# creates $PROJ/data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000/
-#     and $PROJ/data/holdout/well_output/lifted_hydrogen_jet_traj_5000.hdf5
 mkdir -p "$PROJ/codes/scripts" "$PROJ/docs"
 cp use_cases/combustion_simulation/docs/*.md "$PROJ/docs/"
 cp use_cases/combustion_simulation/scripts/check_well_output.py "$PROJ/codes/scripts/"
@@ -93,7 +88,8 @@ convert_to_well_format.py: a command-line converter taking a positional
 BlastNet trajectory directory and the options --output-file and --dry-run,
 reading info.json for dimensions, variables, snapshot ids, and grid paths, and
 writing one WELL HDF5 file. The coordinate arrays must be read from the grid
-files that info.json names, not generated. Save it with save_skill.
+files that info.json names, not generated; a missing grid file is an error.
+Save it with save_skill.
 ```
 
 **Expect:** `save_skill` writes `<project>/skills/blastnet-to-well/` with a
@@ -124,7 +120,8 @@ positional candidate and reference files and the options --rtol, --atol,
 ```text
 Run the registered convert-to-well code, with its exact command, as a dry run on
 data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000 and tell me the grid
-size, the number of snapshots, and which WELL fields it would write.
+size, the number of snapshots, and which WELL fields it would write. info.json
+says 3 snapshots and 13 variables; tell me if the dry run disagrees.
 ```
 
 **Expect:** 1600 × 2000 grid, 3 snapshots, eleven `t0_fields` scalars and a
@@ -146,7 +143,8 @@ data/holdout/well_output/lifted_hydrogen_jet_traj_5000.hdf5 with 10 random
 points per dataset by running the registered check-well-output code with its exact
 command. If anything differs, fix the converter in the skill, reconvert with the
 registered convert-to-well code, and check again. When the spot-check passes, run the
-full comparison the same way.
+full comparison the same way. After the check passes, update the skill's SKILL.md so
+its rules match the converter.
 ```
 
 **Expect:** a first pass that fails on one or more of the pitfalls the
@@ -159,11 +157,14 @@ original development hit — all of them are visible in the checker's output:
 | an extra root attribute (`Re_jet`) or a non-empty `simulation_parameters` | root-attribute mismatch |
 | boundary masks written as `bool` | dtype mismatch on `boundary_conditions/*/mask` |
 | boundary-condition text not parsed (`inflow-outflow`, `pressure outlet`) | `boundary_conditions/` groups missing |
+| `bc_type` written in the source's case (`open`) | attribute mismatch on `boundary_conditions/*/bc_type` (`OPEN` expected) |
+| `dimensions/time` written as snapshot indices (0, 1, 2) or a hard-coded step | `dimensions/time` values differ; the times come from `time-step snapshot [s]` in info.json |
 | coordinates generated as a uniform range instead of read from the grid files | none — the grid is uniform, so it passes within tolerance; read the converter, not only the checker output |
 
 Each fix is a new version of the script inside the skill, each reconversion
 and check a new record in `trace_archive/`. The loop ends with
-`PASS — candidate matches reference exactly`.
+`PASS — candidate matches reference exactly`, and the skill's rules agree with
+the converter that passed.
 
 ### 6. Generate a datacard
 
@@ -179,22 +180,34 @@ note anything unknown rather than asking.
 Reconstruct the conversion and validation pipeline from the execution records
 as a bash script, save it as pipeline.sh, and put the trajectory directory in a
 variable at the top so it can be rerun on the other BlastNet trajectories. Keep
-only the final converter run and its checks.
+the final conversion, the spot check, and the full check.
 ```
 
-**Expect:** `reconstruct_pipeline(format="bash")` orders the recorded runs by
-their input/output files; `pipeline.sh` holds the dry run, the conversion, and
-the two checks as plain `python` (or `uv run`) commands with `TRAJ_DIR` at the
-top. The script calls the tools directly so it runs outside a DSAgt project.
+**Expect:** `reconstruct_pipeline(format="bash")` returns the recorded runs in
+the order they ran; `pipeline.sh` holds the final conversion and the two checks
+as plain commands with `TRAJ_DIR` at the top, the one value to edit for another
+trajectory. The script calls the tools directly so it runs outside a DSAgt
+project.
+
+### 8. Review the project artifacts
+
+```text
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+```
+
+**Expect:** a listing of the project directory that marks the execution records in
+`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
+installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
+with a line on what each is.
 
 ## Post-Conditions
 
-1. `skills/blastnet-to-well/` exists with a `SKILL.md` stating the mapping rules, both specifications copied into the skill, and a converter under `scripts/`.
+1. `skills/blastnet-to-well/` exists with a `SKILL.md` whose mapping rules agree with the final converter, both specifications under `references/`, and the converter under `scripts/`.
 2. Code registry contains `convert-to-well` and `check-well-output` specs.
 3. `well_output/lifted_hydrogen_jet_traj_5000.hdf5` exists and the full checker run reports an exact match to the holdout reference.
 4. `trace_archive/` holds every converter and checker run, including the failed checks that drove the fixes.
 5. A datacard exists for the converted dataset.
-6. `pipeline.sh` replays conversion and validation for a parameterized trajectory directory, calling the tools directly.
+6. `pipeline.sh` replays the final conversion and both checks, calling the tools directly; the trajectory directory at the top is the only value to edit.
 7. MLflow traces (in the serverless `mlflow.db` store) capture the session —
    `dsagt traces blastnet-well`.
 
@@ -209,6 +222,7 @@ top. The script calls the tools directly so it runs outside a DSAgt project.
 | Check-driven iteration with failed runs on the record | 5 |
 | Base-skill use (`datacard-generator`) | 6 |
 | Pipeline reconstruction with a parameterized input | 7 |
+| Review of the session's artifacts | 8 |
 
 ## Cleanup
 
