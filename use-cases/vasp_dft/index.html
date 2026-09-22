@@ -1122,6 +1122,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#10-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1513,6 +1524,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#10-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1600,7 +1622,8 @@ through both of DSAgt's extension mechanisms:</p>
    <code>trace_archive/</code> and can be reconstructed. A reference record is the oracle.</li>
 </ol>
 <p>Both parts use real <code>pymatgen.io.vasp</code> parsing. The slab data is a mock: valid
-VASP format with the OUTCAR reduced to the lines pymatgen reads. The NEB data is
+VASP format, with an OUTCAR whose header comes from a real run and whose body
+keeps the first and last ionic steps. The NEB data is
 a fixture from the pymatgen test suite. Reference outputs for both
 (<code>expected_isaac_record.json</code> for the slab, <code>isaac_neb_record.json</code> for the NEB)
 come with the data, so the agent's records can be checked.</p>
@@ -1638,10 +1661,9 @@ come with the data, so the agent's records can be checked.</p>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init
 </code></pre></div>
-<p>At the menu, name the project <code>isaac-vasp</code>, pick your agent, and <strong>uncheck every
-skill source</strong> at the skill-sources checkbox, so the project starts with no external
-catalog synced — the walkthrough has the agent discover, sync, and search one from
-inside the session. Then:</p>
+<p>At the menu, name the project <code>isaac-vasp</code>, pick your agent, and keep the defaults:
+<code>genesis</code> is the default skill source, and the walkthrough has the agent discover, sync,
+and search a second one from inside the session. Then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/isaac-vasp
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># The fixtures (the NEB images, the mock slab, and their reference records) are</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># in the repository, under this use case&#39;s data/ folder.</span>
@@ -1666,10 +1688,11 @@ any native skill and loads the full <code>SKILL.md</code> only when it is invoke
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Where can I get more skills from? List the skill sources you can pull from and which are already synced.
 </code></pre></div>
 <p><strong>Expect:</strong> <code>list_skill_sources</code> → the known sources (<code>k-dense-ai</code>, <code>anthropic</code>,
-<code>antigravity</code>, <code>composio</code>, <code>genesis</code>) with URLs, each flagged available but not
-synced. The catalog cache under <code>~/dsagt-projects/.skill_sources/</code> is shared
-across projects, so a source another project has already cloned shows as
-synced here, and step 3 becomes a refresh.</p>
+<code>antigravity</code>, <code>composio</code>, <code>genesis</code>) with URLs; <code>genesis</code> is synced (the default
+source) and the rest are available but not synced. Synced means indexed into this
+project's knowledge base, so a source another project has cloned still shows as
+not synced here, and step 3 indexes it from the shared clone under
+<code>~/dsagt-projects/.skill_sources/</code>.</p>
 <h3 id="3-sync-a-source">3. Sync a source<a class="headerlink" href="#3-sync-a-source" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Sync the &quot;k-dense-ai&quot; source so we can search its catalog.
 </code></pre></div>
@@ -1698,7 +1721,9 @@ imports <code>pymatgen.io.vasp</code> (not a hand-rolled regex parser).</p>
 <p><strong>Expect:</strong> pymatgen parses the mock directory and the agent writes
 <code>audit/mock_slab_isaac.json</code> with the key fields pymatgen extracted — final
 energy ≈ -132.8421 eV (<code>Outcar.final_energy</code>), 12 atoms (<code>Poscar</code>), ENCUT 520 /
-NSW 50 (<code>Incar</code>), total mag ≈ 8.0123 (<code>Outcar.total_mag</code>) — matching the reference.</p>
+NSW 50 (<code>Incar</code>), total mag ≈ 8.0123 (<code>Outcar.total_mag</code>) — matching the reference.
+The reference's <code>ionic_steps</code> is NSW from the INCAR: the mock OUTCAR keeps only the
+first and last of the 50 steps.</p>
 <h3 id="7-extend-the-skill-to-neb-calculations-and-register-the-converter">7. Extend the skill to NEB calculations and register the converter<a class="headerlink" href="#7-extend-the-skill-to-neb-calculations-and-register-the-converter" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Extend the vasp-to-isaac skill with a second converter,
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>scripts/vasp_neb_to_isaac.py, for nudged-elastic-band calculations. It takes a
@@ -1719,7 +1744,8 @@ NSW 50 (<code>Incar</code>), total mag ≈ 8.0123 (<code>Outcar.total_mag</code>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Compare it against data/isaac_neb_record.json: report differences in structure
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>and in the computation and measurement blocks, fix the converter, and rerun the
 <a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>registered code until they agree on the method, image count, reaction, and
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>energy series.
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>energy series. The reaction is Fe(lattice) → Fe(vacancy site); the OUTCARs do
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>not state it, so pass it to the converter.
 </code></pre></div>
 <p><strong>Expect:</strong> <code>dsagt-run --code vasp-neb-to-isaac -- ...</code> runs land in
 <code>trace_archive/</code>; pymatgen parses the five OUTCARs (endpoints plus three
@@ -1737,13 +1763,22 @@ hold it to them.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Reconstruct the pipeline from the execution records as a bash script and save it as
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>pipeline.sh.
 </code></pre></div>
+<p><strong>Expect:</strong> the script holds every recorded run of the NEB converter, including
+the attempts that failed the comparison, in the order they ran.</p>
+<h3 id="10-review-the-project-artifacts">10. Review the project artifacts<a class="headerlink" href="#10-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+</code></pre></div>
+<p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
+<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
+installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
+with a line on what each is.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <p>Confirm from a shell (the native skills directory is <code>.claude/skills/</code> for Claude Code,
 <code>.agents/skills/</code> for Codex, Goose, and opencode, <code>.cline/skills/</code> for Cline):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>isaac-vasp<span class="w">                     </span><span class="c1"># KB shows the k-dense-ai catalog collection</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                        </span><span class="c1"># aidrin  datacard-generator  pymatgen  skill-creator  vasp-to-isaac</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/&quot;</span><span class="w">                         </span><span class="c1"># vasp-neb-to-isaac</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/trace_archive/&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>isaac-vasp<span class="w">                     </span><span class="c1"># KB shows the k-dense-ai catalog collection</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                        </span><span class="c1"># aidrin  datacard-generator  pymatgen  skill-creator  vasp-to-isaac</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/&quot;</span><span class="w">                         </span><span class="c1"># vasp-neb-to-isaac</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/trace_archive/&quot;</span>
 </code></pre></div>
 <ol>
 <li>The KB holds the <code>skills_catalog__k-dense-ai-scientific-agent-skills</code>
@@ -1757,11 +1792,11 @@ hold it to them.</p>
    matches the ISAAC shape and values.</li>
 <li>The <code>vasp-to-isaac</code> skill has a second script, <code>vasp_neb_to_isaac.py</code>, and
    the code registry contains the <code>vasp-neb-to-isaac</code> spec.</li>
-<li><code>data/neb_record.json</code> has the structure of the reference <code>data/isaac_neb_record.json</code>,
-   and its energies and series values in the computation and measurement blocks equal the
-   reference's (free-text fields such as notes may differ); <code>trace_archive/</code> holds every
-   conversion attempt, including any that failed the comparison.</li>
-<li><code>pipeline.sh</code> replays the conversion.</li>
+<li><code>data/neb_record.json</code> has the structure of the reference <code>data/isaac_neb_record.json</code>
+   and agrees with it on the method, the image count, the reaction, and the energy series
+   (other fields, such as notes and the method's sub-fields, may differ); <code>trace_archive/</code>
+   holds every NEB conversion attempt, including any that failed the comparison.</li>
+<li><code>pipeline.sh</code> replays every recorded NEB conversion.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session —
    <code>dsagt traces isaac-vasp</code>.</li>
 </ol>
@@ -1810,21 +1845,25 @@ hold it to them.</p>
 <td>Pipeline reconstruction</td>
 <td>9</td>
 </tr>
+<tr>
+<td>Review of the session's artifacts</td>
+<td>10</td>
+</tr>
 </tbody>
 </table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>isaac-vasp<span class="w"> </span>-y
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>rm<span class="w"> </span>neb_fixture.tar.gz<span class="w"> </span>slab_fixture.tar.gz
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>isaac-vasp<span class="w"> </span>-y
 </code></pre></div>
 <p>The shared catalog cache is stored at <code>~/dsagt-projects/.skill_sources/</code> and is
 reused across projects; delete it to force a fresh clone.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>mock_slab/</code> is not real DFT output, but it is valid VASP format: the
-  INCAR/POSCAR parse cleanly, and the OUTCAR keeps exactly the lines pymatgen's
-  <code>Outcar</code> reads (TOTEN, <code>energy(sigma-&gt;0)</code>, magnetization, the force block) while
-  omitting the SCF/eigenvalue blocks. There is no <code>vasprun.xml</code>, so the converter
-  takes energy/forces from the OUTCAR.</li>
+  INCAR/POSCAR parse cleanly, and the OUTCAR's header (dimensions, plane-wave
+  table) is copied from a real VASP 5 run so pymatgen's <code>Outcar</code> parses it,
+  while its body keeps only the first and last ionic steps (TOTEN,
+  <code>energy(sigma-&gt;0)</code>, magnetization, the force block). There is no
+  <code>vasprun.xml</code>, so the converter takes energy/forces from the OUTCAR.</li>
 <li>The <code>neb/</code> OUTCARs are public pymatgen test fixtures.
   <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/vasp_dft/reference/vasp_neb_to_isaac.py"><code>reference/vasp_neb_to_isaac.py</code></a> is a
   converter that produces the reference record; compare the agent's converter

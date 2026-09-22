@@ -1113,10 +1113,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-optional-batch-several-metrics-from-one-config" class="md-nav__link">
+  <a href="#3-batch-several-metrics-from-one-config" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. (Optional) Batch several metrics from one config
+        3. Batch several metrics from one config
       
     </span>
   </a>
@@ -1139,6 +1139,17 @@
     <span class="md-ellipsis">
       
         5. Review the execution records
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Review the project artifacts
       
     </span>
   </a>
@@ -1404,10 +1415,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-optional-batch-several-metrics-from-one-config" class="md-nav__link">
+  <a href="#3-batch-several-metrics-from-one-config" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. (Optional) Batch several metrics from one config
+        3. Batch several metrics from one config
       
     </span>
   </a>
@@ -1430,6 +1441,17 @@
     <span class="md-ellipsis">
       
         5. Review the execution records
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Review the project artifacts
       
     </span>
   </a>
@@ -1672,7 +1694,7 @@ sample dataset into the project and start the session:</p>
 </tr>
 <tr>
 <td><code>aidrin run differential-privacy data/adult.csv "age,hours.per.week" 1.0</code></td>
-<td>noised mean/variance per column</td>
+<td>noised mean/variance per column; also writes <code>noisy/noisy_data.csv</code></td>
 </tr>
 </tbody>
 </table>
@@ -1681,10 +1703,10 @@ moderate <code>hours.per.week</code> outliers); <strong>impact</strong> shows <c
 predictors; <strong>fairness</strong> flags a large gender gap in the target (men ~2.8× more likely <code>&gt;50K</code>); and
 <strong>governance</strong> flags severe re-identification risk (<code>k = 1</code>, <code>l = 1</code>) on the <code>age,sex,race</code>
 quasi-identifiers — bin or suppress before sharing.</p>
-<h3 id="3-optional-batch-several-metrics-from-one-config">3. (Optional) Batch several metrics from one config<a class="headerlink" href="#3-optional-batch-several-metrics-from-one-config" title="Permanent link">&para;</a></h3>
+<h3 id="3-batch-several-metrics-from-one-config">3. Batch several metrics from one config<a class="headerlink" href="#3-batch-several-metrics-from-one-config" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Write an aidrin batch config (YAML) that runs completeness, class-imbalance, statistical-rates, and
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>representation-rate on data/adult.csv with target income and sensitive attribute sex, then run it
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>with the aidrin skill through dsagt-run.
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>with the aidrin skill.
 </code></pre></div>
 <p>The config is one flat mapping, not per-metric blocks; the <code>aidrin</code> skill's
 <code>reference/metrics.md</code> documents the keys. For this step:</p>
@@ -1692,31 +1714,39 @@ quasi-identifiers — bin or suppress before sharing.</p>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">file-type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nt">metrics</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">completeness</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">class-imbalance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">statistical-rates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">representation-rate</span><span class="p p-Indicator">]</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">target-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">income</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nt">y-true-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">income</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nt">sensitive-attribute-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sex</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sex</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">race</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nt">sensitive-attribute-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sex</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sex</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">race</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <h3 id="4-generate-a-datacard-from-the-assessment">4. Generate a datacard from the assessment<a class="headerlink" href="#4-generate-a-datacard-from-the-assessment" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Use the datacard-generator skill to write a Level 1 datacard for data/adult.csv that incorporates
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>the readiness findings above. Take the values from the dataset and the reports, and note anything
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>unknown rather than asking.
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>the readiness findings above. Take the values from the dataset and the reports, note anything
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>unknown rather than asking, and write it as one file, data/genesis_datacard_adult.md.
 </code></pre></div>
-<p>The agent invokes the <code>datacard-generator</code> base skill and writes a Genesis Datacard (e.g.
-<code>data/genesis_datacard_*.md</code>) documenting the dataset and its readiness profile.</p>
+<p>The agent invokes the <code>datacard-generator</code> base skill and writes one Genesis Datacard,
+<code>data/genesis_datacard_adult.md</code>, documenting the dataset and its readiness profile.</p>
 <h3 id="5-review-the-execution-records">5. Review the execution records<a class="headerlink" href="#5-review-the-execution-records" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Show me the execution records for this session as a table of metric, command, and exit code.
 </code></pre></div>
 <p>The agent reads the records <code>dsagt-run</code> wrote to <code>trace_archive/</code> and lists one row per
-metric call: the fifteen runs from step 2 and the batch run from step 3, every exit code 0.</p>
+<code>aidrin</code> command: the runs from step 2 (thirteen to fifteen, since the skill may run the
+three quality metrics as one <code>data-quality</code> call) and the batch run from step 3, every exit
+code 0.</p>
+<h3 id="6-review-the-project-artifacts">6. Review the project artifacts<a class="headerlink" href="#6-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+</code></pre></div>
+<p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
+<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
+installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
+with a line on what each is.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <ol>
 <li><code>skills/aidrin/SKILL.md</code> is present, with a <code>PROVENANCE.txt</code> naming the AIDRIN source.</li>
-<li><code>trace_archive/</code> holds one execution record per metric run from step 2.</li>
+<li><code>trace_archive/</code> holds one execution record per <code>aidrin</code> command from step 2, at least thirteen.</li>
 <li>Results span the four categories, with the gender-fairness gap and the <code>k = 1</code> / <code>l = 1</code>
    re-identification risks identified.</li>
-<li>A datacard for the dataset exists (<code>data/genesis_datacard_*.md</code>).</li>
+<li>One datacard for the dataset exists, <code>data/genesis_datacard_adult.md</code>.</li>
 <li>The agent lists every metric call from the execution records with its command and exit code.</li>
-<li>MLflow traces capture token usage, latency, and the code-execution and MCP tool spans.</li>
+<li>MLflow traces capture token usage, latency, and the code-execution spans.</li>
 </ol>
 <h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
 <table>
@@ -1756,6 +1786,10 @@ metric call: the fifteen runs from step 2 and the batch run from step 3, every e
 <td>5</td>
 </tr>
 <tr>
+<td>Review of the session's artifacts</td>
+<td>6</td>
+</tr>
+<tr>
 <td>Observability (MLflow spans in the serverless <code>mlflow.db</code> store)</td>
 <td>all</td>
 </tr>
@@ -1764,7 +1798,7 @@ metric call: the fifteen runs from step 2 and the batch run from step 3, every e
 <p>View the traces any time with
 <code>dsagt traces aidrin</code>.</p>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>aidrin<span class="w"> </span>-y
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>aidrin<span class="w"> </span>-y
 </code></pre></div>
 
 

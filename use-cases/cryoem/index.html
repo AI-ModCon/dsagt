@@ -1111,6 +1111,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#8-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1536,6 +1547,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#8-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1596,7 +1618,7 @@
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/cryoem/"><code>use_cases/cryoem/</code></a></p>
 <p>DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive (EMPIAR-10017 β-galactosidase micrographs via CryoPPP) — register curation codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing pipeline, with the AIDRIN AI-readiness check measuring the curation step before/after.</p>
 <blockquote>
-<p><strong>Estimated time:</strong> ~45 minutes of session time. Setup pulls a <strong>~0.5 GB data
+<p><strong>Estimated time:</strong> ~20 minutes of session time. Setup pulls a <strong>~0.5 GB data
 download</strong> (84 micrograph previews and the ground-truth particle tables), two
 open-access papers, and the CryoPPP repository, then KB-ingests the repository
 (minutes on the local embedder) before any pipeline work.</p>
@@ -1656,7 +1678,10 @@ without being told to; the micrograph (image) steps are not assessed.</p>
 </code></pre></div>
 <p>The agent should return chunks describing quality metrics: CTF resolution, defocus ranges, ice thickness thresholds, and motion statistics.</p>
 <h3 id="3-register-cryoppp-processing-codes">3. Register CryoPPP processing codes<a class="headerlink" href="#3-register-cryoppp-processing-codes" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Look at the scripts in repos/cryoppp/ and register any data-processing or evaluation codes you find. Run --help on each script to discover its interface.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Register the two CryoPPP scripts convert_start_to_csv_file.py and
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>generate_box_files_for_each_micrographs.py from repos/cryoppp/ as codes. They have
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>hard-coded paths and no command-line interface, so wrap each in a small CLI script under
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>codes/&lt;name&gt;/scripts/ that takes its input and output paths as arguments.
 </code></pre></div>
 <p><strong>Verify:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Search the registry for cryo-EM codes.
@@ -1678,23 +1703,27 @@ without being told to; the micrograph (image) steps are not assessed.</p>
 <h3 id="5-run-the-pipeline">5. Run the pipeline<a class="headerlink" href="#5-run-the-pipeline" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Run the pipeline on the EMPIAR-10017 dataset in data/cryoem/10017/:
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>1. Scan the directory to understand what&#39;s there
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>2. Profile the micrograph metadata
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>3. Run the quality scoring code on the metadata
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>4. Register a code that merges the two ground-truth particle tables in
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>   data/cryoem/10017/ground_truth/ into data/cryoem/particles.csv, adding a selected flag
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>   (1 for the selected table, 0 for excluded), and run it
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>5. Register a code that curates the merged table (keep only rows with selected == 1, drop the
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>   selected column, write data/cryoem/particles_curated.csv), and run it
-<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>6. Summarize: how many micrographs fall into each quality tier, and did curation improve
-<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>   the particle data?
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>2. Derive per-micrograph metadata from the ground-truth particle tables in
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>   data/cryoem/10017/ground_truth/ (defocus U, defocus V, and defocus angle per particle,
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>   aggregated per micrograph) into data/cryoem/micrograph_metadata.csv, with a registered code
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>3. Run the quality scoring code on that metadata
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>4. Register a code that merges the two ground-truth particle tables in
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>   data/cryoem/10017/ground_truth/ into data/cryoem/particles.csv, adding a selected flag
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>   (1 for the selected table, 0 for excluded), and run it
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>5. Register a code that curates the merged table (keep only rows with selected == 1, drop the
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>   selected column, write data/cryoem/particles_curated.csv), and run it
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>6. Summarize: how many micrographs fall into each quality tier, and did curation improve
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>   the particle data?
 </code></pre></div>
+<p>The Lite archive carries no CTF-fit, motion, or ice-thickness columns, so the derived metadata
+holds only the defocus parameters; the CryoCRAB score therefore tops out at 2 and every
+micrograph lands in the low tier. The measurable gain of this pipeline is in the particle tables.</p>
 <p>The merge and the curation are the two data operations of this pipeline, so the prompt asks
 for them as registered codes: each run is then an execution record, and the AI-readiness check
-has a before and an after to measure.</p>
-<p>Steps 4 and 5 are where the check shows: the agent runs the readiness
-metrics around each tabular operation — the merge (a no-op delta, which is itself informative)
-and the curation filter, where <code>particles.csv</code> before and <code>particles_curated.csv</code> after differ.
-Expected across the curation step:</p>
+has a before and an after to measure. The merge has two input tables and no single "before"
+file, so the check pairs are: <code>particles.csv</code> is the merge's after and the curation's before,
+and <code>particles_curated.csv</code> is the curation's after; the two reports on those files are what
+post-condition 4 is judged on. Expected across the curation step:</p>
 <table>
 <thead>
 <tr>
@@ -1735,12 +1764,19 @@ Expected across the curation step:</p>
 <h3 id="7-reconstruct-the-pipeline">7. Reconstruct the pipeline<a class="headerlink" href="#7-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Reconstruct the pipeline from the execution records as a bash script.
 </code></pre></div>
+<h3 id="8-review-the-project-artifacts">8. Review the project artifacts<a class="headerlink" href="#8-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+</code></pre></div>
+<p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
+<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
+installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
+with a line on what each is.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Knowledge base contains <code>cryoppp</code> collection with repo code, docs, and appended papers.</li>
-<li><code>skills/aidrin/</code> is present (installed at init); the code registry includes the CryoPPP processing codes and the quality-scoring code.</li>
+<li><code>skills/aidrin/</code> is present (installed at init); the code registry includes the two CryoPPP codes (the STAR-to-CSV converter and the box-file generator), the metadata-derivation code, and the quality-scoring code.</li>
 <li>Quality-scored CSV exists with tier distribution; <code>particles.csv</code> (merged) and <code>particles_curated.csv</code> (curated) exist with <code>trace_archive/</code> records for both operations.</li>
-<li>The check ran before and after the merge and the curation, and its reports show curation reduced outliers (~0.041 → ~0.029).</li>
+<li>The check ran on <code>particles.csv</code> and on <code>particles_curated.csv</code>, and the two reports show curation reduced outliers (~0.041 → ~0.029).</li>
 <li>A datacard exists for the processed dataset.</li>
 <li>A reconstructed pipeline script is available.</li>
 <li>Code execution records in <code>trace_archive/</code> document the full provenance chain, including one record per check run.</li>
@@ -1795,10 +1831,14 @@ Expected across the curation step:</p>
 <td>Pipeline reconstruction</td>
 <td>7</td>
 </tr>
+<tr>
+<td>Review of the session's artifacts</td>
+<td>8</td>
+</tr>
 </tbody>
 </table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>cryoem-pipeline<span class="w"> </span>-y<span class="w">          </span><span class="c1"># unregisters the project and removes its dir, data included</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>cryoem-pipeline<span class="w"> </span>-y<span class="w">          </span><span class="c1"># unregisters the project and removes its dir, data included</span>
 </code></pre></div>
 
 

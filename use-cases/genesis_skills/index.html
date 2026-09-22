@@ -1151,6 +1151,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#5-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1392,6 +1403,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#5-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1481,11 +1503,13 @@ seconds with no real instruments or HPC.</p>
 at the skill-sources checkbox — the walkthrough has the agent enable that catalog itself
 in step 1. Then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/genesis-skills
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># The fixture data (catalyst_screening.csv, the domain docs, and the expected</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># datacard) is in the repository, under this use case&#39;s data/ folder.</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/genesis_skills/data<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/mock_data&quot;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># $PROJ/mock_data now holds dataset/, domain/, expected_datacard.md</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>dsagt<span class="w"> </span>start<span class="w"> </span>genesis-skills
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># The fixture data (catalyst_screening.csv and the domain docs) is in the</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># repository, under this use case&#39;s data/ folder. The expected datacard stays</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># out of the project: it is the reference you compare against afterwards.</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/mock_data&quot;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/genesis_skills/data/dataset<span class="w"> </span>use_cases/genesis_skills/data/domain<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/mock_data/&quot;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># $PROJ/mock_data now holds dataset/ and domain/</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>dsagt<span class="w"> </span>start<span class="w"> </span>genesis-skills
 </code></pre></div>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
 <p>Paste each prompt into the agent (running inside the project), one at a time.
@@ -1504,7 +1528,7 @@ skills directory at install time, with a <code>PROVENANCE.txt</code> crediting t
 source. <code>datacard-generator</code> needs no install: it is a base skill, present
 since init.</p>
 <h3 id="3-generate-the-datacard-for-the-finished-dataset">3. Generate the datacard for the finished dataset<a class="headerlink" href="#3-generate-the-datacard-for-the-finished-dataset" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Use the datacard-generator skill to write a Level 1 datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the data dictionary and measurement protocol under mock_data/domain/ — don&#39;t invent them, and note anything the documents leave unspecified rather than asking. Save it to audit/catalyst_screening_datacard.md. Then compare your sections against mock_data/expected_datacard.md and report anything missing.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Use the datacard-generator skill to write a Level 1 datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the data dictionary and measurement protocol under mock_data/domain/ — don&#39;t invent them, and note anything the documents leave unspecified rather than asking. Save it to audit/catalyst_screening_datacard.md.
 </code></pre></div>
 <p><strong>Expect:</strong> the agent reads the installed skill's <code>SKILL.md</code> and the two domain
 documents (reactor conditions <strong>250 °C, 1 atm, H2:CO2 = 4:1, GHSV 12,000</strong>;
@@ -1515,14 +1539,24 @@ methodology / stats / limitations / license.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Use the croissant-validator skill to check the Croissant/JSON-LD metadata for this dataset (generate it from the datacard if needed), and report any schema errors.
 </code></pre></div>
 <p><strong>Expect:</strong> the validator skill runs and reports a clean pass or names specific
-schema issues.</p>
+schema issues. The skill installs <code>mlcroissant</code> into a small virtual environment
+for its library check; a pass is one whose output shows <code>mlcroissant parse OK</code>,
+since the script skips that check when the library is absent.</p>
+<h3 id="5-review-the-project-artifacts">5. Review the project artifacts<a class="headerlink" href="#5-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+</code></pre></div>
+<p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
+<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
+installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
+with a line on what each is.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <p>Confirm from a shell (the native skills directory is <code>.claude/skills/</code> for Claude Code,
 <code>.agents/skills/</code> for Codex, Goose, and opencode, <code>.cline/skills/</code> for Cline):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>genesis-skills<span class="w">                  </span><span class="c1"># KB lists skills_catalog__ai-modcon-genesis-skills</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                         </span><span class="c1"># aidrin  croissant-validator  datacard-generator  skill-creator</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/datacard-generator/PROVENANCE.txt&quot;</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w">                          </span><span class="c1"># catalyst_screening_datacard.md</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>genesis-skills<span class="w">                  </span><span class="c1"># KB lists skills_catalog__ai-modcon-genesis-skills</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                         </span><span class="c1"># aidrin  croissant-validator  datacard-generator  skill-creator</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/croissant-validator/PROVENANCE.txt&quot;</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w">                          </span><span class="c1"># catalyst_screening_datacard.md</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>diff<span class="w"> </span>&lt;<span class="o">(</span>grep<span class="w"> </span><span class="s1">&#39;^#&#39;</span><span class="w"> </span>use_cases/genesis_skills/data/expected_datacard.md<span class="o">)</span><span class="w"> </span>&lt;<span class="o">(</span>grep<span class="w"> </span><span class="s1">&#39;^#&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/catalyst_screening_datacard.md&quot;</span><span class="o">)</span>
 </code></pre></div>
 <ol>
 <li>The KB holds a <code>skills_catalog__ai-modcon-genesis-skills</code> collection
@@ -1534,7 +1568,10 @@ schema issues.</p>
    them by reading their <code>SKILL.md</code>.</li>
 <li><code>audit/catalyst_screening_datacard.md</code> was produced for the finished dataset,
    grounded in the domain documents, covering the sections in
-   <code>mock_data/expected_datacard.md</code>.</li>
+   <code>use_cases/genesis_skills/data/expected_datacard.md</code> and carrying its values:
+   reactor conditions 250 °C, 1 atm, H2:CO2 = 4:1, GHSV 12,000; license
+   CC-BY-4.0; 8 rows; and the three caveats the measurement protocol states.</li>
+<li>The validator's output shows <code>mlcroissant parse OK</code>.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session —
    <code>dsagt traces genesis-skills</code>.</li>
 </ol>
@@ -1567,11 +1604,14 @@ schema issues.</p>
 <td>Installed-skill execution grounded in the domain documents</td>
 <td>3, 4</td>
 </tr>
+<tr>
+<td>Review of the session's artifacts</td>
+<td>5</td>
+</tr>
 </tbody>
 </table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>genesis-skills<span class="w"> </span>-y
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>rm<span class="w"> </span>genesis_skills.tar.gz
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>genesis-skills<span class="w"> </span>-y
 </code></pre></div>
 <p>The shared catalog cache is stored at <code>~/dsagt-projects/.skill_sources/</code> and is
 reused across projects; delete it to force a fresh clone.</p>

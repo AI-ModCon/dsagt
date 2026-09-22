@@ -1240,6 +1240,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#8-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1469,6 +1480,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#8-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1595,18 +1617,13 @@ version had, is in
 <p>At the menu, name the project <code>blastnet-well</code> and pick your agent; the defaults
 are fine for the rest. Then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/blastnet-well
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Demo data (one BlastNet trajectory, three snapshots, and its holdout WELL</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># reference file) from the DSAgt use-case data folder:</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=1xUZhlr6uCahSbOLiLt5wcwMzehdpaUjL&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span>-o<span class="w"> </span>combustion_simulation_data.tar.gz
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>tar<span class="w"> </span>xzf<span class="w"> </span>combustion_simulation_data.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># creates $PROJ/data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000/</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="c1">#     and $PROJ/data/holdout/well_output/lifted_hydrogen_jet_traj_5000.hdf5</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/docs&quot;</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>cp<span class="w"> </span>use_cases/combustion_simulation/docs/*.md<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/docs/&quot;</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>cp<span class="w"> </span>use_cases/combustion_simulation/scripts/check_well_output.py<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts/&quot;</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>dsagt<span class="w"> </span>start<span class="w"> </span>blastnet-well
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=1xUZhlr6uCahSbOLiLt5wcwMzehdpaUjL&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-o<span class="w"> </span>combustion_simulation_data.tar.gz
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>tar<span class="w"> </span>xzf<span class="w"> </span>combustion_simulation_data.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/docs&quot;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>cp<span class="w"> </span>use_cases/combustion_simulation/docs/*.md<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/docs/&quot;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>cp<span class="w"> </span>use_cases/combustion_simulation/scripts/check_well_output.py<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/scripts/&quot;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>dsagt<span class="w"> </span>start<span class="w"> </span>blastnet-well
 </code></pre></div>
 <p>The agent writes the converter. <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/combustion_simulation/reference"><code>reference/</code></a> holds the converter this
 walkthrough produced when it was developed, its earlier versions, and the validation
@@ -1625,7 +1642,8 @@ reports; compare the agent's converter with them when the walkthrough is done.</
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>BlastNet trajectory directory and the options --output-file and --dry-run,
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>reading info.json for dimensions, variables, snapshot ids, and grid paths, and
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>writing one WELL HDF5 file. The coordinate arrays must be read from the grid
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>files that info.json names, not generated. Save it with save_skill.
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>files that info.json names, not generated; a missing grid file is an error.
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>Save it with save_skill.
 </code></pre></div>
 <p><strong>Expect:</strong> <code>save_skill</code> writes <code>&lt;project&gt;/skills/blastnet-to-well/</code> with a
 <code>SKILL.md</code>, the two documents under <code>references/</code>, and
@@ -1648,7 +1666,8 @@ time from <code>info.json</code>, and the root attributes <code>dataset_name</co
 <h3 id="3-dry-run">3. Dry run<a class="headerlink" href="#3-dry-run" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Run the registered convert-to-well code, with its exact command, as a dry run on
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000 and tell me the grid
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>size, the number of snapshots, and which WELL fields it would write.
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>size, the number of snapshots, and which WELL fields it would write. info.json
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>says 3 snapshots and 13 variables; tell me if the dry run disagrees.
 </code></pre></div>
 <p><strong>Expect:</strong> 1600 × 2000 grid, 3 snapshots, eleven <code>t0_fields</code> scalars and a
 2-component velocity; no HDF5 written.</p>
@@ -1663,7 +1682,8 @@ time from <code>info.json</code>, and the root attributes <code>dataset_name</co
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>points per dataset by running the registered check-well-output code with its exact
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>command. If anything differs, fix the converter in the skill, reconvert with the
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>registered convert-to-well code, and check again. When the spot-check passes, run the
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>full comparison the same way.
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>full comparison the same way. After the check passes, update the skill&#39;s SKILL.md so
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>its rules match the converter.
 </code></pre></div>
 <p><strong>Expect:</strong> a first pass that fails on one or more of the pitfalls the
 original development hit — all of them are visible in the checker's output:</p>
@@ -1696,6 +1716,14 @@ original development hit — all of them are visible in the checker's output:</p
 <td><code>boundary_conditions/</code> groups missing</td>
 </tr>
 <tr>
+<td><code>bc_type</code> written in the source's case (<code>open</code>)</td>
+<td>attribute mismatch on <code>boundary_conditions/*/bc_type</code> (<code>OPEN</code> expected)</td>
+</tr>
+<tr>
+<td><code>dimensions/time</code> written as snapshot indices (0, 1, 2) or a hard-coded step</td>
+<td><code>dimensions/time</code> values differ; the times come from <code>time-step snapshot [s]</code> in info.json</td>
+</tr>
+<tr>
 <td>coordinates generated as a uniform range instead of read from the grid files</td>
 <td>none — the grid is uniform, so it passes within tolerance; read the converter, not only the checker output</td>
 </tr>
@@ -1703,7 +1731,8 @@ original development hit — all of them are visible in the checker's output:</p
 </table>
 <p>Each fix is a new version of the script inside the skill, each reconversion
 and check a new record in <code>trace_archive/</code>. The loop ends with
-<code>PASS — candidate matches reference exactly</code>.</p>
+<code>PASS — candidate matches reference exactly</code>, and the skill's rules agree with
+the converter that passed.</p>
 <h3 id="6-generate-a-datacard">6. Generate a datacard<a class="headerlink" href="#6-generate-a-datacard" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Use the datacard-generator skill to write a Level 1 datacard for the converted
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>WELL file to audit/. Take the values from info.json and the conversion, and
@@ -1713,20 +1742,28 @@ and check a new record in <code>trace_archive/</code>. The loop ends with
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Reconstruct the conversion and validation pipeline from the execution records
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>as a bash script, save it as pipeline.sh, and put the trajectory directory in a
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>variable at the top so it can be rerun on the other BlastNet trajectories. Keep
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>only the final converter run and its checks.
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>the final conversion, the spot check, and the full check.
 </code></pre></div>
-<p><strong>Expect:</strong> <code>reconstruct_pipeline(format="bash")</code> orders the recorded runs by
-their input/output files; <code>pipeline.sh</code> holds the dry run, the conversion, and
-the two checks as plain <code>python</code> (or <code>uv run</code>) commands with <code>TRAJ_DIR</code> at the
-top. The script calls the tools directly so it runs outside a DSAgt project.</p>
+<p><strong>Expect:</strong> <code>reconstruct_pipeline(format="bash")</code> returns the recorded runs in
+the order they ran; <code>pipeline.sh</code> holds the final conversion and the two checks
+as plain commands with <code>TRAJ_DIR</code> at the top, the one value to edit for another
+trajectory. The script calls the tools directly so it runs outside a DSAgt
+project.</p>
+<h3 id="8-review-the-project-artifacts">8. Review the project artifacts<a class="headerlink" href="#8-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+</code></pre></div>
+<p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
+<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
+installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
+with a line on what each is.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <ol>
-<li><code>skills/blastnet-to-well/</code> exists with a <code>SKILL.md</code> stating the mapping rules, both specifications copied into the skill, and a converter under <code>scripts/</code>.</li>
+<li><code>skills/blastnet-to-well/</code> exists with a <code>SKILL.md</code> whose mapping rules agree with the final converter, both specifications under <code>references/</code>, and the converter under <code>scripts/</code>.</li>
 <li>Code registry contains <code>convert-to-well</code> and <code>check-well-output</code> specs.</li>
 <li><code>well_output/lifted_hydrogen_jet_traj_5000.hdf5</code> exists and the full checker run reports an exact match to the holdout reference.</li>
 <li><code>trace_archive/</code> holds every converter and checker run, including the failed checks that drove the fixes.</li>
 <li>A datacard exists for the converted dataset.</li>
-<li><code>pipeline.sh</code> replays conversion and validation for a parameterized trajectory directory, calling the tools directly.</li>
+<li><code>pipeline.sh</code> replays the final conversion and both checks, calling the tools directly; the trajectory directory at the top is the only value to edit.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session —
    <code>dsagt traces blastnet-well</code>.</li>
 </ol>
@@ -1767,11 +1804,15 @@ top. The script calls the tools directly so it runs outside a DSAgt project.</p>
 <td>Pipeline reconstruction with a parameterized input</td>
 <td>7</td>
 </tr>
+<tr>
+<td>Review of the session's artifacts</td>
+<td>8</td>
+</tr>
 </tbody>
 </table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>blastnet-well<span class="w"> </span>-y
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>rm<span class="w"> </span>combustion_simulation_data.tar.gz
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>blastnet-well<span class="w"> </span>-y
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>rm<span class="w"> </span>combustion_simulation_data.tar.gz
 </code></pre></div>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1783,8 +1824,8 @@ top. The script calls the tools directly so it runs outside a DSAgt project.</p>
   to the same steps, built with
   <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/combustion_simulation/scripts/make_demo_subset.py"><code>scripts/make_demo_subset.py</code></a>:</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>python3<span class="w"> </span>make_demo_subset.py<span class="w"> </span>&lt;traj_dir&gt;<span class="w"> </span>&lt;reference.hdf5&gt;<span class="w"> </span>&lt;out_dir&gt;<span class="w"> </span>--steps<span class="w"> </span><span class="m">3</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>tar<span class="w"> </span>czf<span class="w"> </span>combustion_simulation_data.tar.gz<span class="w"> </span>-C<span class="w"> </span>&lt;out_dir&gt;<span class="w"> </span>data
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>python3<span class="w"> </span>make_demo_subset.py<span class="w"> </span>&lt;traj_dir&gt;<span class="w"> </span>&lt;reference.hdf5&gt;<span class="w"> </span>&lt;out_dir&gt;<span class="w"> </span>--steps<span class="w"> </span><span class="m">3</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>tar<span class="w"> </span>czf<span class="w"> </span>combustion_simulation_data.tar.gz<span class="w"> </span>-C<span class="w"> </span>&lt;out_dir&gt;<span class="w"> </span>data
 </code></pre></div>
 <p>The subset converts and checks exactly like the full trajectory, since a
   converter enumerates snapshots from <code>info.json</code> and every time-varying WELL
