@@ -66,6 +66,7 @@ jobs:
         run: uv run mkdocs build
 
       - name: Deploy PR preview
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: rossjrw/pr-preview-action@v1
         with:
           source-dir: ./site
