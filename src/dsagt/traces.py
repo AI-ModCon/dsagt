@@ -1402,6 +1402,11 @@ def make_trace_collector(
     )
 
 
+def _holds_response(trace: "Trace", root: dict) -> bool:
+    """Whether a turn has been answered, i.e. holds an LLM span."""
+    return any(c["kind"] == "LLM" for c in trace.children(root["span_id"]))
+
+
 class TraceCollector:
     """Periodically read the session, translate it, and hand it to consumers.
 
@@ -1503,11 +1508,13 @@ class TraceCollector:
             roots = trace.roots()
             candidates = roots[:-1]
             # The last root is the deferred final turn only once it holds a
-            # response.  A prompt with no LLM span yet is the open turn of a
+            # response.  A turn with no LLM span yet is the open turn of a
             # session still running on this transcript: the startup catch-up
             # of a resumed conversation reads the live transcript, and emitting
-            # the open turn would ack it as a prompt-only stub for good.
-            if include_last and roots and trace.children(roots[-1]["span_id"]):
+            # the open turn would ack it as a partial for good.  Tool spans
+            # don't count — an agent that calls a tool before it answers has
+            # written children to a turn it has not finished.
+            if include_last and roots and _holds_response(trace, roots[-1]):
                 candidates = roots
             # Ack keys are transcript-qualified.  span_id is unique within one
             # transcript only ("turn-N" is a record index), and the ack file is

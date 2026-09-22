@@ -178,6 +178,42 @@ def test_final_flush_skips_an_open_last_turn(scan_env):
     assert collector._load_acks("mlflow") == {f"{f}:u1", f"{f}:u2"}
 
 
+def test_final_flush_skips_a_last_turn_that_has_only_called_a_tool(scan_env):
+    """A turn mid tool-use is open too: its tool spans are not a response.
+
+    The agent calls its MCP tools before it answers, so the open turn a
+    catch-up reads usually holds children already; acking it there would log
+    the turn without the response and token usage it is about to get.
+    """
+    collector, f, _ = scan_env
+    _append(
+        f,
+        _user("2026-06-19T15:00:00.000Z", "q1", "u1"),
+        _asst("2026-06-19T15:00:01.000Z", {"type": "text", "text": "a1"}),
+        _user("2026-06-19T15:00:02.000Z", "q2 (being answered)", "u2"),
+        _asst(
+            "2026-06-19T15:00:03.000Z",
+            {
+                "type": "tool_use",
+                "id": "t1",
+                "name": "Bash",
+                "input": {"command": "ls"},
+            },
+        ),
+        _user(
+            "2026-06-19T15:00:04.000Z",
+            [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}],
+            "u3",
+            tool_use_result=True,
+        ),
+    )
+    assert collector.collect(include_last=True) == 1  # u1 only; u2 still open
+    assert collector._load_acks("mlflow") == {f"{f}:u1"}
+    _append(f, _asst("2026-06-19T15:00:05.000Z", {"type": "text", "text": "a2"}))
+    assert collector.collect(include_last=True) == 1  # u2, now answered
+    assert collector._load_acks("mlflow") == {f"{f}:u1", f"{f}:u2"}
+
+
 def test_collect_on_empty_transcript_is_zero(scan_env):
     collector, f, _ = scan_env
     f.write_text("")
