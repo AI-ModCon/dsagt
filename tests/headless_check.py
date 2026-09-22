@@ -2,14 +2,19 @@
 
 A headless run (``tests/headless_usecases.py``) leaves a project directory.
 This script reads it and reports two things that are scored apart.
-Mechanical checks are properties of dsagt that hold in every run whatever the
-agent chose: the skills and codes are installed, every run of a registered
-code has a complete record and a ``code.execute`` trace, the logs have no
-error.  A mechanical failure is a dsagt regression and the exit code is 1.
-Outcome observations depend on the agent (a value in a converted file, whether
-a datacard validated, how many samples were assembled); they are printed as
-values, never as pass or fail, and with several projects as a rate, because
-one run moves by a post-condition or two with the same inputs.
+Mechanical checks are the walkthrough's declared post-conditions: dsagt's own
+guarantees (the skills and codes are installed, every record is complete and
+has a ``code.execute`` trace, the logs have no error) and the artifacts the
+README's Post-Conditions name.  A failure means the run did not meet the
+README, and the exit code is 1; the detail says which check and what it found,
+which is what tells a dsagt regression from a run that went another way.  A
+check this run's configuration puts out of reach, the trace count when the
+store is a shared tracking server, is reported as not checked and fails
+nothing.  Outcome observations are what the README leaves to the agent (a
+value in a converted file, whether a validator ran through ``dsagt-run``, how
+many samples were assembled); they are printed as values, never as pass or
+fail, and with several projects as a rate, because one run moves by a
+post-condition or two with the same inputs.
 
 Left out on purpose, because a headless session cannot show them: a step that
 needs a second answer from a person, the last prompt's conversation trace
@@ -25,13 +30,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os.path
 import re
 import sqlite3
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# dsagt's own parser and its own native-mirror rule, so what the registry
+# reads and what the mirror decides are what the checker reads and decides.
+from dsagt.agents.base import _description_fits_native_cap
+from dsagt.observability import resolve_tracking_uri
 from dsagt.registry import _parse_frontmatter
+
+#: This repository, which holds each walkthrough's reference fixtures.
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 BASE_SKILLS = ("skill-creator", "datacard-generator", "aidrin")
 NATIVE_SKILL_DIRS = (".claude/skills", ".agents/skills", ".cline/skills")
@@ -66,6 +79,28 @@ class Project:
     def records_of(self, pattern: str) -> list[dict]:
         return [r for r in self.records if re.search(pattern, r["code_name"])]
 
+    def relative(self, path: str) -> str:
+        """*path* as it sits under the project root.
+
+        A record holds the path the agent typed, so one file appears as
+        ``data/x.csv`` in one record, ``./data/x.csv`` in the next and as an
+        absolute path in a third; a comparison against a declared path has to
+        bring them to one spelling first.  A path outside the project is
+        returned as given.
+        """
+        if os.path.isabs(path):
+            try:
+                return str(Path(path).resolve().relative_to(self.root.resolve()))
+            except ValueError:
+                return path
+        return os.path.normpath(path)
+
+    def outputs_of(self, record: dict) -> list[str]:
+        return [self.relative(f) for f in record["execution"].get("output_files", [])]
+
+    def inputs_of(self, record: dict) -> list[str]:
+        return [self.relative(f) for f in record["execution"].get("input_files", [])]
+
     def files(self, glob: str) -> list[Path]:
         return sorted(self.root.glob(glob))
 
@@ -82,11 +117,12 @@ class Project:
 
 
 # ---------------------------------------------------------------------------
-# Mechanical checks: each returns (name, passed, detail)
+# Mechanical checks: each returns (name, passed, detail); passed is None for
+# a check this run's configuration puts out of reach.
 # ---------------------------------------------------------------------------
 
 
-def common_checks(project: Project) -> list[tuple[str, bool, str]]:
+def common_checks(project: Project) -> list[tuple[str, bool | None, str]]:
     root = project.root
     results = []
 
@@ -100,17 +136,37 @@ def common_checks(project: Project) -> list[tuple[str, bool, str]]:
     results.append(("no codes/ directory", not (root / "codes").exists(), ""))
 
     mirrors = [root / d for d in NATIVE_SKILL_DIRS if (root / d).is_dir()]
+    # A mirror entry with no project source is user-authored; the manifest
+    # leaves those alone, so they are not dsagt's to link.
     copied = [
-        str(entry.relative_to(root))
+        entry
         for mirror in mirrors
         for entry in mirror.iterdir()
-        if entry.is_dir() and not entry.is_symlink()
+        if entry.is_dir()
+        and not entry.is_symlink()
+        and (root / "skills" / entry.name / "SKILL.md").exists()
     ]
+    # dsagt copies rather than links a skill whose description exceeds the
+    # native cap, because a link cannot be trimmed, and the walkthroughs
+    # install catalog skills whose descriptions this repository does not
+    # control.  That copy is the documented behavior, not a failure.
+    over_cap = sorted(
+        e.name
+        for e in copied
+        if not _description_fits_native_cap(root / "skills" / e.name / "SKILL.md")
+    )
+    unlinked = sorted(
+        str(e.relative_to(root)) for e in copied if e.name not in over_cap
+    )
     results.append(
         (
-            "native skills mirror is symlinks",
-            bool(mirrors) and not copied,
-            f"copies: {copied}" if copied else "",
+            "native skills mirror links every skill under the description cap",
+            bool(mirrors) and not unlinked,
+            (
+                f"copies: {unlinked}"
+                if unlinked
+                else (f"copied for the description cap: {over_cap}" if over_cap else "")
+            ),
         )
     )
 
@@ -149,9 +205,9 @@ def common_checks(project: Project) -> list[tuple[str, bool, str]]:
     unhashed = [
         f"{r['record_id']}:{f}"
         for r in project.records
-        if r["execution"]["return_code"] == 0
-        for f in r["execution"]["output_files"]
-        if (root / f).is_file() and f not in r["execution"]["file_hashes"]
+        if r["execution"].get("return_code") == 0
+        for f in r["execution"].get("output_files", [])
+        if (root / f).is_file() and f not in r["execution"].get("file_hashes", {})
     ]
     results.append(
         (
@@ -161,18 +217,26 @@ def common_checks(project: Project) -> list[tuple[str, bool, str]]:
         )
     )
 
-    traced = project.query(
-        "mlflow.db",
-        "select count(*) from trace_tags where key = 'dsagt.source' and value = 'execution'",
-    )
-    n_traced = traced[0][0] if traced else 0
-    results.append(
-        (
-            "one code.execute trace per record",
-            n_traced == len(project.records),
-            f"{n_traced} traces, {len(project.records)} records",
+    # Traces go to the project's sqlite file only when MLFLOW_TRACKING_URI
+    # names no shared server; against a server the checker has no store to
+    # count, which is a different thing from a run that logged nothing.
+    store = resolve_tracking_uri({"project_dir": str(root)})
+    if store != f"sqlite:///{root.resolve() / 'mlflow.db'}":
+        results.append(("one code.execute trace per record", None, f"store is {store}"))
+    else:
+        traced = project.query(
+            "mlflow.db",
+            "select count(*) from trace_tags "
+            "where key = 'dsagt.source' and value = 'execution'",
         )
-    )
+        n_traced = traced[0][0] if traced else 0
+        results.append(
+            (
+                "one code.execute trace per record",
+                n_traced == len(project.records),
+                f"{n_traced} traces, {len(project.records)} records",
+            )
+        )
 
     trace_log = root / ".dsagt" / "run_trace.log"
     failed = trace_log.read_text().strip() if trace_log.exists() else ""
@@ -254,11 +318,11 @@ def successful_records(pattern: str, at_least: int = 1, with_files: bool = True)
         good = [
             r
             for r in project.records_of(pattern)
-            if r["execution"]["return_code"] == 0
+            if r["execution"].get("return_code") == 0
             and (
                 not with_files
-                or r["execution"]["input_files"]
-                or r["execution"]["output_files"]
+                or r["execution"].get("input_files")
+                or r["execution"].get("output_files")
             )
         ]
         return (
@@ -301,8 +365,7 @@ def output_has_record(path: str):
         producers = [
             r["code_name"]
             for r in project.records
-            if r["execution"]["return_code"] == 0
-            and path in r["execution"]["output_files"]
+            if r["execution"].get("return_code") == 0 and path in project.outputs_of(r)
         ]
         return (
             f"{path} is the output of a successful record",
@@ -319,13 +382,39 @@ def output_has_record(path: str):
 
 
 def datacard_validation(project: Project):
+    """The datacard validator's last exit code, over the runs that left a record.
+
+    The label names the record because that is what is measured: a validator
+    the agent ran outside ``dsagt-run`` validated the card and left nothing to
+    read here.
+    """
+    label = "datacard-validate runs on record, last exit code"
     runs = project.records_of(r"datacard-validate")
     if not runs:
-        return ("datacard validator, last exit code", "never run")
-    return (
-        "datacard validator, last exit code",
-        f"{runs[-1]['execution']['return_code']} after {len(runs)} runs",
-    )
+        return (label, "no record")
+    return (label, f"{runs[-1]['execution'].get('return_code')} after {len(runs)} runs")
+
+
+def successful_record_count(label: str, pattern: str):
+    """How many runs of /pattern/ left a record that exited zero."""
+
+    def observe(project: Project):
+        runs = project.records_of(pattern)
+        good = [r for r in runs if r["execution"].get("return_code") == 0]
+        return (label, f"{len(good)} of {len(runs)}")
+
+    return observe
+
+
+def failed_record_count(label: str, pattern: str):
+    """How many runs of /pattern/ left a record that exited non-zero."""
+
+    def observe(project: Project):
+        runs = project.records_of(pattern)
+        bad = [r for r in runs if r["execution"].get("return_code") != 0]
+        return (label, f"{len(bad)} of {len(runs)}")
+
+    return observe
 
 
 def count_of(label: str, glob: str):
@@ -348,13 +437,21 @@ def grep_counts(path: str, *values: str):
 
 
 def json_fields_match(path: str, reference: str, *fields: str):
+    """Compare a produced file against a fixture in this repository.
+
+    *reference* is repository-relative.  The project's copy of the same
+    fixture comes from the walkthrough's data bundle, which is published
+    separately and can lag a correction made here; the repository's copy is
+    the one review sees.
+    """
+
     def lookup(data, dotted):
         for key in dotted.split("."):
             data = data.get(key) if isinstance(data, dict) else None
         return data
 
     def observe(project: Project):
-        produced, expected = project.root / path, project.root / reference
+        produced, expected = project.root / path, REPO_ROOT / reference
         if not produced.exists() or not expected.exists():
             return (f"{path} against {reference}", "file absent")
         a, b = json.loads(produced.read_text()), json.loads(expected.read_text())
@@ -378,15 +475,15 @@ def tables_with_a_readiness_record(project: Project):
     written = {
         f
         for r in project.records
-        if r["code_name"] != "aidrin" and r["execution"]["return_code"] == 0
-        for f in r["execution"]["output_files"]
+        if r["code_name"] != "aidrin" and r["execution"].get("return_code") == 0
+        for f in project.outputs_of(r)
         if f.lower().endswith((".csv", ".tsv", ".parquet", ".xlsx", ".xls"))
     }
     checked = {
         f
         for r in project.records_of(r"^aidrin$")
-        if r["execution"]["return_code"] == 0
-        for f in r["execution"]["input_files"]
+        if r["execution"].get("return_code") == 0
+        for f in project.inputs_of(r)
     }
     return (
         "tables the pipeline wrote that have a readiness record",
@@ -414,7 +511,7 @@ def record_stdout_contains(pattern: str, text: str):
         hits = [
             r
             for r in project.records_of(pattern)
-            if text in r["execution"].get("stdout", "")
+            if text in (r["execution"].get("stdout") or "")
         ]
         return (f"a /{pattern}/ record printed {text!r}", "yes" if hits else "no")
 
@@ -441,9 +538,11 @@ WALKTHROUGHS = {
             skills_installed("croissant-validator"),
             files_exist("skills/croissant-validator/PROVENANCE.txt"),
             successful_records(r"datacard-introspect"),
-            successful_records(r"croissant.*validat"),
         ],
         "outcome": [
+            successful_record_count(
+                "croissant validation runs on record", r"croissant.*validat"
+            ),
             grep_counts(
                 "audit/catalyst_screening_datacard.md",
                 "250 °C",
@@ -487,10 +586,7 @@ WALKTHROUGHS = {
         ],
         "outcome": [
             datacard_validation,
-            count_of(
-                "failed checker runs on record",
-                "trace_archive/check-well-output_*.json",
-            ),
+            failed_record_count("failed checker runs on record", r"check-well-output"),
         ],
     },
     "vasp_dft": {
@@ -505,7 +601,7 @@ WALKTHROUGHS = {
         "outcome": [
             json_fields_match(
                 "audit/mock_slab_isaac.json",
-                "data/expected_isaac_record.json",
+                "use_cases/vasp_dft/data/expected_isaac_record.json",
                 "results.total_energy_eV",
                 "results.energy_sigma0_eV",
                 "computation.relaxation.ionic_steps",
@@ -578,11 +674,9 @@ def main() -> int:
         mechanical, outcome = check_project(walkthrough, root)
         print(f"\n== {root.name}")
         for label, passed, detail in mechanical:
-            failures += not passed
-            print(
-                f"  {'ok  ' if passed else 'FAIL'} {label}"
-                + (f"  [{detail}]" if detail else "")
-            )
+            failures += passed is False
+            mark = {True: "ok  ", False: "FAIL", None: "--  "}[passed]
+            print(f"  {mark} {label}" + (f"  [{detail}]" if detail else ""))
         for label, value in outcome:
             outcomes.setdefault(label, []).append(value)
     print("\n== outcomes (values per run, not pass or fail)")

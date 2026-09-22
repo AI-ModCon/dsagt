@@ -61,14 +61,19 @@ python tests/headless_usecases.py use_cases/<case> <name>            # --only N,
 - Keep the machine awake and on power. A model request that spans a sleep
   waits for the wake, and the driver's timeout counts wall time.
 - Judge a run with `python tests/headless_check.py use_cases/<case> <name> [<name> ...]`,
-  which scores two kinds of result apart. Mechanical checks are properties of
-  dsagt that hold whatever the agent chose: skills and codes installed and
-  mirrored, every record complete and naming a registered code, one
-  `code.execute` trace per record, no error in the logs, the pipeline script
-  saved. A mechanical failure is a dsagt regression, and the script exits 1.
-  Outcome observations depend on the agent (a value in a converted file,
-  whether the datacard validated, how many samples were assembled); they are
-  printed as values per run. Run a walkthrough at least three times before
+  which scores two kinds of result apart. Mechanical checks are the
+  walkthrough's declared post-conditions: dsagt's own guarantees (skills and
+  codes installed and mirrored, every record complete and naming a registered
+  code, one `code.execute` trace per record, no error in the logs) and the
+  artifacts the README's Post-Conditions name, such as the pipeline script. A
+  failure means the run did not meet the README, and the script exits 1; the
+  detail says which check and what it found, which is what tells a dsagt
+  regression from a run that went another way. A check the run's
+  configuration puts out of reach, the trace count when `MLFLOW_TRACKING_URI`
+  names a shared server, prints `--` and fails nothing. Outcome observations
+  are what the README leaves to the agent (a value in a converted file,
+  whether a validator ran through `dsagt-run`, how many samples were
+  assembled); they are printed as values per run. Run a walkthrough at least three times before
   reading an outcome: with the same tree and inputs a run moves by a
   post-condition or two. An outcome leads to work only when it recurs in most
   runs and a person working interactively would meet it too, and the fix is

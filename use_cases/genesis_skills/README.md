@@ -139,7 +139,7 @@ CARD="$PROJ/audit/catalyst_screening_datacard.md"
 for value in '250 °C' 'GHSV' 'CC-BY-4.0' 'Single-run' 'C2+' 'relative'; do
     printf '%s: ' "$value"; grep -c -F -- "$value" "$CARD"   # each count is at least 1
 done
-ls "$PROJ/trace_archive" | wc -l           # at least 3
+ls "$PROJ/trace_archive" | wc -l           # at least 2
 ```
 
 1. The KB holds a `skills_catalog__ai-modcon-genesis-skills` collection
@@ -158,9 +158,12 @@ ls "$PROJ/trace_archive" | wc -l           # at least 3
    `grep -c` above is at least 1. Section headings follow the Genesis template,
    which names them differently from the expected file.
 4. The validator's output shows `mlcroissant parse OK`.
-5. `trace_archive/` holds at least three execution records: the datacard
-   introspection, the datacard validation, and the Croissant validation, each
-   run through `dsagt-run`.
+5. `trace_archive/` holds at least two execution records, the datacard
+   introspection and the datacard validation, each run through `dsagt-run`.
+   The Croissant validation adds a third when the agent registers the
+   validator as a code; when it installs `mlcroissant` into the skill's own
+   virtual environment instead, that run is outside the wrapper and leaves no
+   record, which step 4 allows.
 6. MLflow traces (in the serverless `mlflow.db` store) capture the session —
    `dsagt traces genesis-skills`.
 

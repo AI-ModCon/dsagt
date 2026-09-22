@@ -5,6 +5,10 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
+from dsagt.agents.base import _NATIVE_DESCRIPTION_CAP
+
 spec = importlib.util.spec_from_file_location(
     "headless_check", Path(__file__).parent / "headless_check.py"
 )
@@ -51,15 +55,90 @@ def _failed(root: Path) -> list[str]:
     return [
         label
         for label, passed, _ in headless_check.common_checks(project)
-        if not passed
+        if passed is False
     ]
+
+
+def _result(root: Path, label: str):
+    project = headless_check.Project.load(root)
+    return next(r for r in headless_check.common_checks(project) if r[0] == label)
+
+
+TRACE_COUNT = "one code.execute trace per record"
+MIRROR = "native skills mirror links every skill under the description cap"
+
+
+@pytest.fixture(autouse=True)
+def _local_store(monkeypatch):
+    """The fixtures are serverless projects; a shared store is opted into."""
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
 
 
 def test_a_record_of_a_registered_code_passes_all_but_the_trace_count(tmp_path):
     # No mlflow.db in the fixture, so the trace count is the one failure.
-    assert _failed(_project(tmp_path, "convert")) == [
-        "one code.execute trace per record"
-    ]
+    assert _failed(_project(tmp_path, "convert")) == [TRACE_COUNT]
+
+
+def test_the_trace_count_is_not_checked_against_a_shared_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.example:5000")
+    _, passed, detail = _result(_project(tmp_path, "convert"), TRACE_COUNT)
+    assert passed is None and "http://mlflow.example:5000" in detail
+    assert _failed(tmp_path) == []
+
+
+def test_a_record_missing_a_key_is_reported_not_raised(tmp_path):
+    root = _project(tmp_path, "convert")
+    record_path = root / "trace_archive" / "convert_r1.json"
+    record = json.loads(record_path.read_text())
+    del record["execution"]["file_hashes"]
+    record_path.write_text(json.dumps(record))
+    assert "every record is complete" in _failed(root)
+
+
+def test_a_skill_over_the_native_description_cap_may_be_a_copy(tmp_path):
+    root = _project(tmp_path, "convert")
+    spec = (
+        f"---\nname: verbose\ndescription: {'x' * (_NATIVE_DESCRIPTION_CAP + 1)}\n---\n"
+    )
+    (root / "skills" / "verbose").mkdir()
+    (root / "skills" / "verbose" / "SKILL.md").write_text(spec)
+    (root / ".claude" / "skills" / "verbose").mkdir()
+    (root / ".claude" / "skills" / "verbose" / "SKILL.md").write_text(spec)
+    _, passed, detail = _result(root, MIRROR)
+    assert passed is True and "verbose" in detail
+
+
+def test_a_copied_skill_under_the_cap_is_a_failure(tmp_path):
+    root = _project(tmp_path, "convert")
+    (root / ".claude" / "skills" / "convert").unlink()
+    (root / ".claude" / "skills" / "convert").mkdir()
+    (root / ".claude" / "skills" / "convert" / "SKILL.md").write_text(
+        "---\nx: 1\n---\n"
+    )
+    assert MIRROR in _failed(root)
+
+
+def test_an_output_path_matches_however_the_agent_spelled_it(tmp_path):
+    root = _project(tmp_path, "convert")
+    record_path = root / "trace_archive" / "convert_r1.json"
+    record = json.loads(record_path.read_text())
+    record["execution"]["output_files"] = ["./out/table.csv", str(root / "out/two.csv")]
+    record_path.write_text(json.dumps(record))
+    project = headless_check.Project.load(root)
+    assert project.outputs_of(record) == ["out/table.csv", "out/two.csv"]
+    for path in ("out/table.csv", "out/two.csv"):
+        assert headless_check.output_has_record(path)(project)[1] is True
+
+
+def test_only_a_non_zero_record_counts_as_a_failed_run(tmp_path):
+    root = _project(tmp_path, "convert")
+    record = json.loads((root / "trace_archive" / "convert_r1.json").read_text())
+    record["record_id"] = "r2"
+    record["execution"]["return_code"] = 1
+    (root / "trace_archive" / "convert_r2.json").write_text(json.dumps(record))
+    project = headless_check.Project.load(root)
+    observe = headless_check.failed_record_count("failed runs", r"convert")
+    assert observe(project) == ("failed runs", "1 of 2")
 
 
 def test_a_record_naming_no_registered_code_is_a_mechanical_failure(tmp_path):
