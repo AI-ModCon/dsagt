@@ -133,7 +133,7 @@ See https://github.com/AI-ModCon/dsagt/graphs/contributors for full list.
 
 ## Agent short description
 
-Scaffolding layer that gives any MCP-compatible agent CLI persistent code registration, semantic knowledge retrieval, skill discovery, execution provenance, and session memory — exposed as 20 tools on a single MCP server (`dsagt-server`).
+Scaffolding layer that gives any MCP-compatible agent CLI persistent code registration, semantic knowledge retrieval, skill discovery, execution provenance, and session memory — exposed as 18 tools on a single MCP server (`dsagt-server`).
 
 ## Agent description
 
@@ -200,18 +200,16 @@ The agent accepts natural-language instructions (text). Outputs include text res
 
 ### Tools and permissions
 
-All 20 tools live on the single `dsagt-server` (stdio), split across four concerns.
+All 18 tools live on the single `dsagt-server` (stdio), split across four concerns.
 
-**Registry (8):**
+**Registry (6):**
 
 - `search_registry` — semantic search over registered + bundled code specs. Side effects: reads data.
 - `get_registry` — list every registered code with its MCP-compatible schema. Side effects: reads data.
 - `save_code_spec` — register a code as `codes/<name>/SKILL.md` (executable auto-wrapped with `dsagt-run` + `uv run --with`). Side effects: writes to the project dir; indexes into ChromaDB.
 - `install_dependencies` — install a code's Python dependencies via uv. Side effects: executes uv, network calls (PyPI).
-- `run_command` — execute a shell command with a timeout. Side effects: executes subprocesses.
-- `read_file` — read a file from disk. Side effects: reads data.
-- `http_request` — issue an HTTP(S) request. Side effects: network calls.
 - `reconstruct_pipeline` — render `trace_archive/` as a dependency-ordered execution history. Side effects: reads data.
+- `readiness_reports` — the AI-readiness reports on record for a file, each with whether the file is unchanged since that run. Side effects: reads data.
 
 **Knowledge (5):**
 

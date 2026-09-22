@@ -499,3 +499,19 @@ def test_reconstruct_pipeline_saves_to_a_project_path(tmp_path):
     assert "echo hi" in saved
     outside = _call(server, "reconstruct_pipeline", {"output": "../escape.sh"})
     assert outside.startswith("Error: output must be a path under the project")
+
+
+def test_the_agent_card_lists_the_tools_the_server_serves(tmp_path):
+    """agent-card.md names every served tool and no other.
+
+    The card is read by people deciding what dsagt exposes, and nothing else
+    reads it, so only a test keeps it level with the server.
+    """
+    import re
+
+    server = _make_merged_server(tmp_path)
+    served = set(_list_tools(server))
+    card = (Path(__file__).resolve().parents[1] / "agent-card.md").read_text()
+    listed = {m.group(1) for m in re.finditer(r"^- `(\w+)` — ", card, re.M)}
+    assert listed == served
+    assert f"All {len(served)} tools live" in card
