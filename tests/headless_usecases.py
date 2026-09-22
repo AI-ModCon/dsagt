@@ -97,6 +97,21 @@ def selected_prompts(count: int, from_n: int, only: set[int] | None) -> list[int
     ]
 
 
+def set_shell_timeouts(env: dict, timeout: int) -> dict:
+    """Let a shell command run for the whole prompt timeout.
+
+    Claude Code ends one by moving it to the background, and a headless turn
+    that then ends takes the command with it.  Two limits decide when:
+    ``BASH_DEFAULT_TIMEOUT_MS`` (two minutes) is what a call that asks for no
+    timeout gets, which is most of them, and ``BASH_MAX_TIMEOUT_MS`` (ten
+    minutes) caps what a call may ask for, so both have to rise.  A person's
+    session stays open, so only the driver needs the larger limits.
+    """
+    for name in ("BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_TIMEOUT_MS"):
+        env.setdefault(name, str(timeout * 1000))
+    return env
+
+
 def claude_command(prompt: str, *, model: str | None, first: bool) -> list[str]:
     cmd = ["claude", "-p", prompt, "--model", model or CLAUDE_DEFAULT_MODEL]
     if not first:
@@ -154,11 +169,7 @@ def main() -> int:
         )
     build_command = COMMANDS[agent]
     env = agent_env(config)
-    # Claude Code ends one shell command at BASH_MAX_TIMEOUT_MS (ten minutes
-    # by default) by moving it to the background, and a headless turn that
-    # then ends takes the command with it.  A person's session stays open, so
-    # only the driver needs the larger limit.
-    env.setdefault("BASH_MAX_TIMEOUT_MS", str(args.timeout * 1000))
+    set_shell_timeouts(env, args.timeout)
     project_dir = Path(config["project_dir"])
 
     prompts = prompts_from(Path(args.use_case_dir) / "README.md")
