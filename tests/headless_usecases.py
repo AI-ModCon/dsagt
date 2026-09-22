@@ -100,12 +100,14 @@ def selected_prompts(count: int, from_n: int, only: set[int] | None) -> list[int
 def set_shell_timeouts(env: dict, timeout: int) -> dict:
     """Let a shell command run for the whole prompt timeout.
 
-    Claude Code ends one by moving it to the background, and a headless turn
-    that then ends takes the command with it.  Two limits decide when:
-    ``BASH_DEFAULT_TIMEOUT_MS`` (two minutes) is what a call that asks for no
-    timeout gets, which is most of them, and ``BASH_MAX_TIMEOUT_MS`` (ten
-    minutes) caps what a call may ask for, so both have to rise.  A person's
-    session stays open, so only the driver needs the larger limits.
+    Claude Code ends one at its timeout and kills the process group, 1.5 s
+    after the signal, so a dsagt-run whose child is still running loses the
+    record.  Two limits decide when: ``BASH_MAX_TIMEOUT_MS`` (ten minutes)
+    caps what a call may ask for, and ``BASH_DEFAULT_TIMEOUT_MS`` (two
+    minutes) is what a call that asks for nothing gets.  The agent asks on
+    most dsagt-run calls and asks for 15 to 30 minutes, so the cap is what
+    usually binds and the default binds the rest; both have to rise.  A
+    person's session stays open, so only the driver needs the larger limits.
     """
     for name in ("BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_TIMEOUT_MS"):
         env.setdefault(name, str(timeout * 1000))
