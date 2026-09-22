@@ -140,7 +140,10 @@ async def _handle_kb_search(
     return_code = arguments.get("return_code")
     if return_code is not None:
         where["return_code"] = int(return_code)
-    if len(where) > 1 and not any(k.startswith("$") for k in where):
+    # Several top-level keys need the $and wrapper whether or not one of them
+    # is an operator: a caller-supplied {"$or": [...]} beside a category is two
+    # keys, which ChromaDB refuses.
+    if len(where) > 1:
         where = {"$and": [{k: v} for k, v in where.items()]}
 
     # Document-content filter (over the chunk text itself, complementary to the

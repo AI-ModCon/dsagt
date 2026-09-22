@@ -139,6 +139,9 @@ def _mcp_env_block(
         if src:
             block[key] = str(src)
     extra = (config.get("mcp") or {}).get("env_passthrough") or []
+    if isinstance(extra, str):
+        # One name, written as a scalar; iterating it would pass characters.
+        extra = [extra]
     for name in extra:
         if _CREDENTIAL_NAME.search(name):
             raise ValueError(

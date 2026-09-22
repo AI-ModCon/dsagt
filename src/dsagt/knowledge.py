@@ -982,7 +982,7 @@ class ChromaVectorStore(VectorStore):
         count = 0
         chunks_path = coll_dir / "chunks.jsonl"
         if chunks_path.exists():
-            with open(chunks_path) as fh:
+            with open(chunks_path, encoding="utf-8") as fh:
                 for line in fh:
                     if not line.strip():
                         continue
