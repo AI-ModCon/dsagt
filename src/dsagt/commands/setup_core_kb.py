@@ -23,6 +23,7 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
@@ -126,13 +127,14 @@ def _github_owner_repo(url: str) -> tuple[str, str] | None:
 
 
 def _github_api_headers() -> dict[str, str]:
-    """The API headers, with the shell's ``GITHUB_TOKEN`` when it has one.
+    """The API headers, with the shell's GitHub token when it has one.
 
     The token is read from the shell for the request and written nowhere;
     a private repository needs it, a public one does not.
     """
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "dsagt"}
-    token = os.environ.get("GITHUB_TOKEN")
+    # gh, GitHub Actions runners and many setups export GH_TOKEN instead.
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers
@@ -153,7 +155,7 @@ def fetch_github_tree(url: str, ref: str, into: Path) -> str:
     owner, repo = owner_repo
     with httpx.Client(timeout=120.0, follow_redirects=True) as client:
         commit = client.get(
-            f"https://api.github.com/repos/{owner}/{repo}/commits/{ref}",
+            f"https://api.github.com/repos/{owner}/{repo}/commits/{quote(ref, safe='')}",
             headers=_github_api_headers(),
         )
         commit.raise_for_status()
@@ -163,15 +165,24 @@ def fetch_github_tree(url: str, ref: str, into: Path) -> str:
             headers=_github_api_headers(),
         )
         tarball.raise_for_status()
-    archive = into.parent / f"{repo}.tar.gz"
-    archive.write_bytes(tarball.content)
-    with tarfile.open(archive) as tar:
-        members = tar.getmembers()
-        # GitHub's tarball wraps the tree in one <owner>-<repo>-<sha7>/ directory.
-        top = members[0].name.split("/", 1)[0]
-        tar.extractall(into.parent, filter="data")
-    (into.parent / top).rename(into)
-    archive.unlink()
+    into.parent.mkdir(parents=True, exist_ok=True)
+    # The archive and the extracted tree go to a scratch directory beside the
+    # destination, so a failed download or a malformed archive leaves nothing
+    # behind and never writes into a directory holding other collections.
+    with tempfile.TemporaryDirectory(dir=into.parent) as scratch_dir:
+        scratch = Path(scratch_dir)
+        archive = scratch / f"{repo}.tar.gz"
+        archive.write_bytes(tarball.content)
+        with tarfile.open(archive) as tar:
+            members = tar.getmembers()
+            if not members:
+                raise RuntimeError(f"{url} at {ref} returned an empty archive")
+            # GitHub's tarball wraps the tree in one <owner>-<repo>-<sha7>/ directory.
+            top = members[0].name.split("/", 1)[0]
+            tar.extractall(scratch, filter="data")
+        if into.exists():
+            shutil.rmtree(into)
+        (scratch / top).rename(into)
     return sha
 
 
