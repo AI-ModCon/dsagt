@@ -37,7 +37,9 @@ jobs:
         run: uv run mkdocs gh-deploy --force
 
   preview:
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -66,7 +68,6 @@ jobs:
         run: uv run mkdocs build
 
       - name: Deploy PR preview
-        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: rossjrw/pr-preview-action@v1
         with:
           source-dir: ./site
