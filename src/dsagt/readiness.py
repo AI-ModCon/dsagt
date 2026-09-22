@@ -35,12 +35,11 @@ after which the file is unchanged is current, and the post report of one
 stage is the pre report of the next, so an unchanged file is not checked
 twice. Run the baseline directly; do not ask the user about intent or confirm
 a plan for these checks (the skill's full workflow is for assessments the user
-asks for). The CLI prints its report to stdout, so name the audit file with
-`dsagt-run`'s `--stdout` option, which records it as the run's output:
-`dsagt-run --code aidrin --stdout audit/step_N_pre.aidrin.json -- aidrin
-data-quality <file> --detail` before the operation and `--stdout
-audit/step_N_post.aidrin.json` after it, then report the per-metric change
-to the user before proposing the next step. Do not write a custom check for a
+asks for). The CLI prints its report to stdout and the record holds what it
+printed, so redirect it into the audit file for a reader:
+`... aidrin data-quality <file> --detail > audit/step_N_pre.aidrin.json`
+before the operation and `> audit/step_N_post.aidrin.json` after it, then
+report the per-metric change to the user before proposing the next step. Do not write a custom check for a
 metric AIDRIN provides. A stage with a table as input or output gets this
 check; every other stage keeps the check rule above."""
 
