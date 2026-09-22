@@ -283,7 +283,13 @@ class TestRenderBashReplays:
         head = script.split("# Step 1")[0]
         assert "mkdir -p plots processed_data/tmp" in head
 
-    def test_a_repeated_output_is_removed_before_the_step_that_rewrites_it(self):
+    def test_a_repeated_output_is_not_removed_before_the_step_that_rewrites_it(self):
+        """The script removes nothing.
+
+        A recorded output was written by the code dsagt-run wrapped, and no
+        record holds a removal, so the script does not delete one to clear a
+        path for the step that rewrites it.
+        """
         records = [
             _make_record(
                 "conv", ["conv", "a"], output_files=["out.json"], record_id="r1"
@@ -293,9 +299,24 @@ class TestRenderBashReplays:
             ),
         ]
         script = render_bash(records, build_dependency_graph(records))
-        first, second = script.split("# Step 2")
-        assert "rm -f out.json" not in first
-        assert "rm -f out.json\nconv b" in second
+        assert "rm " not in script
+        assert "conv a" in script and "conv b" in script
+
+    def test_a_step_that_rewrites_its_own_input_keeps_the_file(self):
+        """An in-place step reads the file an earlier step wrote."""
+        records = [
+            _make_record("make", ["make"], output_files=["data.csv"], record_id="r1"),
+            _make_record(
+                "clean",
+                ["clean", "data.csv"],
+                input_files=["data.csv"],
+                output_files=["data.csv"],
+                record_id="r2",
+            ),
+        ]
+        script = render_bash(records, build_dependency_graph(records))
+        assert "rm " not in script
+        assert "clean data.csv" in script
 
 
 class TestRenderSnakemake:

@@ -816,12 +816,24 @@ def render_bash(
     failed attempts are part of the record the reader may want.  Paths under
     *project_dir* are written relative to it, so the script runs from the
     project directory or another checkout of the same layout.
+
+    The script creates the output directories it needs and runs the recorded
+    commands.  It removes nothing: a recorded output was written by the code
+    ``dsagt-run`` wrapped, not by dsagt, and no record holds a removal, so
+    deleting one would act on the reader's data on the strength of an
+    inference.  A step whose command refuses to overwrite an existing output
+    fails with its own error and ``set -e`` stops the script there.
     """
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "",
         "# Pipeline reconstructed from DSAgt execution records, in the order they ran",
+        "#",
+        "# Reconstruction is a work in progress, tracked as a separate effort.",
+        "# Read this script against your own data before running it: it replays",
+        "# what the records hold, and a step the session prepared by hand is not",
+        "# in them.",
         "",
     ]
 
@@ -840,7 +852,6 @@ def render_bash(
         lines.append("mkdir -p " + " ".join(_shell_quote(d) for d in output_dirs))
         lines.append("")
 
-    written: set[str] = set()
     for i, record in enumerate(records):
         code = record["code_name"]
         execution = record["execution"]
@@ -869,14 +880,7 @@ def render_bash(
             lines.append(f"#   failed with exit code {rc}; kept as a comment")
             lines.append(f"# {cmd_str}")
         else:
-            # A converter that refuses to overwrite fails on the second
-            # write of one output; the session removed the file by hand
-            # between runs, and that removal was never recorded.
-            for f in outputs:
-                if f in written:
-                    lines.append(f"rm -f {_shell_quote(f)}")
             lines.append(cmd_str)
-            written.update(outputs)
         lines.append("")
 
     return "\n".join(lines)
