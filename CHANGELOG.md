@@ -173,6 +173,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `token`, …) redacted and common credential shapes inside strings (`Bearer …`,
   `?api_key=…`) masked; an `http_request` bearer token or a whole `read_file`
   payload was previously written verbatim into `mlflow.db`.
+- dsagt sets no MLflow active model. An MLflow LoggedModel records the
+  version of the application under evaluation, and MLflow attaches the active
+  one to everything the thread logs. `init_tracing` and `MLflowSink.write` set
+  a LoggedModel for the dsagt release, which is not what is evaluated, so
+  metrics logged afterwards in the same thread were attributed to dsagt, and
+  failed with `FOREIGN KEY constraint failed` in a store without that model.
+  The trace table's *Version* column is empty; the `dsagt.version` metadata on
+  every trace records the release.
 
 ## [0.2.1] - 2026-09-11
 
