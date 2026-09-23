@@ -106,8 +106,10 @@ def set_shell_timeouts(env: dict, timeout: int) -> dict:
     caps what a call may ask for, and ``BASH_DEFAULT_TIMEOUT_MS`` (two
     minutes) is what a call that asks for nothing gets.  The agent asks on
     most dsagt-run calls and asks for 15 to 30 minutes, so the cap is what
-    usually binds and the default binds the rest; both have to rise.  A
-    person's session stays open, so only the driver needs the larger limits.
+    usually binds and the default binds the rest; both have to rise.  The
+    same two limits bind an interactive session, where a person raises them
+    in the project's ``.claude/settings.json`` (see ``docs/provenance.md``);
+    the driver has no settings file to read, so it passes them in the env.
     """
     for name in ("BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_TIMEOUT_MS"):
         env.setdefault(name, str(timeout * 1000))
