@@ -867,28 +867,6 @@ def test_init_tracing_survives_a_deleted_experiment(tmp_path, monkeypatch, caplo
     )
 
 
-def test_init_tracing_activates_the_version_model(tmp_path, monkeypatch):
-    """`mlflow.modelId` must reference a LoggedModel named for the dsagt
-    release, created once per experiment; that is what the UI's Version
-    column shows."""
-    import mlflow
-
-    from dsagt import __version__
-    from dsagt.observability import init_tracing
-
-    uri = f"sqlite:///{tmp_path}/mlflow.db"
-    monkeypatch.setattr(obs_module, "_initialized", False)
-    monkeypatch.setattr(
-        obs_module, "find_project_config", lambda: ("/proj", {"project": "p"})
-    )
-    init_tracing("dsagt-server", mlflow_url=uri)
-    with obs_module.open_span("demo", source="knowledge"):
-        pass
-    md = _last_trace().info.trace_metadata
-    model = mlflow.get_logged_model(md["mlflow.modelId"])
-    assert model.name == "dsagt-" + __version__.replace(".", "_")
-
-
 def test_bound_leaves_ordinary_prose_alone_and_catches_json_keys():
     """The value-shape sweep is anchored: `Bearer`/`Basic` only after an
     `Authorization:` label, key labels only before a token-shaped value;
@@ -924,8 +902,7 @@ def test_remote_store_retry_budget_is_bounded_but_overridable(monkeypatch):
 
 
 def test_init_tracing_quiets_mlflow_info_chatter(tmp_path, monkeypatch, capsys):
-    """MLflow logs set_experiment / set_active_model at INFO on stderr
-    ("Active model is set to …") on every dsagt-run.  An agent capturing a
+    """MLflow logs experiment setup at INFO on stderr.  An agent capturing a
     code's stderr would read that as the code's output."""
     import logging
 
@@ -937,4 +914,4 @@ def test_init_tracing_quiets_mlflow_info_chatter(tmp_path, monkeypatch, capsys):
     )
     init_tracing("dsagt-run", mlflow_url=f"sqlite:///{tmp_path}/mlflow.db")
     assert logging.getLogger("mlflow.tracking.fluent").level == logging.WARNING
-    assert "Active model is set" not in capsys.readouterr().err
+    assert "INFO" not in capsys.readouterr().err
