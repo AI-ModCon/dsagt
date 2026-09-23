@@ -99,3 +99,17 @@ def test_a_selection_starting_at_prompt_one_starts_the_session():
     assert hu.selected_prompts(3, 1, {1, 2})[0] == 1
     assert hu.selected_prompts(3, 1, {2, 3})[0] != 1
     assert hu.selected_prompts(3, 0, None)[0] == 1
+
+
+def test_shell_timeouts_cover_the_applied_default_and_the_ceiling():
+    """Both limits rise: the default is what a call asking for no timeout gets."""
+    assert hu.set_shell_timeouts({}, 1500) == {
+        "BASH_DEFAULT_TIMEOUT_MS": "1500000",
+        "BASH_MAX_TIMEOUT_MS": "1500000",
+    }
+
+
+def test_shell_timeouts_keep_a_value_the_environment_already_set():
+    env = {"BASH_DEFAULT_TIMEOUT_MS": "60000"}
+    assert hu.set_shell_timeouts(env, 1500)["BASH_DEFAULT_TIMEOUT_MS"] == "60000"
+    assert env["BASH_MAX_TIMEOUT_MS"] == "1500000"

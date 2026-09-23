@@ -47,11 +47,13 @@ in step 1. Then:
 
 ```bash
 PROJ=~/dsagt-projects/genesis-skills
-# The fixture data (catalyst_screening.csv and the domain docs) is in the
-# repository, under this use case's data/ folder. The expected datacard stays
-# out of the project: it is the reference you compare against afterwards.
-mkdir -p "$PROJ/mock_data"
-cp -r use_cases/genesis_skills/data/dataset use_cases/genesis_skills/data/domain "$PROJ/mock_data/"
+# From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
+# One bundle: catalyst_screening.csv and the domain documents. The expected
+# datacard stays out of the project: it is the reference you compare against
+# afterwards, in this repository under this use case's data/ folder.
+curl -L "https://drive.usercontent.google.com/download?id=1HvmvPs6Bx4QgmXqYU0ZQuVbaLfEw0eLK&export=download&confirm=t" \
+  -o genesis_skills.tar.gz
+tar xzf genesis_skills.tar.gz -C "$PROJ"
 # $PROJ/mock_data now holds dataset/ and domain/
 dsagt start genesis-skills
 ```
@@ -85,36 +87,43 @@ since init.
 ### 3. Generate the datacard for the finished dataset
 
 ```text
-Use the datacard-generator skill to write a Level 1 datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the data dictionary and measurement protocol under mock_data/domain/ — don't invent them, and note anything the documents leave unspecified rather than asking. Save it to audit/catalyst_screening_datacard.md.
+Use the datacard-generator skill to write a Level 1 datacard for mock_data/dataset/catalyst_screening.csv. Pull the field definitions, measurement methodology, provenance, and license from the data dictionary and measurement protocol under mock_data/domain/ — don't invent them, and note anything the documents leave unspecified rather than asking. Include basic statistics for the numeric columns. Save it to audit/catalyst_screening_datacard.md, then validate it with the skill's validator and fix what it reports.
 ```
 
 **Expect:** the agent reads the installed skill's `SKILL.md` and the two domain
 documents (reactor conditions **250 °C, 1 atm, H2:CO2 = 4:1, GHSV 12,000**;
-license **CC-BY-4.0**), computes basic stats from the 8-row CSV, and writes
+license **CC-BY-4.0**), computes basic statistics from the 8-row CSV (row count,
+uniqueness, missing values, and the range of each numeric column), and writes
 `audit/catalyst_screening_datacard.md` covering summary / provenance / schema /
-methodology / stats / limitations / license.
+methodology / statistics / limitations / license. Required fields the documents
+leave unspecified (contact, creator) carry a placeholder such as "unspecified".
 
 ### 4. Validate the metadata
 
 ```text
-Use the croissant-validator skill to check the Croissant/JSON-LD metadata for this dataset (generate it from the datacard if needed), and report any schema errors.
+Use the croissant-validator skill to check the Croissant/JSON-LD metadata for this dataset (generate it from the datacard if needed, giving no creator or URL that the domain documents do not state), and report any schema errors.
 ```
 
 **Expect:** the validator skill runs and reports a clean pass or names specific
-schema issues. The skill installs `mlcroissant` into a small virtual environment
-for its library check; a pass is one whose output shows `mlcroissant parse OK`,
-since the script skips that check when the library is absent.
+schema issues. The generator script requires a `creator` and a `url`; the domain
+documents state neither, so the correct values are placeholders such as
+"unspecified", and an invented name or address is a failure. The library check
+needs `mlcroissant`: the skill installs it into a small virtual environment, or
+the agent registers the validator script as a code with `mlcroissant` as a
+dependency and `dsagt-run` supplies it. A pass is one whose output shows
+`mlcroissant parse OK`, since the script skips that check when the library is
+absent.
 
 ### 5. Review the project artifacts
 
 ```text
-Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted. Include the registered codes and installed skills.
 ```
 
-**Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
-installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
-with a line on what each is.
+**Expect:** a listing of the whole project directory, including the registered codes and
+installed skills under `skills/`, with a line on what each entry is. The listing marks the
+execution records in `trace_archive/`, the datacard and the validation output in `audit/`,
+the trace store `mlflow.db`, and the session's other outputs.
 
 ## Post-Conditions
 
@@ -125,8 +134,12 @@ Confirm from a shell (the native skills directory is `.claude/skills/` for Claud
 dsagt info genesis-skills                  # KB lists skills_catalog__ai-modcon-genesis-skills
 ls "$PROJ/skills/"                         # aidrin  croissant-validator  datacard-generator  skill-creator
 cat "$PROJ/skills/croissant-validator/PROVENANCE.txt"
-ls "$PROJ/audit/"                          # catalyst_screening_datacard.md
-diff <(grep '^#' use_cases/genesis_skills/data/expected_datacard.md) <(grep '^#' "$PROJ/audit/catalyst_screening_datacard.md")
+ls "$PROJ/audit/"                          # includes catalyst_screening_datacard.md
+CARD="$PROJ/audit/catalyst_screening_datacard.md"
+for value in '250 °C' 'GHSV' 'CC-BY-4.0' 'Single-run' 'C2+' 'relative'; do
+    printf '%s: ' "$value"; grep -c -F -- "$value" "$CARD"   # each count is at least 1
+done
+ls "$PROJ/trace_archive" | wc -l           # at least 2
 ```
 
 1. The KB holds a `skills_catalog__ai-modcon-genesis-skills` collection
@@ -137,12 +150,21 @@ diff <(grep '^#' use_cases/genesis_skills/data/expected_datacard.md) <(grep '^#'
    base skill. The next session auto-invokes them natively; this session used
    them by reading their `SKILL.md`.
 3. `audit/catalyst_screening_datacard.md` was produced for the finished dataset,
-   grounded in the domain documents, covering the sections in
-   `use_cases/genesis_skills/data/expected_datacard.md` and carrying its values:
-   reactor conditions 250 °C, 1 atm, H2:CO2 = 4:1, GHSV 12,000; license
-   CC-BY-4.0; 8 rows; and the three caveats the measurement protocol states.
+   grounded in the domain documents, and carries the values listed in
+   [`data/expected_datacard.md`](data/expected_datacard.md): reactor conditions
+   250 °C, 1 atm, H2:CO2 = 4:1, GHSV 12,000; license CC-BY-4.0; 8 rows; the
+   ranges of the numeric columns; and the three caveats the measurement
+   protocol states (single-run, trace C2+ excluded, relative ranking). Each
+   `grep -c` above is at least 1. Section headings follow the Genesis template,
+   which names them differently from the expected file.
 4. The validator's output shows `mlcroissant parse OK`.
-5. MLflow traces (in the serverless `mlflow.db` store) capture the session —
+5. `trace_archive/` holds at least two execution records, the datacard
+   introspection and the datacard validation, each run through `dsagt-run`.
+   The Croissant validation adds a third when the agent registers the
+   validator as a code; when it installs `mlcroissant` into the skill's own
+   virtual environment instead, that run is outside the wrapper and leaves no
+   record, which step 4 allows.
+6. MLflow traces (in the serverless `mlflow.db` store) capture the session —
    `dsagt traces genesis-skills`.
 
 ## What This Tests

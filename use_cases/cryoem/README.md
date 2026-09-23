@@ -13,7 +13,7 @@ order: 20
 
 # DSAgt Demo: Cryo-EM Data Curation Pipeline
 
-> **Estimated time:** ~20 minutes of session time. Setup pulls a **~0.5 GB data
+> **Estimated time:** 12 to 25 minutes of session time. Setup pulls a **~0.5 GB data
 > download** (84 micrograph previews and the ground-truth particle tables), two
 > open-access papers, and the CryoPPP repository, then KB-ingests the repository
 > (minutes on the local embedder) before any pipeline work.
@@ -71,8 +71,9 @@ dsagt start cryoem-pipeline
 
 ## Execution
 
-Paste these prompts one at a time. The agent runs the AI-readiness check around the tabular steps
-without being told to; the micrograph (image) steps are not assessed.
+Paste these prompts one at a time. The agent runs the AI-readiness check around the tabular stages
+without being told to. The derive, score, merge, and curate stages each read and write a CSV, so
+the check covers all four; the micrograph previews are images and have no check.
 
 ### 1. Create a cryo-EM knowledge collection
 
@@ -109,7 +110,7 @@ The agent should return chunks describing quality metrics: CTF resolution, defoc
 Register the two CryoPPP scripts convert_start_to_csv_file.py and
 generate_box_files_for_each_micrographs.py from repos/cryoppp/ as codes. They have
 hard-coded paths and no command-line interface, so wrap each in a small CLI script under
-codes/<name>/scripts/ that takes its input and output paths as arguments.
+skills/<name>/scripts/ that takes its input and output paths as arguments.
 ```
 
 **Verify:**
@@ -131,7 +132,7 @@ Use the CryoCRAB 0-7 scoring scheme from the CryoCRAB paper in the cryoppp colle
 its seven screening parameters within the dataset's 3-sigma interval contributes one point, and
 scores map to tiers low (0-2), medium (3-5), high (6-7). Score on the parameters available in our
 metadata. The script should read a metadata CSV and output a scored CSV with quality_score and
-quality_tier columns. Save the script under codes/<name>/scripts/ and register it as a code.
+quality_tier columns. Save the script under skills/<name>/scripts/ and register it as a code.
 ```
 
 The agent should search the knowledge base, write the script, and register it via `save_code_spec`.
@@ -141,7 +142,7 @@ The agent should search the knowledge base, write the script, and register it vi
 ```text
 Run the pipeline on the EMPIAR-10017 dataset in data/cryoem/10017/:
 1. Scan the directory to understand what's there
-2. Derive per-micrograph metadata from the ground-truth particle tables in
+2. Derive per-micrograph metadata from the selected ground-truth particle table in
    data/cryoem/10017/ground_truth/ (defocus U, defocus V, and defocus angle per particle,
    aggregated per micrograph) into data/cryoem/micrograph_metadata.csv, with a registered code
 3. Run the quality scoring code on that metadata
@@ -155,15 +156,18 @@ Run the pipeline on the EMPIAR-10017 dataset in data/cryoem/10017/:
 ```
 
 The Lite archive carries no CTF-fit, motion, or ice-thickness columns, so the derived metadata
-holds only the defocus parameters; the CryoCRAB score therefore tops out at 2 and every
-micrograph lands in the low tier. The measurable gain of this pipeline is in the particle tables.
+holds only the defocus parameters; the tier split depends on which derived columns the agent
+scores. The measurable gain of this pipeline is in the particle tables.
 
-The merge and the curation are the two data operations of this pipeline, so the prompt asks
-for them as registered codes: each run is then an execution record, and the AI-readiness check
-has a before and an after to measure. The merge has two input tables and no single "before"
-file, so the check pairs are: `particles.csv` is the merge's after and the curation's before,
-and `particles_curated.csv` is the curation's after; the two reports on those files are what
-post-condition 4 is judged on. Expected across the curation step:
+The merge and the curation are the two data operations on the particle tables, so the prompt
+asks for them as registered codes: each run is then an execution record, and the AI-readiness
+check has a before and an after to measure. The merge has two input tables and no single
+"before" file, so the check pairs are: `particles.csv` is the merge's after and the curation's
+before, and `particles_curated.csv` is the curation's after. The check runs on the ground-truth tables as they arrive and
+on the output of each transformation: the derived metadata, the scored table, `particles.csv`,
+and `particles_curated.csv`. Each check's execution record holds the report. The two reports on the
+particle tables carry the gain post-condition 4 is
+judged on. Expected across the curation step:
 
 | Metric | before → after | Reading |
 |---|---|---|
@@ -172,9 +176,7 @@ post-condition 4 is judged on. Expected across the curation step:
 | `outliers` (overall) | **0.041 → 0.029** | curation removed ~30% of outliers |
 | `class-imbalance` (Class Number, passthrough) | **22.2 → 11.1** | markedly more balanced |
 
-A score is comparable only before and after one operation on the same table. Read in run
-order, the reports seem to get worse and then recover, because they describe different
-tables:
+The reports cover different tables, so the numbers are not a trend:
 
 | Table | `outliers` | `class-imbalance` |
 |---|---|---|
@@ -200,11 +202,25 @@ curated table is as AI-ready as the selected input, no more.
 Use the datacard-generator skill to write a Level 1 datacard for the curated cryo-EM data.
 ```
 
+The skill asks its questions in batches: first which capabilities the card covers, then the
+fields that identify the dataset. One answer covers them:
+
+```text
+Discoverability only. Name the dataset "EMPIAR-10017 curated particles". The contact is
+Jane Doe, jane@example.org. There is no license yet. Take every other field from the data
+and the two papers, mark what they do not give as unknown, and ask nothing further. When
+the card is written, validate it with the skill's validator and fix what it reports.
+```
+
 ### 7. Reconstruct the pipeline
 
 ```text
-Reconstruct the pipeline from the execution records as a bash script.
+Reconstruct the pipeline from the execution records as a bash script and save it as pipeline.sh.
 ```
+
+**Expect:** `reconstruct_pipeline` with `output="pipeline.sh"` saves the script into the
+project and returns it; the recorded runs appear in the order they ran, with a failed run kept
+as a comment.
 
 ### 8. Review the project artifacts
 
@@ -213,19 +229,19 @@ Show me the contents of my project folder in a tree format, with the artifacts d
 ```
 
 **Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
-installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
-with a line on what each is.
+`trace_archive/` (the readiness reports are the `aidrin` records among them), the registered codes and installed skills under
+`skills/`, the trace store `mlflow.db`, and the session's outputs, with a line on what each
+is. The agent may print the tree through a command; the reply then summarizes it.
 
 ## Post-Conditions
 
 1. Knowledge base contains `cryoppp` collection with repo code, docs, and appended papers.
 2. `skills/aidrin/` is present (installed at init); the code registry includes the two CryoPPP codes (the STAR-to-CSV converter and the box-file generator), the metadata-derivation code, and the quality-scoring code.
 3. Quality-scored CSV exists with tier distribution; `particles.csv` (merged) and `particles_curated.csv` (curated) exist with `trace_archive/` records for both operations.
-4. The check ran on `particles.csv` and on `particles_curated.csv`, and the two reports show curation reduced outliers (~0.041 → ~0.029).
+4. `trace_archive/` holds an `aidrin` record, which is the check report, for each table the pipeline wrote: `micrograph_metadata.csv`, the scored CSV, `particles.csv`, and `particles_curated.csv`. The two reports on the particle tables show curation returned the outlier score to the selected set's value (~0.041 → ~0.029).
 5. A datacard exists for the processed dataset.
-6. A reconstructed pipeline script is available.
-7. Code execution records in `trace_archive/` document the full provenance chain, including one record per check run.
+6. `pipeline.sh` exists, saved by `reconstruct_pipeline`.
+7. Code execution records in `trace_archive/` document the full provenance chain, including one record per check run, each naming the table it read.
 8. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history.
 
 ## What This Tests

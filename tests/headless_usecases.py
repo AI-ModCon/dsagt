@@ -57,6 +57,9 @@ CLAUDE_ALLOWED_TOOLS = [
     "Bash(test:*)", "Bash(seq:*)", "Bash(date:*)", "Bash(basename:*)", "Bash(dirname:*)",
     "Bash(cd:*)", "Bash(export:*)", "Bash(sqlite3:*)", "Bash(jq:*)",
     "Bash(*/.tools/*)", "Bash(~/dsagt-projects/.tools/*)",
+    # A script the agent wrote to Claude Code's session scratchpad and runs by
+    # its absolute path; with a person present this is an approval prompt.
+    "Bash(/private/tmp/claude-*)", "Bash(/tmp/claude-*)",
 ]  # fmt: skip
 
 CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-5"
@@ -92,6 +95,25 @@ def selected_prompts(count: int, from_n: int, only: set[int] | None) -> list[int
     return [
         n for n in range(1, count + 1) if n >= from_n and (only is None or n in only)
     ]
+
+
+def set_shell_timeouts(env: dict, timeout: int) -> dict:
+    """Let a shell command run for the whole prompt timeout.
+
+    Claude Code ends one at its timeout and kills the process group, 1.5 s
+    after the signal, so a dsagt-run whose child is still running loses the
+    record.  Two limits decide when: ``BASH_MAX_TIMEOUT_MS`` (ten minutes)
+    caps what a call may ask for, and ``BASH_DEFAULT_TIMEOUT_MS`` (two
+    minutes) is what a call that asks for nothing gets.  The agent asks on
+    most dsagt-run calls and asks for 15 to 30 minutes, so the cap is what
+    usually binds and the default binds the rest; both have to rise.  The
+    same two limits bind an interactive session, where a person raises them
+    in the project's ``.claude/settings.json`` (see ``docs/provenance.md``);
+    the driver has no settings file to read, so it passes them in the env.
+    """
+    for name in ("BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_TIMEOUT_MS"):
+        env.setdefault(name, str(timeout * 1000))
+    return env
 
 
 def claude_command(prompt: str, *, model: str | None, first: bool) -> list[str]:
@@ -151,6 +173,7 @@ def main() -> int:
         )
     build_command = COMMANDS[agent]
     env = agent_env(config)
+    set_shell_timeouts(env, args.timeout)
     project_dir = Path(config["project_dir"])
 
     prompts = prompts_from(Path(args.use_case_dir) / "README.md")

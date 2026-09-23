@@ -25,7 +25,7 @@
       "vendor_or_project": "VASP"
     },
     "configuration": {
-      "code_version": "6.3.2",
+      "code_version": "5.4.1",
       "compute_architecture": "cpu",
       "cores": null
     }
@@ -44,7 +44,7 @@
       "is_relaxation": true,
       "nsw": 50,
       "converged": true,
-      "ionic_steps": 50
+      "ionic_steps": 2
     }
   },
   "results": {

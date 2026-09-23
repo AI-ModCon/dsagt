@@ -8,6 +8,8 @@ This document outlines best practices for preprocessing and assembling
 microbial isolate short-read sequencing data using fastp for quality
 control and MEGAHIT for de novo assembly. The guidance is specifically
 tuned for running on a laptop with constrained RAM and CPU resources.
+The parameters here supersede any parameter note in the data bundle's
+README.
 
 MEGAHIT is the preferred assembler for this context. It uses
 significantly less memory than SPAdes while delivering comparable
@@ -104,7 +106,10 @@ Step 2: Assembly with MEGAHIT
 MEGAHIT uses a succinct de Bruijn graph approach that allows it to
 assemble genomes with substantially less memory than SPAdes. Its default
 parameters are tuned for metagenomic complexity, so a few adjustments
-are recommended for single microbial isolate data.
+are recommended for single microbial isolate data. MEGAHIT creates the
+-o directory itself and exits with "Output directory already exists"
+when it is present, so do not create it beforehand; create only its
+parent.
 
 Recommended Command
 

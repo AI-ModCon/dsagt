@@ -57,14 +57,18 @@ are fine for the rest. Then:
 
 ```bash
 PROJ=~/dsagt-projects/blastnet-well
-curl -L "https://drive.usercontent.google.com/download?id=1xUZhlr6uCahSbOLiLt5wcwMzehdpaUjL&export=download&confirm=t" \
-  -o combustion_simulation_data.tar.gz
-tar xzf combustion_simulation_data.tar.gz -C "$PROJ"
-mkdir -p "$PROJ/codes/scripts" "$PROJ/docs"
-cp use_cases/combustion_simulation/docs/*.md "$PROJ/docs/"
-cp use_cases/combustion_simulation/scripts/check_well_output.py "$PROJ/codes/scripts/"
+# From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
+# One bundle: the BlastNet trajectory (data/), the two format documents (docs/),
+# the checker (skills/check-well-output/scripts/), and the holdout reference (holdout/).
+curl -L "https://drive.usercontent.google.com/download?id=1dXFOocZ5Uep5DAmth_xMsYwIP5Gbpv83&export=download&confirm=t" \
+  -o combustion_simulation.tar.gz
+tar xzf combustion_simulation.tar.gz -C "$PROJ" --exclude='./holdout'
 dsagt start blastnet-well
 ```
+
+The holdout reference stays outside the project until step 5. An agent that reads the
+reference while gathering context writes a converter that matches on the first try, and the
+pitfall loop of step 5 never runs.
 
 The agent writes the converter. [`reference/`](reference/) holds the converter this
 walkthrough produced when it was developed, its earlier versions, and the validation
@@ -102,23 +106,22 @@ groups under `boundary_conditions/`, coordinate arrays from the grid files,
 time from `info.json`, and the root attributes `dataset_name`, `grid_type`,
 `n_spatial_dims`, `n_trajectories`, `simulation_parameters`.
 
-### 2. Register the converter and the checker as codes
+### 2. Register the checker beside the converter
 
 ```text
-Register two codes. convert-to-well runs
-`python skills/blastnet-to-well/scripts/convert_to_well_format.py` with a
-positional trajectory directory and the options --output-file and --dry-run.
-check-well-output runs `python codes/scripts/check_well_output.py` with
+save_skill registered the converter as a code and its reply gave the command to
+run it by. Register the checker as a second code: check-well-output runs `python skills/check-well-output/scripts/check_well_output.py` with
 positional candidate and reference files and the options --rtol, --atol,
---spot-check, --n-points, and --seed. Run --help on each first to confirm.
+--spot-check, --n-points, and --seed. Run --help on both codes first to confirm
+their options.
 ```
 
-**Verify:** `Search the registry for WELL conversion codes.` → both specs under `codes/`.
+**Verify:** `Search the registry for WELL conversion codes.` → both specs under `skills/`.
 
 ### 3. Dry run
 
 ```text
-Run the registered convert-to-well code, with its exact command, as a dry run on
+Run the converter's registered code, with its exact command, as a dry run on
 data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000 and tell me the grid
 size, the number of snapshots, and which WELL fields it would write. info.json
 says 3 snapshots and 13 variables; tell me if the dry run disagrees.
@@ -131,18 +134,24 @@ says 3 snapshots and 13 variables; tell me if the dry run disagrees.
 
 ```text
 Convert data/blastnet_data/lifted_hydrogen_jet/hydrogen-jet-5000 to
-well_output/lifted_hydrogen_jet_traj_5000.hdf5 by running the registered convert-to-well
+well_output/lifted_hydrogen_jet_traj_5000.hdf5 by running the converter's registered
 code with its exact command.
 ```
 
 ### 5. Check against the holdout reference and iterate
+
+Unpack the reference into the project first:
+
+```bash
+tar xzf combustion_simulation.tar.gz -C "$PROJ/data" ./holdout
+```
 
 ```text
 Spot-check well_output/lifted_hydrogen_jet_traj_5000.hdf5 against
 data/holdout/well_output/lifted_hydrogen_jet_traj_5000.hdf5 with 10 random
 points per dataset by running the registered check-well-output code with its exact
 command. If anything differs, fix the converter in the skill, reconvert with the
-registered convert-to-well code, and check again. When the spot-check passes, run the
+converter's registered code, and check again. When the spot-check passes, run the
 full comparison the same way. After the check passes, update the skill's SKILL.md so
 its rules match the converter.
 ```
@@ -158,6 +167,8 @@ original development hit — all of them are visible in the checker's output:
 | boundary masks written as `bool` | dtype mismatch on `boundary_conditions/*/mask` |
 | boundary-condition text not parsed (`inflow-outflow`, `pressure outlet`) | `boundary_conditions/` groups missing |
 | `bc_type` written in the source's case (`open`) | attribute mismatch on `boundary_conditions/*/bc_type` (`OPEN` expected) |
+| `dataset_name` taken from the trajectory directory (`hydrogen-jet-5000`) instead of the family (`lifted_hydrogen_jet`) | `DIFF 'dataset_name'` on the root attributes |
+| the two meshgrid files read in the wrong order | `dimensions/x` values differ while `dimensions/y` matches |
 | `dimensions/time` written as snapshot indices (0, 1, 2) or a hard-coded step | `dimensions/time` values differ; the times come from `time-step snapshot [s]` in info.json |
 | coordinates generated as a uniform range instead of read from the grid files | none — the grid is uniform, so it passes within tolerance; read the converter, not only the checker output |
 
@@ -171,8 +182,13 @@ the converter that passed.
 ```text
 Use the datacard-generator skill to write a Level 1 datacard for the converted
 WELL file to audit/. Take the values from info.json and the conversion, and
-note anything unknown rather than asking.
+note anything unknown rather than asking. Validate the card with the registered
+datacard-validate code.
 ```
+
+**Expect:** the skill's `introspect.py` runs as the registered `datacard-introspect`
+code, so the introspection is an execution record; the card under `audit/` is in the
+Genesis template and `datacard-validate` accepts it (`ok: true`).
 
 ### 7. Reconstruct the pipeline
 
@@ -183,11 +199,12 @@ variable at the top so it can be rerun on the other BlastNet trajectories. Keep
 the final conversion, the spot check, and the full check.
 ```
 
-**Expect:** `reconstruct_pipeline(format="bash")` returns the recorded runs in
-the order they ran; `pipeline.sh` holds the final conversion and the two checks
-as plain commands with `TRAJ_DIR` at the top, the one value to edit for another
-trajectory. The script calls the tools directly so it runs outside a DSAgt
-project.
+**Expect:** `reconstruct_pipeline` with `format="bash"` and `output="pipeline.sh"`
+saves the script into the project and returns the recorded runs in the order they
+ran; the agent then edits `pipeline.sh` down to the final conversion and the two
+checks as plain commands, with the trajectory directory in one variable at the top
+and the output and reference paths derived from it. The script calls the tools
+directly so it runs outside a DSAgt project.
 
 ### 8. Review the project artifacts
 
@@ -196,18 +213,18 @@ Show me the contents of my project folder in a tree format, with the artifacts d
 ```
 
 **Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
-installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
-with a line on what each is.
+`trace_archive/`, the reports in `audit/`, the registered codes and installed skills under
+`skills/`, the trace store `mlflow.db`, and the session's outputs, with a line on what each
+is. The agent may print the tree through a command; the reply then summarizes it.
 
 ## Post-Conditions
 
-1. `skills/blastnet-to-well/` exists with a `SKILL.md` whose mapping rules agree with the final converter, both specifications under `references/`, and the converter under `scripts/`.
-2. Code registry contains `convert-to-well` and `check-well-output` specs.
+1. `skills/blastnet-to-well/` exists with a `SKILL.md` whose mapping rules agree with the final converter, the two documents under `references/`, and the converter under `scripts/`.
+2. Code registry contains the converter's code, registered by `save_skill` from the skill's script, and `check-well-output`, both under `skills/`.
 3. `well_output/lifted_hydrogen_jet_traj_5000.hdf5` exists and the full checker run reports an exact match to the holdout reference.
 4. `trace_archive/` holds every converter and checker run, including the failed checks that drove the fixes.
-5. A datacard exists for the converted dataset.
-6. `pipeline.sh` replays the final conversion and both checks, calling the tools directly; the trajectory directory at the top is the only value to edit.
+5. A datacard for the converted dataset exists under `audit/`, in the Genesis template, and `datacard-validate` accepts it.
+6. `pipeline.sh`, saved by `reconstruct_pipeline`, replays the final conversion and both checks, calling the tools directly; the trajectory directory is the only variable to edit, and the output and reference paths are derived from it.
 7. MLflow traces (in the serverless `mlflow.db` store) capture the session —
    `dsagt traces blastnet-well`.
 
@@ -228,7 +245,7 @@ with a line on what each is.
 
 ```bash
 dsagt rm blastnet-well -y
-rm combustion_simulation_data.tar.gz
+rm combustion_simulation.tar.gz
 ```
 
 ## Notes

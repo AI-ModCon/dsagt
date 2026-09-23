@@ -89,11 +89,11 @@ Then give me a readiness verdict organized by the four categories.
 
 **Data quality**
 
+The skill runs the three quality metrics as one baseline call.
+
 | Command | Result |
 |---|---|
-| `aidrin run completeness data/adult.csv` | overall `1.0` |
-| `aidrin run duplicity data/adult.csv` | `0.0` |
-| `aidrin run outliers data/adult.csv` | overall `≈0.050` (`hours.per.week` ≈0.277) |
+| `aidrin data-quality data/adult.csv --detail` | completeness `1.0`; duplicity `0.0`; outliers overall `≈0.050` (`hours.per.week` ≈0.277) |
 
 **Impact on AI**
 
@@ -133,17 +133,17 @@ quasi-identifiers — bin or suppress before sharing.
 ```text
 Write an aidrin batch config (YAML) that runs completeness, class-imbalance, statistical-rates, and
 representation-rate on data/adult.csv with target income and sensitive attribute sex, then run it
-with the aidrin skill.
+with the aidrin skill. The config is one flat mapping, and the key names are in the skill's
+reference/metrics.md.
 ```
 
-The config is one flat mapping, not per-metric blocks; the `aidrin` skill's
-`reference/metrics.md` documents the keys. For this step:
+The config for this step:
 
 ```yaml
-file-path: data/adult.csv
-file-type: csv
+file_path: data/adult.csv
 metrics: [completeness, class-imbalance, statistical-rates, representation-rate]
 target-column: income
+y-true-column: income
 sensitive-attribute-column: sex
 columns: [sex, race]
 ```
@@ -156,8 +156,11 @@ the readiness findings above. Take the values from the dataset and the reports, 
 unknown rather than asking, and write it as one file, data/genesis_datacard_adult.md.
 ```
 
-The agent invokes the `datacard-generator` base skill and writes one Genesis Datacard,
-`data/genesis_datacard_adult.md`, documenting the dataset and its readiness profile.
+The agent follows the `datacard-generator` base skill: it fills the skill's template from
+the dataset and the readiness reports, writes one Genesis Datacard,
+`data/genesis_datacard_adult.md`, and validates it with the registered `datacard-validate`
+code. The validator warns that the filename differs from the one it derives from the dataset
+name; that warning is expected, since the prompt fixes the filename.
 
 ### 5. Review the execution records
 
@@ -166,20 +169,20 @@ Show me the execution records for this session as a table of metric, command, an
 ```
 
 The agent reads the records `dsagt-run` wrote to `trace_archive/` and lists one row per
-`aidrin` command: the runs from step 2 (thirteen to fifteen, since the skill may run the
-three quality metrics as one `data-quality` call) and the batch run from step 3, every exit
-code 0.
+`aidrin` command: the runs from step 2 (thirteen with the quality baseline as one
+`data-quality` call, fifteen when the agent runs the three quality metrics separately) and
+the batch run from step 3, every exit code 0.
 
 ### 6. Review the project artifacts
 
 ```text
-Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted. Include the registered codes and installed skills.
 ```
 
-**Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
-installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
-with a line on what each is.
+**Expect:** a listing of the whole project directory, including the registered codes and
+installed skills under `skills/`, with a line on what each entry is. The listing marks the
+execution records in `trace_archive/` (each `aidrin` record holds that metric's report), the datacard, the trace
+store `mlflow.db`, and the session's other outputs.
 
 ## Post-Conditions
 

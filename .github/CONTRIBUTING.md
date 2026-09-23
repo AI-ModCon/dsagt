@@ -23,18 +23,72 @@ python -m pytest tests/test_config.py -q   # a single file
 python -m pytest -m integration -v         # integration (needs creds)
 ```
 
-A walkthrough under `use_cases/` is validated by running its Execution prompts
-through a headless agent:
+## Headless walkthrough runs
+
+The walkthroughs under `use_cases/` are tutorials for a person. They double as
+end-to-end tests because each README has an Execution section of prompts and a
+Post-Conditions section that states the outcome. `tests/headless_usecases.py`
+sends the prompts through a headless agent and the post-conditions are the
+judgment; the unit and integration suites do not run them.
 
 ```bash
-dsagt init <name> --agent claude|codex --location ~/dsagt-projects   # then stage data per the README
-python tests/headless_usecases.py use_cases/<case> <name>            # --only N,M --from N --subst KEY=VALUE
+dsagt init <name> --agent claude|codex --location ~/dsagt-projects   # then stage data per the README's Setup
+python tests/headless_usecases.py use_cases/<case> <name>            # --only N,M --from N --subst KEY=VALUE --timeout S
 ```
 
-The driver reads the agent from the project's config, continues one session
-across the prompts, and appends each response to `<project>/headless_run.log`.
-Judge the run by the README's post-conditions and the `trace_archive/` record
-count, not by the log alone.
+- The driver reads the agent from the project's config, continues one session
+  across the prompts (`claude -p --continue`; `codex exec resume --last` under
+  the project's `CODEX_HOME`), and appends each response to
+  `<project>/headless_run.log`. It stops at the first non-zero exit; `--from N`
+  resumes the same session at prompt N.
+- Claude runs under `--allowedTools` with `acceptEdits`. The list is
+  `CLAUDE_ALLOWED_TOOLS` at the top of the driver: `mcp__dsagt` (every dsagt
+  tool), the file tools (`Read`, `Write`, `Edit`, `MultiEdit`, `Glob`,
+  `Grep`, `LS`), `Skill`, `Task`, and `TodoWrite`, and `Bash(<command>:*)`
+  entries for `python`, `uv run`, `dsagt-run`, `pip`, the shell utilities the
+  walkthroughs use, the walkthrough binaries (`aidrin`, `fastp`, `megahit`,
+  `h5dump`), a project-local `./script` or `.venv*/bin/` executable, and
+  anything under `~/dsagt-projects/.tools/`, and a script under Claude Code's session scratchpad (`/private/tmp/claude-*`), where the agent writes its one-off scripts. A tool outside the list is a
+  denial, so a run that reaches for one fails in a way an interactive session
+  would not; a walkthrough that needs a new binary adds its entry before the
+  run is judged.
+- Codex runs with `--dangerously-bypass-approvals-and-sandbox`, because the
+  server and the codes write under `~/dsagt-projects/` outside the workspace
+  sandbox. A ChatGPT account's usage budget is small: run codex walkthroughs
+  one at a time, and resume a cut run with `--from` after the reset the error
+  names.
+- The driver sets `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` to the per-prompt timeout for a claude run (`set_shell_timeouts`). Each binds a different call: the maximum caps what a Bash call may ask for, ten minutes by default, and the agent asks for more than that on most `dsagt-run` calls; the default, two minutes, is what a call that asks for nothing gets. At the limit the process group is killed 1.5 s after the signal, and a long code loses its execution record. The same two limits apply to an interactive session.
+- Keep the machine awake and on power. A model request that spans a sleep
+  waits for the wake, and the driver's timeout counts wall time.
+- Judge a run with `python tests/headless_check.py use_cases/<case> <name> [<name> ...]`,
+  which scores two kinds of result apart. Mechanical checks are the
+  walkthrough's declared post-conditions: dsagt's own guarantees (skills and
+  codes installed and mirrored, every record complete and naming a registered
+  code, one `code.execute` trace per record, no error in the logs) and the
+  artifacts the README's Post-Conditions name, such as the pipeline script. A
+  failure means the run did not meet the README, and the script exits 1; the
+  detail says which check and what it found, which is what tells a dsagt
+  regression from a run that went another way. A check the run's
+  configuration puts out of reach, the trace count when `MLFLOW_TRACKING_URI`
+  names a shared server, prints `--` and fails nothing. Outcome observations
+  are what the README leaves to the agent (a value in a converted file,
+  whether a validator ran through `dsagt-run`, how many samples were
+  assembled); they are printed as values per run. Run a walkthrough at least three times before
+  reading an outcome: with the same tree and inputs a run moves by a
+  post-condition or two. An outcome leads to work only when it recurs in most
+  runs and a person working interactively would meet it too, and the fix is
+  usually the README's text.
+- A headless session cannot show some things, and they are not scored: a step
+  that needs a second answer from a person (the datacard skill's question
+  batches), the last prompt's conversation trace (collected at the next
+  session start), what a reply contains when the content was shown in tool
+  output, and behavior after a permission denial, which interactively is a
+  request for approval.
+- A walkthrough's checks are its entry in `WALKTHROUGHS` in
+  `tests/headless_check.py`; a new walkthrough with post-conditions adds one.
+- A prompt is what a user would type. A change that exists only so an
+  unattended run gets through (an answer to a question the agent would ask, a
+  path that differs per machine) goes in `--subst`, not in the README.
 
 ## Lint & format
 

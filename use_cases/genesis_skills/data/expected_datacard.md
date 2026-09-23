@@ -1,9 +1,10 @@
 # Expected Datacard Shape (reference target)
 
 This is the *shape* the generated datacard should cover — not a byte-for-byte
-answer. The installed `generating-datacards` skill owns the authoritative
-template; this file just lists the sections the agent should populate from the
-dataset + the KB-ingested domain docs, so you can spot anything missing.
+answer. The installed `datacard-generator` skill owns the authoritative
+template; this file lists the sections the agent should populate from the
+dataset and the domain documents under `mock_data/domain/`, so you can spot
+anything missing.
 
 ---
 

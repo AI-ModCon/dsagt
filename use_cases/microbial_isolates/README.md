@@ -29,13 +29,19 @@ This guide documents a reproducible DSAgt demonstration for microbial isolate da
 
 ### 1. Install fastp and megahit
 
-fastp and megahit are C/C++ programs from Bioconda, not pip packages. The setup
-script creates a conda environment for them from
-[`scripts/environment.yml`](scripts/environment.yml) under the shared DSAgt
-tools directory, using conda if present and a downloaded micromamba otherwise:
+fastp and megahit are C/C++ programs from Bioconda, not pip packages. The
+walkthrough's bundle (the reads, the two documents, and the setup script; 3.9 GB,
+from the DSAgt use-case data folder,
+https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6) holds a
+setup script that creates a conda environment for them from its
+`environment.yml` under the shared DSAgt tools directory, using conda if present
+and a downloaded micromamba otherwise:
 
 ```bash
-bash use_cases/microbial_isolates/scripts/setup_env.sh
+curl -L "https://drive.usercontent.google.com/download?id=1xabVTGy6W3vx55sRBVrPLFqNc_LqG1hz&export=download&confirm=t" \
+  -o microbial_isolates.tar.gz
+mkdir -p isolates_bundle && tar xzf microbial_isolates.tar.gz -C isolates_bundle ./setup
+bash isolates_bundle/setup/setup_env.sh
 ```
 
 It prints the environment's `bin` directory
@@ -62,19 +68,14 @@ in your shell — never written to disk.)
 ### 3. Collect data and reference material into the project
 
 The agent runs with the project directory as its working directory, so everything it
-reads goes under `$PROJ`. The two documents under [`docs/`](docs/) describe the
-processing pipeline and the fastp and megahit parameter choices; the agent reads
-them directly.
+reads goes under `$PROJ`. The bundle's two documents describe the processing
+pipeline and the fastp and megahit parameter choices; the agent reads them
+directly.
 
 ```bash
-mkdir -p "$PROJ/docs"
-# The isolate reads (11 interleaved FASTQ files, 3.9 GB) from the DSAgt use-case
-# data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6
-curl -L "https://drive.usercontent.google.com/download?id=1IgeSRHS476WNFdM3z-WvYJdg3DoxCoxI&export=download&confirm=t" \
-  -o microbial_isolates_reads.tar
-tar xf microbial_isolates_reads.tar -C "$PROJ" --strip-components=1
-# $PROJ/data/microbial_isolate/ now holds the FASTQ files and their README
-cp use_cases/microbial_isolates/docs/*.md "$PROJ/docs/"
+# The bundle downloaded in step 1: 11 interleaved FASTQ files with their README
+# (data/microbial_isolate/) and the two documents (docs/).
+tar xzf microbial_isolates.tar.gz -C "$PROJ" --exclude='./setup'
 ```
 
 ### 4. Start the session
@@ -134,15 +135,19 @@ in `trace_archive/` when it exits; an assembly takes two to four minutes.
 Let's run this same pipeline on the rest of the fastq files at data/microbial_isolate/
 ```
 
+Processing the remaining ten samples takes 30 to 40 minutes on a laptop; the agent runs
+them to completion before replying.
+
 ### 5. Generate datacard
 
 ```text
-Use the datacard-generator skill to write a Level 1 datacard for the assembled data under
-data/assemblies/. Take the values from the data and the reports, and note anything unknown
-rather than asking.
+Use the datacard-generator skill to write a Level 1 datacard (discoverability only) for the
+assembled data under data/assemblies/. Take the values from the data and the reports, and
+note anything unknown rather than asking. Validate the card with the skill's validator and
+fix what it reports.
 ```
 
-`datacard-generator` is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search.
+`datacard-generator` is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search. Level 1 means discoverability only: the card sets `supports_discoverability` and no other capability flag. The skill's own text allows accessibility beside it, which is why the prompt says which one is meant.
 
 ### 6. Reconstruct pipeline
 
@@ -150,7 +155,8 @@ rather than asking.
 Reconstruct the pipeline from the execution records as a bash script.
 ```
 
-The agent calls `reconstruct_pipeline` to generate a reproducible script from the trace archive.
+The agent calls `reconstruct_pipeline` with an `output` path under the project, and the tool
+renders the `trace_archive/` records as a bash script in the order they ran and saves it there.
 
 ### 7. Review the project artifacts
 
@@ -159,9 +165,9 @@ Show me the contents of my project folder in a tree format, with the artifacts d
 ```
 
 **Expect:** a listing of the project directory that marks the execution records in
-`trace_archive/`, the reports in `audit/`, the registered codes under `codes/`, the
-installed skills under `skills/`, the trace store `mlflow.db`, and the session's outputs,
-with a line on what each is.
+`trace_archive/`, the reports in `audit/`, the registered codes and installed skills under
+`skills/`, the trace store `mlflow.db`, the reconstructed script, and the session's outputs,
+with a line on what each is. The reply may summarize a tree printed by a command.
 
 ## Post-Conditions
 
@@ -171,7 +177,7 @@ with a line on what each is.
    - the trimmed R1 and R2 FASTQ files are under `data/processed/<sample>/`
    - the `fastp` HTML and JSON reports are beside them
    - `data/assemblies/<sample>/final.contigs.fa` exists
-4. A Level 1 datacard exists for the processed dataset.
+4. A Level 1 datacard exists for the processed dataset and validates with the registered `datacard-validate` code with no findings.
 5. A reconstructed pipeline script (bash or Snakemake) is available.
 6. Code execution records in `trace_archive/` document the full provenance chain.
 7. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history. View with `dsagt traces isolate-pipeline`.
@@ -194,5 +200,6 @@ with a line on what each is.
 
 ```bash
 dsagt rm isolate-pipeline -y
+rm -r microbial_isolates.tar.gz isolates_bundle
 rm -rf ~/dsagt-projects/.tools/microbial_isolates     # the fastp/megahit environment
 ```
