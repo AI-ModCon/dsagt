@@ -27,6 +27,8 @@ import mcp.types as types
 from dsagt.knowledge import KnowledgeBase
 from dsagt.mcp.server import build_dispatch_server
 from dsagt.registry import SkillRegistry
+from dsagt.agents import refresh_native_skills
+from dsagt.skills import register_skill_scripts
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,16 @@ async def _handle_save_skill(
             spec = json.loads(spec)
         except json.JSONDecodeError as e:
             return f"Error: spec must be a JSON object (or string-encoded JSON object): {e}"
+    name = spec.get("name") if isinstance(spec, dict) else None
+    if name:
+        installed = skill_registry.skills_dir / name / "PROVENANCE.txt"
+        if installed.exists():
+            return (
+                f"'{name}' was installed from a catalog and was not changed; "
+                f"{installed.parent.name}/PROVENANCE.txt credits its source, and "
+                "overwriting it would lose what the credit refers to. Save under "
+                "another name, or call delete_skill first to replace it."
+            )
     body = arguments.get("body")
     reference_files = arguments.get("reference_files")
     if isinstance(reference_files, str):
@@ -63,9 +75,6 @@ async def _handle_save_skill(
         )
     except (KeyError, ValueError, OSError) as e:
         return f"Error saving skill: {e}"
-    from dsagt.agents import refresh_native_skills
-    from dsagt.skills import register_skill_scripts
-
     # The skill's scripts are codes from this moment, the same path a base
     # or catalog skill takes, and the reply gives the stored lines the way
     # save_code_spec does, so the usage line the agent just wrote is not
@@ -82,6 +91,37 @@ async def _handle_save_skill(
     if stored:
         reply += " Its scripts are registered codes; run each as:\n" + "\n".join(
             f"Run it as: {line}" for line in stored
+        )
+    return reply
+
+
+async def _handle_delete_skill(
+    arguments: dict,
+    *,
+    skill_registry: SkillRegistry,
+    kb=None,
+) -> str:
+    """Remove an installed skill or code from the project.
+
+    One path for both, since a code is a skill directory whose frontmatter
+    declares an executable.
+    """
+    from dsagt.skills import delete_skill
+
+    name = arguments["name"]
+    try:
+        result = delete_skill(skill_registry.runtime_dir, name, kb=kb)
+    except FileNotFoundError:
+        return f"Error: no installed skill or code named '{name}'."
+    except OSError as e:
+        return f"Error deleting '{name}': {e}"
+    what = "code" if result["was_code"] else "skill"
+    reply = f"Deleted {what} '{name}' and its entry in the agent's skills dir."
+    if result["entries_removed"]:
+        reply += (
+            f" Removed {result['entries_removed']} knowledge-base entry"
+            f"{'' if result['entries_removed'] == 1 else 'ies'}; search_registry "
+            "no longer returns it."
         )
     return reply
 
@@ -136,9 +176,6 @@ async def _handle_install_skill(
         info = SkillRouter().install(name, runtime_dir)
     except LookupError as e:
         return f"Error: {e}"
-    from dsagt.agents import refresh_native_skills
-    from dsagt.skills import register_skill_scripts
-
     stored = register_skill_scripts(runtime_dir, info["name"], kb=kb)
     refresh_native_skills(runtime_dir)
 
@@ -271,6 +308,9 @@ def _skill_tools_and_handlers(
             _handle_search_skills, kb=kb, skill_registry=skill_registry
         ),
         "install_skill": partial(_handle_install_skill, runtime_dir=rt, kb=kb),
+        "delete_skill": partial(
+            _handle_delete_skill, skill_registry=skill_registry, kb=kb
+        ),
         "add_skill_source": partial(_handle_add_skill_source, kb=kb, runtime_dir=rt),
         "list_skill_sources": partial(_handle_list_skill_sources, kb=kb),
     }
@@ -348,6 +388,30 @@ def _skill_tools_and_handlers(
                     },
                 },
                 "required": ["spec"],
+            },
+        ),
+        types.Tool(
+            name="delete_skill",
+            description=(
+                "Remove an installed skill or registered code from the "
+                "project: its directory under skills/, its entry in the "
+                "agent's native skills dir, and, for a code, its "
+                "knowledge-base entry. Use it to drop something installed by "
+                "mistake, or to replace a skill installed from a catalog, "
+                "which save_skill will not overwrite."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "Name of the skill or code, as its directory "
+                            "under skills/ is named"
+                        ),
+                    }
+                },
+                "required": ["name"],
             },
         ),
         types.Tool(
