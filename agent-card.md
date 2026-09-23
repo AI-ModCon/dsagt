@@ -133,7 +133,7 @@ See https://github.com/AI-ModCon/dsagt/graphs/contributors for full list.
 
 ## Agent short description
 
-Scaffolding layer that gives any MCP-compatible agent CLI persistent code registration, semantic knowledge retrieval, skill discovery, execution provenance, and session memory — exposed as 18 tools on a single MCP server (`dsagt-server`).
+Scaffolding layer that gives any MCP-compatible agent CLI persistent code registration, semantic knowledge retrieval, skill discovery, execution provenance, and session memory — exposed as 19 tools on a single MCP server (`dsagt-server`).
 
 ## Agent description
 
@@ -200,7 +200,7 @@ The agent accepts natural-language instructions (text). Outputs include text res
 
 ### Tools and permissions
 
-All 17 tools live on the single `dsagt-server` (stdio), split across four concerns.
+All 19 tools live on the single `dsagt-server` (stdio), split across four concerns.
 
 **Registry (5):**
 
@@ -210,26 +210,28 @@ All 17 tools live on the single `dsagt-server` (stdio), split across four concer
 - `reconstruct_pipeline` — render `trace_archive/` as a dependency-ordered execution history. Side effects: reads data.
 - `readiness_reports` — the AI-readiness reports on record for a data file. Side effects: reads data.
 
-**Knowledge (5):**
+**Knowledge (6):**
 
 - `kb_search` — hybrid semantic search over one or more collections (optional metadata, regex, and substring filters). Side effects: reads data.
 - `kb_ingest` — index a file or directory into a named collection (background job for large corpora). Side effects: reads sources, writes `<project>/kb_index/`.
 - `kb_append` — add documents to an existing collection (background job). Side effects: writes `<project>/kb_index/`.
 - `kb_list_collections` — list collections with document counts. Side effects: reads data.
 - `kb_job_status` — poll a background ingest/append job. Side effects: none.
+- `kb_delete_collection` — delete a collection and everything indexed in it; dsagt's own collections are refused. Side effects: deletes from `kb_index/`.
 
 **Memory (2):**
 
 - `kb_remember` — save a user-confirmed fact to explicit memory. Side effects: writes `<project>/.dsagt/explicit_memories.yaml` + ChromaDB.
 - `kb_get_memories` — retrieve explicit memories (optionally query-filtered). Side effects: reads data.
 
-**Skills (5):**
+**Skills (6):**
 
 - `search_skills` — rank installable skills across synced external catalogs. Side effects: reads data.
 - `install_skill` — copy a catalog skill into `<project>/skills/` (with upstream attribution). Side effects: writes to the project dir.
 - `save_skill` — register an agent-authored skill into `<project>/skills/`. Side effects: writes to the project dir.
 - `add_skill_source` — clone + index a new external skill catalog. Side effects: network calls (git), writes `kb_index/`.
 - `list_skill_sources` — list known/synced catalog sources. Side effects: reads data.
+- `delete_skill` — remove an installed skill or registered code, its native mirror entry, and a code's knowledge-base entry. Side effects: deletes from the project dir and `kb_index/`.
 
 ### Service endpoint and discovery
 

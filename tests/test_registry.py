@@ -457,3 +457,68 @@ def test_save_tool_writes_the_rendered_spec(tmp_path):
     written = (tmp_path / "skills" / "count-rows" / "SKILL.md").read_text()
     assert written == render_code_spec(spec)
     assert "dsagt-run --code count-rows -- uv run --with pandas -- python" in written
+
+
+class TestDeleteSkill:
+    """One deletion path for a skill and for a code."""
+
+    def _skill(self, project, name, executable=None, provenance=False):
+        d = project / "skills" / name
+        d.mkdir(parents=True)
+        front = f"name: {name}\ndescription: d\n"
+        if executable:
+            front += f"executable: {executable}\n"
+        (d / "SKILL.md").write_text(f"---\n{front}---\n\n# {name}\n")
+        if provenance:
+            (d / "PROVENANCE.txt").write_text("from: catalog\n")
+        return d
+
+    def test_a_skill_its_mirror_and_its_kb_entry_go(self, tmp_path):
+        from dsagt.session import build_config, write_config_file
+        from dsagt.skills import delete_skill
+
+        # refresh_native_skills mirrors only for a project with a configured
+        # agent, which is what removes the entry the manifest owns.
+        write_config_file(tmp_path, build_config("t", "claude"))
+        self._skill(tmp_path, "keep")
+        self._skill(tmp_path, "gone", executable="dsagt-run --code gone -- python x.py")
+
+        class FakeKB:
+            def __init__(self):
+                self.calls = []
+
+            def delete_entries(self, collection, where):
+                self.calls.append((collection, where))
+                return 1
+
+        kb = FakeKB()
+        result = delete_skill(tmp_path, "gone", kb=kb)
+
+        assert result == {"name": "gone", "was_code": True, "entries_removed": 1}
+        assert kb.calls == [("codes", {"code_name": "gone"})]
+        assert not (tmp_path / "skills" / "gone").exists()
+        assert (tmp_path / "skills" / "keep" / "SKILL.md").exists()
+        assert not (tmp_path / ".claude" / "skills" / "gone").exists()
+        assert (tmp_path / ".claude" / "skills" / "keep").is_symlink()
+
+    def test_a_skill_that_is_not_a_code_has_no_entry_to_remove(self, tmp_path):
+        from dsagt.skills import delete_skill
+
+        (tmp_path / ".claude" / "skills").mkdir(parents=True)
+        self._skill(tmp_path, "notes")
+
+        class FakeKB:
+            def delete_entries(self, collection, where):
+                return 0
+
+        result = delete_skill(tmp_path, "notes", kb=FakeKB())
+        assert result["was_code"] is False and result["entries_removed"] == 0
+        assert not (tmp_path / "skills" / "notes").exists()
+
+    def test_an_absent_skill_raises(self, tmp_path):
+        import pytest
+
+        from dsagt.skills import delete_skill
+
+        with pytest.raises(FileNotFoundError):
+            delete_skill(tmp_path, "nope")

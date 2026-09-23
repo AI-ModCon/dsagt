@@ -49,6 +49,7 @@ from pathlib import Path
 import yaml
 
 from dsagt.registry import (
+    CODES_COLLECTION,
     CATALOG_COLLECTION_PREFIX,
     _parse_frontmatter,
     catalog_collection,
@@ -952,6 +953,41 @@ def derive_code_spec(skill_name: str, script: Path) -> dict:
     if ast.get_docstring(tree) and spec["description"].startswith("Script "):
         spec["description"] = ast.get_docstring(tree).strip().split("\n")[0]
     return spec
+
+
+def delete_skill(project_dir: str | Path, name: str, *, kb=None) -> dict:
+    """Remove a skill directory, its native mirror entry and its KB entries.
+
+    One path for a skill and for a code, because a code is a skill directory
+    whose frontmatter declares an executable: the directory goes, the mirror
+    is refreshed so the manifest drops the entry it owns, and a code's
+    ``codes`` entry goes with it so a search stops offering something the
+    project can no longer run.  An installed skill is removed like any other;
+    this is what lets ``save_skill`` refuse to overwrite one without leaving
+    the agent stuck with it.  Raises ``FileNotFoundError`` when no such skill
+    is installed.
+    """
+    project_dir = Path(project_dir)
+    skill_dir = project_dir / "skills" / name
+    if not (skill_dir / "SKILL.md").exists():
+        raise FileNotFoundError(f"no installed skill {name!r} at {skill_dir}")
+
+    spec = _parse_frontmatter(skill_dir / "SKILL.md")
+    entries_removed = 0
+    if kb is not None:
+        # Before the directory goes: a failure here leaves the skill in place
+        # and searchable, rather than on disk with no entry or the reverse.
+        entries_removed = kb.delete_entries(CODES_COLLECTION, {"code_name": name})
+
+    shutil.rmtree(skill_dir)
+    from dsagt.agents import refresh_native_skills
+
+    refresh_native_skills(project_dir)
+    return {
+        "name": name,
+        "was_code": bool(spec.get("executable")),
+        "entries_removed": entries_removed,
+    }
 
 
 def register_skill_scripts(

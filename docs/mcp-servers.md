@@ -2,7 +2,7 @@
 
 DSAgt exposes its capabilities through a single MCP server, **`dsagt-server`**, configured in the per-agent runtime file (`.mcp.json` for Claude Code, `goose.yaml` for Goose, etc.) and launched automatically when the agent starts. It combines four capabilities — a code registry, a [knowledge base](knowledge-base.md), [explicit memory](memory.md), and [skill discovery](skills.md) — behind one process with one shared embedder and one ChromaDB.
 
-The 17 tools split across four concerns, all on the one process.
+The 19 tools split across four concerns, all on the one process.
 
 ## The server's environment
 
@@ -22,7 +22,7 @@ Code registration, the readiness reports on record, and pipeline reconstruction.
 
 Codes are markdown files with YAML frontmatter under `<project>/skills/`, beside the instruction skills; the `executable` in the frontmatter is what makes a skill a code. Executables are wrapped with `dsagt-run` for provenance and `uv run --with` for Python dependencies.
 
-## Knowledge tools (5)
+## Knowledge tools (6)
 
 Semantic search and ingestion over indexed document collections. See the [Knowledge Base](knowledge-base.md) for the retrieval model.
 
@@ -33,6 +33,7 @@ Semantic search and ingestion over indexed document collections. See the [Knowle
 | `kb_append` | Add documents to an existing collection (background job) |
 | `kb_list_collections` | List collections with their embedding model and vector DB |
 | `kb_job_status` | Check the status of a background ingest/append job |
+| `kb_delete_collection` | Delete a collection and everything indexed in it; dsagt's own collections are refused |
 
 ## Memory tools (2)
 
@@ -43,7 +44,7 @@ User-confirmed facts that persist across sessions. See [Memory](memory.md).
 | `kb_remember` | Store a user-confirmed fact as an explicit memory (`supersedes` to replace an outdated one) |
 | `kb_get_memories` | Retrieve active explicit memories for this project |
 
-## Skill tools (5)
+## Skill tools (6)
 
 Discover, install, and author agent skills, and manage external skill sources. See [Skills](skills.md).
 
@@ -54,3 +55,4 @@ Discover, install, and author agent skills, and manage external skill sources. S
 | `save_skill` | Register an agent-authored skill into `<project>/skills/<name>/SKILL.md` |
 | `add_skill_source` | Enable + index an external skill source (a known name or a Git URL) into the searchable corpus |
 | `list_skill_sources` | List known and synced external skill sources |
+| `delete_skill` | Remove an installed skill or registered code: its directory, its native mirror entry, and a code's knowledge-base entry |
