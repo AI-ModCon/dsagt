@@ -19,6 +19,7 @@ test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
 ``install_skill``) live in :mod:`dsagt.mcp.skill_tools`.
 """
 
+import os
 import asyncio
 import json
 import logging
@@ -56,7 +57,10 @@ def _code_for_same_script(registry: CodeRegistry, spec: dict) -> dict | None:
 
     def script_of(executable: str) -> str | None:
         tokens = shlex.split(executable.split(" -- ")[-1]) if executable else []
-        return next((t for t in tokens if t.endswith((".py", ".sh"))), None)
+        script = next((t for t in tokens if t.endswith((".py", ".sh"))), None)
+        # The agent may name the same file ./skills/x/scripts/y.py where the
+        # stored spec says skills/x/scripts/y.py; one spelling compares.
+        return os.path.normpath(script) if script else None
 
     target = script_of(spec.get("executable", ""))
     if target is None:
@@ -115,11 +119,6 @@ async def _handle_save_code_spec(
             obs.event("save_tool_failed", error=str(e)[:256])
             return f"Error saving tool spec: {e}"
 
-        # Codes share the skill envelope, so a fresh registration mirrors into
-        # the agent's native skills dir right away (next session discovers it).
-        from dsagt.agents import refresh_native_skills
-
-        refresh_native_skills(registry.runtime_dir)
         stored = registry.get_code(spec["name"])
         # A changed executable (added dependencies) makes the usage line in
         # the owning skill's text stale; the shared registration rewrites it.
@@ -135,6 +134,15 @@ async def _handle_save_code_spec(
                     for path in (script_rel, f"skills/{skill}/{script_rel}"):
                         pairs.append((f"{interpreter} {path}", stored["executable"]))
                 rewrite_cli_invocations(skill_dir, pairs)
+
+        # Codes share the skill envelope, so a fresh registration mirrors into
+        # the agent's native skills dir right away (next session discovers
+        # it).  After the rewrite above: a skill whose description exceeds the
+        # native cap is mirrored as a copy, and a copy taken first would keep
+        # the usage lines the rewrite has just replaced.
+        from dsagt.agents import refresh_native_skills
+
+        refresh_native_skills(registry.runtime_dir)
         tool_count = len(registry.list_codes_raw())
         obs.set("action", action)
         obs.set("registry_size", tool_count)

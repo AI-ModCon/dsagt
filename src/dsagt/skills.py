@@ -808,7 +808,12 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
             new = line
             for bare, wrapped in pairs:
                 before = new
-                if "dsagt-run" not in new:
+                # Per command, not per line: a line naming two scripts has a
+                # dsagt-run in it once the first pair is applied, and reading
+                # that as "already wrapped" left the second one bare.  Each
+                # pattern below is anchored so it cannot match inside a
+                # wrapper it has already written.
+                if wrapped not in new:
                     new = re.sub(
                         rf"^(\s*){re.escape(bare)}(?=\s)", rf"\1{wrapped}", new
                     )
@@ -820,7 +825,7 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
                         new = re.sub(
                             rf"(?<=\s)(?<!-- ){re.escape(bare)}(?=\s)", wrapped, new
                         )
-                elif "/" in bare and wrapped not in new:
+                if "/" in bare and wrapped not in new and "dsagt-run" in new:
                     # A wrapped line whose code name is a guess (the agent
                     # wrote the usage line before saving) names the right
                     # script under the wrong name; the stored line replaces
@@ -874,9 +879,18 @@ def _is_entry_script(path: Path) -> bool:
 
 def script_code_name(skill_name: str, script: Path) -> str:
     """The registered name of a skill's script: ``<skill>-<stem>``, in the
-    lowercase-hyphen charset native skill loaders require."""
-    stem = re.sub(r"[^a-z0-9]+", "-", script.stem.lower()).strip("-")
-    return f"{skill_name}-{stem}"
+    lowercase-hyphen charset native skill loaders require.
+
+    Both halves are reduced to that charset.  A skill may be named outside it
+    (``csv_inspector``), and pasting the name in front of a reduced stem gave
+    a code name ``save_tool`` refuses, which failed the registration after the
+    skill directory had been written.
+    """
+
+    def reduce(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+    return f"{reduce(skill_name)}-{reduce(script.stem)}"
 
 
 def derive_code_spec(skill_name: str, script: Path) -> dict:
@@ -909,8 +923,8 @@ def derive_code_spec(skill_name: str, script: Path) -> dict:
     if script.suffix != ".py":
         return spec
     try:
-        tree = ast.parse(script.read_text())
-    except SyntaxError:
+        tree = ast.parse(script.read_text(errors="replace"))
+    except (SyntaxError, OSError):
         return spec
     parameters: dict[str, dict] = {}
     for node in ast.walk(tree):

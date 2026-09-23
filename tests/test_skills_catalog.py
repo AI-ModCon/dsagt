@@ -823,3 +823,45 @@ def test_mirror_is_a_relative_symlink_to_the_live_skill(tmp_path):
     assert link.is_symlink()
     _mirror_skills_to(target, [])
     assert not link.exists() and not link.is_symlink()
+
+
+def test_a_line_naming_two_scripts_wraps_both(tmp_path):
+    """The guard is per command, not per line.
+
+    A line mentioning two scripts held a dsagt-run once the first pair was
+    applied, and reading that as "already wrapped" left the second bare.
+    """
+    from dsagt.skills import rewrite_cli_invocations
+
+    skill = tmp_path / "x"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "Run python scripts/extract.py and python scripts/load.py in order.\n"
+    )
+    pairs = [
+        (
+            "python scripts/extract.py",
+            "dsagt-run --code x-extract -- python scripts/extract.py",
+        ),
+        ("python scripts/load.py", "dsagt-run --code x-load -- python scripts/load.py"),
+    ]
+    rewrite_cli_invocations(skill, pairs)
+    text = (skill / "SKILL.md").read_text()
+    assert "dsagt-run --code x-extract -- python scripts/extract.py" in text
+    assert "dsagt-run --code x-load -- python scripts/load.py" in text
+
+    # Applying the same pairs again leaves the text alone.
+    rewrite_cli_invocations(skill, pairs)
+    assert (skill / "SKILL.md").read_text() == text
+
+
+def test_a_script_code_name_is_valid_for_a_skill_named_with_underscores(tmp_path):
+    """save_tool refuses a name outside the lowercase-hyphen charset."""
+    from pathlib import Path
+
+    from dsagt.registry import _CODE_NAME_RE
+    from dsagt.skills import script_code_name
+
+    name = script_code_name("csv_inspector", Path("foo_bar.py"))
+    assert name == "csv-inspector-foo-bar"
+    assert _CODE_NAME_RE.match(name)

@@ -565,7 +565,6 @@ class SkillRegistry:
         name = spec.get("name")
         if not name:
             raise ValueError("save_skill: spec must include 'name'")
-
         skill_dir = self.skills_dir / name
         action = "updated" if skill_dir.exists() else "added"
         skill_dir.mkdir(parents=True, exist_ok=True)
