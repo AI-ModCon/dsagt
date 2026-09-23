@@ -18,9 +18,11 @@ Provenance for code executions.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -50,18 +52,16 @@ CODE_USE_COLLECTION = "code_use"
 # ---------------------------------------------------------------------------
 
 
-def _resolve_records_dir(explicit: str | None) -> Path:
-    """Determine the records directory.
+def _resolve_records_dir() -> Path:
+    """The project's ``trace_archive/``.
 
-    Priority: explicit ``--records-dir`` flag → ``$DSAGT_PROJECT_DIR``
-    (exported by ``dsagt start`` and the MCP env block) → the cwd.  The
-    directory must hold ``.dsagt/config.yaml``, the project config
-    ``dsagt init`` writes.  The project is a fixed place, the agent's
-    working directory, so there is no walk up the tree: a ``cd`` into a
+    ``$DSAGT_PROJECT_DIR`` (exported by ``dsagt start`` and the MCP env
+    block) names the project, and the working directory is it otherwise.  The
+    directory must hold ``.dsagt/config.yaml``, the project config ``dsagt
+    init`` writes.  The project is a fixed place, the agent's working
+    directory, so the directory is checked as given: a ``cd`` into a
     subdirectory before the command is the error, and the message names it.
     """
-    if explicit:
-        return Path(explicit)
     env_dir = os.environ.get("DSAGT_PROJECT_DIR")
     if env_dir:
         project, source = Path(env_dir).resolve(), "DSAGT_PROJECT_DIR"
@@ -70,7 +70,7 @@ def _resolve_records_dir(explicit: str | None) -> Path:
     if not (project / ".dsagt" / "config.yaml").exists():
         raise ValueError(
             f"{source} ({project}) is not a dsagt project: no .dsagt/config.yaml. "
-            "Run dsagt-run from the project directory, or pass --records-dir."
+            "Run dsagt-run from the project directory."
         )
     return project / "trace_archive"
 
@@ -91,6 +91,18 @@ def _current_session_tag_from_cwd() -> str | None:
     if not project:
         return None
     return session.current_session_tag(cwd, project)
+
+
+def _without_uv_wrapper(tokens: list[str]) -> list[str]:
+    """*tokens* with a leading ``uv run ... --`` removed.
+
+    A spec with dependencies stores ``uv run --with <deps> -- <command>``;
+    an agent that runs the command without the wrapper still ran this
+    code, and the roles apply to the arguments either way.
+    """
+    if tokens[:2] == ["uv", "run"] and "--" in tokens:
+        return tokens[tokens.index("--") + 1 :]
+    return tokens
 
 
 def file_roles_from_command(
@@ -118,7 +130,8 @@ def file_roles_from_command(
         if executable.startswith("dsagt-run")
         else executable
     )
-    prefix = shlex.split(inner)
+    prefix = _without_uv_wrapper(shlex.split(inner))
+    command = _without_uv_wrapper(list(command))
     if command[: len(prefix)] != prefix:
         return [], []
     args = command[len(prefix) :]
@@ -169,11 +182,69 @@ def file_roles_from_command(
     return inputs, outputs
 
 
-def _parse_file_list(raw: str | None) -> list[str]:
-    """Split a comma-separated file list, stripping whitespace."""
-    if not raw:
-        return []
-    return [f.strip() for f in raw.split(",") if f.strip()]
+def sha256_of(path: str) -> str | None:
+    """The SHA-256 of a regular file, or ``None`` for a path that is not one.
+
+    Streamed in 1 MiB chunks; the record identifies each input and output by
+    content so a later pass can tell whether a file changed since the run,
+    which a timestamp cannot (a copy has a new mtime, a move keeps an old one).
+    """
+    file = Path(path)
+    if not _is_file(path):
+        return None
+    digest = hashlib.sha256()
+    with open(file, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _is_file(arg: str) -> bool:
+    """Whether *arg* names a regular file; an argument the OS cannot stat (a
+    script passed inline, longer than a path may be) is not one."""
+    try:
+        return Path(arg).is_file()
+    except OSError:
+        return False
+
+
+_INTERPRETERS = ("python", "python3", "bash", "sh", "zsh", "Rscript", "perl", "node")
+
+
+def files_from_arguments(command: list[str]) -> list[str]:
+    """The arguments of *command* that are existing files or directories.
+
+    A spec with no parameter roles names no files; an argument that exists when the command starts is one the
+    command reads or overwrites, which is what the dependency graph and the
+    readiness reports need to know.  A directory counts (a simulation case,
+    a dataset directory); it gets no hash.  The executable is left out, and
+    so is the script an interpreter runs (``python x.py data.csv`` reads
+    ``data.csv``; ``x.py`` is the program, and as an input it would read as
+    the product of whichever step wrote it).
+    """
+    # A spec that declares dependencies is stored as ``uv run --with <deps>
+    # -- <command>``, so the interpreter is not command[0] until the wrapper
+    # comes off; python3.12 and the like carry their version in the name.
+    command = _without_uv_wrapper(command)
+    args = command[1:]
+    program = Path(command[0]).name if command else ""
+    if program.startswith("python") or program in _INTERPRETERS:
+        script = next((a for a in args if not a.startswith("-")), None)
+        if script is not None and _is_file(script):
+            args = [a for a in args if a != script]
+    return [arg for arg in args if _is_file(arg) or _is_dir(arg)]
+
+
+def _is_dir(arg: str) -> bool:
+    try:
+        return Path(arg).is_dir()
+    except OSError:
+        return False
+
+
+def new_files_from_arguments(command: list[str], before: list[str]) -> list[str]:
+    """The arguments of *command* that are files now and were not in *before*."""
+    return [arg for arg in command[1:] if _is_file(arg) and arg not in before]
 
 
 def _child_env() -> dict[str, str]:
@@ -201,23 +272,59 @@ def _pump(source, sink, lines: list[str]) -> None:
         sink.flush()
 
 
-def _run_streaming(command: list[str]) -> tuple[int, str, str]:
+_FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+
+
+def _forward_signal(proc: "subprocess.Popen", signum: int) -> None:
+    """Send *signum* to *proc*, ignoring a child that has already exited.
+
+    A harness signalling the process group reaches the child too, and it may
+    exit before this runs.  ``send_signal`` then raises ``ProcessLookupError``
+    inside the signal handler, where it would escape into whatever the main
+    thread was running: the caller catches ``OSError`` around the whole run
+    and would report exit 1 with no output for a command that finished.
+    ``proc.wait`` already holds the real status.
+    """
+    try:
+        proc.send_signal(signum)
+    except ProcessLookupError:
+        pass
+
+
+def _run_streaming(
+    command: list[str], *, parent: str | None = None
+) -> tuple[int, str, str]:
     """Run *command*, echoing its output as it arrives, and return the exit
     code with the full stdout and stderr.
 
     The child's two pipes are read on two threads, so a command that fills
     one while the other is being read cannot block.  Undecodable bytes are
     replaced, so a stray byte in a tool's log cannot lose the record of
-    the run.  Raises ``FileNotFoundError`` when the executable is absent.
+    the run.  A SIGTERM, SIGINT, or SIGHUP to this process is
+    forwarded to the child and the call returns the child's exit status
+    (negative, the signal number, as ``subprocess`` reports it), so the
+    caller writes the record for a run that was ended from outside; a
+    headless harness ends a turn that way.  Raises ``FileNotFoundError``
+    when the executable is absent.
     """
+    env = _child_env()
+    if parent:
+        env["DSAGT_RUN_PARENT"] = parent
     proc = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         errors="replace",
-        env=_child_env(),
+        env=env,
     )
+    forwarded: list[int] = []
+
+    def forward(signum, _frame):
+        forwarded.append(signum)
+        _forward_signal(proc, signum)
+
+    previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED_SIGNALS}
     out_lines: list[str] = []
     err_lines: list[str] = []
     readers = [
@@ -228,7 +335,23 @@ def _run_streaming(command: list[str]) -> tuple[int, str, str]:
         reader.start()
     for reader in readers:
         reader.join()
-    return proc.wait(), "".join(out_lines), "".join(err_lines)
+    try:
+        return_code = proc.wait()
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    if forwarded:
+        name = signal.Signals(forwarded[0]).name
+        err_lines.append(f"dsagt-run: terminated by {name}\n")
+    return return_code, "".join(out_lines), "".join(err_lines)
+
+
+def log_execution_trace_if_tracing(record_path: Path) -> None:
+    """Log the record's ``code.execute`` trace when this process has tracing on."""
+    from dsagt import observability
+
+    if observability._initialized:
+        observability.log_execution_trace(json.loads(Path(record_path).read_text()))
 
 
 def run_and_record(
@@ -239,16 +362,33 @@ def run_and_record(
     record_id: str | None = None,
     input_files: list[str] | None = None,
     output_files: list[str] | None = None,
+    log_trace=log_execution_trace_if_tracing,
 ) -> int:
     """Execute a command, write an execution record, return the exit code.
 
     The command's output is echoed as it arrives and kept in full for the
     record, so a slow code shows progress and the record still holds
     everything it printed.
-    """
-    from dsagt.observability import obs, code_execute_span, truncate
 
+    The run loads no tracing library: the record is the provenance, and the
+    ``code.execute`` trace is built from the record afterwards by *log_trace*,
+    called with the record's path.  The default logs in this process when
+    tracing is initialized here; ``dsagt-run`` passes a function that hands
+    the record to a detached process, because loading the store costs about a
+    second, which every recorded command would otherwise pay before it starts.
+    """
     record_id = record_id or uuid.uuid4().hex[:12]
+    input_files = list(input_files or [])
+    output_files = list(output_files or [])
+    # Each side the roles leave empty is filled from the arguments: a spec
+    # whose flags differ from the ones the agent used (fastp's -i against
+    # --in1) matches nothing on one side and must not silence the other.
+    derive_inputs = not input_files
+    derive_outputs = not output_files
+    if derive_inputs:
+        input_files = files_from_arguments(command)
+    file_hashes = {f: sha256_of(f) for f in input_files}
+    parent_record_id = os.environ.get("DSAGT_RUN_PARENT")
     if session_id is None:
         # The MCP server mints the session at startup and records it in
         # ``.dsagt/state.yaml``; read the current tag from there so this
@@ -256,67 +396,45 @@ def run_and_record(
         # dir by contract).  ``None`` if no session has been minted yet.
         session_id = _current_session_tag_from_cwd()
 
-    with code_execute_span(record_id, code_name):
-        timestamp_start = datetime.now(timezone.utc).isoformat()
-        start_perf = time.perf_counter()
+    timestamp_start = datetime.now(timezone.utc).isoformat()
+    start_perf = time.perf_counter()
 
-        try:
-            return_code, stdout, stderr = _run_streaming(command)
-        except FileNotFoundError:
-            return_code = 127
-            stdout = ""
-            stderr = f"dsagt-run: command not found: {command[0]}"
-        except (PermissionError, OSError) as e:
-            return_code = 1
-            stdout = ""
-            stderr = f"dsagt-run: execution error: {e}"
+    try:
+        return_code, stdout, stderr = _run_streaming(command, parent=record_id)
+    except FileNotFoundError:
+        return_code = 127
+        stdout = ""
+        stderr = f"dsagt-run: command not found: {command[0]}"
+    except (PermissionError, OSError) as e:
+        return_code = 1
+        stdout = ""
+        stderr = f"dsagt-run: execution error: {e}"
 
-        duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
-        timestamp_end = datetime.now(timezone.utc).isoformat()
-
-        # Attach execution summary to the span. Full payload still goes to
-        # trace_archive/<record_id>.json; the span only carries truncated
-        # summaries that render usefully in the MLflow UI.
-        obs.set_many(
-            {
-                "exit_code": return_code,
-                "duration_ms": duration_ms,
-                "n_input_files": len(input_files or []),
-                "n_output_files": len(output_files or []),
-                "command": truncate(" ".join(command), 256),
-                "stdout_len": len(stdout),
-                "stderr_len": len(stderr),
-            }
-        )
-        if stderr.strip():
-            obs.set("stderr_truncated", truncate(stderr, 256))
-        if return_code != 0:
-            obs.event("code_failed", exit_code=return_code)
-            obs.set_status("ERROR")
-
-        # Populate the MLflow trace UI's Input/Output tabs.  Truncate to
-        # ~4KB per side so big code results don't bloat the trace store.  The
-        # span is a preview by contract: the full stdout/stderr is in
-        # trace_archive/<code>_<ts>_<record_id>.json on the machine that ran
-        # the code, findable by the span's ``record_id`` attribute — and that
-        # file is the only full copy, including when the store is a shared
-        # server that other people read.
-        obs.set_inputs(
-            {
-                "code": code_name,
-                "command": list(command),
-                "input_files": input_files or [],
-            }
-        )
-        obs.set_outputs(
-            {
-                "exit_code": return_code,
-                "duration_ms": duration_ms,
-                "stdout": truncate(stdout, 4096),
-                "stderr": truncate(stderr, 4096) if stderr else "",
-                "output_files": output_files or [],
-            }
-        )
+    duration_ms = round((time.perf_counter() - start_perf) * 1000, 3)
+    timestamp_end = datetime.now(timezone.utc).isoformat()
+    if derive_outputs:
+        # With no roles, an argument that did not exist before the run is an
+        # output, and so is one the run changed: a converter that replaces
+        # its output file names it on every run, not only the first.
+        rewritten = [
+            f
+            for f in input_files
+            if derive_inputs
+            and sha256_of(f) is not None  # still there: a moved file is not written
+            and file_hashes.get(f) not in (None, sha256_of(f))
+        ]
+        output_files = [
+            f
+            for f in new_files_from_arguments(command, input_files) + rewritten
+            if f not in output_files
+        ] + output_files
+    if return_code != 0:
+        # A declared output a failed run never wrote is left out, so the
+        # record names no producer for a file that does not exist.
+        output_files = [f for f in output_files if _is_file(f) or _is_dir(f)]
+    for f in output_files:
+        file_hashes[f] = sha256_of(f)
+    file_hashes = {f: h for f, h in file_hashes.items() if h is not None}
 
     record = {
         "record_id": record_id,
@@ -329,12 +447,20 @@ def run_and_record(
             "stderr": stderr,
             "timestamp_start": timestamp_start,
             "timestamp_end": timestamp_end,
-            "input_files": input_files or [],
-            "output_files": output_files or [],
+            "duration_ms": duration_ms,
+            "input_files": input_files,
+            "output_files": output_files,
+            "file_hashes": file_hashes,
         },
     }
+    if parent_record_id:
+        # A run started by a recorded run (a loop script over samples): the
+        # parent's command replays it, so the reconstruction leaves it out.
+        record["parent_record_id"] = parent_record_id
 
-    _write_record(record, records_dir)
+    path = _write_record(record, records_dir)
+    if log_trace is not None:
+        log_trace(path)
     return return_code
 
 
@@ -597,18 +723,71 @@ def load_pipeline_records(trace_dir: Path, session_id: str | None = None) -> lis
     if not trace_dir.is_dir():
         return []
 
-    records = []
+    loaded = []
     for path in trace_dir.glob("*.json"):
         raw = json.loads(path.read_text())
-        execution = raw.get("execution")
-        if not execution:
-            continue
+        if raw.get("execution"):
+            loaded.append(raw)
+    succeeded = {
+        r["record_id"] for r in loaded if r["execution"].get("return_code", 0) == 0
+    }
+    records = []
+    for raw in loaded:
         if session_id and raw.get("session_id") != session_id:
+            continue
+        if raw.get("parent_record_id") in succeeded:
+            # Started by another recorded run, whose command replays it.  The
+            # child of a run that failed or was killed is kept: the parent is
+            # rendered as a comment, and the child is the work that was done.
             continue
         records.append(raw)
 
     records.sort(key=lambda r: r["execution"].get("timestamp_start", ""))
     return records
+
+
+def readiness_reports(project_dir: Path, path: str) -> list[dict]:
+    """The AI-readiness reports on record for *path*, newest first.
+
+    Reads the ``aidrin`` records under ``<project>/trace_archive/`` whose
+    inputs name *path* (given relative to the project, or absolute under it)
+    and gives, per run, the report file, the run's start time, and whether
+    the file's content is what it was at the run (``unchanged``), from the
+    record's hash against the file now.  The readiness paragraph asks the
+    agent to call this before a check, so a file checked at the end of one
+    stage is not checked again at the start of the next.  A record with no
+    hash for the file, from a run before hashes were recorded, reports
+    ``unchanged`` as ``None``.
+    """
+    project_dir = Path(project_dir)
+    target = _project_file(path, project_dir)
+    current = sha256_of(str(project_dir / target))
+    reports = []
+    for record in load_pipeline_records(project_dir / "trace_archive"):
+        if record.get("code_name") != "aidrin":
+            continue
+        execution = record["execution"]
+        inputs = [
+            _project_file(f, project_dir) for f in execution.get("input_files", [])
+        ]
+        if target not in inputs:
+            continue
+        recorded = execution.get("file_hashes", {})
+        digest = next(
+            (h for f, h in recorded.items() if _project_file(f, project_dir) == target),
+            None,
+        )
+        report = next(iter(execution.get("output_files", [])), None)
+        reports.append(
+            {
+                "report": _project_file(report, project_dir) if report else None,
+                "timestamp": execution.get("timestamp_start"),
+                "command": " ".join(execution.get("exact_command", [])),
+                "unchanged": None if digest is None else digest == current,
+            }
+        )
+    reports.reverse()
+    return reports
 
 
 def build_dependency_graph(records: list[dict]) -> dict[int, list[int]]:
@@ -641,6 +820,17 @@ def _relative_to_project(arg: str, project_dir: Path | None) -> str:
     return arg
 
 
+def _project_file(arg: str, project_dir: Path | None) -> str:
+    """A recorded file path as it sits under the project, in one spelling.
+
+    A record holds the path the agent typed, so one file arrives as
+    ``data/x.csv`` in one record and ``./data/x.csv`` in the next, and
+    comparing them as strings misses the match.  File paths go through this;
+    a command argument does not, since it may be a flag or an empty string.
+    """
+    return os.path.normpath(_relative_to_project(arg, project_dir)) if arg else arg
+
+
 def render_bash(
     records: list[dict],
     deps: dict[int, list[int]],
@@ -653,14 +843,41 @@ def render_bash(
     failed attempts are part of the record the reader may want.  Paths under
     *project_dir* are written relative to it, so the script runs from the
     project directory or another checkout of the same layout.
+
+    The script creates the output directories it needs and runs the recorded
+    commands.  It removes nothing: a recorded output was written by the code
+    ``dsagt-run`` wrapped, not by dsagt, and no record holds a removal, so
+    deleting one would act on the reader's data on the strength of an
+    inference.  A step whose command refuses to overwrite an existing output
+    fails with its own error and ``set -e`` stops the script there.
     """
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "",
         "# Pipeline reconstructed from DSAgt execution records, in the order they ran",
+        "#",
+        "# Reconstruction is a work in progress, tracked as a separate effort.",
+        "# Read this script against your own data before running it: it replays",
+        "# what the records hold, and a step the session prepared by hand is not",
+        "# in them.",
         "",
     ]
+
+    # The recorded commands assume the directories the session had made by
+    # hand; on a fresh copy the script makes them first.
+    output_dirs: list[str] = []
+    for record in records:
+        for f in record["execution"].get("output_files", []):
+            parent = str(Path(_project_file(f, project_dir)).parent)
+            if parent not in (".", "") and parent not in output_dirs:
+                output_dirs.append(parent)
+    output_dirs = [
+        d for d in output_dirs if not any(o.startswith(d + "/") for o in output_dirs)
+    ]
+    if output_dirs:
+        lines.append("mkdir -p " + " ".join(_shell_quote(d) for d in output_dirs))
+        lines.append("")
 
     for i, record in enumerate(records):
         code = record["code_name"]
@@ -668,12 +885,10 @@ def render_bash(
         cmd = [_relative_to_project(a, project_dir) for a in execution["exact_command"]]
         rc = execution.get("return_code", 0)
         inputs = [
-            _relative_to_project(f, project_dir)
-            for f in execution.get("input_files", [])
+            _project_file(f, project_dir) for f in execution.get("input_files", [])
         ]
         outputs = [
-            _relative_to_project(f, project_dir)
-            for f in execution.get("output_files", [])
+            _project_file(f, project_dir) for f in execution.get("output_files", [])
         ]
 
         lines.append(f"# Step {i + 1}: {code}")

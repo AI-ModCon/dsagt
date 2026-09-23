@@ -264,6 +264,61 @@ class TestRenderBash:
 # ---------------------------------------------------------------------------
 
 
+class TestRenderBashReplays:
+    """The script runs on a fresh copy of the project."""
+
+    def test_output_directories_are_created_at_the_top(self):
+        records = [
+            _make_record(
+                "plot", ["plot"], output_files=["plots/a.png"], record_id="r1"
+            ),
+            _make_record(
+                "convert",
+                ["convert"],
+                output_files=["processed_data/tmp/x.json", "plots/b.png"],
+                record_id="r2",
+            ),
+        ]
+        script = render_bash(records, build_dependency_graph(records))
+        head = script.split("# Step 1")[0]
+        assert "mkdir -p plots processed_data/tmp" in head
+
+    def test_a_repeated_output_is_not_removed_before_the_step_that_rewrites_it(self):
+        """The script removes nothing.
+
+        A recorded output was written by the code dsagt-run wrapped, and no
+        record holds a removal, so the script does not delete one to clear a
+        path for the step that rewrites it.
+        """
+        records = [
+            _make_record(
+                "conv", ["conv", "a"], output_files=["out.json"], record_id="r1"
+            ),
+            _make_record(
+                "conv", ["conv", "b"], output_files=["out.json"], record_id="r2"
+            ),
+        ]
+        script = render_bash(records, build_dependency_graph(records))
+        assert "rm " not in script
+        assert "conv a" in script and "conv b" in script
+
+    def test_a_step_that_rewrites_its_own_input_keeps_the_file(self):
+        """An in-place step reads the file an earlier step wrote."""
+        records = [
+            _make_record("make", ["make"], output_files=["data.csv"], record_id="r1"),
+            _make_record(
+                "clean",
+                ["clean", "data.csv"],
+                input_files=["data.csv"],
+                output_files=["data.csv"],
+                record_id="r2",
+            ),
+        ]
+        script = render_bash(records, build_dependency_graph(records))
+        assert "rm " not in script
+        assert "clean data.csv" in script
+
+
 class TestRenderSnakemake:
 
     def test_basic_workflow(self):
@@ -398,3 +453,115 @@ class TestReconstructPipeline:
         # Dependencies noted
         assert "depends: fastp" in script
         assert "depends: megahit" in script
+
+
+# ---------------------------------------------------------------------------
+# readiness_reports
+# ---------------------------------------------------------------------------
+
+
+class TestReadinessReports:
+
+    def _aidrin_record(self, project, path, digest, record_id, ts, report):
+        rec = _make_record(
+            "aidrin",
+            ["aidrin", "data-quality", path, "--detail"],
+            input_files=[path],
+            output_files=[report],
+            record_id=record_id,
+            timestamp=ts,
+        )
+        rec["execution"]["file_hashes"] = {path: digest}
+        _write_record(project / "trace_archive", rec)
+
+    def test_a_path_matches_however_it_was_spelled(self, tmp_path):
+        """A record holds the path the agent typed.
+
+        The same file is `data/t.csv` in one record and `./data/t.csv` in the
+        next, and the caller may ask with either; comparing them as strings
+        returned no reports for a file that has them, so the agent re-ran the
+        check every stage.
+        """
+        import hashlib
+
+        from dsagt.provenance import readiness_reports
+
+        project = tmp_path
+        (project / "data").mkdir()
+        (project / "data" / "t.csv").write_text("a\n1\n")
+        digest = hashlib.sha256(b"a\n1\n").hexdigest()
+        self._aidrin_record(
+            project,
+            "./data/t.csv",
+            digest,
+            "r1",
+            "2026-01-01T00:00:00Z",
+            "audit/pre.json",
+        )
+        for asked in ("data/t.csv", "./data/t.csv", str(project / "data" / "t.csv")):
+            reports = readiness_reports(project, asked)
+            assert len(reports) == 1, asked
+            assert reports[0]["unchanged"] is True
+
+    def test_reports_for_a_file_newest_first_with_change_status(self, tmp_path):
+        import hashlib
+
+        from dsagt.provenance import readiness_reports
+
+        project = tmp_path
+        (project / "data").mkdir()
+        (project / "data" / "t.csv").write_text("a\n1\n")
+        digest = hashlib.sha256(b"a\n1\n").hexdigest()
+        self._aidrin_record(
+            project,
+            "data/t.csv",
+            "0" * 64,
+            "r1",
+            "2026-01-01T00:00:00Z",
+            "audit/pre.json",
+        )
+        self._aidrin_record(
+            project,
+            "data/t.csv",
+            digest,
+            "r2",
+            "2026-01-01T01:00:00Z",
+            "audit/post.json",
+        )
+        # A record for another file and a record from another code are left out.
+        self._aidrin_record(
+            project, "data/u.csv", digest, "r3", "2026-01-01T02:00:00Z", "audit/u.json"
+        )
+        _write_record(
+            project / "trace_archive",
+            _make_record(
+                "convert",
+                ["convert", "data/t.csv"],
+                input_files=["data/t.csv"],
+                record_id="r4",
+            ),
+        )
+        reports = readiness_reports(project, "data/t.csv")
+        assert [r["report"] for r in reports] == ["audit/post.json", "audit/pre.json"]
+        assert reports[0]["unchanged"] is True
+        assert reports[1]["unchanged"] is False
+
+    def test_absolute_path_under_the_project_matches(self, tmp_path):
+        from dsagt.provenance import readiness_reports
+
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "t.csv").write_text("x\n")
+        self._aidrin_record(
+            tmp_path,
+            "data/t.csv",
+            "0" * 64,
+            "r1",
+            "2026-01-01T00:00:00Z",
+            "audit/pre.json",
+        )
+        assert len(readiness_reports(tmp_path, str(tmp_path / "data" / "t.csv"))) == 1
+
+    def test_no_reports(self, tmp_path):
+        from dsagt.provenance import readiness_reports
+
+        assert readiness_reports(tmp_path, "data/none.csv") == []

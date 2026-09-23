@@ -15,11 +15,15 @@ config comes from the project's ``.dsagt/config.yaml`` (local backend by
 default — no credentials needed).
 """
 
+import logging
+import os
+import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
@@ -29,6 +33,8 @@ from dsagt.session import (
     SOURCE_REF_FILE,
     _collection_exists,
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_INDEX_DIR = REGISTRY_DIR / "kb_index"
 
@@ -109,38 +115,137 @@ quality assessment strategies.
 }
 
 
+_GITHUB_REPO = re.compile(
+    r"^(?:https?://github\.com/|git@github\.com:)(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"
+)
+
+
+def _github_owner_repo(url: str) -> tuple[str, str] | None:
+    """``(owner, repo)`` for a GitHub URL in https or ssh form, else ``None``."""
+    m = _GITHUB_REPO.match(url.strip())
+    return (m["owner"], m["repo"]) if m else None
+
+
+def _github_api_headers() -> dict[str, str]:
+    """The API headers, with the shell's GitHub token when it has one.
+
+    The token is read from the shell for the request and written nowhere;
+    a private repository needs it, a public one does not.
+    """
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "dsagt"}
+    # gh, GitHub Actions runners and many setups export GH_TOKEN instead.
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def fetch_github_tree(url: str, ref: str, into: Path) -> str:
+    """Download the tree of a GitHub repository at *ref* into *into*; return the commit.
+
+    Two requests over the httpx client dsagt already has: the commit the
+    ref resolves to (which also checks the ref exists), then the tarball at
+    that commit, unpacked so *into* holds the repository root.  Raises
+    ``httpx.HTTPStatusError`` for a ref or repository the API refuses, which
+    for a private repository means the shell has no ``GITHUB_TOKEN``.
+    """
+    owner_repo = _github_owner_repo(url)
+    if owner_repo is None:
+        raise ValueError(f"{url!r} is not a GitHub repository URL")
+    owner, repo = owner_repo
+    with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+        commit = client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/commits/{quote(ref, safe='')}",
+            headers=_github_api_headers(),
+        )
+        commit.raise_for_status()
+        sha = commit.json()["sha"]
+        tarball = client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/tarball/{sha}",
+            headers=_github_api_headers(),
+        )
+        tarball.raise_for_status()
+    into.parent.mkdir(parents=True, exist_ok=True)
+    # The archive and the extracted tree go to a scratch directory beside the
+    # destination, so a failed download or a malformed archive leaves nothing
+    # behind and never writes into a directory holding other collections.
+    with tempfile.TemporaryDirectory(dir=into.parent) as scratch_dir:
+        scratch = Path(scratch_dir)
+        archive = scratch / f"{repo}.tar.gz"
+        archive.write_bytes(tarball.content)
+        with tarfile.open(archive) as tar:
+            members = tar.getmembers()
+            if not members:
+                raise RuntimeError(f"{url} at {ref} returned an empty archive")
+            # GitHub's tarball wraps the tree in one <owner>-<repo>-<sha7>/ directory.
+            top = members[0].name.split("/", 1)[0]
+            tar.extractall(scratch, filter="data")
+        if into.exists():
+            shutil.rmtree(into)
+        (scratch / top).rename(into)
+    return sha
+
+
+def _git_clone(url: str, ref: str, into: Path) -> str:
+    """Clone *url* at *ref* into *into* with the user's git; return the commit."""
+    result = subprocess.run(
+        ["git", "clone", "--depth", "1", "--branch", ref, url, str(into)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Git clone failed: {result.stderr}")
+    head = subprocess.run(
+        ["git", "-C", str(into), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if head.returncode != 0 or not head.stdout.strip():
+        raise RuntimeError(f"Git rev-parse failed after clone: {head.stderr}")
+    shutil.rmtree(into / ".git", ignore_errors=True)
+    return head.stdout.strip()
+
+
 def clone_github(
     url: str, dest: Path, branch: str = "main", include: list[str] | None = None
 ):
-    """Clone a GitHub repo, optionally keeping only specific directories.
+    """Fetch a GitHub repository's tree at *branch* into *dest*, optionally
+    keeping only specific directories.
 
-    When *include* is set, the named subdirectories are copied AND any
-    top-level files at the repo root (README, pyproject.toml, setup.py,
-    LICENSE, etc.).  Top-level files are usually small and contain
+    The tree comes as a tarball over HTTPS (:func:`fetch_github_tree`), so
+    the end-user install, which is ``pip install``, needs no git; the one
+    fallback is the user's git for a repository the API refuses, which is a
+    private repository the shell has no ``GITHUB_TOKEN`` for but the user's
+    ssh key can reach.  When *include* is set, the named subdirectories are
+    copied AND any top-level files at the repo root (README, pyproject.toml,
+    setup.py, LICENSE, etc.).  Top-level files are usually small and contain
     critical packaging metadata the agent needs to install dependencies
     correctly when it registers tools against the library.  The commit the
-    clone was taken at and the *branch* (or tag) asked for are written to
+    tree was taken at and the *branch* (or tag) asked for are written to
     ``<dest>/SOURCE_COMMIT`` and ``<dest>/SOURCE_REF`` so a consumer can
     tell what a cached clone holds.
     """
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp) / "repo"
-        result = subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", branch, url, str(tmp_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Git clone failed: {result.stderr}")
-        head = subprocess.run(
-            ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-        )
-        if head.returncode != 0 or not head.stdout.strip():
-            raise RuntimeError(f"Git rev-parse failed after clone: {head.stderr}")
+        if _github_owner_repo(url) is None:
+            commit = _git_clone(url, branch, tmp_path)
+        else:
+            try:
+                commit = fetch_github_tree(url, branch, tmp_path)
+            except httpx.HTTPStatusError as err:
+                if err.response.status_code not in (401, 403, 404) or not shutil.which(
+                    "git"
+                ):
+                    raise
+                logger.info(
+                    "GitHub refused %s at %s (%s); cloning with git instead",
+                    url,
+                    branch,
+                    err.response.status_code,
+                )
+                commit = _git_clone(url, branch, tmp_path)
         dest.mkdir(parents=True, exist_ok=True)
-        (dest / SOURCE_COMMIT_FILE).write_text(head.stdout.strip() + "\n")
+        (dest / SOURCE_COMMIT_FILE).write_text(commit + "\n")
         (dest / SOURCE_REF_FILE).write_text(branch + "\n")
 
         if include:
@@ -156,9 +261,7 @@ def clone_github(
                 if f.is_file():
                     shutil.copy2(f, dest / f.name)
         else:
-            # Copy everything except .git
             shutil.copytree(tmp_path, dest, dirs_exist_ok=True)
-            shutil.rmtree(dest / ".git", ignore_errors=True)
 
 
 def download_arxiv(paper_id: str, dest: Path):

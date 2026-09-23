@@ -5,9 +5,9 @@ one MCP server per agent — a single embedder and a single Chroma owner back
 every concern.  Single ownership matters for the ``skills_catalog__*``
 collections, which are written under the skill concern and read under the
 registry concern: one owner removes any write-here/read-there hazard across
-them.  Heavy/risky work runs off the event loop (``run_command`` →
-``dsagt-run`` subprocess; ``kb_ingest`` → background job thread), so one process
-costs little isolation.
+them.  Heavy work runs off the event loop (``kb_ingest`` → background job
+thread; the collectors in worker threads), so one process costs little
+isolation.
 
 Tool *definitions* and *handlers* are defined in their concern modules
 (:mod:`~dsagt.mcp.registry_tools` / :mod:`~dsagt.mcp.knowledge_tools` /
@@ -441,7 +441,7 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
         base_url = emb_config.get("base_url") or ""
         # Credentials are never on disk: the api key comes from the shell env
         # (EMBEDDING_API_KEY), threaded into MCP children via the env block.
-        api_key = os.environ.get("EMBEDDING_API_KEY") or emb_config.get("api_key") or ""
+        api_key = os.environ.get("EMBEDDING_API_KEY") or ""
         if not base_url:
             raise ValueError(
                 "embedding.backend='api' requires embedding.base_url in "
@@ -476,7 +476,7 @@ def _build_kb_from_config(config: dict, project_dir: Path) -> KnowledgeBase:
     return kb
 
 
-def _spawn_catch_up(project_dir: Path, config: dict) -> None:
+def _spawn_catch_up(project_dir: Path, config: dict, kb=None) -> None:
     """Run :func:`dsagt.session.catch_up_extraction` in a daemon thread.
 
     Best-effort background catch-up of the previous session's post-session
@@ -488,7 +488,7 @@ def _spawn_catch_up(project_dir: Path, config: dict) -> None:
         try:
             from dsagt.session import catch_up_extraction
 
-            result = catch_up_extraction(project_dir, config)
+            result = catch_up_extraction(project_dir, config, kb=kb)
             logger.info("Background catch-up complete: %s", result)
         except Exception as e:  # noqa: BLE001
             logger.warning("Background catch-up failed: %s", e)
@@ -563,7 +563,7 @@ def main():
 
     # A KB misconfig (e.g. embedding.backend='api' with no base_url/API key)
     # must not take down the whole server: the tool surface accepts kb=None and
-    # only KB-backed tools degrade, so fall back rather than crash all 20 tools.
+    # only KB-backed tools degrade, so fall back rather than crash every tool.
     try:
         kb = _build_kb_from_config(config, project_dir)
     except Exception as e:  # noqa: BLE001
@@ -614,7 +614,7 @@ def main():
 
         # Catch up post-session extraction for the previous session in the
         # background.  Daemon thread: best-effort, never fails startup.
-        _spawn_catch_up(project_dir, config)
+        _spawn_catch_up(project_dir, config, kb=kb)
 
         # The periodic trace pass: read the live transcript → MLflow.  The
         # loop is agent-agnostic; ``make_trace_collector`` returns a collector

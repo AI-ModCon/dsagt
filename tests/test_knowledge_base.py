@@ -17,14 +17,6 @@ import pytest
 
 from dsagt.knowledge import APIEmbedder, KnowledgeBase, CODE_LANGUAGES
 
-
-@pytest.fixture(autouse=True)
-def _fake_api_env(monkeypatch):
-    """Set dummy API credentials for unit tests without leaking into other modules."""
-    monkeypatch.setenv("LLM_API_KEY", "test-key")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://test")
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -99,21 +91,14 @@ class TestAPIEmbedder:
     def test_missing_base_url_raises(self):
         """Constructor raises ValueError when no base URL is available."""
         with patch.dict(os.environ, {}, clear=True):
-            env = os.environ.copy()
-            env.pop("OPENAI_BASE_URL", None)
-            with patch.dict(os.environ, env, clear=True):
-                with pytest.raises(ValueError, match="base URL required"):
-                    APIEmbedder(api_key="test-key", base_url=None)
+            with pytest.raises(ValueError, match="base URL required"):
+                APIEmbedder(api_key="test-key", base_url=None)
 
     def test_missing_api_key_raises(self):
         """Constructor raises ValueError when no API key is available."""
         with patch.dict(os.environ, {}, clear=True):
-            env = os.environ.copy()
-            env.pop("LLM_API_KEY", None)
-            env.pop("OPENAI_API_KEY", None)
-            with patch.dict(os.environ, env, clear=True):
-                with pytest.raises(ValueError, match="API key required"):
-                    APIEmbedder(api_key=None, base_url="http://test")
+            with pytest.raises(ValueError, match="API key required"):
+                APIEmbedder(api_key=None, base_url="http://test")
 
     def test_explicit_api_key(self):
         """Constructor accepts an explicit API key."""
@@ -699,7 +684,16 @@ class TestKnowledgeBaseIngest:
     def test_empty_collections(self, kb):
         """Fresh knowledge base has no collections."""
         assert kb.collections == []
-        assert kb.list_collections() == []
+        # dsagt's own collections are listed with their purpose before their
+        # first write; nothing else is.
+        listed = kb.list_collections()
+        assert {c["name"] for c in listed} == {
+            "codes",
+            "code_use",
+            "session_memory",
+            "explicit_memory",
+        }
+        assert all(c["chunk_count"] == 0 for c in listed)
 
     def test_ingest_creates_collection(self, kb, source_folder):
         """Ingesting a folder creates a named collection with index and chunks."""
@@ -724,10 +718,9 @@ class TestKnowledgeBaseIngest:
         """list_collections returns description text."""
         kb.ingest(source_folder)
 
-        collections = kb.list_collections()
-        assert len(collections) == 1
-        assert collections[0]["name"] == "test_docs"
-        assert "unit tests" in collections[0]["description"]
+        collections = {c["name"]: c for c in kb.list_collections()}
+        assert "unit tests" in collections["test_docs"]["description"]
+        assert collections["test_docs"]["chunk_count"] > 0
 
     def test_ingest_creates_chunks_jsonl(self, kb, source_folder):
         """Ingest produces a chunks.jsonl with valid entries."""
@@ -776,11 +769,8 @@ class TestKnowledgeBaseIngest:
 
         kb.ingest(folder)
 
-        collections = kb.list_collections()
-        # New route-based list_collections may return description from route
-        # or empty string; just check it doesn't error
-        assert len(collections) == 1
-        assert collections[0]["name"] == "no_desc"
+        collections = {c["name"]: c for c in kb.list_collections()}
+        assert collections["no_desc"]["description"] == ""
 
 
 # ---------------------------------------------------------------------------

@@ -386,29 +386,23 @@ class APIEmbedder(Embedder):
         self.model = model or os.getenv(
             "EMBEDDING_MODEL", "text-embedding-3-small-project"
         )
-        self.base_url = (
-            base_url or os.getenv("EMBEDDING_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-        )
-        # EMBEDDING_API_KEY is the canonical name; LLM_API_KEY/OPENAI_API_KEY
-        # are accepted as fallbacks for setups where the embedding endpoint
-        # shares the LLM endpoint's auth.
-        self.api_key = (
-            api_key
-            or os.getenv("EMBEDDING_API_KEY")
-            or os.getenv("LLM_API_KEY")
-            or os.getenv("OPENAI_API_KEY")
-        )
+        self.base_url = base_url or os.getenv("EMBEDDING_BASE_URL")
+        # The embedding backend is dsagt's own service, so it has its own
+        # credential: the shell or ``~/.config/dsagt/env`` supplies
+        # EMBEDDING_API_KEY.  An LLM-provider key is the agent's, and dsagt
+        # neither reads nor writes one.
+        self.api_key = api_key or os.getenv("EMBEDDING_API_KEY")
         self.timeout = timeout
         self.batch_size = batch_size
 
         if not self.base_url:
             raise ValueError(
                 "Embedding API base URL required via argument or "
-                "EMBEDDING_BASE_URL / OPENAI_BASE_URL env var"
+                "the EMBEDDING_BASE_URL env var"
             )
         if not self.api_key:
             raise ValueError(
-                "API key required via argument or EMBEDDING_API_KEY env var"
+                "API key required via argument or the EMBEDDING_API_KEY env var"
             )
 
         # ``base_url`` is the OpenAI-style root (typically ending in ``/v1``);
@@ -751,6 +745,30 @@ def _rrf_across(result_lists: list[list[dict]], k: int = 60) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 #: The one collection recency applies to.  Mirrors
+#: dsagt's own collections and what each is for, listed by
+#: ``kb_list_collections`` with the collection's metadata keys so the agent
+#: chooses the collection, then the filter, then the query.  The catalog
+#: collections (``skills_catalog__<slug>``) and the ingested corpora carry a
+#: DESCRIPTION.md of their own.
+DSAGT_COLLECTIONS = {
+    "codes": (
+        "The registered codes' SKILL.md specs, one chunk per code; "
+        "search_registry queries it. Filter on code_name or source "
+        "(base-skill, registered)."
+    ),
+    "code_use": (
+        "One chunk per execution record in trace_archive/, indexed by the "
+        "periodic pass: the code, its exact command, and the outcome. Filter "
+        "on code_name, session_id, or return_code to see what a code has "
+        "been run on and how it went."
+    ),
+    "session_memory": (
+        "Episodic memory: what earlier sessions did and learned, extracted "
+        "from their traces. Filter on session_id."
+    ),
+    "explicit_memory": "Facts the user asked to be remembered (kb_remember).",
+}
+
 #: ``memory.SESSION_MEMORY_COLLECTION`` as a literal to avoid a knowledge→memory
 #: import (memory imports knowledge, not the reverse).
 _RECENCY_COLLECTION = "session_memory"
@@ -951,12 +969,33 @@ class ChromaVectorStore(VectorStore):
         return (self.index_dir / name / "chroma_ids.json").exists()
 
     def collection_info(self, name: str) -> dict:
+        """Listing metadata for *name*: its purpose, the metadata keys its
+        chunks carry (read from the first chunks of ``chunks.jsonl``), and
+        its chunk count, so an agent can pick the collection and the
+        ``where`` filter before it queries."""
         coll_dir = self.index_dir / name
         desc_path = coll_dir / "DESCRIPTION.md"
-        description = desc_path.read_text() if desc_path.exists() else ""
+        description = (
+            desc_path.read_text() if desc_path.exists() else collection_purpose(name)
+        )
+        keys: list[str] = []
+        count = 0
+        chunks_path = coll_dir / "chunks.jsonl"
+        if chunks_path.exists():
+            with open(chunks_path, encoding="utf-8") as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    count += 1
+                    if count <= 200:
+                        for key in json.loads(line).get("metadata") or {}:
+                            if key not in keys:
+                                keys.append(key)
         return {
             "name": name,
             "description": description,
+            "metadata_keys": sorted(keys),
+            "chunk_count": count,
             "embedding_backend": self.backend,
             "embedding_model": self.model or "default",
             "vector_db": "chroma",
@@ -1171,6 +1210,18 @@ class ChromaVectorStore(VectorStore):
 # ===========================================================================
 
 
+def collection_purpose(name: str) -> str:
+    """The purpose text for a collection with no DESCRIPTION.md of its own."""
+    if name in DSAGT_COLLECTIONS:
+        return DSAGT_COLLECTIONS[name]
+    if name.startswith("skills_catalog__"):
+        return (
+            f"The skill catalog cloned from the source {name[len('skills_catalog__'):]}, "
+            "one chunk per skill; search_skills queries it."
+        )
+    return ""
+
+
 class KnowledgeBase:
     """Collection-based document retrieval over one-or-more vector stores.
 
@@ -1271,11 +1322,32 @@ class KnowledgeBase:
         return seen
 
     def list_collections(self) -> list[dict]:
-        return [
+        """Every collection with its purpose, metadata keys, and chunk count.
+
+        dsagt's own collections are listed even before their first write
+        (``code_use`` exists once the first execution record is indexed), so
+        an agent learns what they are for and what to filter on.
+        """
+        listed = [
             store.collection_info(name)
             for store in self._stores
             for name in store.collections
         ]
+        names = {c["name"] for c in listed}
+        for name, purpose in DSAGT_COLLECTIONS.items():
+            if name not in names:
+                listed.append(
+                    {
+                        "name": name,
+                        "description": purpose,
+                        "metadata_keys": [],
+                        "chunk_count": 0,
+                        "embedding_backend": self._store.backend,
+                        "embedding_model": self._store.model or "default",
+                        "vector_db": "chroma",
+                    }
+                )
+        return listed
 
     def preload_default_embedder(self) -> None:
         """Kick off internal-store embedder construction in a daemon thread.

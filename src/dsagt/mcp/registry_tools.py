@@ -2,9 +2,11 @@
 
 The "tool lifecycle" surface of ``dsagt-server``: define a tool spec
 (``save_code_spec``), discover tools (``get_registry`` / ``search_registry``),
-execute / gather (``read_file`` / ``http_request`` / ``run_command`` /
-``install_dependencies``), and reconstruct a reproducible pipeline from the
-recorded executions (``reconstruct_pipeline``).
+install a code's dependencies (``install_dependencies``), read the readiness
+reports on record (``readiness_reports``), and reconstruct a reproducible
+pipeline from the recorded executions (``reconstruct_pipeline``).  Execution
+in the user's environment is ``dsagt-run``'s, from the agent's own shell, and
+reads are the agent's own tools, so the server runs nothing for the agent.
 
 Tool specs are saved as markdown files in the runtime tools directory and
 indexed into a ChromaDB collection for semantic search.  Server configuration
@@ -20,13 +22,11 @@ test-facing constructor.  Skill tools (``save_skill`` / ``search_skills`` /
 import asyncio
 import json
 import logging
-import shlex
 import subprocess
 import sys
 from functools import partial
 from pathlib import Path
 
-import httpx
 import yaml
 
 import mcp.types as types
@@ -39,7 +39,7 @@ from dsagt.observability import (
     registry_reconstruct_pipeline_span,
     registry_save_code_span,
 )
-from dsagt.provenance import CodeUseIndexer, reconstruct_pipeline
+from dsagt.provenance import CodeUseIndexer, readiness_reports, reconstruct_pipeline
 from dsagt.registry import CODES_COLLECTION, CodeRegistry
 
 logger = logging.getLogger(__name__)
@@ -69,69 +69,6 @@ def _install_dependencies(packages: list[str], timeout: int = 120) -> str:
 # ---------------------------------------------------------------------------
 # Per-tool handlers (module-level, explicit dependencies)
 # ---------------------------------------------------------------------------
-
-
-async def _handle_read_file(arguments: dict) -> str:
-    path = Path(arguments["path"])
-    try:
-        return path.read_text()
-    except (
-        FileNotFoundError,
-        PermissionError,
-        IsADirectoryError,
-        OSError,
-        UnicodeDecodeError,
-    ) as e:
-        return f"Error reading file: {e}"
-
-
-async def _handle_http_request(arguments: dict) -> str:
-    url = arguments["url"]
-    method = arguments.get("method", "GET")
-    headers = arguments.get("headers", {})
-    try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                timeout=30.0,
-            )
-            return f"Status: {response.status_code}\n\n{response.text}"
-    except (httpx.HTTPError, httpx.InvalidURL) as e:
-        return f"Error making request: {e}"
-
-
-async def _handle_run_command(arguments: dict) -> str:
-    # A code spec's executable is a multi-word string ("dsagt-run --code x --
-    # uv run -- python script.py"); agents pass it whole, so split it.
-    command = shlex.split(arguments["command"])
-    args = arguments.get("args", [])
-    timeout = arguments.get("timeout", 10)
-    try:
-        # Off the shared event loop: a blocking subprocess.run here would stall
-        # the periodic trace pass and every concurrent tool call for its duration.
-        result = await asyncio.to_thread(
-            partial(
-                subprocess.run,
-                command + args,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        )
-    except subprocess.TimeoutExpired:
-        return f"Command timed out after {timeout} seconds"
-    except FileNotFoundError:
-        return f"Command '{command[0]}' not found"
-
-    output = ""
-    if result.stdout:
-        output += f"STDOUT:\n{result.stdout}\n"
-    if result.stderr:
-        output += f"STDERR:\n{result.stderr}\n"
-    output += f"\nReturn code: {result.returncode}"
-    return output
 
 
 async def _handle_save_code_spec(
@@ -241,16 +178,23 @@ async def _handle_search_registry(
     if not results:
         return "No tools found matching the query."
 
+    # The rank is the information; a rank-fusion score is a sum of 1/(60+rank)
+    # terms and reads as the same two decimals for every hit.
     summaries = []
-    for r in results:
+    for rank, r in enumerate(results, start=1):
         chunk = r.get("chunk", {})
         meta = chunk.get("metadata", {})
         summaries.append(
-            f"- **{meta.get('code_name', 'unknown')}** "
-            f"(score: {r.get('score', 0):.2f})\n"
-            f"  {chunk.get('text', '')[:200]}"
+            f"{rank}. **{meta.get('code_name', 'unknown')}**\n"
+            f"   {chunk.get('text', '')[:200]}"
         )
-    return f"Found {len(results)} tool(s):\n\n" + "\n\n".join(summaries)
+    return f"Found {len(results)} code(s), best first:\n\n" + "\n\n".join(summaries)
+
+
+async def _handle_readiness_reports(arguments: dict, *, runtime_dir: Path) -> dict:
+    path = arguments["path"]
+    reports = await asyncio.to_thread(readiness_reports, runtime_dir, path)
+    return {"path": path, "reports": reports}
 
 
 async def _handle_reconstruct_pipeline(
@@ -260,6 +204,7 @@ async def _handle_reconstruct_pipeline(
     kb: KnowledgeBase | None = None,
 ) -> str:
     fmt = arguments.get("format", "bash")
+    output = arguments.get("output")
     trace_dir = runtime_dir / "trace_archive"
     # Index the session's tool-use first: reconstruct is the moment the pipeline
     # is "done enough" to review, so make the just-run executions searchable now
@@ -277,6 +222,16 @@ async def _handle_reconstruct_pipeline(
             obs.event("reconstruct_failed", error=str(e)[:256])
             return f"Error reconstructing pipeline: {e}"
         obs.set("output_chars", len(script))
+        if output:
+            # A project-relative path; the agent otherwise copies the script
+            # by hand from the reply, which one run did from its own
+            # transcript after a context compaction.
+            target = runtime_dir / output
+            if not target.resolve().is_relative_to(runtime_dir.resolve()):
+                return f"Error: output must be a path under the project, got {output!r}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(script)
+            return f"Saved to {output}\n\n{script}"
         return script
 
 
@@ -336,14 +291,14 @@ def _registry_tools_and_handlers(
     runtime_dir = Path(registry.runtime_dir)
 
     handlers = {
-        "read_file": _handle_read_file,
-        "http_request": _handle_http_request,
-        "run_command": _handle_run_command,
         "save_code_spec": partial(_handle_save_code_spec, registry=registry),
         "get_registry": partial(_handle_get_registry, registry=registry),
         "search_registry": partial(_handle_search_registry, registry=registry, kb=kb),
         "reconstruct_pipeline": partial(
             _handle_reconstruct_pipeline, runtime_dir=runtime_dir, kb=kb
+        ),
+        "readiness_reports": partial(
+            _handle_readiness_reports, runtime_dir=runtime_dir
         ),
         "install_dependencies": partial(
             _handle_install_dependencies, registry=registry
@@ -351,65 +306,6 @@ def _registry_tools_and_handlers(
     }
 
     tools = [
-        types.Tool(
-            name="read_file",
-            description="Read contents of a text file",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file to read",
-                    },
-                },
-                "required": ["path"],
-            },
-        ),
-        types.Tool(
-            name="http_request",
-            description="Make an HTTP request to fetch documentation or API specs",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "URL to request"},
-                    "method": {
-                        "type": "string",
-                        "description": "HTTP method",
-                        "default": "GET",
-                    },
-                    "headers": {
-                        "type": "object",
-                        "description": "Optional headers",
-                    },
-                },
-                "required": ["url"],
-            },
-        ),
-        types.Tool(
-            name="run_command",
-            description=(
-                "Run a command to read its --help or usage text. Not for "
-                "executing registered codes: run those from your shell with "
-                "the spec's executable string so dsagt-run records them."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Command to execute",
-                    },
-                    "args": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Arguments (e.g., ['--help'])",
-                        "default": [],
-                    },
-                    "timeout": {"type": "number", "default": 10},
-                },
-                "required": ["command"],
-            },
-        ),
         types.Tool(
             name="save_code_spec",
             description=(
@@ -554,7 +450,9 @@ def _registry_tools_and_handlers(
                 "exited non-zero is kept as a comment, and paths under the "
                 "project are relative to it. The script calls each recorded tool "
                 "directly, without the dsagt-run wrapper, so it runs outside a "
-                "DSAgt project; present it to the user as returned."
+                "DSAgt project; it creates the recorded output directories first "
+                "and writes a recorded stdout file with a redirect. Present it to "
+                "the user as returned, and pass output to save it."
             ),
             inputSchema={
                 "type": "object",
@@ -564,7 +462,32 @@ def _registry_tools_and_handlers(
                         "enum": ["bash", "snakemake"],
                         "default": "bash",
                     },
+                    "output": {
+                        "type": "string",
+                        "description": "Project-relative path to save the script "
+                        "to, e.g. audit/pipeline.sh; the reply says where it went.",
+                    },
                 },
+            },
+        ),
+        types.Tool(
+            name="readiness_reports",
+            description=(
+                "The AI-readiness reports on record for a file, newest first: "
+                "each aidrin run whose input was the file, with its report path, "
+                "start time, and whether the file's content is unchanged since "
+                "that run. Call it before running a check; a current report is "
+                "the pre report of the next stage."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The file, relative to the project directory",
+                    },
+                },
+                "required": ["path"],
             },
         ),
         types.Tool(

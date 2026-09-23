@@ -402,16 +402,17 @@ def test_config_sources_classifies_literal(tmp_path, monkeypatch):
 
 
 def test_config_sources_masks_api_key(tmp_path, monkeypatch):
+    """A key a user hand-wrote into a config is shown masked, never in full."""
     _write_project(
         tmp_path,
         monkeypatch,
-        "project: proj\nagent: goose\nllm:\n  api_key: ${LLM_API_KEY}\n",
+        "project: proj\nagent: goose\nembedding:\n  api_key: ${EMBEDDING_API_KEY}\n",
     )
-    monkeypatch.setenv("LLM_API_KEY", "sk-1234567890abcdef")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "sk-1234567890abcdef")
 
     rows = {r["path"]: r for r in _config_sources("proj")}
-    assert rows["llm.api_key"]["value"] == "sk-1...cdef"
-    assert rows["llm.api_key"]["source"] == "shell"
+    assert rows["embedding.api_key"]["value"] == "sk-1...cdef"
+    assert rows["embedding.api_key"]["source"] == "shell"
 
 
 def test_config_sources_skips_internal_sections(tmp_path, monkeypatch):

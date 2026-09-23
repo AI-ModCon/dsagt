@@ -48,17 +48,15 @@ def test_merged_server_exposes_all_tools(tmp_path):
     """Both concern modules' tools land under one server with no collision."""
     server = _make_merged_server(tmp_path)
     names = _list_tools(server)
-    # 8 registry + 5 knowledge + 2 memory + 5 skill = 20 distinct tools.
+    # 6 registry + 5 knowledge + 2 memory + 5 skill = 18 distinct tools.
     assert set(names) == {
-        # registry / provenance (8)
+        # registry / provenance (6)
         "get_registry",
         "search_registry",
         "save_code_spec",
         "install_dependencies",
-        "run_command",
-        "read_file",
-        "http_request",
         "reconstruct_pipeline",
+        "readiness_reports",
         # knowledge (5)
         "kb_search",
         "kb_ingest",
@@ -469,3 +467,51 @@ class TestPinTraceSourceResume:
 
         TestPinTraceSource()._run(Collector(), tmp_path)
         assert read_state(tmp_path)["sessions"][-1]["trace_source"] == str(same)
+
+
+def test_reconstruct_pipeline_saves_to_a_project_path(tmp_path):
+    """``output`` writes the script under the project and the reply names it."""
+    server = _make_merged_server(tmp_path)
+    trace_dir = tmp_path / "runtime" / "trace_archive"
+    trace_dir.mkdir(parents=True)
+    (trace_dir / "echo_r1.json").write_text(
+        json.dumps(
+            {
+                "record_id": "r1",
+                "code_name": "echo",
+                "session_id": "s1",
+                "execution": {
+                    "exact_command": ["echo", "hi"],
+                    "return_code": 0,
+                    "stdout": "hi\n",
+                    "stderr": "",
+                    "timestamp_start": "2026-01-01T00:00:00Z",
+                    "timestamp_end": "2026-01-01T00:00:01Z",
+                    "input_files": [],
+                    "output_files": [],
+                },
+            }
+        )
+    )
+    out = _call(server, "reconstruct_pipeline", {"output": "audit/pipeline.sh"})
+    assert out.startswith("Saved to audit/pipeline.sh")
+    saved = (tmp_path / "runtime" / "audit" / "pipeline.sh").read_text()
+    assert "echo hi" in saved
+    outside = _call(server, "reconstruct_pipeline", {"output": "../escape.sh"})
+    assert outside.startswith("Error: output must be a path under the project")
+
+
+def test_the_agent_card_lists_the_tools_the_server_serves(tmp_path):
+    """agent-card.md names every served tool and no other.
+
+    The card is read by people deciding what dsagt exposes, and nothing else
+    reads it, so only a test keeps it level with the server.
+    """
+    import re
+
+    server = _make_merged_server(tmp_path)
+    served = set(_list_tools(server))
+    card = (Path(__file__).resolve().parents[1] / "agent-card.md").read_text()
+    listed = {m.group(1) for m in re.finditer(r"^- `(\w+)` — ", card, re.M)}
+    assert listed == served
+    assert f"All {len(served)} tools live" in card

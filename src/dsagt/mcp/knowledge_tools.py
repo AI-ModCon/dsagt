@@ -123,14 +123,26 @@ async def _handle_kb_search(
     # Build ChromaDB where clause from the filter arguments.  ChromaDB
     # requires single-filter dicts or $and-wrapped lists; an empty dict
     # would be invalid, so we only pass where when there are real filters.
-    where = {
-        key: arguments[key]
-        for key in ("category", "session_id", "source_type", "code_name", "tool_name")
-        if arguments.get(key) is not None
-    }
+    where = dict(arguments.get("where") or {})
+    where.update(
+        {
+            key: arguments[key]
+            for key in (
+                "category",
+                "session_id",
+                "source_type",
+                "code_name",
+                "tool_name",
+            )
+            if arguments.get(key) is not None
+        }
+    )
     return_code = arguments.get("return_code")
     if return_code is not None:
         where["return_code"] = int(return_code)
+    # Several top-level keys need the $and wrapper whether or not one of them
+    # is an operator: a caller-supplied {"$or": [...]} beside a category is two
+    # keys, which ChromaDB refuses.
     if len(where) > 1:
         where = {"$and": [{k: v} for k, v in where.items()]}
 
@@ -359,9 +371,12 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
         types.Tool(
             name="kb_list_collections",
             description=(
-                "List all available knowledge base collections with their "
-                "embedding model and vector DB. Use this to discover what "
-                "documentation is already indexed."
+                "Every knowledge base collection with its purpose, the "
+                "metadata keys its chunks carry (the keys a kb_search where "
+                "filter takes), and its chunk count: the registered codes, "
+                "the execution records (code_use), session memory, each skill "
+                "catalog, and each ingested corpus. Call it first to pick the "
+                "collection and the filter."
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
@@ -370,10 +385,14 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
             description=(
                 "Search knowledge base collections using semantic similarity. "
                 "Returns relevant chunks with source metadata. "
-                "Supports multi-collection search. Narrow results with metadata "
-                "filters (session_id, code_name, tool_name, source_type, ...) and/or a "
+                "Supports multi-collection search. Narrow results with a "
+                "metadata filter: where, a mapping of a metadata key the "
+                "collection carries (kb_list_collections shows them) to the "
+                "value it must equal, or the named shortcuts below; and/or a "
                 "document-text filter ('regex' / 'contains') over the chunk text "
-                "itself — useful for pulling specific session-memory context."
+                "itself. The order is collection, filter, then query: "
+                "kb_search(collection='code_use', where={'code_name': 'fastp'}, "
+                "query='assembly') is what fastp has been run on."
             ),
             inputSchema={
                 "type": "object",
@@ -381,6 +400,14 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                     "query": {
                         "type": "string",
                         "description": "Natural language search query",
+                    },
+                    "where": {
+                        "type": "object",
+                        "description": (
+                            "Metadata filter, {key: value} on the collection's "
+                            "metadata keys; several keys must all match. A "
+                            "ChromaDB operator form ({'$or': [...]}) passes through."
+                        ),
                     },
                     "collection": {
                         "type": "string",

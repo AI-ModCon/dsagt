@@ -623,6 +623,7 @@ def base_skills() -> tuple[dict, ...]:
                             "type": "string",
                             "required": True,
                             "cli": "positional",
+                            "role": "input",
                             "description": "Directory holding the dataset",
                         },
                     },
@@ -640,6 +641,7 @@ def base_skills() -> tuple[dict, ...]:
                             "type": "string",
                             "required": True,
                             "cli": "positional",
+                            "role": "input",
                             "description": "Path to the datacard .md file",
                         },
                         "json": {
@@ -664,12 +666,14 @@ def base_skills() -> tuple[dict, ...]:
                             "type": "string",
                             "required": True,
                             "cli": "positional",
+                            "role": "input",
                             "description": "Path to the v1 datacard .md file",
                         },
                         "out": {
                             "type": "string",
                             "required": False,
                             "cli": "--out",
+                            "role": "output",
                             "description": "Output path (default: <input>.genesis.md)",
                         },
                         "json": {

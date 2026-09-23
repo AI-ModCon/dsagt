@@ -1037,13 +1037,7 @@ class TestAgentRecord:
 
 class TestResolveRecordsDirProjectAware:
     """``_resolve_records_dir`` reads the project's ``.dsagt/config.yaml``
-    from cwd as the single source of truth — no env-var chain."""
-
-    def test_explicit_overrides_cwd(self, tmp_path):
-        from dsagt.provenance import _resolve_records_dir
-
-        result = _resolve_records_dir("/custom")
-        assert result == Path("/custom")
+    from the cwd, or from ``DSAGT_PROJECT_DIR`` when it is set."""
 
     def test_cwd_with_config(self, tmp_path, monkeypatch):
         """With no DSAGT_PROJECT_DIR the cwd is the project. A
@@ -1055,10 +1049,10 @@ class TestResolveRecordsDirProjectAware:
         (tmp_path / ".dsagt").mkdir()
         (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
         monkeypatch.chdir(tmp_path)
-        assert _resolve_records_dir(None) == tmp_path / "trace_archive"
+        assert _resolve_records_dir() == tmp_path / "trace_archive"
         monkeypatch.setenv("DSAGT_PROJECT_DIR", "/stale/proj/dir")
         with pytest.raises(ValueError, match="DSAGT_PROJECT_DIR"):
-            _resolve_records_dir(None)
+            _resolve_records_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -1073,9 +1067,6 @@ class TestAgentEnv:
             "project": "test",
             "agent": agent,
             "project_dir": project_dir,
-            "mlflow": {"port": 5001},
-            "llm": {"model": "test-model"},
-            "embedding": {"api_key": "test-key"},
         }
 
     def test_dsagt_vars_set(self):
@@ -1364,3 +1355,81 @@ class TestLoadUserEnv:
         from dsagt.session import load_user_env
 
         assert load_user_env(tmp_path / "absent") == []
+
+
+class TestMcpEnvBlockShellPassthrough:
+    """The block carries the launching shell's activated environment, never a
+    credential."""
+
+    def _config(self):
+        return {"project": "p", "project_dir": "/p", "embedding": {"backend": "local"}}
+
+    def test_activated_environment_is_copied(self):
+        from dsagt.agents import _mcp_env_block
+
+        environ = {
+            "PATH": "/venv/bin:/usr/bin",
+            "VIRTUAL_ENV": "/venv",
+            "PYTHONPATH": "/fio/lib",
+            "DYLD_LIBRARY_PATH": "/fio/lib",
+            "HOME": "/Users/x",
+            "ANTHROPIC_API_KEY": "sk-x",
+            "MLFLOW_TRACKING_API_KEY": "k",
+        }
+        block = _mcp_env_block(self._config(), environ)
+        assert block["PATH"] == "/venv/bin:/usr/bin"
+        assert block["VIRTUAL_ENV"] == "/venv"
+        assert block["PYTHONPATH"] == "/fio/lib"
+        assert block["DYLD_LIBRARY_PATH"] == "/fio/lib"
+        assert "HOME" not in block
+        assert "ANTHROPIC_API_KEY" not in block
+        assert "MLFLOW_TRACKING_API_KEY" not in block
+
+    def test_config_names_extra_variables(self):
+        from dsagt.agents import _mcp_env_block
+
+        config = {**self._config(), "mcp": {"env_passthrough": ["SITE_MODULES"]}}
+        block = _mcp_env_block(config, {"SITE_MODULES": "/opt/mods", "PATH": "/bin"})
+        assert block["SITE_MODULES"] == "/opt/mods"
+
+    @pytest.mark.parametrize(
+        "name", ["MY_KEY", "HF_TOKEN", "DB_SECRET", "DBPASSWORD", "SECRET_THING"]
+    )
+    def test_a_credential_name_is_refused(self, name):
+        from dsagt.agents import _mcp_env_block
+
+        config = {**self._config(), "mcp": {"env_passthrough": [name]}}
+        with pytest.raises(ValueError, match="credential"):
+            _mcp_env_block(config, {name: "x"})
+
+    def test_the_block_never_holds_a_credential_name(self, monkeypatch):
+        """Whatever the shell has, the block's names pass the credential test."""
+        from dsagt.agents import _mcp_env_block
+        from dsagt.agents.base import _CREDENTIAL_NAME
+
+        for name in ("PATH", "VIRTUAL_ENV", "OPENAI_API_KEY", "EMBEDDING_API_KEY"):
+            monkeypatch.setenv(name, "v")
+        block = _mcp_env_block(self._config())
+        assert block
+        assert not any(_CREDENTIAL_NAME.search(k) for k in block)
+
+
+def test_concurrent_registrations_are_all_kept(tmp_path):
+    """Seven ``dsagt init`` runs started together left one project in the
+    registry: a reader found the file truncated by another's write and saved
+    only its own entry."""
+    import subprocess
+    import sys
+
+    script = (
+        "import sys; from pathlib import Path; import dsagt.session as s\n"
+        "s.REGISTRY_DIR = Path(sys.argv[1]); s.REGISTRY_FILE = s.REGISTRY_DIR / 'projects.yaml'\n"
+        "for i in range(20): s.register_project(f'{sys.argv[2]}-{i}', s.REGISTRY_DIR / sys.argv[2])\n"
+    )
+    workers = [
+        subprocess.Popen([sys.executable, "-c", script, str(tmp_path), f"p{n}"])
+        for n in range(6)
+    ]
+    assert [w.wait() for w in workers] == [0] * 6
+    registry = yaml.safe_load((tmp_path / "projects.yaml").read_text())
+    assert len(registry) == 120
