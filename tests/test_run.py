@@ -285,6 +285,7 @@ class TestRunAndRecord:
     def test_output_is_echoed_while_the_command_runs(self, tmp_path, monkeypatch):
         """A line the command prints is echoed before the command exits, so a
         slow code shows progress instead of looking hung until it finishes."""
+        import gc
         import sys
         import time
 
@@ -301,17 +302,27 @@ class TestRunAndRecord:
 
         writer = TimedWriter()
         monkeypatch.setattr(sys, "stdout", writer)
-        run_and_record(
-            code_name="slow",
-            command=[
-                sys.executable,
-                "-c",
-                "import time; print('started', flush=True); "
-                "time.sleep(1.0); print('done')",
-            ],
-            records_dir=tmp_path,
-            record_id="test-008",
-        )
+        # By this point the suite has left about 1.9 million objects in the
+        # process, and a generation-2 collection over them takes 0.8 to 1.0 s.
+        # One that starts inside Popen holds the main thread there, so the
+        # reader threads start late and the echo measures the suite's heap
+        # instead of the echo path.  dsagt-run's own process is light and
+        # collects in milliseconds.
+        gc.disable()
+        try:
+            run_and_record(
+                code_name="slow",
+                command=[
+                    sys.executable,
+                    "-c",
+                    "import time; print('started', flush=True); "
+                    "time.sleep(1.0); print('done')",
+                ],
+                records_dir=tmp_path,
+                record_id="test-008",
+            )
+        finally:
+            gc.enable()
         finished_at = time.monotonic()
 
         assert writer.first_write_at is not None
