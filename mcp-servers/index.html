@@ -795,10 +795,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#registry-tools-8" class="md-nav__link">
+  <a href="#the-servers-environment" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Registry tools (8)
+        The server's environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#registry-tools-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registry tools (6)
       
     </span>
   </a>
@@ -1238,10 +1249,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#registry-tools-8" class="md-nav__link">
+  <a href="#the-servers-environment" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Registry tools (8)
+        The server's environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#registry-tools-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registry tools (6)
       
     </span>
   </a>
@@ -1303,8 +1325,10 @@
 
 <h1 id="mcp-server">MCP Server<a class="headerlink" href="#mcp-server" title="Permanent link">&para;</a></h1>
 <p>DSAgt exposes its capabilities through a single MCP server, <strong><code>dsagt-server</code></strong>, configured in the per-agent runtime file (<code>.mcp.json</code> for Claude Code, <code>goose.yaml</code> for Goose, etc.) and launched automatically when the agent starts. It combines four capabilities — a code registry, a <a href="../knowledge-base/">knowledge base</a>, <a href="../memory/">explicit memory</a>, and <a href="../skills/">skill discovery</a> — behind one process with one shared embedder and one ChromaDB.</p>
-<p>The 20 tools split across four concerns, all on the one process.</p>
-<h2 id="registry-tools-8">Registry tools (8)<a class="headerlink" href="#registry-tools-8" title="Permanent link">&para;</a></h2>
+<p>The 18 tools split across four concerns, all on the one process.</p>
+<h2 id="the-servers-environment">The server's environment<a class="headerlink" href="#the-servers-environment" title="Permanent link">&para;</a></h2>
+<p>The per-agent MCP config carries an <code>env</code> block with two kinds of variable: routing (the project name and directory, the trace store URI, the embedding backend) and the launching shell's activated environment (<code>PATH</code>, <code>VIRTUAL_ENV</code>, <code>CONDA_PREFIX</code>, <code>PYTHONPATH</code>, the library paths, the <code>module</code> variables, plus any names listed under <code>mcp.env_passthrough</code> in <code>.dsagt/config.yaml</code>). Codex and Cline start the server from that block alone, so it is what makes the server's Python the one with the user's packages. The block is written at <code>dsagt init</code> and <code>dsagt start</code>; after changing the activated environment, run <code>dsagt start</code> (or re-init) so the block matches. A credential never enters the block: a name ending in <code>_KEY</code>, <code>_TOKEN</code>, or <code>_SECRET</code>, or containing <code>SECRET</code> or <code>PASSW</code>, is refused, and dsagt's own service credentials come from the shell or <code>~/.config/dsagt/env</code>.</p>
+<h2 id="registry-tools-6">Registry tools (6)<a class="headerlink" href="#registry-tools-6" title="Permanent link">&para;</a></h2>
 <p>Code registration, execution helpers, dependency installation, and pipeline reconstruction. See <a href="../provenance/">Provenance</a> for how registered codes are captured.</p>
 <table>
 <thead>
@@ -1331,20 +1355,12 @@
 <td>Install a code's Python dependencies via <code>uv run --with</code></td>
 </tr>
 <tr>
-<td><code>run_command</code></td>
-<td>Execute a command to capture its help/usage output</td>
-</tr>
-<tr>
-<td><code>read_file</code></td>
-<td>Read a text file from disk</td>
-</tr>
-<tr>
-<td><code>http_request</code></td>
-<td>Fetch documentation or an API spec over HTTP(S)</td>
-</tr>
-<tr>
 <td><code>reconstruct_pipeline</code></td>
-<td>Render <code>trace_archive/</code> as a dependency-ordered bash script or Snakemake workflow</td>
+<td>Render <code>trace_archive/</code> as a bash script (in run order, output directories created, recorded stdout files redirected) or a Snakemake workflow; <code>output</code> saves it under the project</td>
+</tr>
+<tr>
+<td><code>readiness_reports</code></td>
+<td>The AI-readiness reports on record for a file, each with whether the file is unchanged since that run</td>
 </tr>
 </tbody>
 </table>

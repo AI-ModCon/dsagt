@@ -1755,9 +1755,58 @@ post-condition 4 is judged on. Expected across the curation step:</p>
 </tr>
 </tbody>
 </table>
-<p>Curation produced a cleaner, more balanced particle set — a <strong>measurable</strong> AI-readiness gain, with
-<code>outliers</code> (and <code>class-imbalance</code>, if the agent proposes it) as the headline indicators and
-<code>completeness</code>/<code>duplicity</code> confirming the data was already structurally sound.</p>
+<p>A score is comparable only before and after one operation on the same table. Read in run
+order, the reports seem to get worse and then recover, because they describe different
+tables:</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th><code>outliers</code></th>
+<th><code>class-imbalance</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>selected particles (input)</td>
+<td>0.029</td>
+<td>11.1</td>
+</tr>
+<tr>
+<td>excluded particles (input)</td>
+<td>0.038</td>
+<td>10.2</td>
+</tr>
+<tr>
+<td><code>micrograph_metadata.csv</code> (84 rows of per-micrograph statistics)</td>
+<td>0.075</td>
+<td>n/a</td>
+</tr>
+<tr>
+<td>the scored micrograph CSV</td>
+<td>0.055</td>
+<td>n/a</td>
+</tr>
+<tr>
+<td><code>particles.csv</code> (merged)</td>
+<td>0.041</td>
+<td>22.2</td>
+</tr>
+<tr>
+<td><code>particles_curated.csv</code></td>
+<td>0.029</td>
+<td>11.1</td>
+</tr>
+</tbody>
+</table>
+<p>The micrograph table scores highest because means, spreads, minima and maxima over 84 rows
+have long tails; adding the score columns lowers the average without cleaning anything. The
+merge joins two populations with different distributions and 22 more 2D classes, so the merged
+table scores worse than either input. Curation returns the particle table to the selected
+set's values. What the step shows is that the check measures the merge's effect and the
+curation's removal of it: <code>outliers</code> (and <code>class-imbalance</code>, if the agent proposes it) move,
+and <code>completeness</code> and <code>duplicity</code> confirm the data was structurally sound throughout. The
+curated table is as AI-ready as the selected input, no more.</p>
 <h3 id="6-generate-a-datacard">6. Generate a datacard<a class="headerlink" href="#6-generate-a-datacard" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Use the datacard-generator skill to write a Level 1 datacard for the curated cryo-EM data.
 </code></pre></div>
