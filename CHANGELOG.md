@@ -36,8 +36,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   start and end times; writers take a lock on `.dsagt/run_trace.lock`, and
   an error goes to `.dsagt/run_trace.log`.
 - **Codes and skills share `skills/`.** A code is a skill directory whose
-  frontmatter declares an executable; a project has no `codes/` directory,
-  and `dsagt init` on a project with one moves each code under `skills/`.
+  frontmatter declares an executable, and a project has no `codes/`
+  directory. A project made before this keeps its `codes/` directory and the
+  codes in it stay registered under the old path, which no longer resolves:
+  move each `codes/<name>/` to `skills/<name>/`, change `codes/` to `skills/`
+  in that skill's `SKILL.md`, and call `save_code_spec` again so the stored
+  command matches. `dsagt init` does not do this for you.
 - **The native skills mirror is a relative symlink per skill directory**, so
   the agent reads the live files; a skill whose description exceeds Claude
   Code's cap is copied with the description truncated.
