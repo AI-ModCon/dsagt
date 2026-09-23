@@ -1169,6 +1169,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#headless-walkthrough-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Headless walkthrough runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#lint-format" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1313,6 +1324,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#headless-walkthrough-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Headless walkthrough runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#lint-format" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1449,15 +1471,70 @@ lock that does not match.</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/test_config.py<span class="w"> </span>-q<span class="w">   </span><span class="c1"># a single file</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-m<span class="w"> </span>integration<span class="w"> </span>-v<span class="w">         </span><span class="c1"># integration (needs creds)</span>
 </code></pre></div>
-<p>A walkthrough under <code>use_cases/</code> is validated by running its Execution prompts
-through a headless agent:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dsagt<span class="w"> </span>init<span class="w"> </span>&lt;name&gt;<span class="w"> </span>--agent<span class="w"> </span>claude<span class="p">|</span>codex<span class="w"> </span>--location<span class="w"> </span>~/dsagt-projects<span class="w">   </span><span class="c1"># then stage data per the README</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>python<span class="w"> </span>tests/headless_usecases.py<span class="w"> </span>use_cases/&lt;<span class="k">case</span>&gt;<span class="w"> </span>&lt;name&gt;<span class="w">            </span><span class="c1"># --only N,M --from N --subst KEY=VALUE</span>
+<h2 id="headless-walkthrough-runs">Headless walkthrough runs<a class="headerlink" href="#headless-walkthrough-runs" title="Permanent link">&para;</a></h2>
+<p>The walkthroughs under <code>use_cases/</code> are tutorials for a person. They double as
+end-to-end tests because each README has an Execution section of prompts and a
+Post-Conditions section that states the outcome. <code>tests/headless_usecases.py</code>
+sends the prompts through a headless agent and the post-conditions are the
+judgment; the unit and integration suites do not run them.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dsagt<span class="w"> </span>init<span class="w"> </span>&lt;name&gt;<span class="w"> </span>--agent<span class="w"> </span>claude<span class="p">|</span>codex<span class="w"> </span>--location<span class="w"> </span>~/dsagt-projects<span class="w">   </span><span class="c1"># then stage data per the README&#39;s Setup</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>python<span class="w"> </span>tests/headless_usecases.py<span class="w"> </span>use_cases/&lt;<span class="k">case</span>&gt;<span class="w"> </span>&lt;name&gt;<span class="w">            </span><span class="c1"># --only N,M --from N --subst KEY=VALUE --timeout S</span>
 </code></pre></div>
-<p>The driver reads the agent from the project's config, continues one session
-across the prompts, and appends each response to <code>&lt;project&gt;/headless_run.log</code>.
-Judge the run by the README's post-conditions and the <code>trace_archive/</code> record
-count, not by the log alone.</p>
+<ul>
+<li>The driver reads the agent from the project's config, continues one session
+  across the prompts (<code>claude -p --continue</code>; <code>codex exec resume --last</code> under
+  the project's <code>CODEX_HOME</code>), and appends each response to
+  <code>&lt;project&gt;/headless_run.log</code>. It stops at the first non-zero exit; <code>--from N</code>
+  resumes the same session at prompt N.</li>
+<li>Claude runs under <code>--allowedTools</code> with <code>acceptEdits</code>. The list is
+  <code>CLAUDE_ALLOWED_TOOLS</code> at the top of the driver: <code>mcp__dsagt</code> (every dsagt
+  tool), the file tools (<code>Read</code>, <code>Write</code>, <code>Edit</code>, <code>MultiEdit</code>, <code>Glob</code>,
+  <code>Grep</code>, <code>LS</code>), <code>Skill</code>, <code>Task</code>, and <code>TodoWrite</code>, and <code>Bash(&lt;command&gt;:*)</code>
+  entries for <code>python</code>, <code>uv run</code>, <code>dsagt-run</code>, <code>pip</code>, the shell utilities the
+  walkthroughs use, the walkthrough binaries (<code>aidrin</code>, <code>fastp</code>, <code>megahit</code>,
+  <code>h5dump</code>), a project-local <code>./script</code> or <code>.venv*/bin/</code> executable, and
+  anything under <code>~/dsagt-projects/.tools/</code>, and a script under Claude Code's session scratchpad (<code>/private/tmp/claude-*</code>), where the agent writes its one-off scripts. A tool outside the list is a
+  denial, so a run that reaches for one fails in a way an interactive session
+  would not; a walkthrough that needs a new binary adds its entry before the
+  run is judged.</li>
+<li>Codex runs with <code>--dangerously-bypass-approvals-and-sandbox</code>, because the
+  server and the codes write under <code>~/dsagt-projects/</code> outside the workspace
+  sandbox. A ChatGPT account's usage budget is small: run codex walkthroughs
+  one at a time, and resume a cut run with <code>--from</code> after the reset the error
+  names.</li>
+<li>The driver sets <code>BASH_DEFAULT_TIMEOUT_MS</code> and <code>BASH_MAX_TIMEOUT_MS</code> to the per-prompt timeout for a claude run (<code>set_shell_timeouts</code>). Each binds a different call: the maximum caps what a Bash call may ask for, ten minutes by default, and the agent asks for more than that on most <code>dsagt-run</code> calls; the default, two minutes, is what a call that asks for nothing gets. At the limit the process group is killed 1.5 s after the signal, and a long code loses its execution record. The same two limits apply to an interactive session.</li>
+<li>Keep the machine awake and on power. A model request that spans a sleep
+  waits for the wake, and the driver's timeout counts wall time.</li>
+<li>Judge a run with <code>python tests/headless_check.py use_cases/&lt;case&gt; &lt;name&gt; [&lt;name&gt; ...]</code>,
+  which scores two kinds of result apart. Mechanical checks are the
+  walkthrough's declared post-conditions: dsagt's own guarantees (skills and
+  codes installed and mirrored, every record complete and naming a registered
+  code, one <code>code.execute</code> trace per record, no error in the logs) and the
+  artifacts the README's Post-Conditions name, such as the pipeline script. A
+  failure means the run did not meet the README, and the script exits 1; the
+  detail says which check and what it found, which is what tells a dsagt
+  regression from a run that went another way. A check the run's
+  configuration puts out of reach, the trace count when <code>MLFLOW_TRACKING_URI</code>
+  names a shared server, prints <code>--</code> and fails nothing. Outcome observations
+  are what the README leaves to the agent (a value in a converted file,
+  whether a validator ran through <code>dsagt-run</code>, how many samples were
+  assembled); they are printed as values per run. Run a walkthrough at least three times before
+  reading an outcome: with the same tree and inputs a run moves by a
+  post-condition or two. An outcome leads to work only when it recurs in most
+  runs and a person working interactively would meet it too, and the fix is
+  usually the README's text.</li>
+<li>A headless session cannot show some things, and they are not scored: a step
+  that needs a second answer from a person (the datacard skill's question
+  batches), the last prompt's conversation trace (collected at the next
+  session start), what a reply contains when the content was shown in tool
+  output, and behavior after a permission denial, which interactively is a
+  request for approval.</li>
+<li>A walkthrough's checks are its entry in <code>WALKTHROUGHS</code> in
+  <code>tests/headless_check.py</code>; a new walkthrough with post-conditions adds one.</li>
+<li>A prompt is what a user would type. A change that exists only so an
+  unattended run gets through (an answer to a question the agent would ask, a
+  path that differs per machine) goes in <code>--subst</code>, not in the README.</li>
+</ul>
 <h2 id="lint-format">Lint &amp; format<a class="headerlink" href="#lint-format" title="Permanent link">&para;</a></h2>
 <p>CI enforces both on <code>src/</code> and <code>tests/</code> (scientific scripts under <code>use_cases/</code>
 are exempt):</p>

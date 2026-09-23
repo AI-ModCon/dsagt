@@ -1633,11 +1633,17 @@
 </ul>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <h3 id="1-install-fastp-and-megahit">1. Install fastp and megahit<a class="headerlink" href="#1-install-fastp-and-megahit" title="Permanent link">&para;</a></h3>
-<p>fastp and megahit are C/C++ programs from Bioconda, not pip packages. The setup
-script creates a conda environment for them from
-<a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/microbial_isolates/scripts/environment.yml"><code>scripts/environment.yml</code></a> under the shared DSAgt
-tools directory, using conda if present and a downloaded micromamba otherwise:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>bash<span class="w"> </span>use_cases/microbial_isolates/scripts/setup_env.sh
+<p>fastp and megahit are C/C++ programs from Bioconda, not pip packages. The
+walkthrough's bundle (the reads, the two documents, and the setup script; 3.9 GB,
+from the DSAgt use-case data folder,
+https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6) holds a
+setup script that creates a conda environment for them from its
+<code>environment.yml</code> under the shared DSAgt tools directory, using conda if present
+and a downloaded micromamba otherwise:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=1xabVTGy6W3vx55sRBVrPLFqNc_LqG1hz&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>-o<span class="w"> </span>microbial_isolates.tar.gz
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>isolates_bundle<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>tar<span class="w"> </span>xzf<span class="w"> </span>microbial_isolates.tar.gz<span class="w"> </span>-C<span class="w"> </span>isolates_bundle<span class="w"> </span>./setup
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>bash<span class="w"> </span>isolates_bundle/setup/setup_env.sh
 </code></pre></div>
 <p>It prints the environment's <code>bin</code> directory
 (<code>~/dsagt-projects/.tools/microbial_isolates/env/bin</code>); that path is the
@@ -1654,17 +1660,12 @@ for the rest. Then:</p>
 in your shell — never written to disk.)</p>
 <h3 id="3-collect-data-and-reference-material-into-the-project">3. Collect data and reference material into the project<a class="headerlink" href="#3-collect-data-and-reference-material-into-the-project" title="Permanent link">&para;</a></h3>
 <p>The agent runs with the project directory as its working directory, so everything it
-reads goes under <code>$PROJ</code>. The two documents under <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/microbial_isolates/docs"><code>docs/</code></a> describe the
-processing pipeline and the fastp and megahit parameter choices; the agent reads
-them directly.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/docs&quot;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># The isolate reads (11 interleaved FASTQ files, 3.9 GB) from the DSAgt use-case</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=1IgeSRHS476WNFdM3z-WvYJdg3DoxCoxI&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>-o<span class="w"> </span>microbial_isolates_reads.tar
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>tar<span class="w"> </span>xf<span class="w"> </span>microbial_isolates_reads.tar<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span><span class="w"> </span>--strip-components<span class="o">=</span><span class="m">1</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># $PROJ/data/microbial_isolate/ now holds the FASTQ files and their README</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>cp<span class="w"> </span>use_cases/microbial_isolates/docs/*.md<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/docs/&quot;</span>
+reads goes under <code>$PROJ</code>. The bundle's two documents describe the processing
+pipeline and the fastp and megahit parameter choices; the agent reads them
+directly.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># The bundle downloaded in step 1: 11 interleaved FASTQ files with their README</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># (data/microbial_isolate/) and the two documents (docs/).</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>tar<span class="w"> </span>xzf<span class="w"> </span>microbial_isolates.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span><span class="w"> </span>--exclude<span class="o">=</span><span class="s1">&#39;./setup&#39;</span>
 </code></pre></div>
 <h3 id="4-start-the-session">4. Start the session<a class="headerlink" href="#4-start-the-session" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isolate-pipeline
@@ -1700,23 +1701,27 @@ in <code>trace_archive/</code> when it exits; an assembly takes two to four minu
 <h3 id="4-process-remaining-samples">4. Process remaining samples<a class="headerlink" href="#4-process-remaining-samples" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Let&#39;s run this same pipeline on the rest of the fastq files at data/microbial_isolate/
 </code></pre></div>
+<p>Processing the remaining ten samples takes 30 to 40 minutes on a laptop; the agent runs
+them to completion before replying.</p>
 <h3 id="5-generate-datacard">5. Generate datacard<a class="headerlink" href="#5-generate-datacard" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Use the datacard-generator skill to write a Level 1 datacard for the assembled data under
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>data/assemblies/. Take the values from the data and the reports, and note anything unknown
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>rather than asking.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Use the datacard-generator skill to write a Level 1 datacard (discoverability only) for the
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>assembled data under data/assemblies/. Take the values from the data and the reports, and
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>note anything unknown rather than asking. Validate the card with the skill&#39;s validator and
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>fix what it reports.
 </code></pre></div>
-<p><code>datacard-generator</code> is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search.</p>
+<p><code>datacard-generator</code> is a base skill, installed at init and mirrored into the agent's native skills directory, so the agent invokes it without a catalog search. Level 1 means discoverability only: the card sets <code>supports_discoverability</code> and no other capability flag. The skill's own text allows accessibility beside it, which is why the prompt says which one is meant.</p>
 <h3 id="6-reconstruct-pipeline">6. Reconstruct pipeline<a class="headerlink" href="#6-reconstruct-pipeline" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Reconstruct the pipeline from the execution records as a bash script.
 </code></pre></div>
-<p>The agent calls <code>reconstruct_pipeline</code> to generate a reproducible script from the trace archive.</p>
+<p>The agent calls <code>reconstruct_pipeline</code> with an <code>output</code> path under the project, and the tool
+renders the <code>trace_archive/</code> records as a bash script in the order they ran and saves it there.</p>
 <h3 id="7-review-the-project-artifacts">7. Review the project artifacts<a class="headerlink" href="#7-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
 </code></pre></div>
 <p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
-<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
-installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
-with a line on what each is.</p>
+<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes and installed skills under
+<code>skills/</code>, the trace store <code>mlflow.db</code>, the reconstructed script, and the session's outputs,
+with a line on what each is. The reply may summarize a tree printed by a command.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Code registry includes <code>fastp</code> and <code>megahit</code> code specs (wrapped with <code>dsagt-run</code>).</li>
@@ -1725,7 +1730,7 @@ with a line on what each is.</p>
 <li>the trimmed R1 and R2 FASTQ files are under <code>data/processed/&lt;sample&gt;/</code></li>
 <li>the <code>fastp</code> HTML and JSON reports are beside them</li>
 <li><code>data/assemblies/&lt;sample&gt;/final.contigs.fa</code> exists</li>
-<li>A Level 1 datacard exists for the processed dataset.</li>
+<li>A Level 1 datacard exists for the processed dataset and validates with the registered <code>datacard-validate</code> code with no findings.</li>
 <li>A reconstructed pipeline script (bash or Snakemake) is available.</li>
 <li>Code execution records in <code>trace_archive/</code> document the full provenance chain.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture token usage, latency, and full request/response history. View with <code>dsagt traces isolate-pipeline</code>.</li>
@@ -1772,7 +1777,8 @@ with a line on what each is.</p>
 </table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>isolate-pipeline<span class="w"> </span>-y
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>rm<span class="w"> </span>-rf<span class="w"> </span>~/dsagt-projects/.tools/microbial_isolates<span class="w">     </span><span class="c1"># the fastp/megahit environment</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>rm<span class="w"> </span>-r<span class="w"> </span>microbial_isolates.tar.gz<span class="w"> </span>isolates_bundle
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>rm<span class="w"> </span>-rf<span class="w"> </span>~/dsagt-projects/.tools/microbial_isolates<span class="w">     </span><span class="c1"># the fastp/megahit environment</span>
 </code></pre></div>
 
 

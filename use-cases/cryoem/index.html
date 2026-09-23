@@ -1618,7 +1618,7 @@
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/cryoem/"><code>use_cases/cryoem/</code></a></p>
 <p>DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive (EMPIAR-10017 β-galactosidase micrographs via CryoPPP) — register curation codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing pipeline, with the AIDRIN AI-readiness check measuring the curation step before/after.</p>
 <blockquote>
-<p><strong>Estimated time:</strong> ~20 minutes of session time. Setup pulls a <strong>~0.5 GB data
+<p><strong>Estimated time:</strong> 12 to 25 minutes of session time. Setup pulls a <strong>~0.5 GB data
 download</strong> (84 micrograph previews and the ground-truth particle tables), two
 open-access papers, and the CryoPPP repository, then KB-ingests the repository
 (minutes on the local embedder) before any pipeline work.</p>
@@ -1660,8 +1660,9 @@ data operation runs inside the session with provenance. The full-resolution micr
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>dsagt<span class="w"> </span>start<span class="w"> </span>cryoem-pipeline
 </code></pre></div>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
-<p>Paste these prompts one at a time. The agent runs the AI-readiness check around the tabular steps
-without being told to; the micrograph (image) steps are not assessed.</p>
+<p>Paste these prompts one at a time. The agent runs the AI-readiness check around the tabular stages
+without being told to. The derive, score, merge, and curate stages each read and write a CSV, so
+the check covers all four; the micrograph previews are images and have no check.</p>
 <h3 id="1-create-a-cryo-em-knowledge-collection">1. Create a cryo-EM knowledge collection<a class="headerlink" href="#1-create-a-cryo-em-knowledge-collection" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Ingest the folder repos/cryoppp/ into the knowledge base as a collection called &quot;cryoppp&quot;.
 </code></pre></div>
@@ -1681,7 +1682,7 @@ without being told to; the micrograph (image) steps are not assessed.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Register the two CryoPPP scripts convert_start_to_csv_file.py and
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>generate_box_files_for_each_micrographs.py from repos/cryoppp/ as codes. They have
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>hard-coded paths and no command-line interface, so wrap each in a small CLI script under
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>codes/&lt;name&gt;/scripts/ that takes its input and output paths as arguments.
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>skills/&lt;name&gt;/scripts/ that takes its input and output paths as arguments.
 </code></pre></div>
 <p><strong>Verify:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Search the registry for cryo-EM codes.
@@ -1697,13 +1698,13 @@ without being told to; the micrograph (image) steps are not assessed.</p>
 <a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>its seven screening parameters within the dataset&#39;s 3-sigma interval contributes one point, and
 <a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>scores map to tiers low (0-2), medium (3-5), high (6-7). Score on the parameters available in our
 <a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>metadata. The script should read a metadata CSV and output a scored CSV with quality_score and
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>quality_tier columns. Save the script under codes/&lt;name&gt;/scripts/ and register it as a code.
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>quality_tier columns. Save the script under skills/&lt;name&gt;/scripts/ and register it as a code.
 </code></pre></div>
 <p>The agent should search the knowledge base, write the script, and register it via <code>save_code_spec</code>.</p>
 <h3 id="5-run-the-pipeline">5. Run the pipeline<a class="headerlink" href="#5-run-the-pipeline" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Run the pipeline on the EMPIAR-10017 dataset in data/cryoem/10017/:
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>1. Scan the directory to understand what&#39;s there
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>2. Derive per-micrograph metadata from the ground-truth particle tables in
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>2. Derive per-micrograph metadata from the selected ground-truth particle table in
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>   data/cryoem/10017/ground_truth/ (defocus U, defocus V, and defocus angle per particle,
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>   aggregated per micrograph) into data/cryoem/micrograph_metadata.csv, with a registered code
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>3. Run the quality scoring code on that metadata
@@ -1716,14 +1717,17 @@ without being told to; the micrograph (image) steps are not assessed.</p>
 <a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>   the particle data?
 </code></pre></div>
 <p>The Lite archive carries no CTF-fit, motion, or ice-thickness columns, so the derived metadata
-holds only the defocus parameters; the CryoCRAB score therefore tops out at 2 and every
-micrograph lands in the low tier. The measurable gain of this pipeline is in the particle tables.</p>
-<p>The merge and the curation are the two data operations of this pipeline, so the prompt asks
-for them as registered codes: each run is then an execution record, and the AI-readiness check
-has a before and an after to measure. The merge has two input tables and no single "before"
-file, so the check pairs are: <code>particles.csv</code> is the merge's after and the curation's before,
-and <code>particles_curated.csv</code> is the curation's after; the two reports on those files are what
-post-condition 4 is judged on. Expected across the curation step:</p>
+holds only the defocus parameters; the tier split depends on which derived columns the agent
+scores. The measurable gain of this pipeline is in the particle tables.</p>
+<p>The merge and the curation are the two data operations on the particle tables, so the prompt
+asks for them as registered codes: each run is then an execution record, and the AI-readiness
+check has a before and an after to measure. The merge has two input tables and no single
+"before" file, so the check pairs are: <code>particles.csv</code> is the merge's after and the curation's
+before, and <code>particles_curated.csv</code> is the curation's after. The check runs on the ground-truth tables as they arrive and
+on the output of each transformation: the derived metadata, the scored table, <code>particles.csv</code>,
+and <code>particles_curated.csv</code>. Each check's execution record holds the report. The two reports on the
+particle tables carry the gain post-condition 4 is
+judged on. Expected across the curation step:</p>
 <table>
 <thead>
 <tr>
@@ -1755,9 +1759,7 @@ post-condition 4 is judged on. Expected across the curation step:</p>
 </tr>
 </tbody>
 </table>
-<p>A score is comparable only before and after one operation on the same table. Read in run
-order, the reports seem to get worse and then recover, because they describe different
-tables:</p>
+<p>The reports cover different tables, so the numbers are not a trend:</p>
 <table>
 <thead>
 <tr>
@@ -1810,25 +1812,35 @@ curated table is as AI-ready as the selected input, no more.</p>
 <h3 id="6-generate-a-datacard">6. Generate a datacard<a class="headerlink" href="#6-generate-a-datacard" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Use the datacard-generator skill to write a Level 1 datacard for the curated cryo-EM data.
 </code></pre></div>
-<h3 id="7-reconstruct-the-pipeline">7. Reconstruct the pipeline<a class="headerlink" href="#7-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Reconstruct the pipeline from the execution records as a bash script.
+<p>The skill asks its questions in batches: first which capabilities the card covers, then the
+fields that identify the dataset. One answer covers them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Discoverability only. Name the dataset &quot;EMPIAR-10017 curated particles&quot;. The contact is
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>Jane Doe, jane@example.org. There is no license yet. Take every other field from the data
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>and the two papers, mark what they do not give as unknown, and ask nothing further. When
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>the card is written, validate it with the skill&#39;s validator and fix what it reports.
 </code></pre></div>
+<h3 id="7-reconstruct-the-pipeline">7. Reconstruct the pipeline<a class="headerlink" href="#7-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Reconstruct the pipeline from the execution records as a bash script and save it as pipeline.sh.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>reconstruct_pipeline</code> with <code>output="pipeline.sh"</code> saves the script into the
+project and returns it; the recorded runs appear in the order they ran, with a failed run kept
+as a comment.</p>
 <h3 id="8-review-the-project-artifacts">8. Review the project artifacts<a class="headerlink" href="#8-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
 </code></pre></div>
 <p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
-<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
-installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
-with a line on what each is.</p>
+<code>trace_archive/</code> (the readiness reports are the <code>aidrin</code> records among them), the registered codes and installed skills under
+<code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs, with a line on what each
+is. The agent may print the tree through a command; the reply then summarizes it.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Knowledge base contains <code>cryoppp</code> collection with repo code, docs, and appended papers.</li>
 <li><code>skills/aidrin/</code> is present (installed at init); the code registry includes the two CryoPPP codes (the STAR-to-CSV converter and the box-file generator), the metadata-derivation code, and the quality-scoring code.</li>
 <li>Quality-scored CSV exists with tier distribution; <code>particles.csv</code> (merged) and <code>particles_curated.csv</code> (curated) exist with <code>trace_archive/</code> records for both operations.</li>
-<li>The check ran on <code>particles.csv</code> and on <code>particles_curated.csv</code>, and the two reports show curation reduced outliers (~0.041 → ~0.029).</li>
+<li><code>trace_archive/</code> holds an <code>aidrin</code> record, which is the check report, for each table the pipeline wrote: <code>micrograph_metadata.csv</code>, the scored CSV, <code>particles.csv</code>, and <code>particles_curated.csv</code>. The two reports on the particle tables show curation returned the outlier score to the selected set's value (~0.041 → ~0.029).</li>
 <li>A datacard exists for the processed dataset.</li>
-<li>A reconstructed pipeline script is available.</li>
-<li>Code execution records in <code>trace_archive/</code> document the full provenance chain, including one record per check run.</li>
+<li><code>pipeline.sh</code> exists, saved by <code>reconstruct_pipeline</code>.</li>
+<li>Code execution records in <code>trace_archive/</code> document the full provenance chain, including one record per check run, each naming the table it read.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture token usage, latency, and full request/response history.</li>
 </ol>
 <h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
@@ -1887,7 +1899,7 @@ with a line on what each is.</p>
 </tbody>
 </table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>cryoem-pipeline<span class="w"> </span>-y<span class="w">          </span><span class="c1"># unregisters the project and removes its dir, data included</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>cryoem-pipeline<span class="w"> </span>-y<span class="w">          </span><span class="c1"># unregisters the project and removes its dir, data included</span>
 </code></pre></div>
 
 

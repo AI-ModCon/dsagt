@@ -1565,9 +1565,14 @@ Sanchez-Villar (PPPL). The session below has been tested with Claude Code.</p>
   which brings <code>h5py</code> and <code>matplotlib</code>; <code>numpy</code> comes with dsagt.</li>
 <li>An agent platform installed and <strong>already authenticated</strong>.</li>
 <li>The <a href="https://github.com/nferraro/fusion-io">fusion-io</a> library and its Python
-  bindings, built from source by <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/tokamak_stability/scripts/setup_env.sh"><code>scripts/setup_env.sh</code></a>:</li>
+  bindings, built from source by <code>scripts/setup_env.sh</code> in the walkthrough's
+  bundle (the DSAgt use-case data folder,
+  https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6):</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>bash<span class="w"> </span>use_cases/tokamak_stability/scripts/setup_env.sh
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=1qo-ZG_GoGlZ_X2BjR1fE8zZW3s9K6mTu&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>-o<span class="w"> </span>tokamak_stability.tar.gz
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>tokamak_bundle<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>tar<span class="w"> </span>xzf<span class="w"> </span>tokamak_stability.tar.gz<span class="w"> </span>-C<span class="w"> </span>tokamak_bundle<span class="w"> </span>./scripts/setup_env.sh
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>bash<span class="w"> </span>tokamak_bundle/scripts/setup_env.sh
 </code></pre></div>
 <p>The build needs git, cmake, pkg-config, C/C++/Fortran compilers, MPI, HDF5,
   NetCDF, and LAPACK already installed (macOS: <code>brew install cmake pkgconf gcc
@@ -1584,23 +1589,20 @@ Sanchez-Villar (PPPL). The session below has been tested with Claude Code.</p>
 <p>At the menu, name the project <code>tokamak-stability</code> and pick your agent; the
 defaults are fine for the rest. Then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/tokamak-stability
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills&quot;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># Demo data (one M3D-C1 simulation output) from the DSAgt use-case data folder:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=1qo-ZG_GoGlZ_X2BjR1fE8zZW3s9K6mTu&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>-o<span class="w"> </span>tokamak_stability.tar.gz
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tokamak_stability.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data&quot;</span><span class="w"> </span>--strip-components<span class="o">=</span><span class="m">1</span><span class="w"> </span>tokamak_stability/m3dc1_data
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/tokamak_stability/scripts<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/scripts&quot;</span><span class="w">     </span><span class="c1"># the modules, the m3dc1 package, and their tests</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/tokamak_stability/skills/m3dc1-skill<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span><span class="nv">$PROJ</span>/scripts:<span class="nv">$PYTHONPATH</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="nb">export</span><span class="w"> </span><span class="nv">M3DC1_DATA_DIR</span><span class="o">=</span><span class="nv">$PROJ</span>/data/m3dc1_data
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/scripts/tests&quot;</span><span class="w"> </span>-q<span class="w">      </span><span class="c1"># all 91 pass with fusion-io and the data in place; several minutes</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>dsagt<span class="w"> </span>start<span class="w"> </span>tokamak-stability<span class="w">                  </span><span class="c1"># mirrors the skill into the agent&#39;s native skills dir</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># The bundle downloaded under Prerequisites: one M3D-C1 simulation output</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># (data/m3dc1_data), the modules with the m3dc1 package and their tests (scripts/),</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># and the m3dc1 skill (skills/).</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tokamak_stability.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span><span class="nv">$PROJ</span>/scripts:<span class="nv">$PYTHONPATH</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nb">export</span><span class="w"> </span><span class="nv">M3DC1_DATA_DIR</span><span class="o">=</span><span class="nv">$PROJ</span>/data/m3dc1_data
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/scripts/tests&quot;</span><span class="w"> </span>-q<span class="w"> </span>-p<span class="w"> </span>no:cacheprovider<span class="w">   </span><span class="c1"># all 91 pass with fusion-io and the data in place; several minutes</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>dsagt<span class="w"> </span>start<span class="w"> </span>tokamak-stability<span class="w">                  </span><span class="c1"># mirrors the skill into the agent&#39;s native skills dir</span>
 </code></pre></div>
-<p>The tarball is also available from <a href="https://osf.io/gak3v/files/">OSF</a>. The
-integration tests need fusion-io and the data directory named by
+<p>The integration tests need fusion-io and the data directory named by
 <code>M3DC1_DATA_DIR</code>; failures naming <code>fpy</code> or <code>write_neo_input</code> mean the
-fusion-io install is not on the path. <code>dsagt start</code> mirrors the copied skill
+fusion-io install is not on the path. The tests write <code>__pycache__</code> directories
+under <code>scripts/</code>; <code>-p no:cacheprovider</code> keeps <code>.pytest_cache</code> out of the
+current directory. <code>dsagt start</code> mirrors the copied skill
 into the agent's native skills directory; if you start the agent directly
 instead, run <code>dsagt init</code> on the project once more first.</p>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
@@ -1628,21 +1630,28 @@ read through the registered codes (with <code>dsagt-run</code> records in <code>
 <h3 id="3-equilibrium-quantities">3. Equilibrium quantities<a class="headerlink" href="#3-equilibrium-quantities" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>What are the Miller parameters for this configuration?
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>What&#39;s the safety factor?
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>What&#39;s the safety factor profile: q on axis, q95, and q at the edge?
 </code></pre></div>
 <p><strong>Expect:</strong> the agent runs the Miller-geometry and q-profile codes and reports
-the parameters and q95: R0 1.819 m, a 0.559 m, κ 1.589, δ 0.299; q0 1.10,
-q95 5.03, q_edge 6.72. q95 comes from the <code>compute_q95</code> code applied to the
-profile, not from reading the profile by eye.</p>
+the parameters and the three q values: R0 1.819 m, a 0.559 m, κ 1.589, δ 0.299;
+q0 1.10, q95 5.03, q_edge 6.72. q95 comes from the <code>compute_q95</code> code applied
+to the <code>q</code> entry the <code>compute_flux_average_profiles</code> code wrote; the profile
+value at the grid point nearest 0.95 is 5.05, which is what reading the profile
+by eye gives.</p>
 <h3 id="4-field-plots">4. Field plots<a class="headerlink" href="#4-field-plots" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Make plots of the t=1 fields of the electron temperature, all components of the
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>current density, and the perturbations of the density and magnetic flux.
 </code></pre></div>
 <p><strong>Expect:</strong> PNG files under <code>plots/</code>, produced by evaluating the fields on a
-grid rather than plotting raw coefficients (the skill says which the user means).</p>
+grid rather than plotting raw coefficients (the skill says which the user means),
+through the registered <code>plot_field</code> and <code>plot_perturbed_field_map</code> codes, one
+record per plot.</p>
 <h3 id="5-spectra-and-energy-trace">5. Spectra and energy trace<a class="headerlink" href="#5-spectra-and-energy-trace" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Create plots of the standard poloidal spectra and the kinetic energy trace.
 </code></pre></div>
+<p><strong>Expect:</strong> two PNG files under <code>plots/</code>, <code>standard_spectra_t1.png</code> from the
+standard-spectra plot code and <code>kinetic_energy.png</code> from the kinetic-energy
+plot code, each with a record.</p>
 <h3 id="6-repackage-secondary-data-products">6. Repackage secondary data products<a class="headerlink" href="#6-repackage-secondary-data-products" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Save the poloidal spectral data for the pressure field in an HDF5 file
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>processed_data/pressure_spectrum.h5.
@@ -1660,16 +1669,19 @@ values rather than basis coefficients.</p>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>variable at the top so it can be rerun on other M3D-C1 datasets.
 </code></pre></div>
 <p><strong>Expect:</strong> <code>reconstruct_pipeline</code> renders the <code>trace_archive/</code> records in the
-order they ran, including any run that failed; the agent's only edit is the
-variable. The skill asks the agent to check your default shell first, since the
-fusion-io environment variables may be set only in that shell's startup files.</p>
+order they ran, including any run that failed, and saves the script at the path
+given; the agent's only edit is the variable. The script starts by creating the
+directories the recorded outputs go to (<code>plots/</code>, <code>processed_data/tmp/</code>), so it
+runs on a fresh copy of the project. The skill asks the agent to check your
+default shell first, since the fusion-io environment variables may be set only
+in that shell's startup files.</p>
 <h3 id="8-review-the-project-artifacts">8. Review the project artifacts<a class="headerlink" href="#8-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Reply with a tree listing of my project folder, with the artifacts dsagt recorded during this session marked and one line on what each marked item is.
 </code></pre></div>
-<p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
-<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
-installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
-with a line on what each is.</p>
+<p><strong>Expect:</strong> a tree of the project directory in the reply that marks the execution
+records in <code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes and
+installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's
+outputs, with a line on what each is.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Code registry contains specs for the M3D-C1 reading, analysis, plotting, and
@@ -1728,7 +1740,7 @@ with a line on what each is.</p>
 </table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>tokamak-stability<span class="w"> </span>-y
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>rm<span class="w"> </span>tokamak_stability.tar.gz
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>rm<span class="w"> </span>-r<span class="w"> </span>tokamak_stability.tar.gz<span class="w"> </span>tokamak_bundle
 <a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>rm<span class="w"> </span>-rf<span class="w"> </span>~/dsagt-projects/.tools/tokamak_stability<span class="w">      </span><span class="c1"># the fusion-io build</span>
 </code></pre></div>
 

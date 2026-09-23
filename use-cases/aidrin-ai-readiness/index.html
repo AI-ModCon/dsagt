@@ -1595,6 +1595,7 @@ sample dataset into the project and start the session:</p>
 </code></pre></div>
 <p><strong>Expect</strong> — the exact commands and representative results (positional args; JSON to stdout):</p>
 <p><strong>Data quality</strong></p>
+<p>The skill runs the three quality metrics as one baseline call.</p>
 <table>
 <thead>
 <tr>
@@ -1604,16 +1605,8 @@ sample dataset into the project and start the session:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>aidrin run completeness data/adult.csv</code></td>
-<td>overall <code>1.0</code></td>
-</tr>
-<tr>
-<td><code>aidrin run duplicity data/adult.csv</code></td>
-<td><code>0.0</code></td>
-</tr>
-<tr>
-<td><code>aidrin run outliers data/adult.csv</code></td>
-<td>overall <code>≈0.050</code> (<code>hours.per.week</code> ≈0.277)</td>
+<td><code>aidrin data-quality data/adult.csv --detail</code></td>
+<td>completeness <code>1.0</code>; duplicity <code>0.0</code>; outliers overall <code>≈0.050</code> (<code>hours.per.week</code> ≈0.277)</td>
 </tr>
 </tbody>
 </table>
@@ -1706,14 +1699,14 @@ quasi-identifiers — bin or suppress before sharing.</p>
 <h3 id="3-batch-several-metrics-from-one-config">3. Batch several metrics from one config<a class="headerlink" href="#3-batch-several-metrics-from-one-config" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Write an aidrin batch config (YAML) that runs completeness, class-imbalance, statistical-rates, and
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>representation-rate on data/adult.csv with target income and sensitive attribute sex, then run it
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>with the aidrin skill.
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>with the aidrin skill. The config is one flat mapping, and the key names are in the skill&#39;s
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>reference/metrics.md.
 </code></pre></div>
-<p>The config is one flat mapping, not per-metric blocks; the <code>aidrin</code> skill's
-<code>reference/metrics.md</code> documents the keys. For this step:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">file-path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data/adult.csv</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">file-type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nt">metrics</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">completeness</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">class-imbalance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">statistical-rates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">representation-rate</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">target-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">income</span>
+<p>The config for this step:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">file_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data/adult.csv</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">metrics</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">completeness</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">class-imbalance</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">statistical-rates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">representation-rate</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nt">target-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">income</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">y-true-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">income</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nt">sensitive-attribute-column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sex</span>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sex</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">race</span><span class="p p-Indicator">]</span>
 </code></pre></div>
@@ -1722,22 +1715,25 @@ quasi-identifiers — bin or suppress before sharing.</p>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>the readiness findings above. Take the values from the dataset and the reports, note anything
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>unknown rather than asking, and write it as one file, data/genesis_datacard_adult.md.
 </code></pre></div>
-<p>The agent invokes the <code>datacard-generator</code> base skill and writes one Genesis Datacard,
-<code>data/genesis_datacard_adult.md</code>, documenting the dataset and its readiness profile.</p>
+<p>The agent follows the <code>datacard-generator</code> base skill: it fills the skill's template from
+the dataset and the readiness reports, writes one Genesis Datacard,
+<code>data/genesis_datacard_adult.md</code>, and validates it with the registered <code>datacard-validate</code>
+code. The validator warns that the filename differs from the one it derives from the dataset
+name; that warning is expected, since the prompt fixes the filename.</p>
 <h3 id="5-review-the-execution-records">5. Review the execution records<a class="headerlink" href="#5-review-the-execution-records" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Show me the execution records for this session as a table of metric, command, and exit code.
 </code></pre></div>
 <p>The agent reads the records <code>dsagt-run</code> wrote to <code>trace_archive/</code> and lists one row per
-<code>aidrin</code> command: the runs from step 2 (thirteen to fifteen, since the skill may run the
-three quality metrics as one <code>data-quality</code> call) and the batch run from step 3, every exit
-code 0.</p>
+<code>aidrin</code> command: the runs from step 2 (thirteen with the quality baseline as one
+<code>data-quality</code> call, fifteen when the agent runs the three quality metrics separately) and
+the batch run from step 3, every exit code 0.</p>
 <h3 id="6-review-the-project-artifacts">6. Review the project artifacts<a class="headerlink" href="#6-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted. Include the registered codes and installed skills.
 </code></pre></div>
-<p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
-<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
-installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
-with a line on what each is.</p>
+<p><strong>Expect:</strong> a listing of the whole project directory, including the registered codes and
+installed skills under <code>skills/</code>, with a line on what each entry is. The listing marks the
+execution records in <code>trace_archive/</code> (each <code>aidrin</code> record holds that metric's report), the datacard, the trace
+store <code>mlflow.db</code>, and the session's other outputs.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <ol>
 <li><code>skills/aidrin/SKILL.md</code> is present, with a <code>PROVENANCE.txt</code> naming the AIDRIN source.</li>

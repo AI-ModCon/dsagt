@@ -1665,11 +1665,13 @@ come with the data, so the agent's records can be checked.</p>
 <code>genesis</code> is the default skill source, and the walkthrough has the agent discover, sync,
 and search a second one from inside the session. Then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/isaac-vasp
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># The fixtures (the NEB images, the mock slab, and their reference records) are</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># in the repository, under this use case&#39;s data/ folder.</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>cp<span class="w"> </span>-r<span class="w"> </span>use_cases/vasp_dft/data<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/data&quot;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># $PROJ/data now holds neb/, isaac_neb_record.json, mock_slab/, expected_isaac_record.json</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isaac-vasp<span class="w">                        </span><span class="c1"># mirrors the skill-creator base skill into the agent&#39;s native skills dir</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># One bundle: the NEB images, the mock slab, and their reference records (data/).</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=14HFHhEY4HfcQLl-Yu430zODm2CJH-kRS&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>-o<span class="w"> </span>vasp_dft.tar.gz
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>tar<span class="w"> </span>xzf<span class="w"> </span>vasp_dft.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># $PROJ/data now holds neb/, isaac_neb_record.json, mock_slab/, expected_isaac_record.json</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isaac-vasp<span class="w">                        </span><span class="c1"># mirrors the skill-creator base skill into the agent&#39;s native skills dir</span>
 </code></pre></div>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
 <p>Paste each prompt into the agent, one at a time. The arc: <strong>see what you have →
@@ -1710,7 +1712,7 @@ the converter uses next. <strong>Verify</strong> it landed:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span>
 </code></pre></div>
 <h3 id="5-author-the-converter-skill-with-skill-creator">5. Author the converter skill with skill-creator<a class="headerlink" href="#5-author-the-converter-skill-with-skill-creator" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Use the skill-creator skill to author a new project skill named &quot;vasp-to-isaac&quot;. Following the pymatgen skill you just installed, its converter should use `pymatgen.io.vasp` — `Incar.from_file` (ENCUT, NSW, ISPIN, LDAUU), `Poscar.from_file` (formula, atom counts), and `Outcar` (final energy, energy(sigma-&gt;0), total magnetization, max force) — to read a VASP slab calc directory and emit an ISAAC-style JSON record. The mock has no vasprun.xml, so take energy/forces from the OUTCAR. Target the shape in data/expected_isaac_record.json. Save it with save_skill.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Use the skill-creator skill to author a new project skill named &quot;vasp-to-isaac&quot;. Following the pymatgen skill you just installed, its converter should use `pymatgen.io.vasp` — `Incar.from_file` (ENCUT, NSW, ISPIN, LDAUU), `Poscar.from_file` (formula, atom counts), and `Outcar` (`final_energy`, which is the energy(sigma-&gt;0) of the last ionic step, and the total magnetization) — to read a VASP slab calc directory and emit an ISAAC-style JSON record. The mock has no vasprun.xml, and `Outcar` has no attribute for the ionic-step count, the largest residual force, or the VASP version, so read those three from the OUTCAR text: the number of `free  energy   TOTEN` lines (one per ionic step), the last TOTAL-FORCE block, and the header line. Target the shape in data/expected_isaac_record.json. Save it with save_skill.
 </code></pre></div>
 <p><strong>Expect:</strong> the agent reads <code>skill-creator</code>'s template and the <code>pymatgen</code> skill's IO
 docs, then <code>save_skill</code> writes <code>&lt;project&gt;/skills/vasp-to-isaac/</code> whose script
@@ -1718,12 +1720,16 @@ imports <code>pymatgen.io.vasp</code> (not a hand-rolled regex parser).</p>
 <h3 id="6-run-the-skill-on-the-slab-calculation">6. Run the skill on the slab calculation<a class="headerlink" href="#6-run-the-skill-on-the-slab-calculation" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Invoke the vasp-to-isaac skill on data/mock_slab/ and write the result to audit/mock_slab_isaac.json. Then diff its structure and values against data/expected_isaac_record.json and report any differences.
 </code></pre></div>
-<p><strong>Expect:</strong> pymatgen parses the mock directory and the agent writes
-<code>audit/mock_slab_isaac.json</code> with the key fields pymatgen extracted — final
-energy ≈ -132.8421 eV (<code>Outcar.final_energy</code>), 12 atoms (<code>Poscar</code>), ENCUT 520 /
-NSW 50 (<code>Incar</code>), total mag ≈ 8.0123 (<code>Outcar.total_mag</code>) — matching the reference.
-The reference's <code>ionic_steps</code> is NSW from the INCAR: the mock OUTCAR keeps only the
-first and last of the 50 steps.</p>
+<p><strong>Expect:</strong> the agent registers the skill's converter as a code and runs it through
+<code>dsagt-run</code>, so the run has a record in <code>trace_archive/</code>. pymatgen parses the mock
+directory and the converter writes <code>audit/mock_slab_isaac.json</code> with the key fields
+pymatgen extracted, matching the reference: final energy ≈ -132.8421 eV
+(<code>Outcar.final_energy</code>), 12 atoms (<code>Poscar</code>), ENCUT 520 / NSW 50 (<code>Incar</code>), total
+mag ≈ 8.0123 (<code>Outcar.total_mag</code>). The reference's <code>ionic_steps</code> is 2, the steps the mock OUTCAR
+holds; NSW 50 is the INCAR's limit. Its <code>code_version</code> is <code>5.4.1</code>, from the OUTCAR
+header. The energy(sigma-&gt;0) value is <code>Outcar.final_energy</code>; <code>final_energy_wo_entrp</code>
+is the energy-without-entropy line, -132.8 here, and a converter that maps
+<code>energy_sigma0_eV</code> to it reports a spurious difference.</p>
 <h3 id="7-extend-the-skill-to-neb-calculations-and-register-the-converter">7. Extend the skill to NEB calculations and register the converter<a class="headerlink" href="#7-extend-the-skill-to-neb-calculations-and-register-the-converter" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Extend the vasp-to-isaac skill with a second converter,
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>scripts/vasp_neb_to_isaac.py, for nudged-elastic-band calculations. It takes a
@@ -1737,7 +1743,7 @@ first and last of the 50 steps.</p>
 <a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>neb_dir and the --output option; run it with --help first.
 </code></pre></div>
 <p><strong>Verify:</strong> <code>Search the registry for the vasp-neb-to-isaac code.</code> →
-<code>$PROJ/codes/vasp-neb-to-isaac/SKILL.md</code> should exist.</p>
+<code>$PROJ/skills/vasp-neb-to-isaac/SKILL.md</code> should exist.</p>
 <h3 id="8-run-the-conversion-and-check-it">8. Run the conversion and check it<a class="headerlink" href="#8-run-the-conversion-and-check-it" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Run the registered vasp-neb-to-isaac code, with its exact command, to convert data/neb/
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>and write the record to data/neb_record.json.
@@ -1745,14 +1751,18 @@ first and last of the 50 steps.</p>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>and in the computation and measurement blocks, fix the converter, and rerun the
 <a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>registered code until they agree on the method, image count, reaction, and
 <a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>energy series. The reaction is Fe(lattice) → Fe(vacancy site); the OUTCARs do
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>not state it, so pass it to the converter.
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>not state it, so pass it to the converter. Read the cutoff, k-points, smearing,
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>and convergence settings from the OUTCARs; the images have no INCAR.
 </code></pre></div>
 <p><strong>Expect:</strong> <code>dsagt-run --code vasp-neb-to-isaac -- ...</code> runs land in
 <code>trace_archive/</code>; pymatgen parses the five OUTCARs (endpoints plus three
 intermediate images); the final record's <code>computation.transition_state</code> has
 <code>method: NEB</code>, <code>images: 3</code>, and the Fe vacancy-migration reaction, and its
 <code>measurement.series</code> carries the five-point energy path matching the reference:
-endpoints at −255.980 eV and −255.981 eV, a barrier of 0.325 eV at image 2.</p>
+endpoints at −255.980 eV and −255.981 eV, a barrier of 0.325 eV at image 2. The
+<code>computation.method</code> sub-fields (cutoff, k-points, smearing, convergence) are parsed
+from the OUTCAR text, where VASP echoes them; a converter that copies the reference's
+values as literals matches by construction and fails on any other calculation.</p>
 <p>One pitfall to watch for: reading <code>Outcar.final_energy_wo_entrp</code> instead of
 <code>Outcar.final_energy</code> (the energy(sigma→0) of the last ionic step) shifts every
 energy by about 0.33 eV and the barrier to 0.309 eV. An agent may then report
@@ -1763,22 +1773,24 @@ hold it to them.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Reconstruct the pipeline from the execution records as a bash script and save it as
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>pipeline.sh.
 </code></pre></div>
-<p><strong>Expect:</strong> the script holds every recorded run of the NEB converter, including
-the attempts that failed the comparison, in the order they ran.</p>
+<p><strong>Expect:</strong> <code>reconstruct_pipeline</code> saves the script at the path given. It holds
+every recorded run of the NEB converter, including the attempts that failed the
+comparison, in the order they ran. The script creates its output directories and
+removes a repeated output before the step that rewrites it, so a converter that
+refuses to overwrite still replays.</p>
 <h3 id="10-review-the-project-artifacts">10. Review the project artifacts<a class="headerlink" href="#10-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Show me the contents of my project folder in a tree format, with the artifacts dsagt recorded during this session highlighted.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Reply with a tree of my project folder, with the artifacts dsagt recorded during this session marked and one line on what each marked item is.
 </code></pre></div>
-<p><strong>Expect:</strong> a listing of the project directory that marks the execution records in
-<code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes under <code>codes/</code>, the
-installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's outputs,
-with a line on what each is.</p>
+<p><strong>Expect:</strong> a tree of the project directory in the reply that marks the execution
+records in <code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes and
+installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's
+outputs, with a line on what each is.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <p>Confirm from a shell (the native skills directory is <code>.claude/skills/</code> for Claude Code,
 <code>.agents/skills/</code> for Codex, Goose, and opencode, <code>.cline/skills/</code> for Cline):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>isaac-vasp<span class="w">                     </span><span class="c1"># KB shows the k-dense-ai catalog collection</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                        </span><span class="c1"># aidrin  datacard-generator  pymatgen  skill-creator  vasp-to-isaac</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/codes/&quot;</span><span class="w">                         </span><span class="c1"># vasp-neb-to-isaac</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/trace_archive/&quot;</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                        </span><span class="c1"># aidrin  datacard-generator  pymatgen  skill-creator  vasp-neb-to-isaac  vasp-to-isaac</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/trace_archive/&quot;</span>
 </code></pre></div>
 <ol>
 <li>The KB holds the <code>skills_catalog__k-dense-ai-scientific-agent-skills</code>
@@ -1788,14 +1800,17 @@ with a line on what each is.</p>
    mirrored into the agent's native skills directory.</li>
 <li>A <code>vasp-to-isaac</code> skill, authored via <code>skill-creator</code> and parsing with
    <code>pymatgen.io.vasp</code>, exists and is natively discoverable.</li>
-<li><code>audit/mock_slab_isaac.json</code> was produced from the mock slab directory and
-   matches the ISAAC shape and values.</li>
+<li><code>audit/mock_slab_isaac.json</code> was produced from the mock slab directory by a
+   registered code, with a record in <code>trace_archive/</code>, and matches the ISAAC shape
+   and values.</li>
 <li>The <code>vasp-to-isaac</code> skill has a second script, <code>vasp_neb_to_isaac.py</code>, and
-   the code registry contains the <code>vasp-neb-to-isaac</code> spec.</li>
+   the code registry contains the <code>vasp-neb-to-isaac</code> spec at
+   <code>skills/vasp-neb-to-isaac/SKILL.md</code>.</li>
 <li><code>data/neb_record.json</code> has the structure of the reference <code>data/isaac_neb_record.json</code>
-   and agrees with it on the method, the image count, the reaction, and the energy series
-   (other fields, such as notes and the method's sub-fields, may differ); <code>trace_archive/</code>
-   holds every NEB conversion attempt, including any that failed the comparison.</li>
+   and agrees with it on the method, the image count, the reaction, and the energy series,
+   with the method sub-fields parsed from the OUTCARs (free-text fields, such as notes
+   and identifiers, may differ); <code>trace_archive/</code> holds every NEB conversion attempt,
+   including any that failed the comparison.</li>
 <li><code>pipeline.sh</code> replays every recorded NEB conversion.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session —
    <code>dsagt traces isaac-vasp</code>.</li>
