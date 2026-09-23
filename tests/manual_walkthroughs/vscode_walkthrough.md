@@ -40,7 +40,7 @@ Inside VS Code:
 
 1. > Ingest the docs in `$SMOKE_DIR/knowledge/` into a collection named `knowledge`.
 2. > I have a CSV utility called `csvtool`. Its reference is at `$SMOKE_DIR/knowledge/api_reference.md` — register the `filter` subcommand. Use an underscore in the name.
-3. > Use the `scan-directory` tool from the registry to scan `$SMOKE_DIR/data/`.
+3. > Use the `datacard-introspect` code from the registry to summarize `$SMOKE_DIR/data/`.
 4. > Look at `$SMOKE_DIR/data/samples.csv` and summarize — columns, row count, quality issues.
 5. > Put this in explicit memory: samples.csv has null values in the status and timestamp columns.
 6. > What do you remember about the samples dataset?
@@ -53,7 +53,7 @@ Close the extension chat / VS Code session when done.
 
 ```bash
 dsagt info smoke-<AGENT>
-ls ~/dsagt-projects/smoke-<AGENT>/codes/
+ls ~/dsagt-projects/smoke-<AGENT>/skills/
 ls ~/dsagt-projects/smoke-<AGENT>/trace_archive/
 test -s ~/dsagt-projects/smoke-<AGENT>/explicit_memories.yaml && echo OK
 ```

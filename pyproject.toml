@@ -37,7 +37,7 @@ dependencies = [
     "chromadb>=1.5.1",                 # vector store
     "rank-bm25>=0.2.2",                # sparse keyword retrieval
     "aidrin>=2026.8.2,<2027",          # AI Data Readiness Inspector CLI; the readiness assessment's check
-    "uv>=0.5",                         # runs codes with declared dependencies (uv run --with) and install_dependencies
+    "uv>=0.5",                         # runs codes with declared dependencies (uv run --with)
 ]
 
 [project.scripts]
@@ -85,7 +85,7 @@ version = {attr = "dsagt.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-dsagt = ["py.typed", "codes/**/*", "dsagt_instructions.md"]
+dsagt = ["py.typed", "dsagt_instructions.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

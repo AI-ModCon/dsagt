@@ -5,11 +5,11 @@ to build the requested assets into the shared ``~/dsagt-projects/kb_index/``
 once, then copies them per project.
 
 Asset namespace (the ``--include`` / ``--exclude`` selectors on ``dsagt init``):
-- ``tools``                bundled tool specs (cheap, local)
+- ``codes``                the base-skill code specs (cheap, local)
 - skill catalogs           ``genesis`` (default), ``scientific``, ``composio``, …
 - scientific collections   ``nemo_curator`` (clones the external repo; docs + papers only, not source)
 
-:data:`DEFAULT_ASSETS` (bundled tools + the genesis skill catalog) is the
+:data:`DEFAULT_ASSETS` (the base-skill codes + the genesis skill catalog) is the
 cheap set installed automatically on a machine's first project.  Embedding
 config comes from the project's ``.dsagt/config.yaml`` (local backend by
 default — no credentials needed).
@@ -381,7 +381,7 @@ def _current_dsagt_version() -> str:
 #
 # Three kinds, all built into the shared ``~/dsagt-projects/kb_index/`` and
 # copied per-project:
-#   "codes"        bundled tool specs (package data; cheap, fully local)
+#   "codes"        the base-skill code specs (cheap, fully local)
 #   <catalog>      a skill-catalog source from ``skills.KNOWN_SOURCES``
 #                  (e.g. "genesis", "k-dense-ai", "composio", "antigravity")
 #   <collection>   a heavy scientific doc collection from ``COLLECTIONS``
@@ -391,7 +391,7 @@ def _current_dsagt_version() -> str:
 # automatically; everything else is opt-in via ``--include``.
 # ---------------------------------------------------------------------------
 
-#: The default per-project / first-init asset set: bundled tools + the
+#: The default per-project / first-init asset set: the base-skill codes + the
 #: genesis skill catalog.  Kept deliberately cheap (one small local embed +
 #: one git clone) so onboarding needs no manual step.
 DEFAULT_ASSETS: tuple[str, ...] = ("codes", "genesis")
@@ -476,7 +476,7 @@ def _model_is_cached(model_id: str) -> bool:
         return True
 
 
-#: Written into the shared ``codes`` collection by :func:`_build_bundled_tools`;
+#: Written into the shared ``codes`` collection by :func:`_build_codes`;
 #: :func:`ensure_assets` rebuilds the collection when the file differs from
 #: :func:`_codes_stamp`, so a dsagt upgrade or a changed base-skill code
 #: refreshes every later init without a manual cache wipe.
@@ -486,26 +486,16 @@ CODES_STAMP_FILE = "CODES_STAMP"
 def _codes_entries() -> list[tuple[str, dict]]:
     """The text and metadata of every entry the shared ``codes`` collection holds.
 
-    The package codes are their SKILL.md files.  The base-skill codes are
-    rendered from :func:`dsagt.skills.base_skill_code_specs` by the same
-    function ``save_tool`` uses, so the embedded text equals the file init
-    writes into the project.  Neither depends on a project, which is what
-    lets the collection be built once and copied.
+    The base-skill codes are rendered from
+    :func:`dsagt.skills.base_skill_code_specs` by the same function
+    ``save_tool`` uses, so the embedded text equals the file init writes into
+    the project.  A spec depends on no project, which is what lets the
+    collection be built once and copied.
     """
-    from dsagt.registry import (
-        CodeRegistry,
-        _parse_frontmatter,
-        code_metadata,
-        render_code_spec,
-    )
+    from dsagt.registry import code_metadata, render_code_spec
     from dsagt.skills import base_skill_code_specs
 
     entries: list[tuple[str, dict]] = []
-    for path in sorted(CodeRegistry._PACKAGE_CODES_DIR.glob("*/SKILL.md")):
-        spec = _parse_frontmatter(path)
-        if spec.get("name"):
-            spec.setdefault("executable", "")
-            entries.append((path.read_text(), code_metadata(spec, "bundled")))
     for spec in base_skill_code_specs():
         text = render_code_spec(spec)
         wrapped = _parse_frontmatter_text(text)
@@ -540,8 +530,8 @@ def _codes_current(index_dir: Path) -> bool:
     )
 
 
-def _build_bundled_tools(kb, index_dir: Path) -> int:
-    """(Re)build the shared ``codes`` collection: package codes and base-skill codes.
+def _build_codes(kb, index_dir: Path) -> int:
+    """(Re)build the shared ``codes`` collection of base-skill codes.
 
     Wipe-and-rebuild, then write :data:`CODES_STAMP_FILE`.  Returns the
     number indexed.
@@ -636,8 +626,8 @@ def ensure_assets(
 
         for asset in to_build:
             if asset == "codes":
-                print("  Indexing bundled tools and base-skill codes …", flush=True)
-                _build_bundled_tools(kb, index_dir)
+                print("  Indexing the base-skill codes …", flush=True)
+                _build_codes(kb, index_dir)
                 built.append(asset)
             elif asset in KNOWN_SOURCES:
                 print(f"  Fetching skill catalog: {asset} …", flush=True)

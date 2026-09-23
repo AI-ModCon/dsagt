@@ -29,7 +29,6 @@ def _make_merged_server(tmp_path: Path):
     kb.collections = []
     runtime = str(tmp_path / "runtime")
     reg = CodeRegistry(runtime_dir=runtime, kb=None)
-    reg.ensure_bundled_copies()
     sreg = SkillRegistry(runtime_dir=runtime, kb=None)
     return create_dsagt_server(reg, kb, sreg, runtime_dir=runtime)
 
@@ -48,30 +47,31 @@ def test_merged_server_exposes_all_tools(tmp_path):
     """Both concern modules' tools land under one server with no collision."""
     server = _make_merged_server(tmp_path)
     names = _list_tools(server)
-    # 6 registry + 5 knowledge + 2 memory + 5 skill = 18 distinct tools.
+    # 5 registry + 6 knowledge + 2 memory + 6 skill = 19 distinct tools.
     assert set(names) == {
-        # registry / provenance (6)
+        # registry / provenance (5)
         "get_registry",
         "search_registry",
         "save_code_spec",
-        "install_dependencies",
         "reconstruct_pipeline",
         "readiness_reports",
-        # knowledge (5)
+        # knowledge (6)
         "kb_search",
         "kb_ingest",
         "kb_list_collections",
         "kb_job_status",
+        "kb_delete_collection",
         "kb_append",
         # memory (2)
         "kb_remember",
         "kb_get_memories",
-        # skills (5)
+        # skills (6)
         "search_skills",
         "install_skill",
         "save_skill",
         "add_skill_source",
         "list_skill_sources",
+        "delete_skill",
     }
     assert len(set(names)) == len(names)  # no name collision
 
@@ -152,6 +152,14 @@ def test_dispatch_root_span_never_stores_credentials_or_payloads(tmp_path, monke
 def test_registry_tool_returns_plain_string(tmp_path):
     """Registry handlers return a bare string — passed through unchanged."""
     server = _make_merged_server(tmp_path)
+    CodeRegistry(runtime_dir=str(tmp_path / "runtime"), kb=None).save_tool(
+        {
+            "name": "ping",
+            "description": "Print pong.",
+            "executable": "echo pong",
+            "parameters": {},
+        }
+    )
     out = _call(server, "get_registry", {})
     # Not JSON — the registry contract is a human-readable string.
     with pytest.raises(json.JSONDecodeError):
@@ -514,4 +522,14 @@ def test_the_agent_card_lists_the_tools_the_server_serves(tmp_path):
     card = (Path(__file__).resolve().parents[1] / "agent-card.md").read_text()
     listed = {m.group(1) for m in re.finditer(r"^- `(\w+)` — ", card, re.M)}
     assert listed == served
-    assert f"All {len(served)} tools live" in card
+    # Every count the card states of the current server, not just the one
+    # beside the list: they drifted apart from each other before they drifted
+    # from the server.  A release-history line states the count of its own
+    # release and is left alone.
+    counts = {
+        int(n)
+        for line in card.splitlines()
+        if not re.search(r"\bv\d+\.\d+", line)
+        for n in re.findall(r"\b(\d+) tools\b", line)
+    }
+    assert counts == {len(served)}, f"card states {sorted(counts)} tools"

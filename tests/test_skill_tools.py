@@ -272,3 +272,91 @@ class TestSkillSources:
             server, "add_skill_source", {"source": "not-a-real-known-name"}
         )
         assert "error" in result
+
+
+class TestReplacingAnInstalledSkill:
+    """save_skill leaves a catalog skill alone; delete_skill is the way out."""
+
+    def _installed(self, tmp_path, name="croissant-validator"):
+        d = tmp_path / "runtime" / "skills" / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: upstream\n---\n")
+        (d / "PROVENANCE.txt").write_text("source: genesis\n")
+        return d
+
+    def test_save_skill_refuses_a_skill_installed_from_a_catalog(self, tmp_path):
+        server, _, _ = _make_skill_server(tmp_path)
+        d = self._installed(tmp_path)
+
+        text = call_tool_sync(
+            server,
+            "save_skill",
+            {"spec": {"name": d.name, "description": "mine"}, "body": "# mine\n"},
+        )
+
+        assert "was installed from a catalog" in text
+        assert "delete_skill" in text
+        assert "upstream" in (d / "SKILL.md").read_text()
+
+    def test_an_authored_skill_is_still_updated(self, tmp_path):
+        server, _, _ = _make_skill_server(tmp_path)
+        spec = {"name": "mine", "description": "first"}
+        call_tool_sync(server, "save_skill", {"spec": spec, "body": "# mine\n"})
+
+        text = call_tool_sync(
+            server,
+            "save_skill",
+            {"spec": {"name": "mine", "description": "second"}, "body": "# again\n"},
+        )
+
+        assert "updated" in text
+        md = (tmp_path / "runtime" / "skills" / "mine" / "SKILL.md").read_text()
+        assert "second" in md
+
+    def test_delete_skill_clears_the_way(self, tmp_path):
+        server, _, _ = _make_skill_server(tmp_path)
+        d = self._installed(tmp_path)
+
+        text = call_tool_sync(server, "delete_skill", {"name": d.name})
+        assert "Deleted skill" in text
+        assert not d.exists()
+
+        text = call_tool_sync(
+            server,
+            "save_skill",
+            {"spec": {"name": d.name, "description": "mine"}, "body": "# mine\n"},
+        )
+        assert "added" in text
+
+    def test_delete_skill_reports_an_unknown_name(self, tmp_path):
+        server, _, _ = _make_skill_server(tmp_path)
+        assert "no installed skill" in call_tool_sync(
+            server, "delete_skill", {"name": "nope"}
+        )
+
+
+class TestScriptRegistrationFails:
+    """The skill is on disk by then, so the reply says what stands."""
+
+    def test_save_skill_reports_the_skill_and_the_failure(self, tmp_path, monkeypatch):
+        server, _, _ = _make_skill_server(tmp_path)
+
+        def boom(*a, **k):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr("dsagt.mcp.skill_tools.register_skill_scripts", boom)
+        text = call_tool_sync(
+            server,
+            "save_skill",
+            {"spec": {"name": "half", "description": "d"}, "body": "# half\n"},
+        )
+
+        assert "was written to skills/half/" in text
+        assert "No space left on device" in text
+        assert "delete_skill" in text
+        # It is on disk, and delete_skill is the way to clear it.
+        assert (tmp_path / "runtime" / "skills" / "half" / "SKILL.md").exists()
+        assert "Deleted skill 'half'" in call_tool_sync(
+            server, "delete_skill", {"name": "half"}
+        )
+        assert not (tmp_path / "runtime" / "skills" / "half").exists()

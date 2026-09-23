@@ -112,7 +112,7 @@ def _write_tool(codes_dir, spec: dict) -> None:
 def make_registry(tmp_path, tools: list[dict]) -> CodeRegistry:
     """Create a CodeRegistry with the given tool definitions."""
     runtime_dir = tmp_path / "runtime"
-    codes_dir = runtime_dir / "codes"
+    codes_dir = runtime_dir / "skills"
     codes_dir.mkdir(parents=True, exist_ok=True)
     for tool in tools:
         _write_tool(codes_dir, tool)
@@ -338,75 +338,13 @@ class TestSaveTool:
 # ---------------------------------------------------------------------------
 
 
-class TestBundledCopies:
+class TestFreshRegistry:
 
-    def test_copies_bundled_codes_into_project(self, tmp_path):
-        """ensure_bundled_copies lands each packaged code dir in codes/."""
-        reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
-        actions = reg.ensure_bundled_copies()
-        assert any("scan-directory" in a for a in actions)
-        copied = tmp_path / "rt" / "codes" / "scan-directory"
-        assert (copied / "SKILL.md").exists()
-        # Fully self-contained: the implementation script rides along.
-        assert (copied / "scripts" / "scan_directory.py").exists()
-        assert reg.get_code("scan-directory") is not None
-
-    def test_never_clobbers_existing_copy(self, tmp_path):
-        """A user-edited (or agent-overridden) code dir is left untouched."""
-        reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
-        reg.ensure_bundled_copies()
-        spec = tmp_path / "rt" / "codes" / "scan-directory" / "SKILL.md"
-        spec.write_text(spec.read_text() + "\nUser edit.\n")
-        actions = reg.ensure_bundled_copies()
-        assert actions == []
-        assert "User edit." in spec.read_text()
-
-    def test_package_source_unmodified(self, tmp_path):
-        """Copying never touches the packaged source dirs."""
-        before = sorted(
-            p.relative_to(CodeRegistry._PACKAGE_CODES_DIR)
-            for p in CodeRegistry._PACKAGE_CODES_DIR.rglob("*")
-        )
-        CodeRegistry(runtime_dir=str(tmp_path / "rt")).ensure_bundled_copies()
-        after = sorted(
-            p.relative_to(CodeRegistry._PACKAGE_CODES_DIR)
-            for p in CodeRegistry._PACKAGE_CODES_DIR.rglob("*")
-        )
-        assert before == after
-
-
-# ---------------------------------------------------------------------------
-# Default skills
-# ---------------------------------------------------------------------------
-
-
-class TestDefaultTools:
-    """Validate the tool files that ship with the package."""
-
-    def test_tools_directory_exists(self):
-        """The package ships a tools directory."""
-        assert CodeRegistry._PACKAGE_CODES_DIR.exists()
-        assert CodeRegistry._PACKAGE_CODES_DIR.is_dir()
-
-    def test_tools_are_valid(self):
-        """Every tool file must parse cleanly and have required fields."""
-        tool_files = list(CodeRegistry._PACKAGE_CODES_DIR.glob("*/SKILL.md"))
-        assert len(tool_files) > 0, "No tool files found in package"
-
-        for path in tool_files:
-            tool = _parse_frontmatter(path)
-            assert tool.get("name"), f"{path.name}: missing 'name'"
-            assert tool.get("description"), f"{path.name}: missing 'description'"
-            assert tool.get("executable"), f"{path.name}: missing 'executable'"
-            assert "parameters" in tool, f"{path.name}: missing 'parameters'"
-
-    def test_bundled_codes_appear_after_copy(self, tmp_path):
-        """A fresh registry is empty until ensure_bundled_copies runs."""
+    def test_fresh_registry_is_empty(self, tmp_path):
+        """A registry with no saved code lists nothing."""
         reg = CodeRegistry(runtime_dir=str(tmp_path / "rt"))
         assert reg.list_codes() == []
-        reg.ensure_bundled_copies()
-        names = [t["name"] for t in reg.list_codes()]
-        assert "scan-directory" in names
+        assert reg.get_code("datacard-introspect") is None
 
 
 # ---------------------------------------------------------------------------
@@ -516,6 +454,71 @@ def test_save_tool_writes_the_rendered_spec(tmp_path):
     }
     registry = CodeRegistry(runtime_dir=tmp_path)
     assert registry.save_tool(spec) == "added"
-    written = (tmp_path / "codes" / "count-rows" / "SKILL.md").read_text()
+    written = (tmp_path / "skills" / "count-rows" / "SKILL.md").read_text()
     assert written == render_code_spec(spec)
     assert "dsagt-run --code count-rows -- uv run --with pandas -- python" in written
+
+
+class TestDeleteSkill:
+    """One deletion path for a skill and for a code."""
+
+    def _skill(self, project, name, executable=None, provenance=False):
+        d = project / "skills" / name
+        d.mkdir(parents=True)
+        front = f"name: {name}\ndescription: d\n"
+        if executable:
+            front += f"executable: {executable}\n"
+        (d / "SKILL.md").write_text(f"---\n{front}---\n\n# {name}\n")
+        if provenance:
+            (d / "PROVENANCE.txt").write_text("from: catalog\n")
+        return d
+
+    def test_a_skill_its_mirror_and_its_kb_entry_go(self, tmp_path):
+        from dsagt.session import build_config, write_config_file
+        from dsagt.skills import delete_skill
+
+        # refresh_native_skills mirrors only for a project with a configured
+        # agent, which is what removes the entry the manifest owns.
+        write_config_file(tmp_path, build_config("t", "claude"))
+        self._skill(tmp_path, "keep")
+        self._skill(tmp_path, "gone", executable="dsagt-run --code gone -- python x.py")
+
+        class FakeKB:
+            def __init__(self):
+                self.calls = []
+
+            def delete_entries(self, collection, where):
+                self.calls.append((collection, where))
+                return 1
+
+        kb = FakeKB()
+        result = delete_skill(tmp_path, "gone", kb=kb)
+
+        assert result == {"name": "gone", "was_code": True, "entries_removed": 1}
+        assert kb.calls == [("codes", {"code_name": "gone"})]
+        assert not (tmp_path / "skills" / "gone").exists()
+        assert (tmp_path / "skills" / "keep" / "SKILL.md").exists()
+        assert not (tmp_path / ".claude" / "skills" / "gone").exists()
+        assert (tmp_path / ".claude" / "skills" / "keep").is_symlink()
+
+    def test_a_skill_that_is_not_a_code_has_no_entry_to_remove(self, tmp_path):
+        from dsagt.skills import delete_skill
+
+        (tmp_path / ".claude" / "skills").mkdir(parents=True)
+        self._skill(tmp_path, "notes")
+
+        class FakeKB:
+            def delete_entries(self, collection, where):
+                return 0
+
+        result = delete_skill(tmp_path, "notes", kb=FakeKB())
+        assert result["was_code"] is False and result["entries_removed"] == 0
+        assert not (tmp_path / "skills" / "notes").exists()
+
+    def test_an_absent_skill_raises(self, tmp_path):
+        import pytest
+
+        from dsagt.skills import delete_skill
+
+        with pytest.raises(FileNotFoundError):
+            delete_skill(tmp_path, "nope")

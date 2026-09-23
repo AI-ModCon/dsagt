@@ -3,6 +3,7 @@ the native-skill mirror.  No network: ``clone_github`` is monkeypatched and
 the KB is a lightweight fake that records ``add_entries`` calls."""
 
 import json
+import os
 
 import pytest
 
@@ -128,33 +129,49 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
     provenance = (proj / "skills" / "datacard-generator" / "PROVENANCE.txt").read_text()
     assert "Commit: ai-modcon-genesis-skills-commit" in provenance
     # The scripts the datacard workflow runs, and the aidrin CLI, are codes.
-    assert (proj / "codes" / "datacard-introspect" / "SKILL.md").exists()
-    assert (proj / "codes" / "datacard-validate" / "SKILL.md").exists()
-    assert (proj / "codes" / "aidrin" / "SKILL.md").exists()
+    assert (proj / "skills" / "datacard-introspect" / "SKILL.md").exists()
+    assert (proj / "skills" / "datacard-validate" / "SKILL.md").exists()
+    assert (proj / "skills" / "aidrin" / "SKILL.md").exists()
 
 
-def test_register_base_skill_codes_wraps_scripts_in_place(tmp_path):
+def _base_skill_dirs(proj):
+    """Each base skill's directory with a SKILL.md and the scripts its codes name."""
+    for entry in sc.base_skills():
+        skill_dir = proj / "skills" / entry["name"]
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {entry['name']}\ndescription: d\n---\n"
+        )
+        for code in entry.get("codes", ()):
+            if "script" not in code:
+                continue
+            script = skill_dir / code["script"]
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text("print('ok')\n")
+
+
+def _register_base(proj, kb=None):
+    stored = []
+    for entry in sc.base_skills():
+        stored += sc.register_skill_scripts(
+            proj,
+            entry["name"],
+            kb=kb,
+            overrides=sc._script_overrides(entry),
+            cli_codes=[c for c in entry.get("codes", ()) if "executable" in c],
+        )
+    return stored
+
+
+def test_base_skill_scripts_are_codes_through_the_shared_registration(tmp_path):
     """Each base-skill code runs the installed skill's script through
     ``dsagt-run``, with ``uv run --with`` for the entries that declare
     dependencies, and a re-run updates instead of duplicating."""
     from dsagt.registry import CodeRegistry
 
     proj = tmp_path / "proj"
-    for entry in sc.base_skills():
-        for code in entry.get("codes", ()):
-            if "script" not in code:
-                continue
-            script = proj / "skills" / entry["name"] / code["script"]
-            script.parent.mkdir(parents=True, exist_ok=True)
-            script.write_text("print('ok')\n")
-
-    actions = sc.register_base_skill_codes(proj)
-    assert actions == [
-        "added datacard-introspect",
-        "added datacard-validate",
-        "added datacard-convert-v1",
-        "added aidrin",
-    ]
+    _base_skill_dirs(proj)
+    stored = _register_base(proj)
     registry = CodeRegistry(runtime_dir=proj)
     introspect = registry.get_code("datacard-introspect")
     assert introspect["executable"] == (
@@ -162,6 +179,7 @@ def test_register_base_skill_codes_wraps_scripts_in_place(tmp_path):
         "python skills/datacard-generator/scripts/introspect.py"
     )
     assert introspect["parameters"]["dataset_dir"]["cli"] == "positional"
+    assert introspect["parameters"]["dataset_dir"]["role"] == "input"
     validate = registry.get_code("datacard-validate")
     assert validate["executable"] == (
         "dsagt-run --code datacard-validate -- uv run --with pyyaml,pydantic -- "
@@ -173,15 +191,33 @@ def test_register_base_skill_codes_wraps_scripts_in_place(tmp_path):
     aidrin = registry.get_code("aidrin")
     assert aidrin["executable"] == "dsagt-run --code aidrin -- aidrin"
     assert aidrin["parameters"]["args"]["cli"] == "positional"
+    assert set(stored) == {
+        introspect["executable"],
+        validate["executable"],
+        registry.get_code("datacard-convert-v1")["executable"],
+        aidrin["executable"],
+    }
+    # Idempotent: the same specs, no duplicates.
+    _register_base(proj)
+    assert sorted(c["name"] for c in registry.list_codes_raw()) == [
+        "aidrin",
+        "datacard-convert-v1",
+        "datacard-introspect",
+        "datacard-validate",
+    ]
 
-    assert sc.register_base_skill_codes(proj)[0] == "updated datacard-introspect"
 
-
-def test_register_base_skill_codes_requires_the_script(tmp_path):
+def test_registration_requires_the_script_an_override_names(tmp_path):
     proj = tmp_path / "proj"
     (proj / "skills" / "datacard-generator").mkdir(parents=True)
+    (proj / "skills" / "datacard-generator" / "SKILL.md").write_text(
+        "---\nname: x\n---\n"
+    )
+    entry = next(e for e in sc.base_skills() if e["name"] == "datacard-generator")
     with pytest.raises(FileNotFoundError, match="datacard-generator"):
-        sc.register_base_skill_codes(proj)
+        sc.register_skill_scripts(
+            proj, "datacard-generator", overrides=sc._script_overrides(entry)
+        )
 
 
 def test_persist_source_to_config_appends_and_dedupes(tmp_path):
@@ -469,8 +505,7 @@ def test_rewrite_cli_invocations_to_the_registered_code(tmp_path):
     (skill / "reference" / "metrics.md").write_text("`aidrin run duplicity <file>`\n")
     (skill / "PROVENANCE.txt").write_text("Installed by dsagt from catalog source: x\n")
 
-    pairs = sc.native_invocations()["aidrin"]
-    assert pairs == [("aidrin", "dsagt-run --code aidrin -- aidrin")]
+    pairs = [("aidrin", "dsagt-run --code aidrin -- aidrin")]
     assert sc.rewrite_cli_invocations(skill, pairs) == 4
     text = (skill / "SKILL.md").read_text()
     assert "Run `dsagt-run --code aidrin -- aidrin run completeness <file>`" in text
@@ -705,8 +740,8 @@ def test_install_base_skills_finishes_the_others_when_one_fetch_fails(
         sc.install_base_skills(proj, cache_dir=cache)
     assert (proj / "skills" / "skill-creator" / "SKILL.md").exists()
     assert (proj / "skills" / "datacard-generator" / "SKILL.md").exists()
-    assert (proj / "codes" / "datacard-introspect" / "SKILL.md").exists()
-    assert not (proj / "codes" / "aidrin").exists()
+    assert (proj / "skills" / "datacard-introspect" / "SKILL.md").exists()
+    assert not (proj / "skills" / "aidrin").exists()
 
 
 def test_base_skill_code_specs_hold_no_project_path():
@@ -725,7 +760,7 @@ def test_base_skill_code_specs_hold_no_project_path():
     )
 
 
-def test_register_base_skill_codes_indexes_into_the_kb(tmp_path):
+def test_registration_indexes_into_the_kb(tmp_path):
     """With a knowledge base, each registered code is added to the ``codes``
     collection, so ``search_registry`` finds it."""
     from dsagt.registry import CODES_COLLECTION
@@ -738,14 +773,9 @@ def test_register_base_skill_codes_indexes_into_the_kb(tmp_path):
             self.added.append((collection, [m["code_name"] for m in metadatas]))
 
     proj = tmp_path / "proj"
-    for entry in sc.base_skills():
-        for code in entry.get("codes", ()):
-            if "script" in code:
-                script = proj / "skills" / entry["name"] / code["script"]
-                script.parent.mkdir(parents=True, exist_ok=True)
-                script.write_text("print('ok')\n")
+    _base_skill_dirs(proj)
     kb = FakeKB()
-    sc.register_base_skill_codes(proj, kb=kb)
+    _register_base(proj, kb=kb)
     names = [n for coll, ns in kb.added if coll == CODES_COLLECTION for n in ns]
     assert "aidrin" in names and "datacard-introspect" in names
 
@@ -772,3 +802,66 @@ def test_a_previous_clone_left_behind_is_not_a_source(tmp_path, monkeypatch):
         cache_dir=cache,
     )
     assert not (cache / "x-y.previous").exists()
+
+
+def test_mirror_is_a_relative_symlink_to_the_live_skill(tmp_path):
+    """The agent reads the live files: a script edited under skills/ is what
+    the mirrored skill runs, with no copy to go stale."""
+    src = _mkskill(tmp_path / "proj" / "skills" / "alpha", "alpha")
+    (src / "scripts").mkdir()
+    (src / "scripts" / "a.py").write_text("print(1)\n")
+    target = tmp_path / "proj" / ".claude" / "skills"
+    _mirror_skills_to(target, [src])
+    link = target / "alpha"
+    assert link.is_symlink()
+    assert not os.path.isabs(os.readlink(link))
+    assert (link / "scripts" / "a.py").read_text() == "print(1)\n"
+    (src / "scripts" / "a.py").write_text("print(2)\n")
+    assert (link / "scripts" / "a.py").read_text() == "print(2)\n"
+    # A second pass replaces the link in place; reaping removes it.
+    _mirror_skills_to(target, [src])
+    assert link.is_symlink()
+    _mirror_skills_to(target, [])
+    assert not link.exists() and not link.is_symlink()
+
+
+def test_a_line_naming_two_scripts_wraps_both(tmp_path):
+    """The guard is per command, not per line.
+
+    A line mentioning two scripts held a dsagt-run once the first pair was
+    applied, and reading that as "already wrapped" left the second bare.
+    """
+    from dsagt.skills import rewrite_cli_invocations
+
+    skill = tmp_path / "x"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "Run python scripts/extract.py and python scripts/load.py in order.\n"
+    )
+    pairs = [
+        (
+            "python scripts/extract.py",
+            "dsagt-run --code x-extract -- python scripts/extract.py",
+        ),
+        ("python scripts/load.py", "dsagt-run --code x-load -- python scripts/load.py"),
+    ]
+    rewrite_cli_invocations(skill, pairs)
+    text = (skill / "SKILL.md").read_text()
+    assert "dsagt-run --code x-extract -- python scripts/extract.py" in text
+    assert "dsagt-run --code x-load -- python scripts/load.py" in text
+
+    # Applying the same pairs again leaves the text alone.
+    rewrite_cli_invocations(skill, pairs)
+    assert (skill / "SKILL.md").read_text() == text
+
+
+def test_a_script_code_name_is_valid_for_a_skill_named_with_underscores(tmp_path):
+    """save_tool refuses a name outside the lowercase-hyphen charset."""
+    from pathlib import Path
+
+    from dsagt.registry import _CODE_NAME_RE
+    from dsagt.skills import script_code_name
+
+    name = script_code_name("csv_inspector", Path("foo_bar.py"))
+    assert name == "csv-inspector-foo-bar"
+    assert _CODE_NAME_RE.match(name)

@@ -43,7 +43,6 @@ _BLOCK_END = "<!-- dsagt:end -->"
 _DSAGT_MCP_ALWAYS_ALLOW = [
     "add_skill_source",
     "get_registry",
-    "install_dependencies",
     "install_skill",
     "kb_append",
     "kb_get_memories",
@@ -239,15 +238,41 @@ def _truncate_native_description(skill_md: Path) -> None:
         skill_md.write_text(f"---\n{new_front}---{parts[2]}")
 
 
+def _description_fits_native_cap(skill_md: Path) -> bool:
+    import yaml
+
+    text = skill_md.read_text()
+    parts = text.split("---", 2)
+    if not text.startswith("---") or len(parts) < 3:
+        return True
+    try:
+        front = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        return True
+    desc = front.get("description")
+    return not (isinstance(desc, str) and len(desc) > _NATIVE_DESCRIPTION_CAP)
+
+
+def _remove_mirror_entry(dest: Path) -> None:
+    if dest.is_symlink():
+        dest.unlink()
+    elif dest.is_dir():
+        shutil.rmtree(dest)
+
+
 def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
     """Idempotently mirror *skill_dirs* into *target_dir* (e.g. .claude/skills).
 
-    Copies each skill directory (SKILL.md + scripts/ + references/) under
-    ``target_dir/<dir-name>/``.  A manifest tracks the names dsagt owns so a
-    later run reaps skills that were removed upstream **without ever
-    touching user-authored skills** that dsagt didn't place.  ``skill_dirs``
-    should list bundled dirs before project dirs so a project skill wins a
-    name collision (copied last).
+    Links each skill directory (SKILL.md + scripts/ + references/) at
+    ``target_dir/<dir-name>``, a relative symlink, so the agent reads the
+    live files and an edit to a skill's script or SKILL.md under ``skills/``
+    is what the next invocation sees; Claude Code and Codex both follow the
+    link.  A skill whose description exceeds the native cap is copied instead
+    and the copy's description truncated, since a link cannot be trimmed.  A
+    manifest tracks the names dsagt owns so a later run reaps skills that
+    were removed upstream **without ever touching user-authored skills**
+    that dsagt didn't place.  ``skill_dirs`` should list bundled dirs before
+    project dirs so a project skill wins a name collision (placed last).
     """
     actions: list[str] = []
     manifest_path = target_dir / _SKILL_MANIFEST
@@ -265,18 +290,18 @@ def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
             continue
         name = src.name
         dest = target_dir / name
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(src, dest)
-        _truncate_native_description(dest / "SKILL.md")
+        _remove_mirror_entry(dest)
+        if _description_fits_native_cap(src / "SKILL.md"):
+            dest.symlink_to(os.path.relpath(src.resolve(), target_dir.resolve()))
+        else:
+            shutil.copytree(src, dest)
+            _truncate_native_description(dest / "SKILL.md")
         if name not in managed:
             managed.append(name)
 
     # Reap skills dsagt placed on an earlier run that are gone from the source set.
     for stale in set(previously) - set(managed):
-        stale_dir = target_dir / stale
-        if stale_dir.is_dir():
-            shutil.rmtree(stale_dir, ignore_errors=True)
+        _remove_mirror_entry(target_dir / stale)
 
     manifest_path.write_text(json.dumps(sorted(managed), indent=2) + "\n")
     if managed:
@@ -406,7 +431,7 @@ class AgentSetup(ABC):
         """Mirror installed skills AND registered codes into the agent's
         native skills dir so it auto-discovers/auto-invokes them.
 
-        Codes share the skill-standard envelope (``codes/<name>/SKILL.md``),
+        Codes share the skill-standard envelope and the ``skills/`` directory,
         so the same copy serves both: native discovery puts a code's exact
         dsagt-run command in context at invocation time — a second discovery
         path alongside ``search_registry``, aimed at the from-memory
@@ -421,14 +446,9 @@ class AgentSetup(ABC):
             return []
         if not (config.get("skills") or {}).get("populate_native", True):
             return []
-        from dsagt.registry import CodeRegistry, SkillRegistry
+        from dsagt.registry import SkillRegistry
 
-        codes = CodeRegistry(runtime_dir=working_dir, kb=None)
-        reg = SkillRegistry(runtime_dir=working_dir, kb=None)
-        # Later entries win name collisions: codes first, then project
-        # skills — a deliberately installed instruction skill outranks a
-        # registered code of the same name.
-        src_dirs = codes.code_dirs() + reg.skill_dirs()
+        src_dirs = SkillRegistry(runtime_dir=working_dir, kb=None).skill_dirs()
         target = working_dir
         for part in self.native_skills_dir.split("/"):
             target = target / part

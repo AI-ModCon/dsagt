@@ -763,20 +763,6 @@ def registry_save_code_span(code_name: str | None):
     )
 
 
-def registry_install_deps_span(packages: list[str] | None):
-    """Span around an ``install_dependencies`` call."""
-    from mlflow.entities import SpanType
-
-    return child_span(
-        "registry.install_dependencies",
-        span_type=SpanType.TOOL,
-        package_count=len(packages) if packages else 0,
-        # First few package names are useful in the UI for at-a-glance
-        # identification; full list is in the LLM call record if needed.
-        packages_preview=", ".join(packages[:5]) if packages else "",
-    )
-
-
 def registry_reconstruct_pipeline_span(fmt: str | None):
     """Span around a ``reconstruct_pipeline`` call."""
     from mlflow.entities import SpanType

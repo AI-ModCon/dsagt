@@ -14,8 +14,7 @@ Project directory layout::
             explicit_memories.yaml, ...   # explicit memory
         trace_archive/      # tool execution records
         mlflow.db           # serverless MLflow SQLite trace store (created lazily)
-        codes/<name>/       # registered codes (skill-standard dirs: SKILL.md + scripts/)
-        skills/             # instruction-based agent skills
+        skills/             # skills and registered codes (a code declares an executable)
         kb_index/           # knowledge base collections
 """
 
@@ -570,8 +569,8 @@ def _provision_kb(
     """Build the requested KB assets into the shared cache, then copy that
     set into the project.  Returns the resolved asset names.
 
-    The first project on a machine pays the one-time build (bundled tools +
-    genesis catalog by default); later projects just copy.  The copy is
+    The first project on a machine pays the one-time build (the base-skill
+    codes + genesis catalog by default); later projects just copy.  The copy is
     scoped to the requested set, so a project gets exactly what was asked
     for regardless of what else the shared cache holds.
 
@@ -712,7 +711,7 @@ def init_project(
     (agent switch, removed collections) with explicit per-change prompts.
 
     Knowledge base: provisioned with a chosen set of KB assets
-    (``include`` / ``exclude``, default = bundled tools + genesis catalog),
+    (``include`` / ``exclude``, default = the base-skill codes + genesis catalog),
     built once into the shared ``~/dsagt-projects/kb_index/`` and copied in.
 
     Returns the project directory.
@@ -732,14 +731,6 @@ def init_project(
     # ``mlflow.db`` is created lazily by the MLflow client on first span.
     for subdir in ("trace_archive", "skills", "audit", CONFIG_DIRNAME):
         (pdir / subdir).mkdir(parents=True, exist_ok=True)
-
-    # Bundled codes are copied into <project>/codes/ so every available
-    # code lives in one place, in one format (skill-standard dirs), fully
-    # self-contained.  Re-init after a package upgrade refreshes copies
-    # the user hasn't touched; edited/overridden dirs are never clobbered.
-    from dsagt.registry import CodeRegistry
-
-    CodeRegistry(runtime_dir=pdir).ensure_bundled_copies()
 
     assets = _provision_kb(pdir, include, exclude, embedding=embedding)
 

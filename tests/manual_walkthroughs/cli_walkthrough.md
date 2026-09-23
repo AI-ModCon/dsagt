@@ -44,11 +44,11 @@ cd ~/dsagt-projects/smoke-<AGENT> && <agent-launch-command>
 
 2. > I have a CSV utility called `csvtool`. Its reference is at `$SMOKE_DIR/knowledge/api_reference.md` — register the `filter` subcommand. Use an underscore in the name.
 
-   **Expect:** `save_code_spec` MCP call; `~/dsagt-projects/smoke-<AGENT>/codes/csvtool_filter.md` exists.
+   **Expect:** `save_code_spec` MCP call; `~/dsagt-projects/smoke-<AGENT>/skills/csvtool-filter/SKILL.md` exists.
 
-3. > Use the `scan-directory` tool from the registry to scan `$SMOKE_DIR/data/`.
+3. > Use the `datacard-introspect` code from the registry to summarize `$SMOKE_DIR/data/`.
 
-   **Expect:** Agent invokes `dsagt-run --code scan-directory ...`; one record in `~/dsagt-projects/smoke-<AGENT>/trace_archive/scan-directory_*.json`.
+   **Expect:** Agent invokes `dsagt-run --code datacard-introspect ...`; one record in `~/dsagt-projects/smoke-<AGENT>/trace_archive/datacard-introspect_*.json`.
 
 4. > Look at `$SMOKE_DIR/data/samples.csv` and summarize — columns, row count, quality issues.
 
@@ -68,7 +68,7 @@ Exit the agent (Ctrl+C / `/exit`).
 
 ```bash
 dsagt info smoke-<AGENT>
-ls ~/dsagt-projects/smoke-<AGENT>/codes/
+ls ~/dsagt-projects/smoke-<AGENT>/skills/
 ls ~/dsagt-projects/smoke-<AGENT>/trace_archive/
 test -s ~/dsagt-projects/smoke-<AGENT>/explicit_memories.yaml && echo OK
 ```

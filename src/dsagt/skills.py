@@ -49,6 +49,7 @@ from pathlib import Path
 import yaml
 
 from dsagt.registry import (
+    CODES_COLLECTION,
     CATALOG_COLLECTION_PREFIX,
     _parse_frontmatter,
     catalog_collection,
@@ -598,11 +599,11 @@ def base_skills() -> tuple[dict, ...]:
     ``force``.  The ``aidrin`` skill is fetched at the release tag of the
     installed ``aidrin`` package so it describes the CLI dsagt installs; the
     tag is read when this function is called, so importing the module never
-    touches package metadata.  ``codes`` lists what a skill's workflow runs;
-    each entry is registered as a code (:func:`register_base_skill_codes`) so
-    the agent runs it through ``dsagt-run`` and the run is recorded.  An entry
-    names either ``script``, relative to the skill directory, or
-    ``executable``, a command on the path.
+    touches package metadata.  ``codes`` is the overrides table for what a
+    skill's workflow runs: :func:`register_skill_scripts` registers every
+    script under ``scripts/`` and takes an entry here, when one names the
+    script, over the spec it would derive; an entry naming ``executable``
+    instead is a CLI the skill documents, registered the same way.
     """
     return (
         {"name": "skill-creator", "source": "genesis"},
@@ -735,8 +736,7 @@ def install_base_skills(
     """Install every :func:`base_skills` entry into ``<project>/skills/<name>/``
     and register the scripts they run as codes.
 
-    A skill already present in the project is left as it is, the rule
-    ``CodeRegistry.ensure_bundled_copies`` applies to codes: edits by the
+    A skill already present in the project is left as it is: edits by the
     user or the agent win, and deleting the directory and re-running init
     restores the upstream version.  Otherwise the source is cloned into the
     cache when absent or held at another ref, and reused as is when
@@ -750,10 +750,7 @@ def install_base_skills(
     for an installed skill, ``{name, dest_dir, action: "kept"}`` for one
     left in place.
     """
-    from dsagt.registry import CodeRegistry  # lazy: keeps this module light
-
     project_dir = Path(project_dir)
-    registry = CodeRegistry(runtime_dir=project_dir, kb=kb)
     results: list[dict] = []
     failures: list[str] = []
     for entry in base_skills():
@@ -772,10 +769,13 @@ def install_base_skills(
                 result = install_into_project(
                     qualified, project_dir, cache_dir=cache_dir
                 )
-                pairs = native_invocations().get(entry["name"])
-                if pairs:
-                    rewrite_cli_invocations(Path(result["dest_dir"]), pairs)
-            _register_skill_codes(registry, project_dir, entry)
+            register_skill_scripts(
+                project_dir,
+                entry["name"],
+                kb=kb,
+                overrides=_script_overrides(entry),
+                cli_codes=[c for c in entry.get("codes", ()) if "executable" in c],
+            )
         except (
             Exception
         ) as e:  # noqa: BLE001 — every skill gets its turn; the failures are raised together below
@@ -787,29 +787,6 @@ def install_base_skills(
     return results
 
 
-def native_invocations() -> dict[str, list[tuple[str, str]]]:
-    """Per base skill, the bare CLI commands its text uses and their registered forms.
-
-    A skill written upstream shows its CLI bare (``aidrin run …``); in a dsagt
-    project that CLI is a registered code whose executable carries the
-    ``dsagt-run`` prefix.  :func:`rewrite_cli_invocations` applies these pairs
-    to the installed copy, which is the text the agent reads.
-    """
-    table: dict[str, list[tuple[str, str]]] = {}
-    for entry in base_skills():
-        pairs = [
-            (
-                code["executable"],
-                f"dsagt-run --code {code['name']} -- {code['executable']}",
-            )
-            for code in entry.get("codes", ())
-            if "executable" in code
-        ]
-        if pairs:
-            table[entry["name"]] = pairs
-    return table
-
-
 def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> int:
     """Rewrite a skill's bare CLI commands to their registered form, in place.
 
@@ -817,52 +794,295 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
     (a fenced example) and after a backtick (an inline command), only where
     the command is followed by whitespace, so ``aidrin-mcp``, ``uv run
     aidrin``, a path segment, and the bare word are untouched.  A line that
-    already carries ``dsagt-run`` is left as it is.  Appends a line to the
-    skill's ``PROVENANCE.txt`` naming the rewrite, so the difference from the
-    upstream text is on record.  Returns the number of lines changed.
+    already carries the stored command is left as it is; a wrapped line that
+    names the script under another code name (a usage line written before
+    the save) takes the stored command.  Appends a line to the skill's
+    ``PROVENANCE.txt`` per pair that changed something, so the difference
+    from the upstream text is on record.  Returns the number of lines changed.
     """
     changed = 0
+    applied: list[tuple[str, str]] = []
     for md in skill_dir.rglob("*.md"):
         out = []
         for line in md.read_text().splitlines(keepends=True):
             new = line
-            if "dsagt-run" not in line:
-                for bare, wrapped in pairs:
+            for bare, wrapped in pairs:
+                before = new
+                # Per command, not per line: a line naming two scripts has a
+                # dsagt-run in it once the first pair is applied, and reading
+                # that as "already wrapped" left the second one bare.  Each
+                # pattern below is anchored so it cannot match inside a
+                # wrapper it has already written.
+                if wrapped not in new:
                     new = re.sub(
                         rf"^(\s*){re.escape(bare)}(?=\s)", rf"\1{wrapped}", new
                     )
                     new = re.sub(rf"`{re.escape(bare)}(?=\s)", f"`{wrapped}", new)
+                    if "/" in bare:
+                        # A script path is specific enough to rewrite
+                        # mid-sentence ("Run python3 scripts/x.py on ...");
+                        # a bare CLI name is not ("uv run aidrin" stays).
+                        new = re.sub(
+                            rf"(?<=\s)(?<!-- ){re.escape(bare)}(?=\s)", wrapped, new
+                        )
+                if "/" in bare and wrapped not in new and "dsagt-run" in new:
+                    # A wrapped line whose code name is a guess (the agent
+                    # wrote the usage line before saving) names the right
+                    # script under the wrong name; the stored line replaces
+                    # the whole wrapper.
+                    new = re.sub(
+                        rf"dsagt-run --code \S+ -- (?:uv run [^\n`]*? -- )?{re.escape(bare)}(?=\s|`|$)",
+                        wrapped,
+                        new,
+                    )
+                if new != before and (bare, wrapped) not in applied:
+                    applied.append((bare, wrapped))
             changed += new != line
             out.append(new)
         md.write_text("".join(out))
-    if changed:
+    if applied:
         with (skill_dir / "PROVENANCE.txt").open("a") as f:
-            for bare, wrapped in pairs:
+            for bare, wrapped in applied:
                 f.write(f"CLI examples rewritten by dsagt: `{bare}` -> `{wrapped}`\n")
     return changed
 
 
-def register_base_skill_codes(project_dir: str | Path, *, kb=None) -> list[str]:
-    """Register every ``codes`` entry of :func:`base_skills` in ``<project>/codes/``.
+def _script_overrides(entry: dict) -> dict[str, dict]:
+    """The curated specs a base skill's ``codes`` tuple gives its scripts, by
+    script path relative to the skill directory."""
+    return {c["script"]: c for c in entry.get("codes", ()) if "script" in c}
 
-    A ``script`` entry runs the script in place under ``<project>/skills/``,
-    relative to the project directory, which is the agent's cwd; an
-    ``executable`` entry runs a command on the path.  The registry wraps
-    either with ``dsagt-run`` and, when the entry declares dependencies,
-    ``uv run --with``.  A re-init updates the spec and keeps the body.  With
-    *kb* each spec is also indexed into the ``codes`` collection, which is
-    what ``search_registry`` searches.  Raises ``FileNotFoundError`` when a
-    listed script is absent from the installed skill.  Returns one
-    ``"<action> <name>"`` line per code.
+
+def _is_entry_script(path: Path) -> bool:
+    """Whether a file under ``scripts/`` is something to run.
+
+    A shell script is.  A Python file is when it has a ``__main__`` guard or
+    reads its arguments (argparse, click, ``sys.argv``); a module the scripts
+    import (a Pydantic model file, a helper) has neither and is not a code.
+    A leading underscore marks a helper whatever it contains.
+    """
+    if path.name.startswith("_"):
+        return False
+    if path.suffix == ".sh":
+        return True
+    if path.suffix != ".py":
+        return False
+    text = path.read_text(errors="replace")
+    return (
+        '__name__ == "__main__"' in text
+        or "__name__ == '__main__'" in text
+        or "argparse" in text
+        or "sys.argv" in text
+        or "import click" in text
+    )
+
+
+def script_code_name(skill_name: str, script: Path) -> str:
+    """The registered name of a skill's script: ``<skill>-<stem>``, in the
+    lowercase-hyphen charset native skill loaders require.
+
+    Both halves are reduced to that charset.  A skill may be named outside it
+    (``csv_inspector``), and pasting the name in front of a reduced stem gave
+    a code name ``save_tool`` refuses, which failed the registration after the
+    skill directory had been written.
+    """
+
+    def reduce(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+    return f"{reduce(skill_name)}-{reduce(script.stem)}"
+
+
+def derive_code_spec(skill_name: str, script: Path) -> dict:
+    """A code spec for a skill's script, read from the script itself.
+
+    An argparse script gives its description and its parameters (name,
+    ``cli``, type, default, help) from the ``add_argument`` calls found by
+    parsing the source, so nothing runs at install; any other script gets
+    one ``args`` positional, the form the ``aidrin`` CLI uses.  The spec's
+    executable is the interpreter on the script's path relative to the
+    project, which is the agent's cwd.
+    """
+    import ast
+
+    interpreter = "bash" if script.suffix == ".sh" else "python"
+    spec = {
+        "name": script_code_name(skill_name, script),
+        "description": f"Script {script.name} of the {skill_name} skill.",
+        "executable": f"{interpreter} {Path('skills') / skill_name / 'scripts' / script.name}",
+        "parameters": {
+            "args": {
+                "type": "string",
+                "required": False,
+                "cli": "positional",
+                "description": "The script's arguments",
+            }
+        },
+        "tags": [skill_name],
+    }
+    if script.suffix != ".py":
+        return spec
+    try:
+        tree = ast.parse(script.read_text(errors="replace"))
+    except (SyntaxError, OSError):
+        return spec
+    parameters: dict[str, dict] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        kwargs = {
+            k.arg: k.value.value
+            for k in node.keywords
+            if k.arg and isinstance(k.value, ast.Constant)
+        }
+        if node.func.attr == "ArgumentParser" and "description" in kwargs:
+            spec["description"] = str(kwargs["description"])
+        if node.func.attr != "add_argument" or not node.args:
+            continue
+        flags = [a.value for a in node.args if isinstance(a, ast.Constant)]
+        if not flags:
+            continue
+        long = next((f for f in flags if f.startswith("--")), flags[0])
+        name = long.lstrip("-").replace("-", "_")
+        type_name = "string"
+        type_node = next((k.value for k in node.keywords if k.arg == "type"), None)
+        if isinstance(type_node, ast.Name):
+            type_name = {"int": "integer", "float": "number"}.get(
+                type_node.id, "string"
+            )
+        if kwargs.get("action") in ("store_true", "store_false"):
+            type_name = "boolean"
+        param = {
+            "type": type_name,
+            "required": bool(kwargs.get("required", not long.startswith("-"))),
+            "cli": long if long.startswith("-") else "positional",
+        }
+        if "default" in kwargs and kwargs["default"] is not None:
+            param["default"] = kwargs["default"]
+        if "help" in kwargs:
+            param["description"] = str(kwargs["help"])
+        parameters[name] = param
+    if parameters:
+        spec["parameters"] = parameters
+    if ast.get_docstring(tree) and spec["description"].startswith("Script "):
+        spec["description"] = ast.get_docstring(tree).strip().split("\n")[0]
+    return spec
+
+
+def delete_skill(project_dir: str | Path, name: str, *, kb=None) -> dict:
+    """Remove a skill directory, its native mirror entry and its KB entries.
+
+    One path for a skill and for a code, because a code is a skill directory
+    whose frontmatter declares an executable: the directory goes, the mirror
+    is refreshed so the manifest drops the entry it owns, and a code's
+    ``codes`` entry goes with it so a search stops offering something the
+    project can no longer run.  An installed skill is removed like any other;
+    this is what lets ``save_skill`` refuse to overwrite one without leaving
+    the agent stuck with it.  Raises ``FileNotFoundError`` when no such skill
+    is installed.
+    """
+    project_dir = Path(project_dir)
+    skill_dir = project_dir / "skills" / name
+    if not (skill_dir / "SKILL.md").exists():
+        raise FileNotFoundError(f"no installed skill {name!r} at {skill_dir}")
+
+    spec = _parse_frontmatter(skill_dir / "SKILL.md")
+    entries_removed = 0
+    if kb is not None:
+        # Before the directory goes: a failure here leaves the skill in place
+        # and searchable, rather than on disk with no entry or the reverse.
+        entries_removed = kb.delete_entries(CODES_COLLECTION, {"code_name": name})
+
+    shutil.rmtree(skill_dir)
+    from dsagt.agents import refresh_native_skills
+
+    refresh_native_skills(project_dir)
+    return {
+        "name": name,
+        "was_code": bool(spec.get("executable")),
+        "entries_removed": entries_removed,
+    }
+
+
+def register_skill_scripts(
+    project_dir: str | Path,
+    skill_name: str,
+    *,
+    kb=None,
+    overrides: dict[str, dict] | None = None,
+    cli_codes: list[dict] | tuple[dict, ...] = (),
+) -> list[str]:
+    """Register an installed skill's scripts as codes and rewrite its text
+    to their stored commands; return the stored command lines.
+
+    The one path every skill takes into a project, whichever entry point
+    brought it (``dsagt init`` for a base skill, ``install_skill`` for a
+    catalog skill, ``save_skill`` for the agent's own): each top-level
+    ``scripts/*.py`` and ``scripts/*.sh``, except a helper whose name starts
+    with an underscore, becomes a code whose spec is the override for that
+    script when one exists (a base skill's curated description, ``role``s,
+    and dependencies) and otherwise :func:`derive_code_spec`'s; a CLI the
+    skill documents (*cli_codes*, the ``aidrin`` entry) is registered the
+    same way.  Then every bare invocation of a script or CLI in the skill's
+    markdown becomes the stored ``dsagt-run`` line, so the text the agent
+    reads at invocation names the recorded command.  Raises
+    ``FileNotFoundError`` when the skill or a script an override names is
+    absent.
     """
     from dsagt.registry import CodeRegistry  # lazy: keeps this module light
 
     project_dir = Path(project_dir)
+    skill_dir = project_dir / "skills" / skill_name
+    if not (skill_dir / "SKILL.md").exists():
+        raise FileNotFoundError(f"no installed skill {skill_name!r} at {skill_dir}")
+    overrides = dict(overrides or {})
+    for script_rel in overrides:
+        if not (skill_dir / script_rel).exists():
+            raise FileNotFoundError(
+                f"skill {skill_name!r} has no {script_rel} in {skill_dir}"
+            )
     registry = CodeRegistry(runtime_dir=project_dir, kb=kb)
-    actions: list[str] = []
-    for entry in base_skills():
-        actions.extend(_register_skill_codes(registry, project_dir, entry))
-    return actions
+    stored: list[str] = []
+    pairs: list[tuple[str, str]] = []
+    scripts = (
+        sorted(
+            p
+            for p in (skill_dir / "scripts").glob("*")
+            if _is_entry_script(p) or str(p.relative_to(skill_dir)) in overrides
+        )
+        if (skill_dir / "scripts").is_dir()
+        else []
+    )
+    for script in scripts:
+        script_rel = str(script.relative_to(skill_dir))
+        if script_rel in overrides:
+            spec = _code_spec(
+                {"name": skill_name}, {**overrides[script_rel], "script": script_rel}
+            )
+            registry.save_tool(spec)
+        else:
+            spec = derive_code_spec(skill_name, script)
+            # A spec read from argparse never replaces one already stored:
+            # the agent may have saved roles or dependencies onto it with
+            # save_code_spec, and a second save_skill would drop them.
+            if registry.get_code(spec["name"]) is None:
+                registry.save_tool(spec)
+        executable = registry.get_code(spec["name"])["executable"]
+        stored.append(executable)
+        for interpreter in ("python3", "python", "bash", "sh"):
+            pairs.append((f"{interpreter} {script_rel}", executable))
+            pairs.append(
+                (f"{interpreter} skills/{skill_name}/{script_rel}", executable)
+            )
+    for code in cli_codes:
+        spec = _code_spec({"name": skill_name}, code)
+        registry.save_tool(spec)
+        executable = registry.get_code(spec["name"])["executable"]
+        stored.append(executable)
+        pairs.append((code["executable"], executable))
+    if pairs:
+        rewrite_cli_invocations(skill_dir, pairs)
+    return stored
 
 
 def base_skill_code_specs() -> list[dict]:
@@ -896,21 +1116,6 @@ def _code_spec(entry: dict, code: dict) -> dict:
     if code.get("dependencies"):
         spec["dependencies"] = list(code["dependencies"])
     return spec
-
-
-def _register_skill_codes(registry, project_dir: Path, entry: dict) -> list[str]:
-    """Register one base skill's ``codes`` entries through *registry*."""
-    actions: list[str] = []
-    for code in entry.get("codes", ()):
-        if "script" in code:
-            script = project_dir / "skills" / entry["name"] / code["script"]
-            if not script.exists():
-                raise FileNotFoundError(
-                    f"base skill {entry['name']!r} has no {code['script']} in "
-                    f"{project_dir / 'skills' / entry['name']}"
-                )
-        actions.append(f"{registry.save_tool(_code_spec(entry, code))} {code['name']}")
-    return actions
 
 
 # ---------------------------------------------------------------------------
@@ -1138,8 +1343,6 @@ class SkillsCatalog:
 
 def _where_label(source: str) -> str:
     """Human tag for a hit's origin in the search output."""
-    if source in ("bundled", "registered", "installed"):
-        return " [installed]"
     if source.startswith("catalog:"):
         return " [catalog · install_skill to add]"
     return ""

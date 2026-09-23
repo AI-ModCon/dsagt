@@ -26,6 +26,7 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import asyncio  # noqa: E402
 import logging  # noqa: E402
+import shutil
 import time  # noqa: E402
 import uuid  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
@@ -34,7 +35,7 @@ from pathlib import Path  # noqa: E402
 
 import mcp.types as types  # noqa: E402
 
-from dsagt.knowledge import KnowledgeBase  # noqa: E402
+from dsagt.knowledge import DSAGT_COLLECTIONS, KnowledgeBase  # noqa: E402
 from dsagt.mcp.server import build_dispatch_server  # noqa: E402
 from dsagt.session import _collection_exists  # noqa: E402
 from dsagt.session import setup_runtime_kb  # noqa: E402, F401  (re-exported for tests)
@@ -319,6 +320,56 @@ async def _handle_kb_append(
     }
 
 
+async def _handle_kb_delete_collection(
+    arguments: dict,
+    *,
+    kb: KnowledgeBase,
+    job_tracker: _JobTracker,
+) -> dict:
+    collection = arguments["collection"]
+
+    if collection in DSAGT_COLLECTIONS:
+        return {
+            "status": "error",
+            "error": (
+                f"'{collection}' is one of dsagt's own collections "
+                f"({', '.join(sorted(DSAGT_COLLECTIONS))}); the registry, the "
+                f"execution records, and memory read them."
+            ),
+        }
+    if collection in job_tracker.active_collections:
+        return {
+            "status": "error",
+            "error": (
+                f"Collection '{collection}' is being written by a running job. "
+                f"Poll kb_job_status until it finishes, then delete it."
+            ),
+        }
+
+    # The listing is both the existence check and the chunk count, so the
+    # reply says what was removed.
+    info = next((c for c in kb.list_collections() if c["name"] == collection), None)
+    if info is None:
+        return {"status": "error", "error": f"Collection '{collection}' not found"}
+    chunk_count = info["chunk_count"]
+
+    coll_dir = kb.index_dir / collection
+    # A collection provisioned by `dsagt init` is a copied directory, but one
+    # can be a symlink to a shared collection, and rmtree refuses a symlink.
+    # Unlinking removes this project's collection and leaves the shared one.
+    if coll_dir.is_symlink():
+        coll_dir.unlink()
+    else:
+        shutil.rmtree(coll_dir)
+
+    return {
+        "status": "ok",
+        "collection": collection,
+        "chunks_removed": chunk_count,
+        "message": f"Deleted collection '{collection}' ({chunk_count} chunks).",
+    }
+
+
 async def _handle_kb_job_status(arguments: dict, *, job_tracker: _JobTracker) -> dict:
     job_id = arguments["job_id"]
     if job_id not in job_tracker.jobs:
@@ -363,6 +414,9 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
         "kb_list_collections": partial(_handle_kb_list_collections, kb=kb),
         "kb_search": partial(_handle_kb_search, kb=kb),
         "kb_ingest": partial(_handle_kb_ingest, kb=kb, job_tracker=job_tracker),
+        "kb_delete_collection": partial(
+            _handle_kb_delete_collection, kb=kb, job_tracker=job_tracker
+        ),
         "kb_append": partial(_handle_kb_append, kb=kb, job_tracker=job_tracker),
         "kb_job_status": partial(_handle_kb_job_status, job_tracker=job_tracker),
     }
@@ -464,6 +518,25 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                     },
                 },
                 "required": ["query"],
+            },
+        ),
+        types.Tool(
+            name="kb_delete_collection",
+            description=(
+                "Delete a knowledge-base collection and everything indexed "
+                "in it. Use it to remove a collection created by mistake or a "
+                "corpus the project has finished with. dsagt's own "
+                "collections are refused."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "collection": {
+                        "type": "string",
+                        "description": "Name of the collection to delete",
+                    }
+                },
+                "required": ["collection"],
             },
         ),
         types.Tool(

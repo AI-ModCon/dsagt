@@ -664,69 +664,6 @@ def test_save_code_spec_emits_registry_save_span(_reset_tracing, tmp_path):
     assert _last_trace().info.tags["dsagt.source"] == "registry"
 
 
-def test_save_code_spec_with_deps_nests_install_span(
-    _reset_tracing, tmp_path, monkeypatch
-):
-    """When a spec carries dependencies, save_code_spec should open a
-    nested registry.install_dependencies span as a child."""
-    from mcp_helpers import call_tool_sync as call_tool
-
-    # Stub the actual uv install so the test doesn't hit the network.
-    import dsagt.mcp.registry_tools as rs_mod
-
-    monkeypatch.setattr(
-        rs_mod,
-        "_install_dependencies",
-        lambda packages, timeout=120: f"Successfully installed: {', '.join(packages)}",
-    )
-
-    server = _make_registry_server(tmp_path)
-
-    spec = _minimal_spec("beta", dependencies=["numpy", "pandas"])
-    call_tool(server, "save_code_spec", {"spec": spec})
-
-    spans = _spans_by_name()
-    save_span = spans["registry.save_code_spec"]
-    install_span = spans["registry.install_dependencies"]
-
-    assert install_span.parent_id == save_span.span_id
-    assert install_span.attributes["package_count"] == 2
-    assert install_span.attributes["status"] == "ok"
-    assert "numpy" in install_span.attributes["packages_preview"]
-
-
-def test_install_dependencies_failed_records_event(
-    _reset_tracing, tmp_path, monkeypatch
-):
-    """A failing _install_dependencies should set status=failed and emit
-    an install_failed event with the error message truncated."""
-    from mcp_helpers import call_tool_sync as call_tool
-
-    import dsagt.mcp.registry_tools as rs_mod
-
-    monkeypatch.setattr(
-        rs_mod,
-        "_install_dependencies",
-        lambda packages, timeout=120: "Installation failed (exit code 1):\nresolution failure",
-    )
-
-    server = _make_registry_server(tmp_path)
-
-    # First register a tool with deps so install_dependencies has something
-    # to operate on, then call install_dependencies directly.
-    spec = _minimal_spec("gamma", dependencies=["broken-package"])
-    call_tool(server, "save_code_spec", {"spec": spec})
-    call_tool(server, "install_dependencies", {})
-
-    # The last trace is the install_dependencies call.
-    spans = _spans_by_name()
-    assert "registry.install_dependencies" in spans
-    span = spans["registry.install_dependencies"]
-    assert span.attributes["package_count"] == 1
-    assert span.attributes["status"] == "failed"
-    assert any(e.name == "install_failed" for e in span.events)
-
-
 def test_reconstruct_pipeline_emits_span(_reset_tracing, tmp_path):
     """reconstruct_pipeline should produce a span with format and output_chars."""
     from mcp_helpers import call_tool_sync as call_tool
