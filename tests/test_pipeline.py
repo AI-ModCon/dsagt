@@ -474,6 +474,35 @@ class TestReadinessReports:
         rec["execution"]["file_hashes"] = {path: digest}
         _write_record(project / "trace_archive", rec)
 
+    def test_a_path_matches_however_it_was_spelled(self, tmp_path):
+        """A record holds the path the agent typed.
+
+        The same file is `data/t.csv` in one record and `./data/t.csv` in the
+        next, and the caller may ask with either; comparing them as strings
+        returned no reports for a file that has them, so the agent re-ran the
+        check every stage.
+        """
+        import hashlib
+
+        from dsagt.provenance import readiness_reports
+
+        project = tmp_path
+        (project / "data").mkdir()
+        (project / "data" / "t.csv").write_text("a\n1\n")
+        digest = hashlib.sha256(b"a\n1\n").hexdigest()
+        self._aidrin_record(
+            project,
+            "./data/t.csv",
+            digest,
+            "r1",
+            "2026-01-01T00:00:00Z",
+            "audit/pre.json",
+        )
+        for asked in ("data/t.csv", "./data/t.csv", str(project / "data" / "t.csv")):
+            reports = readiness_reports(project, asked)
+            assert len(reports) == 1, asked
+            assert reports[0]["unchanged"] is True
+
     def test_reports_for_a_file_newest_first_with_change_status(self, tmp_path):
         import hashlib
 

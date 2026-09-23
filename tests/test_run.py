@@ -935,3 +935,63 @@ def test_a_run_without_a_code_name_is_refused(tmp_path, capsys):
         main(["--records-dir", str(tmp_path), "--", "true"])
     assert "--code" in capsys.readouterr().err
     assert list(tmp_path.glob("*.json")) == []
+
+
+def test_forwarding_a_signal_to_an_exited_child_is_not_an_error():
+    """The child may take the same signal from the process group first.
+
+    send_signal then raises ProcessLookupError in the handler; escaping, it
+    was caught as an OSError around the run and replaced the record's output
+    and exit code with "execution error" and 1.
+    """
+    from dsagt.provenance import _forward_signal
+
+    class Gone:
+        def send_signal(self, signum):
+            raise ProcessLookupError(3, "No such process")
+
+    _forward_signal(Gone(), 15)
+
+    class Denied:
+        def send_signal(self, signum):
+            raise PermissionError(1, "Operation not permitted")
+
+    with pytest.raises(PermissionError):
+        _forward_signal(Denied(), 15)
+
+
+class TestFilesFromArguments:
+    def test_the_script_is_left_out_under_the_uv_wrapper(self, tmp_path, monkeypatch):
+        from dsagt.provenance import files_from_arguments
+
+        """A spec with dependencies is stored as uv run --with <deps> -- ...
+
+        command[0] is then uv, so the script was recorded as an input file and
+        the dependency graph gained an edge to whichever step wrote it.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "convert.py").write_text("")
+        (tmp_path / "data.csv").write_text("a\n")
+        command = [
+            "uv",
+            "run",
+            "--with",
+            "pandas",
+            "--",
+            "python",
+            "convert.py",
+            "data.csv",
+        ]
+        assert files_from_arguments(command) == ["data.csv"]
+
+    def test_the_script_is_left_out_for_a_versioned_interpreter(
+        self, tmp_path, monkeypatch
+    ):
+        from dsagt.provenance import files_from_arguments
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "convert.py").write_text("")
+        (tmp_path / "data.csv").write_text("a\n")
+        assert files_from_arguments(["python3.12", "convert.py", "data.csv"]) == [
+            "data.csv"
+        ]

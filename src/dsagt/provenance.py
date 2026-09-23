@@ -222,8 +222,13 @@ def files_from_arguments(command: list[str]) -> list[str]:
     ``data.csv``; ``x.py`` is the program, and as an input it would read as
     the product of whichever step wrote it).
     """
+    # A spec that declares dependencies is stored as ``uv run --with <deps>
+    # -- <command>``, so the interpreter is not command[0] until the wrapper
+    # comes off; python3.12 and the like carry their version in the name.
+    command = _without_uv_wrapper(command)
     args = command[1:]
-    if command and Path(command[0]).name in _INTERPRETERS:
+    program = Path(command[0]).name if command else ""
+    if program.startswith("python") or program in _INTERPRETERS:
         script = next((a for a in args if not a.startswith("-")), None)
         if script is not None and _is_file(script):
             args = [a for a in args if a != script]
@@ -270,6 +275,22 @@ def _pump(source, sink, lines: list[str]) -> None:
 _FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 
 
+def _forward_signal(proc: "subprocess.Popen", signum: int) -> None:
+    """Send *signum* to *proc*, ignoring a child that has already exited.
+
+    A harness signalling the process group reaches the child too, and it may
+    exit before this runs.  ``send_signal`` then raises ``ProcessLookupError``
+    inside the signal handler, where it would escape into whatever the main
+    thread was running: the caller catches ``OSError`` around the whole run
+    and would report exit 1 with no output for a command that finished.
+    ``proc.wait`` already holds the real status.
+    """
+    try:
+        proc.send_signal(signum)
+    except ProcessLookupError:
+        pass
+
+
 def _run_streaming(
     command: list[str], *, parent: str | None = None
 ) -> tuple[int, str, str]:
@@ -301,7 +322,7 @@ def _run_streaming(
 
     def forward(signum, _frame):
         forwarded.append(signum)
-        proc.send_signal(signum)
+        _forward_signal(proc, signum)
 
     previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED_SIGNALS}
     out_lines: list[str] = []
@@ -739,7 +760,7 @@ def readiness_reports(project_dir: Path, path: str) -> list[dict]:
     ``unchanged`` as ``None``.
     """
     project_dir = Path(project_dir)
-    target = _relative_to_project(path, project_dir)
+    target = _project_file(path, project_dir)
     current = sha256_of(str(project_dir / target))
     reports = []
     for record in load_pipeline_records(project_dir / "trace_archive"):
@@ -747,24 +768,19 @@ def readiness_reports(project_dir: Path, path: str) -> list[dict]:
             continue
         execution = record["execution"]
         inputs = [
-            _relative_to_project(f, project_dir)
-            for f in execution.get("input_files", [])
+            _project_file(f, project_dir) for f in execution.get("input_files", [])
         ]
         if target not in inputs:
             continue
         recorded = execution.get("file_hashes", {})
         digest = next(
-            (
-                h
-                for f, h in recorded.items()
-                if _relative_to_project(f, project_dir) == target
-            ),
+            (h for f, h in recorded.items() if _project_file(f, project_dir) == target),
             None,
         )
         report = next(iter(execution.get("output_files", [])), None)
         reports.append(
             {
-                "report": _relative_to_project(report, project_dir) if report else None,
+                "report": _project_file(report, project_dir) if report else None,
                 "timestamp": execution.get("timestamp_start"),
                 "command": " ".join(execution.get("exact_command", [])),
                 "unchanged": None if digest is None else digest == current,
@@ -802,6 +818,17 @@ def _relative_to_project(arg: str, project_dir: Path | None) -> str:
     if arg.startswith(root + "/"):
         return arg[len(root) + 1 :]
     return arg
+
+
+def _project_file(arg: str, project_dir: Path | None) -> str:
+    """A recorded file path as it sits under the project, in one spelling.
+
+    A record holds the path the agent typed, so one file arrives as
+    ``data/x.csv`` in one record and ``./data/x.csv`` in the next, and
+    comparing them as strings misses the match.  File paths go through this;
+    a command argument does not, since it may be a flag or an empty string.
+    """
+    return os.path.normpath(_relative_to_project(arg, project_dir)) if arg else arg
 
 
 def render_bash(
@@ -842,7 +869,7 @@ def render_bash(
     output_dirs: list[str] = []
     for record in records:
         for f in record["execution"].get("output_files", []):
-            parent = str(Path(_relative_to_project(f, project_dir)).parent)
+            parent = str(Path(_project_file(f, project_dir)).parent)
             if parent not in (".", "") and parent not in output_dirs:
                 output_dirs.append(parent)
     output_dirs = [
@@ -858,12 +885,10 @@ def render_bash(
         cmd = [_relative_to_project(a, project_dir) for a in execution["exact_command"]]
         rc = execution.get("return_code", 0)
         inputs = [
-            _relative_to_project(f, project_dir)
-            for f in execution.get("input_files", [])
+            _project_file(f, project_dir) for f in execution.get("input_files", [])
         ]
         outputs = [
-            _relative_to_project(f, project_dir)
-            for f in execution.get("output_files", [])
+            _project_file(f, project_dir) for f in execution.get("output_files", [])
         ]
 
         lines.append(f"# Step {i + 1}: {code}")
