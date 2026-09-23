@@ -180,7 +180,8 @@ def files_from_arguments(command: list[str]) -> list[str]:
     # the interpreter and its script are found past that wrapper.
     inner = _without_uv_wrapper(command)
     args = inner[1:]
-    if inner and Path(inner[0]).name in _INTERPRETERS:
+    program = Path(inner[0]).name if inner else ""
+    if program.startswith("python") or program in _INTERPRETERS:
         script = next((a for a in args if not a.startswith("-")), None)
         if script is not None and _is_file(script):
             args = [a for a in args if a != script]
@@ -1036,7 +1037,7 @@ def readiness_reports(project_dir: Path, path: str) -> list[dict]:
     ``unchanged`` as ``None``.
     """
     project_dir = Path(project_dir)
-    target = _relative_to_project(path, project_dir)
+    target = _project_file(path, project_dir)
     current = sha256_of(str(project_dir / target))
     reports = []
     for record in load_pipeline_records(project_dir / "trace_archive"):
@@ -1044,18 +1045,13 @@ def readiness_reports(project_dir: Path, path: str) -> list[dict]:
             continue
         execution = record["execution"]
         inputs = [
-            _relative_to_project(f, project_dir)
-            for f in execution.get("input_files", [])
+            _project_file(f, project_dir) for f in execution.get("input_files", [])
         ]
         if target not in inputs:
             continue
         recorded = execution.get("file_hashes", {})
         digest = next(
-            (
-                h
-                for f, h in recorded.items()
-                if _relative_to_project(f, project_dir) == target
-            ),
+            (h for f, h in recorded.items() if _project_file(f, project_dir) == target),
             None,
         )
         reports.append(
