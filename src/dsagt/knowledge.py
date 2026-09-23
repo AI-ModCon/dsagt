@@ -493,7 +493,7 @@ class ChromaIndex:
     id list so returned integer indices line up with the chunk list.
     """
 
-    _META_FILE = "chroma_ids.json"  # maps int position → chroma id
+    _META_FILE = "chroma_ids.json"  # the chunk list's ids, in chunk order
 
     def __init__(self, collection_name: str, persist_dir: Path | None = None):
         import chromadb
@@ -508,18 +508,23 @@ class ChromaIndex:
         self._col = self._client.get_or_create_collection(
             collection_name, metadata={"hnsw:space": "cosine"}
         )
-        self._ids: list[str] = []  # positional id list for int-index mapping
+        self._ids: list[str] = []  # one id per chunk, in the chunk list's order
 
-    # ChromaDB stores ids internally; we maintain a positional list so that
-    # returned integer indices are consistent with the chunk list.
+    # ChromaDB stores ids internally; this list holds them in the chunk
+    # list's order, so a search hit maps back to its chunk by position in it.
+    # An id is opaque: one past the highest minted so far and never reused,
+    # so removing an entry leaves every surviving id alone.
+    def _next_ids(self, count: int) -> list[str]:
+        highest = max((int(i) for i in self._ids if i.isdigit()), default=-1)
+        return [str(highest + 1 + i) for i in range(count)]
+
     def add(
         self,
         embeddings: np.ndarray,
         metadatas: list[dict] | None = None,
         documents: list[str] | None = None,
     ) -> None:
-        start = len(self._ids)
-        new_ids = [str(start + i) for i in range(len(embeddings))]
+        new_ids = self._next_ids(len(embeddings))
         self._ids.extend(new_ids)
         embeddings_list = embeddings.tolist()
 
@@ -559,9 +564,26 @@ class ChromaIndex:
         results = self._col.query(**query_kwargs)
         chroma_ids = results["ids"][0]
         distances = results["distances"][0]  # cosine distance (0=identical)
-        scores = np.array([1.0 - d for d in distances], dtype=np.float32)
-        indices = np.array([int(cid) for cid in chroma_ids], dtype=np.int64)
+        # A hit is read by the caller as a position in the chunk list, and the
+        # BM25 leg it is merged with produces positions, so an id is resolved
+        # through this list rather than parsed as a number.
+        position = {cid: i for i, cid in enumerate(self._ids)}
+        keep = [n for n, cid in enumerate(chroma_ids) if cid in position]
+        scores = np.array([1.0 - distances[n] for n in keep], dtype=np.float32)
+        indices = np.array([position[chroma_ids[n]] for n in keep], dtype=np.int64)
         return scores, indices
+
+    def remove(self, positions: set[int]) -> None:
+        """Drop the entries at *positions* in the chunk list.
+
+        Every surviving id keeps its value; only this list shortens, so it
+        stays in step with the chunk list once the caller drops the same rows.
+        """
+        doomed = [self._ids[i] for i in sorted(positions) if i < len(self._ids)]
+        if not doomed:
+            return
+        self._col.delete(ids=doomed)
+        self._ids = [i for n, i in enumerate(self._ids) if n not in positions]
 
     def save(self, directory: Path) -> None:
         # ChromaDB PersistentClient auto-saves; just write id list for rebuild.
@@ -1084,6 +1106,36 @@ class ChromaVectorStore(VectorStore):
             )
         return self.add_chunks(collection, chunks, return_embeddings=return_embeddings)
 
+    def delete_entries(self, collection: str, where: dict) -> int:
+        """Remove *collection*'s entries whose metadata equals every pair in
+        *where*, and return how many went.
+
+        The dense index, the chunk file and the sparse leg are rewritten
+        together, since a search reads a hit's position out of one and its
+        text out of another.  Zero when the collection has no chunk file or
+        nothing matches.
+        """
+        coll_dir = self.index_dir / collection
+        if not (coll_dir / "chunks.jsonl").exists():
+            return 0
+        index, chunks = self._load(collection)
+        doomed = {
+            i
+            for i, chunk in enumerate(chunks)
+            if all(chunk.get("metadata", {}).get(k) == v for k, v in where.items())
+        }
+        if not doomed:
+            return 0
+        index.remove(doomed)
+        index.save(coll_dir)
+        kept = [c for i, c in enumerate(chunks) if i not in doomed]
+        with open(coll_dir / "chunks.jsonl", "w") as f:
+            for chunk in kept:
+                f.write(json.dumps(chunk) + "\n")
+        self._rebuild_bm25(collection, kept)
+        self._cache[collection] = (index, kept)
+        return len(doomed)
+
     # -- single-collection hybrid search ------------------------------------
 
     def search(
@@ -1409,6 +1461,19 @@ class KnowledgeBase:
         )
         obs.set_outputs({"entries_added": result.get("entries_added")})
         return result
+
+    @traced("kb.delete_entries")
+    def delete_entries(self, collection: str, where: dict) -> int:
+        """Remove the entries of *collection* whose metadata matches *where*.
+
+        The counterpart of :meth:`add_entries`, for a code or skill that is
+        being removed from the project: its entry goes with it, so a search
+        stops returning something the agent can no longer run.
+        """
+        obs.set_inputs({"collection": collection, "where": where})
+        removed = self._store.delete_entries(collection, where)
+        obs.set_outputs({"entries_removed": removed})
+        return removed
 
     # -- document ingestion pipeline ----------------------------------------
 
