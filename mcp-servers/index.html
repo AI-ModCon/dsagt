@@ -806,10 +806,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#registry-tools-6" class="md-nav__link">
+  <a href="#registry-tools-5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Registry tools (6)
+        Registry tools (5)
       
     </span>
   </a>
@@ -817,10 +817,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#knowledge-tools-5" class="md-nav__link">
+  <a href="#knowledge-tools-6" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Knowledge tools (5)
+        Knowledge tools (6)
       
     </span>
   </a>
@@ -839,10 +839,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#skill-tools-5" class="md-nav__link">
+  <a href="#skill-tools-6" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Skill tools (5)
+        Skill tools (6)
       
     </span>
   </a>
@@ -1260,10 +1260,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#registry-tools-6" class="md-nav__link">
+  <a href="#registry-tools-5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Registry tools (6)
+        Registry tools (5)
       
     </span>
   </a>
@@ -1271,10 +1271,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#knowledge-tools-5" class="md-nav__link">
+  <a href="#knowledge-tools-6" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Knowledge tools (5)
+        Knowledge tools (6)
       
     </span>
   </a>
@@ -1293,10 +1293,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#skill-tools-5" class="md-nav__link">
+  <a href="#skill-tools-6" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Skill tools (5)
+        Skill tools (6)
       
     </span>
   </a>
@@ -1325,11 +1325,11 @@
 
 <h1 id="mcp-server">MCP Server<a class="headerlink" href="#mcp-server" title="Permanent link">&para;</a></h1>
 <p>DSAgt exposes its capabilities through a single MCP server, <strong><code>dsagt-server</code></strong>, configured in the per-agent runtime file (<code>.mcp.json</code> for Claude Code, <code>goose.yaml</code> for Goose, etc.) and launched automatically when the agent starts. It combines four capabilities — a code registry, a <a href="../knowledge-base/">knowledge base</a>, <a href="../memory/">explicit memory</a>, and <a href="../skills/">skill discovery</a> — behind one process with one shared embedder and one ChromaDB.</p>
-<p>The 18 tools split across four concerns, all on the one process.</p>
+<p>The 19 tools split across four concerns, all on the one process.</p>
 <h2 id="the-servers-environment">The server's environment<a class="headerlink" href="#the-servers-environment" title="Permanent link">&para;</a></h2>
 <p>The per-agent MCP config carries an <code>env</code> block with two kinds of variable: routing (the project name and directory, the trace store URI, the embedding backend) and the launching shell's activated environment (<code>PATH</code>, <code>VIRTUAL_ENV</code>, <code>CONDA_PREFIX</code>, <code>PYTHONPATH</code>, the library paths, the <code>module</code> variables, plus any names listed under <code>mcp.env_passthrough</code> in <code>.dsagt/config.yaml</code>). Codex and Cline start the server from that block alone, so it is what makes the server's Python the one with the user's packages. The block is written at <code>dsagt init</code> and <code>dsagt start</code>; after changing the activated environment, run <code>dsagt start</code> (or re-init) so the block matches. A credential never enters the block: a name ending in <code>_KEY</code>, <code>_TOKEN</code>, or <code>_SECRET</code>, or containing <code>SECRET</code> or <code>PASSW</code>, is refused, and dsagt's own service credentials come from the shell or <code>~/.config/dsagt/env</code>.</p>
-<h2 id="registry-tools-6">Registry tools (6)<a class="headerlink" href="#registry-tools-6" title="Permanent link">&para;</a></h2>
-<p>Code registration, execution helpers, dependency installation, and pipeline reconstruction. See <a href="../provenance/">Provenance</a> for how registered codes are captured.</p>
+<h2 id="registry-tools-5">Registry tools (5)<a class="headerlink" href="#registry-tools-5" title="Permanent link">&para;</a></h2>
+<p>Code registration, the readiness reports on record, and pipeline reconstruction. See <a href="../provenance/">Provenance</a> for how registered codes are captured.</p>
 <table>
 <thead>
 <tr>
@@ -1348,11 +1348,7 @@
 </tr>
 <tr>
 <td><code>save_code_spec</code></td>
-<td>Register a CLI code as <code>codes/&lt;name&gt;/SKILL.md</code> (executable auto-wrapped with <code>dsagt-run</code> + <code>uv run --with</code>), mirrored into the agent's native skills dir</td>
-</tr>
-<tr>
-<td><code>install_dependencies</code></td>
-<td>Install a code's Python dependencies via <code>uv run --with</code></td>
+<td>Register a CLI code as <code>skills/&lt;name&gt;/SKILL.md</code> (executable wrapped with <code>dsagt-run</code> + <code>uv run --with</code>), linked into the agent's native skills directory</td>
 </tr>
 <tr>
 <td><code>reconstruct_pipeline</code></td>
@@ -1364,8 +1360,8 @@
 </tr>
 </tbody>
 </table>
-<p>Codes are markdown files with YAML frontmatter under <code>&lt;project&gt;/codes/</code>. Executables are wrapped with <code>dsagt-run</code> for provenance and <code>uv run --with</code> for Python dependencies.</p>
-<h2 id="knowledge-tools-5">Knowledge tools (5)<a class="headerlink" href="#knowledge-tools-5" title="Permanent link">&para;</a></h2>
+<p>Codes are markdown files with YAML frontmatter under <code>&lt;project&gt;/skills/</code>, beside the instruction skills; the <code>executable</code> in the frontmatter is what makes a skill a code. Executables are wrapped with <code>dsagt-run</code> for provenance and <code>uv run --with</code> for Python dependencies.</p>
+<h2 id="knowledge-tools-6">Knowledge tools (6)<a class="headerlink" href="#knowledge-tools-6" title="Permanent link">&para;</a></h2>
 <p>Semantic search and ingestion over indexed document collections. See the <a href="../knowledge-base/">Knowledge Base</a> for the retrieval model.</p>
 <table>
 <thead>
@@ -1395,6 +1391,10 @@
 <td><code>kb_job_status</code></td>
 <td>Check the status of a background ingest/append job</td>
 </tr>
+<tr>
+<td><code>kb_delete_collection</code></td>
+<td>Delete a collection and everything indexed in it; dsagt's own collections are refused</td>
+</tr>
 </tbody>
 </table>
 <h2 id="memory-tools-2">Memory tools (2)<a class="headerlink" href="#memory-tools-2" title="Permanent link">&para;</a></h2>
@@ -1417,7 +1417,7 @@
 </tr>
 </tbody>
 </table>
-<h2 id="skill-tools-5">Skill tools (5)<a class="headerlink" href="#skill-tools-5" title="Permanent link">&para;</a></h2>
+<h2 id="skill-tools-6">Skill tools (6)<a class="headerlink" href="#skill-tools-6" title="Permanent link">&para;</a></h2>
 <p>Discover, install, and author agent skills, and manage external skill sources. See <a href="../skills/">Skills</a>.</p>
 <table>
 <thead>
@@ -1429,11 +1429,11 @@
 <tbody>
 <tr>
 <td><code>search_skills</code></td>
-<td>Search the external corpus (hits are tagged <code>[catalog]</code>); <code>skill_name</code> looks up one installed skill</td>
+<td>Search the external corpus (each hit tagged <code>[catalog · install_skill to add]</code>); <code>skill_name</code> looks up one installed skill</td>
 </tr>
 <tr>
 <td><code>install_skill</code></td>
-<td>Copy a skill from the corpus into <code>&lt;project&gt;/skills/</code> and mirror it into the agent's native skills dir</td>
+<td>Copy a skill from the corpus into <code>&lt;project&gt;/skills/</code> and link it into the agent's native skills directory</td>
 </tr>
 <tr>
 <td><code>save_skill</code></td>
@@ -1446,6 +1446,10 @@
 <tr>
 <td><code>list_skill_sources</code></td>
 <td>List known and synced external skill sources</td>
+</tr>
+<tr>
+<td><code>delete_skill</code></td>
+<td>Remove an installed skill or registered code: its directory, its native mirror entry, and a code's knowledge-base entry</td>
 </tr>
 </tbody>
 </table>

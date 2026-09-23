@@ -1317,11 +1317,11 @@
 <li>A YAML frontmatter block describing the executable, parameters, dependencies, and tags.</li>
 <li>A markdown body with the exact runnable command, usage, and notes for the agent.</li>
 </ul>
-<p>Example code spec (<code>codes/csv-summary/SKILL.md</code>):</p>
+<p>Example code spec (<code>skills/csv-summary/SKILL.md</code>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>---
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>name: csv-summary
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>description: Summarize a CSV — columns, row count, null counts, numeric stats. Use when profiling a tabular dataset.
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>executable: dsagt-run --code csv-summary -- python codes/csv-summary/scripts/csv_summary.py
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>executable: dsagt-run --code csv-summary -- python skills/csv-summary/scripts/csv_summary.py
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>parameters:
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  file:
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    type: string
@@ -1334,7 +1334,7 @@
 <a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>Run this registered code with the exact shell command below…
 </code></pre></div>
-<p>DSAgt wraps every registered code with <code>dsagt-run</code> for provenance capture and <code>uv run --with</code> for Python dependencies, so the agent can call any code without managing environments manually. It provides one built-in code, <code>scan-directory</code>, indexed for search by <code>dsagt init</code>.</p>
+<p>DSAgt wraps every registered code with <code>dsagt-run</code> for provenance capture and <code>uv run --with</code> for Python dependencies, so the agent can call any code without managing environments manually. The base skills' scripts and the <code>aidrin</code> CLI are registered as codes at <code>dsagt init</code>, indexed for search.</p>
 <h2 id="execution-record">Execution record<a class="headerlink" href="#execution-record" title="Permanent link">&para;</a></h2>
 <p>Every registered code runs through the <code>dsagt-run</code> wrapper. For each call it records the command, arguments, exit code, duration, input and output files, and truncated stderr to <code>&lt;project&gt;/trace_archive/&lt;record_id&gt;.json</code>, and, once the command has exited, a detached <code>python -m dsagt.commands.log_trace</code> process logs a <code>code.execute</code> span with the run's own start and end times to the <a href="../observability/">trace store</a>, so the wrapper adds about 0.2 s to a command. An error from that process is appended to <code>.dsagt/run_trace.log</code>. The MCP server incrementally indexes those records into the <code>code_use</code> collection, so past executions are searchable.</p>
 <p>The wrapper is the point of code-mediated data access. A direct shell or editor call isn't recordless — the agent's transcript still captures whatever it chose to report about the command and its stdout/stderr — but that's a partial, agent-curated account, not the structured <code>dsagt-run</code> record of exit code, timing, and input/output files. Only the wrapped record carries what <code>reconstruct_pipeline</code> needs, so a direct call still breaks reconstruction.</p>
