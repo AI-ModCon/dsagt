@@ -79,10 +79,20 @@ async def _handle_save_skill(
     # or catalog skill takes, and the reply gives the stored lines the way
     # save_code_spec does, so the usage line the agent just wrote is not
     # what it runs.
-    stored = register_skill_scripts(
-        skill_registry.runtime_dir, spec["name"], kb=skill_registry._kb
-    )
-    refresh_native_skills(skill_registry.runtime_dir)
+    try:
+        stored = register_skill_scripts(
+            skill_registry.runtime_dir, spec["name"], kb=skill_registry._kb
+        )
+        refresh_native_skills(skill_registry.runtime_dir)
+    except (KeyError, ValueError, OSError) as e:
+        # The skill is already written, so the reply says what stands rather
+        # than reporting a failure that leaves an unexplained directory.
+        return (
+            f"Skill '{spec['name']}' was written to skills/{spec['name']}/, but "
+            f"registering its scripts as codes failed: {e}. Its scripts are not "
+            "runnable through dsagt-run. Fix what the error names and save it "
+            "again, or call delete_skill to remove the skill and start over."
+        )
     skill_count = len(skill_registry.list_skills())
     reply = (
         f"Skill '{spec['name']}' {action} successfully. "
@@ -176,8 +186,16 @@ async def _handle_install_skill(
         info = SkillRouter().install(name, runtime_dir)
     except LookupError as e:
         return f"Error: {e}"
-    stored = register_skill_scripts(runtime_dir, info["name"], kb=kb)
-    refresh_native_skills(runtime_dir)
+    try:
+        stored = register_skill_scripts(runtime_dir, info["name"], kb=kb)
+        refresh_native_skills(runtime_dir)
+    except (KeyError, ValueError, OSError) as e:
+        return (
+            f"'{info['name']}' was copied to {info['dest_dir']}/, but registering "
+            f"its scripts as codes failed: {e}. Its scripts are not runnable "
+            "through dsagt-run. Fix what the error names and install it again, or "
+            "call delete_skill to remove it."
+        )
 
     # Bare confirmation by design: the install→use model and the
     # license/PROVENANCE capture are already in the agent's instructions and on
