@@ -1139,10 +1139,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1575,10 +1575,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1614,16 +1614,16 @@
 
 
 <h1 id="cryo-em">Cryo-EM<a class="headerlink" href="#cryo-em" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP</p>
+<p><strong>Domain:</strong> Structural biology, EMPIAR-10017 β-galactosidase micrographs via CryoPPP</p>
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/cryoem/"><code>use_cases/cryoem/</code></a></p>
-<p>DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive (EMPIAR-10017 β-galactosidase micrographs via CryoPPP) — register curation codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing pipeline, with the AIDRIN AI-readiness check measuring the curation step before/after.</p>
+<p>DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive (EMPIAR-10017 β-galactosidase micrographs via CryoPPP): register curation codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing pipeline, with the AIDRIN AI-readiness check measuring the curation step before/after.</p>
 <blockquote>
-<p><strong>Estimated time:</strong> 12 to 25 minutes of session time. Setup pulls a <strong>~0.5 GB data
-download</strong> (84 micrograph previews and the ground-truth particle tables), two
-open-access papers, and the CryoPPP repository, then KB-ingests the repository
-(minutes on the local embedder) before any pipeline work.</p>
+<p><strong>Estimated time:</strong> 12 to 25 minutes of session time. Setup downloads <strong>~0.5 GB of
+data</strong> (84 micrograph previews and the ground-truth particle tables), two
+open-access papers, and the CryoPPP repository, then ingests the repository into
+the knowledge base (minutes on the local embedder) before any pipeline work.</p>
 </blockquote>
-<p>This guide documents a DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, multi-stage pipeline execution with domain-specific evaluation, and the <a href="https://github.com/AI-ModCon/dsagt/blob/main/docs/readiness.md">AI-readiness check</a>: with the check on, the agent runs the AIDRIN quality baseline before and after the tabular curation step on its own, so the pipeline's AI-readiness gain is <em>measured</em>. </p>
+<p>This guide documents a DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, multi-stage pipeline execution with domain-specific evaluation, and the <a href="https://github.com/AI-ModCon/dsagt/blob/main/docs/readiness.md">AI-readiness check</a>: with the check on, the agent runs the AIDRIN quality baseline before and after the tabular curation step on its own, so the pipeline's AI-readiness gain is measured.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
 <li>DSAgt installed</li>
@@ -1721,13 +1721,10 @@ holds only the defocus parameters; the tier split depends on which derived colum
 scores. The measurable gain of this pipeline is in the particle tables.</p>
 <p>The merge and the curation are the two data operations on the particle tables, so the prompt
 asks for them as registered codes: each run is then an execution record, and the AI-readiness
-check has a before and an after to measure. The merge has two input tables and no single
-"before" file, so the check pairs are: <code>particles.csv</code> is the merge's after and the curation's
-before, and <code>particles_curated.csv</code> is the curation's after. The check runs on the ground-truth tables as they arrive and
+check has something to measure. The check runs on the ground-truth tables as they arrive and
 on the output of each transformation: the derived metadata, the scored table, <code>particles.csv</code>,
-and <code>particles_curated.csv</code>. Each check's execution record holds the report. The two reports on the
-particle tables carry the gain post-condition 4 is
-judged on. Expected across the curation step:</p>
+and <code>particles_curated.csv</code>. Each check's execution record holds the report. The gain
+post-condition 4 is judged on is in the particle tables. Expected across the curation step:</p>
 <table>
 <thead>
 <tr>
@@ -1837,13 +1834,13 @@ is. The agent may print the tree through a command; the reply then summarizes it
 <li>Knowledge base contains <code>cryoppp</code> collection with repo code, docs, and appended papers.</li>
 <li><code>skills/aidrin/</code> is present (installed at init); the code registry includes the two CryoPPP codes (the STAR-to-CSV converter and the box-file generator), the metadata-derivation code, and the quality-scoring code.</li>
 <li>Quality-scored CSV exists with tier distribution; <code>particles.csv</code> (merged) and <code>particles_curated.csv</code> (curated) exist with <code>trace_archive/</code> records for both operations.</li>
-<li><code>trace_archive/</code> holds an <code>aidrin</code> record, which is the check report, for each table the pipeline wrote: <code>micrograph_metadata.csv</code>, the scored CSV, <code>particles.csv</code>, and <code>particles_curated.csv</code>. The two reports on the particle tables show curation returned the outlier score to the selected set's value (~0.041 → ~0.029).</li>
+<li>The check ran on the incoming tables and on each transformation's output, and the reports on <code>particles.csv</code> and <code>particles_curated.csv</code> show curation returned the outlier score to the selected set's value (~0.041 → ~0.029).</li>
 <li>A datacard exists for the processed dataset.</li>
 <li><code>pipeline.sh</code> exists, saved by <code>reconstruct_pipeline</code>.</li>
 <li>Code execution records in <code>trace_archive/</code> document the full provenance chain, including one record per check run, each naming the table it read.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture token usage, latency, and full request/response history.</li>
 </ol>
-<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>

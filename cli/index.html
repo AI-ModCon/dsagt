@@ -1238,7 +1238,7 @@
 <h1 id="cli-reference">CLI Reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
 <p>All commands are available after <a href="../#installation">installation</a> and activating your virtual environment.</p>
 <h2 id="project-management">Project Management<a class="headerlink" href="#project-management" title="Permanent link">&para;</a></h2>
-<!-- Shared with README.md — edit there, not here. -->
+<!-- Shared with README.md. Edit there, not here. -->
 
 <table>
 <thead>
@@ -1249,12 +1249,12 @@
 </thead>
 <tbody>
 <tr>
-<td><code>dsagt init</code></td>
-<td>Create or reconfigure a project — interactive menu for name, location, agent, knowledge collections, skill sources, the episodic-memory opt-in, and the AI-readiness check; sets up the KB and writes the per-agent MCP config</td>
+<td><code>dsagt init [&lt;name&gt;] [--agent &lt;platform&gt;] [--location &lt;dir&gt;] [--include\|--exclude &lt;asset&gt;...] [--episodic] [--no-readiness]</code></td>
+<td>Create or reconfigure a project: an interactive menu for name, location, agent, knowledge collections, skill sources, the episodic-memory opt-in, and the AI-readiness check; the flags drive it without a TTY. Sets up the KB and writes the per-agent MCP config</td>
 </tr>
 <tr>
 <td><code>dsagt start &lt;name&gt;</code></td>
-<td>Launch the agent in the project directory (equivalent to <code>cd &lt;project&gt; &amp;&amp; &lt;agent&gt;</code>)</td>
+<td>Refresh the MCP config and the native skills mirror, then launch the agent in the project directory (<code>cd &lt;project&gt; &amp;&amp; &lt;agent&gt;</code>)</td>
 </tr>
 <tr>
 <td><code>dsagt info &lt;name&gt; [--json]</code></td>
@@ -1262,7 +1262,7 @@
 </tr>
 <tr>
 <td><code>dsagt traces &lt;name&gt; [--port &lt;n&gt;]</code></td>
-<td>Open the MLflow trace viewer over the project's store (runs catch-up first, deep-links to the Traces tab, quiets the mlflow noise)</td>
+<td>Open the MLflow trace viewer over the project's store (runs catch-up first, deep-links to the Traces tab, quiets the mlflow log output)</td>
 </tr>
 <tr>
 <td><code>dsagt list</code></td>
@@ -1274,11 +1274,11 @@
 </tr>
 <tr>
 <td><code>dsagt rm &lt;name&gt; [-y] [--keep-files]</code></td>
-<td>Unregister a project (and optionally delete its directory)</td>
+<td>Delete a project's directory and unregister it; <code>--keep-files</code> unregisters only</td>
 </tr>
 <tr>
 <td><code>dsagt smoke-test [--agent claude\|goose\|codex\|opencode\|cline] [--all]</code></td>
-<td>End-to-end install verification; <code>--all</code> runs every agent in parallel</td>
+<td>End-to-end install verification (default agent <code>goose</code>); <code>--all</code> runs every agent in parallel</td>
 </tr>
 </tbody>
 </table>

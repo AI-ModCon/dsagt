@@ -1476,7 +1476,7 @@ lock that does not match.</p>
 end-to-end tests because each README has an Execution section of prompts and a
 Post-Conditions section that states the outcome. <code>tests/headless_usecases.py</code>
 sends the prompts through a headless agent and the post-conditions are the
-judgment; the unit and integration suites do not run them.</p>
+judgment; they run only when a person starts them.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dsagt<span class="w"> </span>init<span class="w"> </span>&lt;name&gt;<span class="w"> </span>--agent<span class="w"> </span>claude<span class="p">|</span>codex<span class="w"> </span>--location<span class="w"> </span>~/dsagt-projects<span class="w">   </span><span class="c1"># then stage data per the README&#39;s Setup</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>python<span class="w"> </span>tests/headless_usecases.py<span class="w"> </span>use_cases/&lt;<span class="k">case</span>&gt;<span class="w"> </span>&lt;name&gt;<span class="w">            </span><span class="c1"># --only N,M --from N --subst KEY=VALUE --timeout S</span>
 </code></pre></div>
@@ -1551,7 +1551,7 @@ site with <code>--strict</code> on every PR and deploys it to GitHub Pages from 
 <h2 id="pull-requests">Pull requests<a class="headerlink" href="#pull-requests" title="Permanent link">&para;</a></h2>
 <ul>
 <li>One concern per pull request. A small, focused pull request receives full
-  and timely review; a monolithic refactor invites a cursory one and occludes important changes.</li>
+  and timely review; a large refactor invites a cursory one and hides important changes.</li>
 <li>Code an agent wrote gets a human review before it merges, the same as any
   other code.</li>
 <li>Work on a branch off <code>main</code>. Describe the intent, not the diff. Update
@@ -1621,16 +1621,16 @@ nothing from the package; when it needs something dsagt holds, the agent
 calls a tool for it beside the code. A function that needs only dsagt's own
 state is a tool. Nothing is both.</p>
 <h2 id="codebase-orientation">Codebase orientation<a class="headerlink" href="#codebase-orientation" title="Permanent link">&para;</a></h2>
-<p>The <a href="https://ai-modcon.github.io/dsagt/architecture/">Architecture</a> page explains in more detail the components of DSAgt — the
+<p>The <a href="https://ai-modcon.github.io/dsagt/architecture/">Architecture</a> page describes the components of DSAgt: the
 capabilities, the single <code>dsagt-server</code> MCP layout, and the observability and
-memory design. <code>CLAUDE.md</code> contains helpful information for the human as well as agent developer.</p>
+memory design. <code>CLAUDE.md</code> holds the glossary and the invariants, for a human developer as well as an agent.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
-<p><strong>Agent command not found.</strong> The agent CLI isn't installed or isn't on PATH —
+<p><strong>Agent command not found.</strong> The agent CLI is not installed or is not on PATH;
 see the <a href="https://ai-modcon.github.io/dsagt/#supported-agents">supported agents</a>.</p>
 <p><strong>MCP server not connecting.</strong> Confirm the entry point resolves:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>which<span class="w"> </span>dsagt-server
 </code></pre></div>
-<p>If it's missing, reinstall:
+<p>If it is missing, reinstall:
 <code>pip install --force-reinstall "git+https://github.com/AI-ModCon/dsagt.git"</code>.</p>
 <h2 id="aillm-assisted-contributions">AI/LLM-assisted contributions<a class="headerlink" href="#aillm-assisted-contributions" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1639,7 +1639,7 @@ see the <a href="https://ai-modcon.github.io/dsagt/#supported-agents">supported 
   an AI tool does not transfer that responsibility to the tool.</li>
 <li><strong>Understand your work.</strong> Review AI-generated code line by line before
   submitting it. You are responsible for its correctness, security, and scope,
-  and for confirming it doesn't breach copyright.</li>
+  and for confirming it does not breach copyright.</li>
 <li><strong>Disclose it.</strong> If AI/LLM tools were used to generate a substantial part of
   a PR, say so in the PR description.</li>
 <li><strong>Human review is mandatory.</strong> An LLM review can supplement a human

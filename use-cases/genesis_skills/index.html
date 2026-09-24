@@ -1179,10 +1179,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1431,10 +1431,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1470,37 +1470,37 @@
 
 
 <h1 id="genesis-skills-for-data-curation">Genesis Skills for Data Curation<a class="headerlink" href="#genesis-skills-for-data-curation" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> Skill management — the external Genesis skill catalog driving a data-curation pipeline</p>
+<p><strong>Domain:</strong> Skill management, the external Genesis skill catalog driving a data-curation pipeline</p>
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/genesis_skills/"><code>use_cases/genesis_skills/</code></a></p>
 <p>Sync the Genesis skill catalog, install the Croissant validation skill, ground the curation skills in the dataset's domain documents, and produce a datacard for a small curated dataset.</p>
 <blockquote>
-<p><strong>Estimated time:</strong> ~10 minutes (the data is tiny; the one external
-dependency is a shallow clone of the Genesis catalog from GitHub — needs
+<p><strong>Estimated time:</strong> ~10 minutes (the data is small; the one external
+dependency is a shallow clone of the Genesis catalog from GitHub, which needs
 network access to <code>github.com</code>).</p>
 </blockquote>
-<p>An end-to-end <strong>data-preparation</strong> walkthrough that exercises the skill catalog
-against the <strong>Genesis</strong> source (AI-ModCon on GitHub). The agent installs the
+<p>An end-to-end data-preparation walkthrough that exercises the skill catalog
+against the Genesis source (AI-ModCon on GitHub). The agent installs the
 BASE-Data/ModCon Croissant validator from the catalog, grounds the
 <code>datacard-generator</code> base skill every project carries in the dataset's domain
-documents, then prepares and <strong>datacards a finished dataset</strong>.</p>
-<p>The "finished product" is a small curated dataset — a CO2-methanation <strong>catalyst
-screen</strong> (<code>dataset/catalyst_screening.csv</code>, 8 rows) — plus the domain docs that
-describe how it was produced. Everything is tiny, so the whole thing runs in
-seconds with no real instruments or HPC.</p>
+documents, then writes a datacard for a finished dataset.</p>
+<p>The finished dataset is a small curated CO2-methanation catalyst screen
+(<code>dataset/catalyst_screening.csv</code>, 8 rows) plus the domain documents that
+describe how it was produced. The data is small, so the walkthrough runs in
+seconds with no instruments or HPC.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
 <li>DSAgt installed and an agent platform installed and
   <strong>already authenticated</strong>.</li>
 <li>Git, with network access to <code>github.com</code> (the Genesis catalog clones from
   <code>AI-ModCon/genesis-skills</code>).</li>
-<li>Embedding credentials are optional — <code>search_skills</code> uses semantic search
+<li>Embedding credentials are optional: <code>search_skills</code> uses semantic search
   when <code>EMBEDDING_*</code> is set and falls back to a keyword scorer otherwise.</li>
 </ul>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init
 </code></pre></div>
 <p>At the menu, name the project <code>genesis-skills</code>, pick your agent, and <strong>uncheck <code>genesis</code></strong>
-at the skill-sources checkbox — the walkthrough has the agent enable that catalog itself
+at the skill-sources checkbox; the walkthrough has the agent enable that catalog itself
 in step 1. Then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/genesis-skills
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6</span>
@@ -1524,7 +1524,7 @@ its skills indexed, source written to <code>.dsagt/config.yaml</code>.</p>
 <h3 id="2-find-and-install-the-validator-skill">2. Find and install the validator skill<a class="headerlink" href="#2-find-and-install-the-validator-skill" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Search the catalog for a skill that validates Croissant / JSON-LD dataset metadata and install the best match into this project.
 </code></pre></div>
-<p><strong>Expect:</strong> <code>search_skills</code> surfaces <strong><code>croissant-validator</code></strong> → <code>install_skill</code>.
+<p><strong>Expect:</strong> <code>search_skills</code> returns <strong><code>croissant-validator</code></strong> → <code>install_skill</code>.
 It is installed into <code>&lt;project&gt;/skills/</code> and mirrored into the agent's native
 skills directory at install time, with a <code>PROVENANCE.txt</code> crediting the Genesis
 source. <code>datacard-generator</code> needs no install: it is a base skill, present
@@ -1594,10 +1594,10 @@ the trace store <code>mlflow.db</code>, and the session's other outputs.</p>
    validator as a code; when it installs <code>mlcroissant</code> into the skill's own
    virtual environment instead, that run is outside the wrapper and leaves no
    record, which step 4 allows.</li>
-<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session —
-   <code>dsagt traces genesis-skills</code>.</li>
+<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session;
+   view them with <code>dsagt traces genesis-skills</code>.</li>
 </ol>
-<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>

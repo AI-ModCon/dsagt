@@ -1329,7 +1329,7 @@
 
 
 <h1 id="knowledge-base">Knowledge Base<a class="headerlink" href="#knowledge-base" title="Permanent link">&para;</a></h1>
-<p>The knowledge base is DSAgt's catalog of <strong>domain knowledge</strong> — reference corpora and your own documents — that the agent searches to ground its work on scientific data-processing and AI-readiness evaluation.</p>
+<p>The knowledge base is DSAgt's catalog of domain knowledge, reference corpora and your own documents, that the agent searches to ground its work on scientific data processing and AI-readiness evaluation.</p>
 <p><img alt="DSAgt knowledge base" src="../assets/knowledge-base.png" /></p>
 <h2 id="domain-knowledge-collections">Domain-knowledge collections<a class="headerlink" href="#domain-knowledge-collections" title="Permanent link">&para;</a></h2>
 <table>
@@ -1353,24 +1353,24 @@
 </tr>
 </tbody>
 </table>
-<p>The agent has five knowledge base tools: <code>kb_ingest</code> (index a file or directory into a named collection; long ingests run in the background), <code>kb_append</code> (add documents to an existing collection), <code>kb_job_status</code> (poll a background job), <code>kb_search</code> (retrieve across one or more collections), and <code>kb_list_collections</code> (see what is indexed).</p>
+<p>The agent has five knowledge base tools: <code>kb_ingest</code> (index a folder into a named collection; the ingest runs in the background), <code>kb_append</code> (add documents to an existing collection), <code>kb_job_status</code> (poll a background job), <code>kb_search</code> (retrieve across one or more collections, with a <code>where</code> metadata filter and regex or substring filters over the chunk text), and <code>kb_list_collections</code> (every collection with its purpose, the metadata keys a <code>where</code> filter takes, and its chunk count).</p>
 <h2 id="hybrid-vector-search">Hybrid vector search<a class="headerlink" href="#hybrid-vector-search" title="Permanent link">&para;</a></h2>
-<p>Retrieval is <strong>hybrid</strong> — dense semantic embeddings fused with sparse BM25 keyword matching — by default per collection for focused retrieval:</p>
+<p>Retrieval is hybrid, dense semantic embeddings fused with sparse BM25 keyword matching, per collection by default:</p>
 <ul>
-<li><strong>Semantic embeddings</strong> catch paraphrase and synonymy: a query about "missing values" finds a passage on "null rates" even with no shared words.</li>
-<li><strong>BM25 keyword matching</strong> catches the exact terms embeddings tend to under-rank — identifiers, gene names, parameter flags, standard names — where a literal match matters.</li>
-<li><strong>Per-collection partitioning</strong> scopes a search to a domain, so a materials-science query isn't diluted by genomics references.</li>
+<li><strong>Semantic embeddings</strong> match paraphrase and synonymy: a query about "missing values" finds a passage on "null rates" with no shared words.</li>
+<li><strong>BM25 keyword matching</strong> matches the exact terms embeddings under-rank (identifiers, gene names, parameter flags, standard names), where a literal match matters.</li>
+<li><strong>Per-collection partitioning</strong> scopes a search to a domain, so a materials-science query is ranked against materials references only.</li>
 </ul>
 <p>The default embedder is <code>BAAI/bge-small-en-v1.5</code> run locally on onnxruntime from the ONNX export the model's repository publishes (133 MB, downloaded once).</p>
 <h2 id="shared-vector-store">Shared vector store<a class="headerlink" href="#shared-vector-store" title="Permanent link">&para;</a></h2>
-<p>The same vector store additionally supports DSAgt's <a href="../memory/">memory</a> (explicit + episodic), <a href="../skills/">skills discovery</a> (the installable-skill corpus), and <a href="../provenance/">code execution tracking</a> (the <code>code_use</code> records). Each is a separate partitioned collection in that store, sharing one embedder and one ChromaDB. Respective docs on <a href="../memory/">memory</a>, <a href="../skills/">skills</a>, and <a href="../provenance/">provenance</a> share specific details about those collections.</p>
+<p>The same vector store also holds DSAgt's <a href="../memory/">memory</a> (explicit and episodic), the <a href="../skills/">skill corpus</a>, and the <a href="../provenance/">execution records</a> (the <code>code_use</code> collection). Each is a separate collection in that store, sharing one embedder and one ChromaDB; the linked pages describe each collection.</p>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<p><code>dsagt init</code> sets up the knowledge base from your choices in the interactive menu. </p>
+<p><code>dsagt init</code> sets up the knowledge base from your choices in the interactive menu.</p>
 <h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># name it `demo`, and check `nemo_curator` at the knowledge-collections menu</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dsagt<span class="w"> </span>start<span class="w"> </span>demo
 </code></pre></div>
-<p>Then, in the agent — substituting <code>&lt;your-docs-folder&gt;</code> with any folder of your
+<p>Then, in the agent, substituting <code>&lt;your-docs-folder&gt;</code> with any folder of your
 own documents (papers, protocols, schemas):</p>
 <ol>
 <li>

@@ -496,10 +496,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-capabilities" class="md-nav__link">
+  <a href="#capabilities" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Key Capabilities
+        Capabilities
       
     </span>
   </a>
@@ -1225,10 +1225,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-capabilities" class="md-nav__link">
+  <a href="#capabilities" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Key Capabilities
+        Capabilities
       
     </span>
   </a>
@@ -1258,10 +1258,10 @@
 <h1 id="dsagt">DSAgt<a class="headerlink" href="#dsagt" title="Permanent link">&para;</a></h1>
 <!-- Shared with README.md. Edit there, not here. -->
 
-<p><strong>D</strong>ata<strong>S</strong>mith <strong>Ag</strong>en<strong>t</strong> — AI-assisted data pipeline builder.</p>
+<p><strong>D</strong>ata<strong>S</strong>mith <strong>Ag</strong>en<strong>t</strong>, an AI-assisted data pipeline builder.</p>
 <p><img alt="DSAgt architecture" src="assets/overview.png" /></p>
 <p>DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It exposes these capabilities to a user's existing agent CLI or VS Code extension (Claude Code, OpenCode, Codex, and others).</p>
-<p><strong>Prerequisites:</strong> Python 3.12 or later (CI tests 3.12 and 3.13) on Apple Silicon or Linux x86_64 (onnxruntime, which runs the local embedding model, has no Intel Mac wheel), and an agent platform (currently supported platforms are listed below) — already installed and authenticated against whatever LLM provider you intend to use.</p>
+<p><strong>Prerequisites:</strong> Python 3.12 or later (CI tests 3.12 and 3.13) on Apple Silicon or Linux x86_64 (onnxruntime, which runs the local embedding model, has no Intel Mac wheel), and one of the agent platforms below, installed and authenticated against the LLM provider you intend to use.</p>
 <!-- md-shared:agents:start -->
 <table>
 <thead>
@@ -1304,37 +1304,37 @@
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
 <!-- Shared with README.md. Edit there, not here. -->
 
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python3.12<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>~/.venvs/dsagt<span class="w">          </span><span class="c1"># or: conda create -n dsagt python=3.12 &amp;&amp; conda activate dsagt</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python3.13<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>~/.venvs/dsagt<span class="w">          </span><span class="c1"># or: conda create -n dsagt python=3.13 &amp;&amp; conda activate dsagt</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">source</span><span class="w"> </span>~/.venvs/dsagt/bin/activate<span class="w">         </span><span class="c1"># (Windows venv: ~\.venvs\dsagt\Scripts\activate)</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;git+https://github.com/AI-ModCon/dsagt.git&quot;</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>dsagt<span class="w"> </span>--version<span class="w">                            </span><span class="c1"># 0.2.1</span>
 </code></pre></div>
-<p>This puts the <code>dsagt</code> CLI on your PATH. Create your first project — <code>dsagt init</code> is interactive (it walks you through the agent platform, project location, packaged knowledge collections, and skill sources) and sets up the knowledge base on first run:</p>
+<p>This puts the <code>dsagt</code> CLI on your PATH. Create your first project. <code>dsagt init</code> is interactive (it prompts for the agent platform, project location, packaged knowledge collections, and skill sources) and sets up the knowledge base on first run:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>init<span class="w">                      </span><span class="c1"># interactive; pick agent, collections, sources</span>
 </code></pre></div>
 <p>Then start dsagt (shorthand for starting your agent with the dsagt MCP server enabled), or open the project in VS Code:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dsagt<span class="w"> </span>start<span class="w"> </span>&lt;my-project&gt;<span class="w">   </span><span class="c1"># ≈ cd ~/dsagt-projects/my-project &amp;&amp; claude   (or your preferred agent)</span>
 </code></pre></div>
-<p>Or, if you use a VS Code agent extension, just open the folder as a project in VS Code and start the agent — <code>dsagt init</code> already made the dsagt MCP server available via the native interface (e.g. for Claude, exposed in the project's <code>.mcp.json</code>).</p>
-<p>To upgrade later, reinstall — re-running <code>dsagt init</code> reconfigures an existing project in place:</p>
+<p>With a VS Code agent extension, open the folder as a project in VS Code and start the agent; <code>dsagt init</code> has already written the dsagt MCP server into the agent's native config (for Claude, the project's <code>.mcp.json</code>).</p>
+<p>To upgrade later, reinstall; re-running <code>dsagt init</code> reconfigures an existing project in place:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span><span class="s2">&quot;git+https://github.com/AI-ModCon/dsagt.git&quot;</span>
 </code></pre></div>
 <blockquote>
 <p>Pin to a specific release: e.g. <code>pip install "git+https://github.com/AI-ModCon/dsagt.git@0.2.0"</code>.</p>
 </blockquote>
 <p>For a development install from a clone, see the <a href="developer/">Developer Guide</a>.</p>
-<h2 id="key-capabilities">Key Capabilities<a class="headerlink" href="#key-capabilities" title="Permanent link">&para;</a></h2>
+<h2 id="capabilities">Capabilities<a class="headerlink" href="#capabilities" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Capability</th>
-<th>What it does</th>
+<th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>Code Registry</strong></td>
-<td>Register CLI codes as markdown specs; the agent discovers and runs them via <code>search_registry</code></td>
+<td>Register CLI codes as markdown specs; the agent discovers them via <code>search_registry</code> and runs them from its shell</td>
 </tr>
 <tr>
 <td><strong>Knowledge Base</strong></td>
@@ -1342,7 +1342,7 @@
 </tr>
 <tr>
 <td><strong>Skills Discovery</strong></td>
-<td>Search the external skill corpus and install workflow skills on demand via <code>search_skills</code> / <code>install_skill</code>, without flooding the agent's context</td>
+<td>Search the external skill corpus and install workflow skills on demand via <code>search_skills</code> / <code>install_skill</code>; an uninstalled skill takes no space in the agent's context</td>
 </tr>
 <tr>
 <td><strong>Provenance</strong></td>
@@ -1354,15 +1354,15 @@
 </tr>
 <tr>
 <td><strong>Episodic Memory</strong></td>
-<td>Opt-in: the MCP server mechanically chunks and embeds each session turn into a searchable <code>session_memory</code> collection (recency-weighted retrieval)</td>
+<td>Opt-in: the MCP server chunks and embeds each session turn into a searchable <code>session_memory</code> collection (recency-weighted retrieval)</td>
 </tr>
 <tr>
 <td><strong>Observability</strong></td>
-<td>Serverless MLflow tracing (a per-project SQLite file) — DSAgt's own spans plus agent traces recovered from the on-disk transcript</td>
+<td>Serverless MLflow tracing (a per-project SQLite file): DSAgt's own spans plus agent traces recovered from the on-disk transcript</td>
 </tr>
 </tbody>
 </table>
-<p>See the <a href="quickstart/">Quick Start</a> to try all of these in a single session.</p>
+<p>The <a href="quickstart/">Quick Start</a> exercises all of these in a single session.</p>
 
 
 

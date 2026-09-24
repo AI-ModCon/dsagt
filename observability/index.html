@@ -1341,7 +1341,7 @@
 
 
 <h1 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h1>
-<p>DSAgt logs traces to a serverless <strong>MLflow</strong> store, an SQLite file at <code>~/dsagt-projects/&lt;project&gt;/mlflow.db</code>.</p>
+<p>DSAgt logs traces to one <strong>MLflow</strong> store: the shared tracking server <code>MLFLOW_TRACKING_URI</code> names, or, when it is unset, a serverless SQLite file at <code>&lt;project&gt;/mlflow.db</code>, which keeps a project self-contained in its directory.</p>
 <p><img alt="DSAgt observability" src="../assets/observability.png" /></p>
 <p>To view in the MLflow UI:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;project&gt;<span class="w"> </span><span class="c1"># mlflow ui --backend-store-uri sqlite:///&lt;project&gt;/mlflow.db</span>
@@ -1350,20 +1350,20 @@
 <h2 id="logging-to-a-shared-tracking-server">Logging to a shared tracking server<a class="headerlink" href="#logging-to-a-shared-tracking-server" title="Permanent link">&para;</a></h2>
 <p>Export <code>MLFLOW_TRACKING_URI</code> before <code>dsagt init</code>; the value is written into the agent's MCP config, so the CLI, the MCP server and its <code>dsagt-run</code> children all log there instead of the local file. Credentials are never written into a project or an agent config:</p>
 <ul>
-<li><code>MLFLOW_TRACKING_TOKEN</code> (Bearer) or <code>MLFLOW_TRACKING_USERNAME</code> / <code>_PASSWORD</code> — read by the MLflow client itself.</li>
-<li><code>MLFLOW_TRACKING_API_KEY</code> — for a server behind an API gateway that authenticates on an <code>X-API-Key</code> header (Kong answers <code>WWW-Authenticate: Key</code>); DSAgt adds the header through MLflow's request-header plugin.</li>
+<li><code>MLFLOW_TRACKING_TOKEN</code> (Bearer) or <code>MLFLOW_TRACKING_USERNAME</code> / <code>_PASSWORD</code>: read by the MLflow client itself.</li>
+<li><code>MLFLOW_TRACKING_API_KEY</code>: for a server behind an API gateway that authenticates on an <code>X-API-Key</code> header (Kong answers <code>WWW-Authenticate: Key</code>); DSAgt adds the header through MLflow's request-header plugin.</li>
 </ul>
-<p><code>dsagt traces</code> prints the remote deep-link in this mode rather than starting a local viewer, and <code>dsagt info</code> reads from the remote store.</p>
-<p>Two consequences of the URL being baked at init:</p>
+<p>In this mode <code>dsagt traces</code> prints the remote deep-link, since the viewer is the remote server, and <code>dsagt info</code> reads from the remote store.</p>
+<p>Two consequences of the URL being written into the agent config at init:</p>
 <ul>
-<li><strong>Change the server by re-running <code>dsagt init</code>.</strong> Exporting a different <code>MLFLOW_TRACKING_URI</code> later moves the CLI but not the MCP server, whose config still carries the old value.</li>
-<li><strong>codex and cline do not pass the shell to their MCP children</strong>, so a key exported in a terminal never reaches <code>dsagt-server</code> under those agents. Put it in <strong><code>~/.config/dsagt/env</code></strong> instead (<code>KEY=VALUE</code> lines, mode 600): <code>dsagt-server</code> and the <code>dsagt</code> CLI load it at startup for any key the shell did not set. The file is in <code>$HOME</code>, never inside a project or an agent config — the <code>~/.netrc</code> pattern. It works for every agent, and for <code>EMBEDDING_API_KEY</code> too.</li>
+<li><strong>Change the server by re-running <code>dsagt init</code>.</strong> Exporting a different <code>MLFLOW_TRACKING_URI</code> later moves the CLI but not the MCP server, whose config still carries the earlier value.</li>
+<li><strong>Codex and Cline start their MCP children from the config's env block alone</strong>, so a key exported in a terminal never reaches <code>dsagt-server</code> under those agents. Put it in <strong><code>~/.config/dsagt/env</code></strong> (<code>KEY=VALUE</code> lines, mode 600): <code>dsagt-server</code> and the <code>dsagt</code> CLI load it at startup for any key the shell did not set. The file is in <code>$HOME</code>, never inside a project or an agent config, the same placement as <code>~/.netrc</code>. It works for every agent, and for <code>EMBEDDING_API_KEY</code> too.</li>
 </ul>
 <h2 id="trace-sources">Trace sources<a class="headerlink" href="#trace-sources" title="Permanent link">&para;</a></h2>
 <p>DSAgt reconstructs traces from what the agent writes to disk.</p>
 <ol>
 <li><strong>DSAgt spans (live).</strong> DSAgt instruments its own code and emits spans directly to mlflow as it runs.</li>
-<li><strong>Agent traces (post-hoc).</strong> The MCP server periodically reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink — recovering prompts, responses, and tool calls.</li>
+<li><strong>Agent traces (post-hoc).</strong> The MCP server periodically reads the agent's own on-disk session transcript, translates it to a canonical trace shape, and writes it to the same store via the MLflow sink, recovering prompts, responses, and tool calls.</li>
 </ol>
 <h2 id="trace-coverage">Trace Coverage<a class="headerlink" href="#trace-coverage" title="Permanent link">&para;</a></h2>
 <table>
@@ -1398,12 +1398,12 @@
 </tbody>
 </table>
 <h3 id="agent-trace-coverage">Agent trace coverage<a class="headerlink" href="#agent-trace-coverage" title="Permanent link">&para;</a></h3>
-<p>Agent traces are reconstructed from each agent's on-disk session record. A per-agent reader + translator runs for every supported agent (claude, codex, goose, opencode, cline), uniformly. Fidelity is capped by what the transcript persisted (e.g. token counts and timing appear where the agent recorded them).</p>
+<p>Agent traces are reconstructed from each agent's on-disk session record. A per-agent reader and translator runs for every supported agent (claude, codex, goose, opencode, cline), the same way. Fidelity is capped by what the transcript persisted: token counts and timing appear where the agent recorded them.</p>
 <p>Every span carries the project's session id for filtering in the MLflow trace view.</p>
-<p>The trace scan runs every 45 seconds inside the MCP server. Each pass reads new transcript records, translates the completed turns to the canonical trace, and hands them to the MLflow sink and, when episodic memory is on, to the memory indexer.</p>
+<p>The periodic pass runs every 45 seconds inside the MCP server. Each pass reads new transcript records, translates the completed turns to the canonical trace, and passes them to the MLflow sink and, when episodic memory is on, to the memory indexer.</p>
 <h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># follow the prompts: name it `demo`, then pick your agent</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>dsagt<span class="w"> </span>start<span class="w"> </span>demo<span class="w">      </span><span class="c1"># …run a prompt or two, then exit the agent</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>dsagt<span class="w"> </span>start<span class="w"> </span>demo<span class="w">      </span><span class="c1"># run a prompt or two, then exit the agent</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>&lt;project&gt;
 </code></pre></div>
 <p>Open MLflow UI to see both feeds in one store: DSAgt's own <code>kb.*</code> / <code>code.execute</code> spans and the per-turn agent traces recovered from the transcript. <code>dsagt info demo</code> prints the same session/trace summary from the command line.</p>

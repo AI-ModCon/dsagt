@@ -1307,13 +1307,13 @@
 
 
 <h1 id="memory">Memory<a class="headerlink" href="#memory" title="Permanent link">&para;</a></h1>
-<p>DSAgt gives the agent two kinds of persistent memory backed by the project's vector store: <strong>explicit memory</strong> — facts the user confirms — and opt-in <strong>episodic memory</strong> — an automatic record of session turns. Both are retrievable by the agent with <code>kb_search</code> / <code>kb_get_memories</code> MCP tools.</p>
+<p>DSAgt gives the agent two kinds of persistent memory backed by the project's vector store: <strong>explicit memory</strong>, facts the user confirms, and opt-in <strong>episodic memory</strong>, an automatic record of session turns. The agent retrieves them with the <code>kb_get_memories</code> and <code>kb_search</code> tools.</p>
 <p><img alt="DSAgt memory" src="../assets/memory.png" /></p>
 <h2 id="explicit-memory">Explicit memory<a class="headerlink" href="#explicit-memory" title="Permanent link">&para;</a></h2>
-<p>Explicit memories are facts the user confirms during a session. The agent saves them via <code>kb_remember</code>, which writes to both the ChromaDB collection and <code>&lt;project&gt;/.dsagt/explicit_memories.yaml</code>. It fetches them via <code>kb_get_memories</code> on demand — typically when you ask it to recall something — so they are not auto-loaded at session start. </p>
+<p>Explicit memories are facts the user confirms during a session. The agent saves them via <code>kb_remember</code>, which writes to both the ChromaDB collection and <code>&lt;project&gt;/.dsagt/explicit_memories.yaml</code>. It fetches them via <code>kb_get_memories</code> on demand, typically when you ask it to recall something, so a session starts with none of them in context.</p>
 <h2 id="episodic-memory">Episodic memory<a class="headerlink" href="#episodic-memory" title="Permanent link">&para;</a></h2>
-<p>When episodic memory is enabled, DSAgt reads the agent's transcript as the session runs and captures each completed turn into the <code>session_memory</code> collection — a fast, local chunk-and-embed pass that reuses the same embedder as the rest of the <a href="../knowledge-base/">knowledge base</a>.</p>
-<p>Retrieval over <code>session_memory</code> filters first to a session, then by regex over the query's key terms, before a final <strong>recency-weighted</strong> semantic ranking: a newer turn edges out a stale one as a bounded boost, so a corrected fact wins by recency while a strongly-relevant old turn is never buried.</p>
+<p>When episodic memory is enabled, DSAgt reads the agent's transcript as the session runs and captures each completed turn into the <code>session_memory</code> collection, a local chunk-and-embed pass that reuses the embedder of the rest of the <a href="../knowledge-base/">knowledge base</a>.</p>
+<p>Retrieval over <code>session_memory</code> filters first to a session, then by regex over the query's key terms, before a final recency-weighted semantic ranking: a newer turn gets a bounded boost, so a corrected fact wins by recency while a strongly relevant old turn still ranks.</p>
 <h2 id="comparison-with-platform-native-memory">Comparison with platform-native memory<a class="headerlink" href="#comparison-with-platform-native-memory" title="Permanent link">&para;</a></h2>
 <p>Agent platforms provide their own memory: instruction files such as <code>CLAUDE.md</code> and <code>.goosehints</code>, and on some platforms notes the agent saves for itself. That memory is agent-curated (the model decides what is worth saving), stored as prose files loaded whole into context, and tied to one platform's format. DSAgt memory differs on each point:</p>
 <ul>
@@ -1326,7 +1326,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init<span class="w">            </span><span class="c1"># name it `demo`; answer &quot;yes&quot; to &quot;Enable episodic memory?&quot; to also capture turns</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dsagt<span class="w"> </span>start<span class="w"> </span>demo
 </code></pre></div>
-<p>Then, in the agent — <strong>explicit</strong> memory (you confirm a fact to store):</p>
+<p>Then, in the agent, explicit memory (you confirm a fact to store):</p>
 <ol>
 <li>
 <blockquote>
@@ -1342,11 +1342,11 @@
 <p>Confirm it persisted to disk:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cat<span class="w"> </span>~/dsagt-projects/demo/.dsagt/explicit_memories.yaml
 </code></pre></div>
-<p>And <strong>episodic</strong> memory (captured automatically — no <code>remember</code> step):</p>
+<p>And episodic memory (captured without a <code>remember</code> step):</p>
 <ol>
 <li>
 <blockquote>
-<p>For this dataset, let's treat any column with over 5% nulls as unusable.</p>
+<p>For this dataset, treat any column with over 5% nulls as unusable.</p>
 </blockquote>
 </li>
 <li>
@@ -1355,7 +1355,7 @@
 </blockquote>
 </li>
 </ol>
-<p>The agent recalls the decision from <code>session_memory</code> even though you never explicitly stored it. Confirm the collection materialized:</p>
+<p>The agent recalls the decision from <code>session_memory</code> although you never stored it explicitly. Confirm the collection exists:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ls<span class="w"> </span>~/dsagt-projects/demo/kb_index/session_memory/
 </code></pre></div>
 

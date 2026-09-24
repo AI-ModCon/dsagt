@@ -1156,10 +1156,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1497,10 +1497,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1536,12 +1536,12 @@
 
 
 <h1 id="tokamak-stability">Tokamak Stability<a class="headerlink" href="#tokamak-stability" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> Fusion energy — M3D-C1 finite-element simulation data</p>
+<p><strong>Domain:</strong> Fusion energy, M3D-C1 finite-element simulation data</p>
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/tokamak_stability/"><code>use_cases/tokamak_stability/</code></a></p>
 <p>Register codes for reading, analyzing, and visualizing data from the M3D-C1 finite-element code, then use DSAgt to explore an example linear-MHD dataset, produce plots and spectra, repackage secondary data products as HDF5, and reconstruct the session as a script that reruns on other datasets.</p>
 <blockquote>
-<p><strong>Estimated time:</strong> involved / not a 10-minute demo. Setup is the cost:
-building the <strong>fusion-io</strong> C/C++ library from source (scripted, but its
+<p><strong>Estimated time:</strong> involved / not a 10-minute demo. Setup takes most of the
+time: building the fusion-io C/C++ library from source (scripted, but its
 compilers and libraries must be installed first). Budget roughly an hour
 for first-time setup; the agent session itself is ~15 minutes once the
 dependencies and data are in place.</p>
@@ -1549,8 +1549,8 @@ dependencies and data are in place.</p>
 <p>This guide uses DSAgt to investigate the stability properties of a tokamak
 configuration from linear MHD simulation output produced by the
 <a href="https://sites.google.com/pppl.gov/m3d-c1">M3D-C1</a> unstructured-mesh
-finite-element code. The Python modules under <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/tokamak_stability/scripts"><code>scripts/</code></a> — <code>hdf5.py</code>,
-<code>m3dc1_tools.py</code>, <code>m3dc1_plots.py</code>, and the <code>m3dc1/</code> wrapper package — provide
+finite-element code. The Python modules under <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/tokamak_stability/scripts"><code>scripts/</code></a> (<code>hdf5.py</code>,
+<code>m3dc1_tools.py</code>, <code>m3dc1_plots.py</code>, and the <code>m3dc1/</code> wrapper package) provide
 the functions for reading M3D-C1 HDF5 output, evaluating fields from their
 basis-function coefficients, computing equilibrium and spectral quantities, and
 plotting. The agent registers those functions as codes under the guidance of
@@ -1562,7 +1562,7 @@ Sanchez-Villar (PPPL). The session below has been tested with Claude Code.</p>
 <ul>
 <li>DSAgt installed with the <code>tokamak-stability</code> extra
   (<code>pip install "dsagt[tokamak-stability] @ git+https://github.com/AI-ModCon/dsagt.git"</code>),
-  which brings <code>h5py</code> and <code>matplotlib</code>; <code>numpy</code> comes with dsagt.</li>
+  which installs <code>h5py</code> and <code>matplotlib</code>; <code>numpy</code> is a dsagt dependency.</li>
 <li>An agent platform installed and <strong>already authenticated</strong>.</li>
 <li>The <a href="https://github.com/nferraro/fusion-io">fusion-io</a> library and its Python
   bindings, built from source by <code>scripts/setup_env.sh</code> in the walkthrough's
@@ -1620,7 +1620,8 @@ agent so, and you can redirect either in a prompt.</p>
 <p>Creating and registering the codes may take several minutes. <strong>Verify:</strong>
 <code>Search the registry for M3D-C1 codes.</code> The skill requires that codes wrapping
 functions that call into fusion-io write their JSON result to an
-<code>--output-json</code> file rather than stdout; check one such spec (for example the
+<code>--output-json</code> file, since fusion-io writes to the process's stdout and
+corrupts anything printed there; check one such spec (for example the
 Miller-geometry code) carries that option.</p>
 <h3 id="2-explore-the-dataset">2. Explore the dataset<a class="headerlink" href="#2-explore-the-dataset" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Using your codes, tell me about the data in data/m3dc1_data/.
@@ -1693,9 +1694,9 @@ outputs, with a line on what each is.</p>
 <li><code>dsagt_session_script.sh</code> reruns the session against a data directory set at
    the top of the script.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture every code
-   execution and agent turn — <code>dsagt traces tokamak-stability</code>.</li>
+   execution and agent turn; view them with <code>dsagt traces tokamak-stability</code>.</li>
 </ol>
-<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>

@@ -1174,7 +1174,7 @@
 
 
 <h1 id="use-cases">Use Cases<a class="headerlink" href="#use-cases" title="Permanent link">&para;</a></h1>
-<p>End-to-end walkthroughs for representative scientific and data-readiness scenarios are located in <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/"><code>use_cases/</code></a>. Each follows one layout — Prerequisites, Setup, Execution as pasted prompts with expected results, Post-Conditions, What This Tests, Cleanup — and covers data acquisition, code or skill registration, pipeline construction, and agent-driven execution. Some run on real scientific datasets; the skill-management demos use small fixture data.</p>
+<p>End-to-end walkthroughs for representative scientific and data-readiness scenarios are located in <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/"><code>use_cases/</code></a>. Each follows one layout (Prerequisites, Setup, Execution as pasted prompts with expected results, Post-Conditions, Coverage, Cleanup) and covers data acquisition, code or skill registration, pipeline construction, and agent-driven execution. Some run on real scientific datasets; the skill-management demos use small fixture data.</p>
 <p>Fixture data of a few megabytes is in the use case's own <code>data/</code> folder in the repository; larger datasets are hosted in the <a href="https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6">DSAgt use-case data folder</a>, and each Setup section gives the copy or download command.</p>
 <p><img alt="DSAgt use cases" src="../assets/use-cases.png" /></p>
 <table>
@@ -1188,42 +1188,42 @@
 <tbody>
 <tr>
 <td><a href="microbial_isolates/">Microbial Isolates</a></td>
-<td>Genomics — short-read QC and assembly with <code>fastp</code> + <code>megahit</code></td>
+<td>Genomics, short-read QC and assembly with <code>fastp</code> + <code>megahit</code></td>
 <td>Register short-read QC and assembly codes, follow the genomics best-practice documents, and build a reproducible isolate-processing pipeline against real sequencing reads.</td>
 </tr>
 <tr>
 <td><a href="cryoem/">Cryo-EM</a></td>
-<td>Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP</td>
-<td>DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive (EMPIAR-10017 β-galactosidase micrographs via CryoPPP) — register curation codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing pipeline, with the AIDRIN AI-readiness check measuring the curation step before/after.</td>
+<td>Structural biology, EMPIAR-10017 β-galactosidase micrographs via CryoPPP</td>
+<td>DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive (EMPIAR-10017 β-galactosidase micrographs via CryoPPP): register curation codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing pipeline, with the AIDRIN AI-readiness check measuring the curation step before/after.</td>
 </tr>
 <tr>
 <td><a href="vasp_dft/">VASP DFT → AI-Ready Records</a></td>
-<td>Materials science — VASP DFT output to AI-ready records, via catalog skills and a registered code</td>
-<td>Convert VASP DFT output into AI-ready records — the agent discovers and installs a pymatgen skill from a catalog, authors a converter skill for a slab calculation, extends it to nudged-elastic-band calculations, registers that converter as a code, and runs it with provenance against a reference record (no DFT run, no HPC).</td>
+<td>Materials science, VASP DFT output to AI-ready records, via catalog skills and a registered code</td>
+<td>Convert VASP DFT output into AI-ready records: the agent discovers and installs a pymatgen skill from a catalog, authors a converter skill for a slab calculation, extends it to nudged-elastic-band calculations, registers that converter as a code, and runs it with provenance against a reference record (no DFT run, no HPC).</td>
 </tr>
 <tr>
 <td><a href="tokamak_stability/">Tokamak Stability</a></td>
-<td>Fusion energy — M3D-C1 finite-element simulation data</td>
+<td>Fusion energy, M3D-C1 finite-element simulation data</td>
 <td>Register codes for reading, analyzing, and visualizing data from the M3D-C1 finite-element code, then use DSAgt to explore an example linear-MHD dataset, produce plots and spectra, repackage secondary data products as HDF5, and reconstruct the session as a script that reruns on other datasets.</td>
 </tr>
 <tr>
 <td><a href="aidrin-ai-readiness/">AIDRIN</a></td>
-<td>AI data readiness — <code>aidrin</code> metrics (quality, fairness, privacy) on UCI Adult</td>
-<td>Apply AIDRIN through DSAgt to a single tabular dataset (UCI Adult) — 15 metrics spanning data-quality, impact-on-AI, fairness-and-bias, and data-governance.</td>
+<td>AI data readiness, <code>aidrin</code> metrics (quality, fairness, privacy) on UCI Adult</td>
+<td>Apply AIDRIN through DSAgt to a single tabular dataset (UCI Adult), 15 metrics spanning data-quality, impact-on-AI, fairness-and-bias, and data-governance.</td>
 </tr>
 <tr>
 <td><a href="genesis_skills/">Genesis Skills for Data Curation</a></td>
-<td>Skill management — the external Genesis skill catalog driving a data-curation pipeline</td>
+<td>Skill management, the external Genesis skill catalog driving a data-curation pipeline</td>
 <td>Sync the Genesis skill catalog, install the Croissant validation skill, ground the curation skills in the dataset's domain documents, and produce a datacard for a small curated dataset.</td>
 </tr>
 <tr>
 <td><a href="plasma_turbulence/">Plasma Turbulence Training Data (XGC)</a></td>
-<td>Plasma physics — gyrokinetic turbulence simulation (XGC) training-data prep</td>
+<td>Plasma physics, gyrokinetic turbulence simulation (XGC) training-data prep</td>
 <td>Register the XGC preprocessing scripts as codes and drive them through DSAgt with provenance: check an ADIOS2 BP5 simulation case, summarize its physics content, preprocess it into GNN-ready npz files, validate the output, and reconstruct the pipeline. Advanced, HPC-scale data.</td>
 </tr>
 <tr>
 <td><a href="combustion_simulation/">BlastNet → WELL Conversion</a></td>
-<td>Combustion CFD — BlastNet DNS trajectories to the WELL HDF5 format</td>
+<td>Combustion CFD, BlastNet DNS trajectories to the WELL HDF5 format</td>
 <td>Develop a BlastNet-to-WELL converter from the format documents: author a conversion skill that carries the specifications as references, register the agent-written converter and a checker as codes, convert a sample trajectory with provenance, and compare the result with a reference WELL file held back from the agent, fixing the converter until the two match exactly.</td>
 </tr>
 </tbody>
@@ -1246,9 +1246,9 @@ present. Larger data comes from the Google Drive folder linked above.</p>
 <div class="admonition note">
 <p class="admonition-title">Adding a use case</p>
 <p>Drop a <code>README.md</code> with frontmatter (<code>title</code>, <code>domain</code>, <code>summary</code>) into a
-<code>use_cases/&lt;name&gt;/</code> folder — it is auto-added to this table, its body is
-inlined as its own page, and it appears in the nav. Folders without
-frontmatter are left out entirely. See
+<code>use_cases/&lt;name&gt;/</code> folder; it is added to this table, its body is
+inlined as its own page, and it appears in the nav. A folder without
+frontmatter is left out. See
 <a href="https://github.com/AI-ModCon/dsagt/blob/main/hooks/gen_use_cases.py"><code>hooks/gen_use_cases.py</code></a>.</p>
 </div>
 

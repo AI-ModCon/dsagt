@@ -1173,10 +1173,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1475,10 +1475,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1514,13 +1514,13 @@
 
 
 <h1 id="aidrin">AIDRIN<a class="headerlink" href="#aidrin" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> AI data readiness — <code>aidrin</code> metrics (quality, fairness, privacy) on UCI Adult</p>
+<p><strong>Domain:</strong> AI data readiness, <code>aidrin</code> metrics (quality, fairness, privacy) on UCI Adult</p>
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/aidrin-ai-readiness/"><code>use_cases/aidrin-ai-readiness/</code></a></p>
-<p>Apply AIDRIN through DSAgt to a single tabular dataset (UCI Adult) — 15 metrics spanning data-quality, impact-on-AI, fairness-and-bias, and data-governance.</p>
+<p>Apply AIDRIN through DSAgt to a single tabular dataset (UCI Adult), 15 metrics spanning data-quality, impact-on-AI, fairness-and-bias, and data-governance.</p>
 <blockquote>
 <p><strong>Estimated time:</strong> ~15 minutes</p>
 </blockquote>
-<p>This tutorial demonstrates <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) on a single tabular dataset — metrics from all four of AIDRIN's
+<p>This tutorial demonstrates <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) on a single tabular dataset: metrics from all four of AIDRIN's
 categories, with execution provenance.
 For how the <code>aidrin</code> skill and code are set up and what rules the agent follows, see the
 <a href="https://github.com/AI-ModCon/dsagt/blob/main/docs/readiness.md">AI-Readiness Check</a> page.</p>
@@ -1593,7 +1593,7 @@ sample dataset into the project and start the session:</p>
 <a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    differential-privacy on &quot;age,hours.per.week&quot; with epsilon 1.0.
 <a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>Then give me a readiness verdict organized by the four categories.
 </code></pre></div>
-<p><strong>Expect</strong> — the exact commands and representative results (positional args; JSON to stdout):</p>
+<p><strong>Expect:</strong> the exact commands and representative results (positional args; JSON to stdout):</p>
 <p><strong>Data quality</strong></p>
 <p>The skill runs the three quality metrics as one baseline call.</p>
 <table>
@@ -1695,7 +1695,7 @@ sample dataset into the project and start the session:</p>
 moderate <code>hours.per.week</code> outliers); <strong>impact</strong> shows <code>education.num</code>/<code>age</code> as the strongest income
 predictors; <strong>fairness</strong> flags a large gender gap in the target (men ~2.8× more likely <code>&gt;50K</code>); and
 <strong>governance</strong> flags severe re-identification risk (<code>k = 1</code>, <code>l = 1</code>) on the <code>age,sex,race</code>
-quasi-identifiers — bin or suppress before sharing.</p>
+quasi-identifiers; bin or suppress before sharing.</p>
 <h3 id="3-batch-several-metrics-from-one-config">3. Batch several metrics from one config<a class="headerlink" href="#3-batch-several-metrics-from-one-config" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Write an aidrin batch config (YAML) that runs completeness, class-imbalance, statistical-rates, and
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>representation-rate on data/adult.csv with target income and sensitive attribute sex, then run it
@@ -1744,7 +1744,7 @@ store <code>mlflow.db</code>, and the session's other outputs.</p>
 <li>The agent lists every metric call from the execution records with its command and exit code.</li>
 <li>MLflow traces capture token usage, latency, and the code-execution spans.</li>
 </ol>
-<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>

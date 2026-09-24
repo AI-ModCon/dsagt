@@ -1307,7 +1307,7 @@
 
 
 <h1 id="provenance">Provenance<a class="headerlink" href="#provenance" title="Permanent link">&para;</a></h1>
-<p>DSAgt records data operations as reproducible, auditable steps. The agent registers a <strong>code</strong> — a CLI executable — and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.</p>
+<p>DSAgt records data operations as reproducible, auditable steps. The agent registers a <strong>code</strong>, a CLI executable, and every run of that code is wrapped for provenance capture, so the pipeline can later be reconstructed from the record.</p>
 <p><img alt="DSAgt provenance" src="../assets/provenance.png" /></p>
 <h2 id="codes">Codes<a class="headerlink" href="#codes" title="Permanent link">&para;</a></h2>
 <p>Registered codes are CLI executables defined as skills. The agent registers new codes via the MCP server's <code>save_code_spec</code> tool and finds existing ones via <code>search_registry</code>.</p>
@@ -1320,7 +1320,7 @@
 <p>Example code spec (<code>skills/csv-summary/SKILL.md</code>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>---
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>name: csv-summary
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>description: Summarize a CSV — columns, row count, null counts, numeric stats. Use when profiling a tabular dataset.
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>description: Summarize a CSV (columns, row count, null counts, numeric stats). Use when profiling a tabular dataset.
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>executable: dsagt-run --code csv-summary -- python skills/csv-summary/scripts/csv_summary.py
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>parameters:
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  file:
@@ -1332,9 +1332,9 @@
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="gu">tags: [csv, profiling]</span>
 <a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="gu">---</span>
 <a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>Run this registered code with the exact shell command below…
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>Run this registered code with the exact shell command below.
 </code></pre></div>
-<p>DSAgt wraps every registered code with <code>dsagt-run</code> for provenance capture and <code>uv run --with</code> for Python dependencies, so the agent can call any code without managing environments manually. The base skills' scripts and the <code>aidrin</code> CLI are registered as codes at <code>dsagt init</code>, indexed for search.</p>
+<p>DSAgt wraps every registered code with <code>dsagt-run</code> for provenance capture and <code>uv run --with</code> for Python dependencies, so the agent calls a code by its stored command and the environment is handled for it. The base skills' scripts and the <code>aidrin</code> CLI are registered as codes at <code>dsagt init</code>, indexed for search.</p>
 <h2 id="execution-record">Execution record<a class="headerlink" href="#execution-record" title="Permanent link">&para;</a></h2>
 <p>Every registered code runs through the <code>dsagt-run</code> wrapper. For each call it records the command, arguments, exit code, duration, input and output files, and truncated stderr to <code>&lt;project&gt;/trace_archive/&lt;record_id&gt;.json</code>, and, once the command has exited, a detached <code>python -m dsagt.commands.log_trace</code> process logs a <code>code.execute</code> span with the run's own start and end times to the <a href="../observability/">trace store</a>, so the wrapper adds about 0.2 s to a command. An error from that process is appended to <code>.dsagt/run_trace.log</code>. The MCP server incrementally indexes those records into the <code>code_use</code> collection, so past executions are searchable.</p>
 <p>Claude Code ends a shell command that outruns its timeout and kills the process group 1.5 s later. <code>dsagt-run</code> forwards the signal and records a run whose child ends inside that window; a child still running is killed along with it and that run leaves no record. Two limits decide when: <code>BASH_MAX_TIMEOUT_MS</code>, ten minutes, caps what a call may ask for, and <code>BASH_DEFAULT_TIMEOUT_MS</code>, two minutes, is what a call that asks for nothing gets. Raise both for the project: <code>{"env": {"BASH_DEFAULT_TIMEOUT_MS": "3600000", "BASH_MAX_TIMEOUT_MS": "3600000"}}</code> in <code>.claude/settings.json</code>.</p>
@@ -1365,7 +1365,7 @@
 </li>
 </ol>
 <p>Afterwards, inspect the trail:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ls<span class="w"> </span>~/dsagt-projects/demo/<span class="o">{</span>codes,trace_archive<span class="o">}</span><span class="w">          </span><span class="c1"># the specs + execution records</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ls<span class="w"> </span>~/dsagt-projects/demo/<span class="o">{</span>skills,trace_archive<span class="o">}</span><span class="w">         </span><span class="c1"># the specs + execution records</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>demo<span class="w">                                        </span><span class="c1"># code.execute spans in the MLflow viewer</span>
 </code></pre></div>
 

@@ -1324,7 +1324,7 @@
 
 
 <h1 id="mcp-server">MCP Server<a class="headerlink" href="#mcp-server" title="Permanent link">&para;</a></h1>
-<p>DSAgt exposes its capabilities through a single MCP server, <strong><code>dsagt-server</code></strong>, configured in the per-agent runtime file (<code>.mcp.json</code> for Claude Code, <code>goose.yaml</code> for Goose, etc.) and launched automatically when the agent starts. It combines four capabilities — a code registry, a <a href="../knowledge-base/">knowledge base</a>, <a href="../memory/">explicit memory</a>, and <a href="../skills/">skill discovery</a> — behind one process with one shared embedder and one ChromaDB.</p>
+<p>DSAgt exposes its capabilities through a single MCP server, <strong><code>dsagt-server</code></strong>, configured in the per-agent runtime file (<code>.mcp.json</code> for Claude Code, <code>goose.yaml</code> for Goose, and so on) and launched by the agent when it starts. It combines four capabilities (a code registry, a <a href="../knowledge-base/">knowledge base</a>, <a href="../memory/">explicit memory</a>, and <a href="../skills/">skill discovery</a>) behind one process with one shared embedder and one ChromaDB.</p>
 <p>The 19 tools split across four concerns, all on the one process.</p>
 <h2 id="the-servers-environment">The server's environment<a class="headerlink" href="#the-servers-environment" title="Permanent link">&para;</a></h2>
 <p>The per-agent MCP config carries an <code>env</code> block with two kinds of variable: routing (the project name and directory, the trace store URI, the embedding backend) and the launching shell's activated environment (<code>PATH</code>, <code>VIRTUAL_ENV</code>, <code>CONDA_PREFIX</code>, <code>PYTHONPATH</code>, the library paths, the <code>module</code> variables, plus any names listed under <code>mcp.env_passthrough</code> in <code>.dsagt/config.yaml</code>). Codex and Cline start the server from that block alone, so it is what makes the server's Python the one with the user's packages. The block is written at <code>dsagt init</code> and <code>dsagt start</code>; after changing the activated environment, run <code>dsagt start</code> (or re-init) so the block matches. A credential never enters the block: a name ending in <code>_KEY</code>, <code>_TOKEN</code>, or <code>_SECRET</code>, or containing <code>SECRET</code> or <code>PASSW</code>, is refused, and dsagt's own service credentials come from the shell or <code>~/.config/dsagt/env</code>.</p>
@@ -1373,11 +1373,11 @@
 <tbody>
 <tr>
 <td><code>kb_search</code></td>
-<td>Hybrid semantic search across one or more collections (optional metadata, regex, and substring filters)</td>
+<td>Hybrid semantic search across one or more collections; <code>where</code> filters on a collection's metadata keys, <code>regex</code> and <code>contains</code> on the chunk text</td>
 </tr>
 <tr>
 <td><code>kb_ingest</code></td>
-<td>Index a folder as a new collection — returns a <code>job_id</code>; poll <code>kb_job_status</code> until complete</td>
+<td>Index a folder as a new collection; returns a <code>job_id</code> to poll with <code>kb_job_status</code></td>
 </tr>
 <tr>
 <td><code>kb_append</code></td>
@@ -1385,7 +1385,7 @@
 </tr>
 <tr>
 <td><code>kb_list_collections</code></td>
-<td>List collections with their embedding model and vector DB</td>
+<td>Every collection with its purpose, the metadata keys its chunks carry, and its chunk count</td>
 </tr>
 <tr>
 <td><code>kb_job_status</code></td>
@@ -1441,7 +1441,7 @@
 </tr>
 <tr>
 <td><code>add_skill_source</code></td>
-<td>Enable + index an external skill source (a known name or a Git URL) into the searchable corpus</td>
+<td>Fetch and index an external skill source (a known name or a Git URL) into the searchable corpus</td>
 </tr>
 <tr>
 <td><code>list_skill_sources</code></td>

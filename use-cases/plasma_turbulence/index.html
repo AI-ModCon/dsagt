@@ -1218,10 +1218,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1475,10 +1475,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1536,11 +1536,11 @@
 
 
 <h1 id="plasma-turbulence-training-data-xgc">Plasma Turbulence Training Data (XGC)<a class="headerlink" href="#plasma-turbulence-training-data-xgc" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> Plasma physics — gyrokinetic turbulence simulation (XGC) training-data prep</p>
+<p><strong>Domain:</strong> Plasma physics, gyrokinetic turbulence simulation (XGC) training-data prep</p>
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/plasma_turbulence/"><code>use_cases/plasma_turbulence/</code></a></p>
 <p>Register the XGC preprocessing scripts as codes and drive them through DSAgt with provenance: check an ADIOS2 BP5 simulation case, summarize its physics content, preprocess it into GNN-ready npz files, validate the output, and reconstruct the pipeline. Advanced, HPC-scale data.</p>
 <blockquote>
-<p><strong>Estimated time:</strong> ~30 minutes on an HPC login node — not a 10-minute demo.
+<p><strong>Estimated time:</strong> ~30 minutes on an HPC login node, not a 10-minute demo.
 XGC output is HPC-scale ADIOS2 BP5 data (up to ~1.3M mesh nodes). No case is
 hosted with this demo: point the paths below at your own XGC run. The
 walkthrough needs only <code>adios2</code>; the training-ready dataset class in the
@@ -1602,7 +1602,7 @@ for the variable reference. Representative cases:</p>
 <ul>
 <li>DSAgt installed with the <code>plasma-turbulence</code> extra
   (<code>pip install "dsagt[plasma-turbulence] @ git+https://github.com/AI-ModCon/dsagt.git"</code>),
-  which brings <code>adios2</code>.</li>
+  which installs <code>adios2</code>.</li>
 <li>An agent platform installed and <strong>already authenticated</strong>.</li>
 <li>An XGC case directory of your own (the KSTART case in the table above is the
   smallest of the three and the one the expected values below refer to).</li>
@@ -1676,10 +1676,10 @@ one <code>step_NNNNN.npz</code> per selected step, all <code>[nphi, n_nodes]</co
 <li><code>data/&lt;case_dir&gt;_npz/</code> contains <code>mesh.npz</code>, <code>meta.json</code>, and three step files.</li>
 <li><code>trace_archive/</code> holds one execution record per stage.</li>
 <li>A reconstructed pipeline script replays steps 2–5 against a parameterized case directory.</li>
-<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session —
-   <code>dsagt traces xgc-training</code>.</li>
+<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session;
+   view them with <code>dsagt traces xgc-training</code>.</li>
 </ol>
-<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>

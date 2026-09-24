@@ -1286,32 +1286,25 @@
 
 <h1 id="ai-readiness-check">AI-Readiness Check<a class="headerlink" href="#ai-readiness-check" title="Permanent link">&para;</a></h1>
 <p>DSAgt is configured at init to run <a href="https://github.com/idtlab/AIDRIN">AIDRIN</a> (AI Data Readiness Inspector) as the check before and after every tabular pipeline stage; uncheck it on the menu to turn it off. AIDRIN installs with dsagt, and every project gets the <code>aidrin</code> skill and an <code>aidrin</code> code, so each call the agent makes is an execution record in <code>trace_archive/</code> like any other code. A user who asks "is my data AI-ready?" gets the AIDRIN skill's workflow.</p>
-<p>The DSAgt instructions request assessments for the effects of data transformations for the downstream application, with reports in <code>audit/</code>. For tabular files that check is the <code>aidrin</code> skill's quality baseline (completeness, duplicity, outliers), run on the stage's input before the operation and on its output after it. Every stage is measured the same way, so the before/after delta is comparable across stages and projects.</p>
+<p>The DSAgt instructions request assessments for the effects of data transformations for the downstream application. For tabular files that check is the <code>aidrin</code> skill's quality baseline (completeness, duplicity, outliers), run on the data as it arrives and on the output of each transformation. Every stage is measured the same way, so the change between a table and the one it was derived from is comparable across stages and projects. Each run's report is the text AIDRIN printed, which its execution record holds and <code>readiness_reports</code> returns.</p>
 <p><code>dsagt init</code> asks "Assess tabular data for AI-readiness before and after each data transform?", default yes; when it is yes, the agent's instructions carry one paragraph at the per-operation check rule; when it is no, they do not. The <code>aidrin</code> code and skill are present either way.</p>
 <p>The inserted paragraph:</p>
 <blockquote>
 <h4 id="ai-readiness-check_1">AI-readiness check<a class="headerlink" href="#ai-readiness-check_1" title="Permanent link">&para;</a></h4>
-<p>For a stage whose input or output is a table, the check is the <code>aidrin</code>
-skill's quality baseline: run it on the file before and after the operation,
-through the registered <code>aidrin</code> code's <code>executable</code> (never bare <code>aidrin</code>).
-A table is a CSV, Parquet, Excel, or JSON-records file; an HDF5 or NumPy file
-counts only once <code>aidrin summarize</code> shows it as one table, since AIDRIN reads
-any HDF5 it can flatten and scores a simulation field as columns. Before a
-check, call the <code>readiness_reports</code> tool on the file: a report from a run
-after which the file is unchanged is current, and the post report of one
-stage is the pre report of the next, so an unchanged file is not checked
-twice. Run the baseline directly; do not ask the user about intent or confirm
-a plan for these checks (the skill's full workflow is for assessments the user
-asks for). The CLI prints its report to stdout and the record holds what it
-printed, so redirect it into the audit file for a reader:
-<code>... aidrin data-quality &lt;file&gt; --detail &gt; audit/step_N_pre.aidrin.json</code>
-before the operation and <code>&gt; audit/step_N_post.aidrin.json</code> after it, then
-report the per-metric change to the user before proposing the next step. Do not write a custom check for a
-metric AIDRIN provides. A stage with a table as input or output gets this
-check; every other stage keeps the check rule above.</p>
+<p>For a stage whose input or output is a tabular file (CSV, TSV, Excel, JSON,
+HDF5, Parquet, npz), the check is the <code>aidrin</code> skill's quality baseline: run
+it on the data as it arrives and on the output of each transformation,
+through the registered <code>aidrin</code> code's <code>executable</code> (never bare <code>aidrin</code>). A
+JSON, HDF5, or NumPy file may hold nested or multi-dataset structure that
+the AIDRIN baseline reads as one flat table; say so beside the numbers when
+you report them. The report AIDRIN prints is saved to the run's record and
+is retrieved with the <code>readiness_reports</code> MCP tool. Report the per-metric
+change to the user before proposing the next step. Compare a score only with
+an earlier report on the same table, or with the report of the table it was
+derived from. Do not write a custom check for a metric AIDRIN provides.</p>
 </blockquote>
 <h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
-<p>A three-stage pipeline on AIDRIN's own demo dataset — 525 sensor readings with 25 exact
+<p>A three-stage pipeline on AIDRIN's own demo dataset: 525 sensor readings with 25 exact
 duplicates, missing values in every sensor column, and temperature outliers. About ten minutes;
 the only download is a 40 KB CSV.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init
@@ -1324,16 +1317,15 @@ AI-readiness check on. Then:</p>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span>-o<span class="w"> </span>~/dsagt-projects/assessment-demo/data/sensors.csv
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>dsagt<span class="w"> </span>start<span class="w"> </span>assessment-demo
 </code></pre></div>
-<p>Then one prompt. Do not mention AIDRIN or checks — the point is what the agent does on its own:</p>
+<p>Then one prompt. Leave AIDRIN and checks out of it; the demo shows what the agent does unprompted:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Build a curation pipeline for data/sensors.csv in three steps, one at a time:
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>1. drop exact duplicate rows -&gt; data/dedup.csv
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>2. drop rows with a missing temperature -&gt; data/complete.csv
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>3. drop rows whose temperature is more than 3 standard deviations from the mean -&gt; data/clean.csv
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>Confirm the approach with me before each step.
 </code></pre></div>
-<p>At each stage the agent should run the AIDRIN quality baseline on the stage input before the
-operation and on the output after it, write both reports to <code>audit/</code>, and show the metric delta
-before proposing the next step. Expected values on this dataset (pre column measured directly):</p>
+<p>At each stage the agent should run the AIDRIN quality baseline on the stage input and on the
+output it produces, and show the metric change before proposing the next step. Expected values on this dataset (pre column measured directly):</p>
 <table>
 <thead>
 <tr>
@@ -1367,10 +1359,10 @@ before proposing the next step. Expected values on this dataset (pre column meas
 <p>Afterwards, one more prompt:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Show me the execution records for this session as a table of step, command, and exit code.
 </code></pre></div>
-<p>The table lists one record per baseline run (two per stage) and one per operation, and
-<code>audit/</code> holds the six reports. Clean up with <code>dsagt rm assessment-demo -y</code>.</p>
+<p>The table lists one record per baseline run (two per stage) and one per operation, and each
+baseline record holds the report that run printed. Clean up with <code>dsagt rm assessment-demo -y</code>.</p>
 <h2 id="demos">Demos<a class="headerlink" href="#demos" title="Permanent link">&para;</a></h2>
-<p>The <a href="../use-cases/cryoem/">cryo-EM curation demo</a> runs on real scientific data — the check measures the particle-curation step unprompted. The <a href="../use-cases/aidrin-ai-readiness/">AIDRIN example</a> drives quality, fairness, and privacy metrics on a tabular dataset.</p>
+<p>The <a href="../use-cases/cryoem/">cryo-EM curation demo</a> runs on real scientific data; the check measures the particle-curation step unprompted. The <a href="../use-cases/aidrin-ai-readiness/">AIDRIN example</a> drives quality, fairness, and privacy metrics on a tabular dataset.</p>
 
 
 

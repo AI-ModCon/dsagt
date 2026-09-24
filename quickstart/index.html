@@ -1302,9 +1302,9 @@
 
 
 <h1 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h1>
-<p>This guide walks through knowledge ingest, code registration, provenance, and explicit memory using the mock project in <a href="https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/"><code>tests/smoke_test/</code></a>. The examples use <code>claude</code>; substitute another agent (<code>goose</code>, <code>codex</code>, <code>opencode</code>, <code>cline</code>) if you prefer — the prompts are agent-agnostic.</p>
+<p>This guide walks through knowledge ingest, code registration, provenance, and explicit memory using the mock project in <a href="https://github.com/AI-ModCon/dsagt/tree/main/tests/smoke_test/"><code>tests/smoke_test/</code></a>. The examples use <code>claude</code>; substitute another agent (<code>goose</code>, <code>codex</code>, <code>opencode</code>, <code>cline</code>), since the prompts are the same for every agent.</p>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Install (Python 3.12 or later on Apple Silicon or Linux x86_64; CI tests 3.12 and 3.13)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Install (Python 3.13, or any 3.12 or later, on Apple Silicon or Linux x86_64)</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;git+https://github.com/AI-ModCon/dsagt.git&quot;</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Fetch the sample files and set a convenience variable for the prompts below</span>
@@ -1312,17 +1312,17 @@
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="p">|</span><span class="w"> </span>tar<span class="w"> </span>xz<span class="w"> </span>--strip-components<span class="o">=</span><span class="m">2</span><span class="w"> </span>dsagt-main/tests/smoke_test
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SMOKE_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">/smoke_test&quot;</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># 1. Create a project.  `dsagt init` is interactive — follow the menu to name it</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># 1. Create a project.  `dsagt init` is interactive: follow the menu to name it</span>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1">#    `quickstart`, pick your agent, and choose knowledge collections + skill sources.</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1">#    It sets up the knowledge base on first run (a ~130 MB local embedder downloads once).</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1">#    It sets up the knowledge base on first run (a 133 MB local embedder downloads once).</span>
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>dsagt<span class="w"> </span>init
 <a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
 <a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># 2. Launch the agent in the project:</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>dsagt<span class="w"> </span>start<span class="w"> </span>quickstart<span class="w">     </span><span class="c1"># …or: cd ~/dsagt-projects/quickstart &amp;&amp; &lt;your agent&gt;</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>dsagt<span class="w"> </span>start<span class="w"> </span>quickstart<span class="w">     </span><span class="c1"># or: cd ~/dsagt-projects/quickstart &amp;&amp; &lt;your agent&gt;</span>
 </code></pre></div>
 <h2 id="agent-prompts">Agent Prompts<a class="headerlink" href="#agent-prompts" title="Permanent link">&para;</a></h2>
-<p>Inside the agent, paste these prompts one at a time. Replace <code>$SMOKE_DIR</code> with the absolute path you exported — the chat does not expand shell variables.</p>
-<!-- Shared with README.md — edit there, not here. -->
+<p>Inside the agent, paste these prompts one at a time. Replace <code>$SMOKE_DIR</code> with the absolute path you exported; the chat does not expand shell variables.</p>
+<!-- Shared with README.md. Edit there, not here. -->
 
 <ol>
 <li>
@@ -1356,9 +1356,9 @@
 </blockquote>
 </li>
 </ol>
-<p><code>csv_summary.py</code> is stdlib-only, so there's no dependency to install — registration and execution work out of the box. Step 4's null-column finding is the fact you store and recall in 5–6.</p>
+<p><code>csv_summary.py</code> uses only the standard library, so registration and execution need no dependency install. Step 4's null-column finding is the fact you store and recall in 5–6.</p>
 <h2 id="capabilities-covered">Capabilities Covered<a class="headerlink" href="#capabilities-covered" title="Permanent link">&para;</a></h2>
-<!-- Shared with README.md — edit there, not here. -->
+<!-- Shared with README.md. Edit there, not here. -->
 
 <table>
 <thead>
@@ -1370,15 +1370,15 @@
 <tbody>
 <tr>
 <td>1</td>
-<td><code>dsagt-server</code> (<code>kb_ingest</code>) — chunks and indexes docs into ChromaDB</td>
+<td><code>dsagt-server</code> (<code>kb_ingest</code>): chunks and indexes docs into ChromaDB</td>
 </tr>
 <tr>
 <td>2</td>
-<td><code>dsagt-server</code> (<code>save_code_spec</code>) — writes <code>skills/csv-summary/SKILL.md</code> (a skill-standard dir), wrapping the executable with <code>dsagt-run</code></td>
+<td><code>dsagt-server</code> (<code>save_code_spec</code>): writes <code>skills/csv-summary/SKILL.md</code> (a skill-standard dir), wrapping the executable with <code>dsagt-run</code></td>
 </tr>
 <tr>
 <td>3–4</td>
-<td><code>dsagt-run</code> provenance wrapper — records each execution to <code>trace_archive/</code></td>
+<td><code>dsagt-run</code> provenance wrapper: records each execution to <code>trace_archive/</code></td>
 </tr>
 <tr>
 <td>5–6</td>
@@ -1389,10 +1389,10 @@
 <h2 id="verify-the-artifacts">Verify the Artifacts<a class="headerlink" href="#verify-the-artifacts" title="Permanent link">&para;</a></h2>
 <p>Exit the agent (<code>Ctrl+C</code> or <code>/exit</code>), then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>quickstart<span class="w">                       </span><span class="c1"># config + a session/trace summary</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>ls<span class="w"> </span>~/dsagt-projects/quickstart/<span class="o">{</span>codes,trace_archive<span class="o">}</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>ls<span class="w"> </span>~/dsagt-projects/quickstart/<span class="o">{</span>skills,trace_archive<span class="o">}</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>cat<span class="w"> </span>~/dsagt-projects/quickstart/.dsagt/explicit_memories.yaml
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Traces land in a serverless SQLite store.  Browse them with:</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Traces are stored in a serverless SQLite store.  Browse them with:</span>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>dsagt<span class="w"> </span>traces<span class="w"> </span>quickstart
 </code></pre></div>
 

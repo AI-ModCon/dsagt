@@ -1111,10 +1111,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1575,10 +1575,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-tests" class="md-nav__link">
+  <a href="#coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What This Tests
+        Coverage
       
     </span>
   </a>
@@ -1614,7 +1614,7 @@
 
 
 <h1 id="microbial-isolates">Microbial Isolates<a class="headerlink" href="#microbial-isolates" title="Permanent link">&para;</a></h1>
-<p><strong>Domain:</strong> Genomics — short-read QC and assembly with <code>fastp</code> + <code>megahit</code></p>
+<p><strong>Domain:</strong> Genomics, short-read QC and assembly with <code>fastp</code> + <code>megahit</code></p>
 <p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/microbial_isolates/"><code>use_cases/microbial_isolates/</code></a></p>
 <p>Register short-read QC and assembly codes, follow the genomics best-practice documents, and build a reproducible isolate-processing pipeline against real sequencing reads.</p>
 <blockquote>
@@ -1629,7 +1629,8 @@
 <li>An agent platform installed and <strong>already authenticated</strong> (e.g., <code>claude</code> for Claude Code, or
   <code>goose</code>).</li>
 <li>fastp and megahit, installed by <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/microbial_isolates/scripts/setup_env.sh"><code>scripts/setup_env.sh</code></a>
-  (see Setup); conda is optional, the script fetches micromamba when neither is present</li>
+  (see Setup); conda is optional, and the script fetches micromamba when neither
+  conda nor micromamba is present</li>
 </ul>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <h3 id="1-install-fastp-and-megahit">1. Install fastp and megahit<a class="headerlink" href="#1-install-fastp-and-megahit" title="Permanent link">&para;</a></h3>
@@ -1657,7 +1658,7 @@ for the rest. Then:</p>
 </code></pre></div>
 <p>(The default local embedder needs no key. To use a hosted embedder instead, set
 <code>embedding.backend: api</code> in <code>$PROJ/.dsagt/config.yaml</code> and export <code>EMBEDDING_API_KEY</code>
-in your shell — never written to disk.)</p>
+in your shell; dsagt never writes it to disk.)</p>
 <h3 id="3-collect-data-and-reference-material-into-the-project">3. Collect data and reference material into the project<a class="headerlink" href="#3-collect-data-and-reference-material-into-the-project" title="Permanent link">&para;</a></h3>
 <p>The agent runs with the project directory as its working directory, so everything it
 reads goes under <code>$PROJ</code>. The bundle's two documents describe the processing
@@ -1670,7 +1671,7 @@ directly.</p>
 <h3 id="4-start-the-session">4. Start the session<a class="headerlink" href="#4-start-the-session" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isolate-pipeline
 </code></pre></div>
-<p>The agent launches from the project directory with the MCP server connected. Serverless — there are no background services to clean up.</p>
+<p>The agent launches from the project directory with the MCP server connected; there are no background services to clean up.</p>
 <h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
 <p>Use these prompts in the agent session. Replace <code>&lt;CONDA_PREFIX&gt;</code> with the bin directory the setup script printed (<code>~/dsagt-projects/.tools/microbial_isolates/env/bin</code>). Data and docs paths are relative to the project directory.</p>
 <h3 id="1-register-codes">1. Register codes<a class="headerlink" href="#1-register-codes" title="Permanent link">&para;</a></h3>
@@ -1736,7 +1737,7 @@ with a line on what each is. The reply may summarize a tree printed by a command
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture token usage, latency, and full request/response history. View with <code>dsagt traces isolate-pipeline</code>.</li>
 </ol>
 <p><code>megahit</code> segfaults on Apple Silicon with more than one thread; the best-practices document says <code>-t 1 --no-hw-accel</code>, and a sample that segfaulted is rerun that way with the same <code>kmax=21</code> and memory cap.</p>
-<h2 id="what-this-tests">What This Tests<a class="headerlink" href="#what-this-tests" title="Permanent link">&para;</a></h2>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
