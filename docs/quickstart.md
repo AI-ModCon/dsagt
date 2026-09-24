@@ -5,7 +5,7 @@ This guide walks through knowledge ingest, code registration, provenance, and ex
 ## Setup
 
 ```bash
-# Install (Python 3.13, or any 3.12 or later, on Apple Silicon or Linux x86_64)
+# Install (Python 3.13, or any 3.12 or later)
 pip install "git+https://github.com/AI-ModCon/dsagt.git"
 
 # Fetch the sample files and set a convenience variable for the prompts below
