@@ -19,6 +19,7 @@ import pytest
 from mcp_helpers import call_tool_async
 from mcp_helpers import call_tool_json as call_tool
 
+from dsagt.knowledge import KnowledgeBase
 from dsagt.mcp.knowledge_tools import create_knowledge_server, setup_runtime_kb
 
 
@@ -71,8 +72,13 @@ def make_search_result(
 
 @pytest.fixture
 def mock_kb(tmp_path):
-    """A mocked KnowledgeBase with default behaviors."""
-    kb = MagicMock()
+    """A mocked KnowledgeBase with default behaviors.
+
+    Specced against the real class, so a handler that calls a method
+    KnowledgeBase does not have fails here instead of passing on a mock and
+    raising against the real object.
+    """
+    kb = MagicMock(spec=KnowledgeBase)
     kb.index_dir = tmp_path / "kb_index"
     kb.index_dir.mkdir()
     kb.list_collections.return_value = [
@@ -243,6 +249,94 @@ class TestSearch:
 
 
 # ---------------------------------------------------------------------------
+# kb_delete_collection
+# ---------------------------------------------------------------------------
+
+
+def _make_collection(index_dir, name: str):
+    """Create a collection directory the way _collection_exists recognizes one."""
+    coll = index_dir / name
+    coll.mkdir()
+    (coll / "chroma_ids.json").write_bytes(b"fake")
+    return coll
+
+
+class TestDeleteCollection:
+
+    def test_deletes_collection(self, server, mock_kb):
+        """Deleting removes the collection directory and reports its chunk count."""
+        coll = _make_collection(mock_kb.index_dir, "stray")
+        mock_kb.list_collections.return_value = [{"name": "stray", "chunk_count": 9}]
+
+        result = call_tool(server, "kb_delete_collection", {"collection": "stray"})
+
+        assert result["status"] == "ok"
+        assert result["chunks_removed"] == 9
+        assert not coll.exists()
+
+    def test_refuses_dsagt_collection(self, server, mock_kb):
+        """dsagt's own collections are refused, naming them."""
+        _make_collection(mock_kb.index_dir, "codes")
+
+        result = call_tool(server, "kb_delete_collection", {"collection": "codes"})
+
+        assert result["status"] == "error"
+        assert "codes" in result["error"]
+        assert (mock_kb.index_dir / "codes").exists()
+
+    def test_refuses_missing_collection(self, server, mock_kb):
+        """A collection that is not there is refused, not silently accepted."""
+        result = call_tool(server, "kb_delete_collection", {"collection": "absent"})
+
+        assert result["status"] == "error"
+        assert "absent" in result["error"]
+
+    def test_refuses_collection_with_a_running_job(self, server, mock_kb, tmp_path):
+        """A collection a job is still writing is refused until the job ends."""
+        folder = tmp_path / "busy"
+        folder.mkdir()
+        release = threading.Event()
+
+        def blocking_ingest(*args, **kwargs):
+            release.wait(timeout=10)
+            return {"collection": "busy", "files": 1, "chunks": 5}
+
+        mock_kb.ingest.side_effect = blocking_ingest
+
+        async def run():
+            try:
+                started = await _call_tool_async(
+                    server,
+                    "kb_ingest",
+                    {"folder_path": str(folder), "collection": "busy"},
+                )
+                assert started["status"] == "started"
+
+                result = await _call_tool_async(
+                    server, "kb_delete_collection", {"collection": "busy"}
+                )
+                assert result["status"] == "error"
+                assert "running job" in result["error"]
+            finally:
+                release.set()
+
+        asyncio.run(run())
+
+    def test_symlinked_collection_leaves_its_target(self, server, mock_kb, tmp_path):
+        """Deleting a symlinked collection removes the link, not the shared copy."""
+        shared = _make_collection(tmp_path, "shared_codes")
+        (mock_kb.index_dir / "borrowed").symlink_to(shared)
+        mock_kb.list_collections.return_value = [{"name": "borrowed", "chunk_count": 3}]
+
+        result = call_tool(server, "kb_delete_collection", {"collection": "borrowed"})
+
+        assert result["status"] == "ok"
+        assert not (mock_kb.index_dir / "borrowed").exists()
+        assert shared.exists()
+        assert (shared / "chroma_ids.json").exists()
+
+
+# ---------------------------------------------------------------------------
 # kb_ingest (background job pattern)
 # ---------------------------------------------------------------------------
 
@@ -259,6 +353,7 @@ class TestIngest:
             "kb_ingest",
             {
                 "folder_path": str(folder),
+                "collection": folder.name,
             },
         )
 
@@ -273,7 +368,9 @@ class TestIngest:
 
         async def run():
             initial, final = await call_tool_and_await_job(
-                server, "kb_ingest", {"folder_path": str(folder)}
+                server,
+                "kb_ingest",
+                {"folder_path": str(folder), "collection": folder.name},
             )
             assert final["status"] == "complete"
             assert final["result"]["files"] == 5
@@ -292,6 +389,7 @@ class TestIngest:
                 "kb_ingest",
                 {
                     "folder_path": str(folder),
+                    "collection": "docs2",
                     "file_types": ["md", "txt"],
                 },
             )
@@ -304,6 +402,50 @@ class TestIngest:
 
         asyncio.run(run())
 
+    def test_ingest_carries_a_description(self, server, mock_kb, tmp_path):
+        """A description given at ingest is forwarded as the collection's purpose."""
+        folder = tmp_path / "papers"
+        folder.mkdir()
+
+        async def run():
+            await call_tool_and_await_job(
+                server,
+                "kb_ingest",
+                {
+                    "folder_path": str(folder),
+                    "collection": "papers",
+                    "description": "Open-access combustion papers.",
+                },
+            )
+            mock_kb.ingest.assert_called_once_with(
+                folder,
+                collection_name="papers",
+                description="Open-access combustion papers.",
+            )
+
+        asyncio.run(run())
+
+    def test_ingest_refuses_the_other_collection_argument_name(self, server, tmp_path):
+        """kb_ingest called with kb_search's old argument name is refused.
+
+        The name used to be collection_name while its siblings took collection,
+        and the unnamed argument fell back to the folder's name, so a call that
+        got the name wrong silently indexed into a collection named after the
+        folder.
+        """
+        folder = tmp_path / "docs"
+        folder.mkdir()
+
+        result = call_tool(
+            server,
+            "kb_ingest",
+            {"folder_path": str(folder), "collection_name": "combustion"},
+        )
+
+        assert result["status"] == "error"
+        assert "collection" in result["error"]
+        assert not (folder.parent / "kb_index" / "docs").exists()
+
     def test_ingest_folder_not_found(self, server):
         """Ingesting a nonexistent folder returns an error immediately."""
         result = call_tool(
@@ -311,6 +453,7 @@ class TestIngest:
             "kb_ingest",
             {
                 "folder_path": "/nonexistent/folder",
+                "collection": "nonexistent",
             },
         )
 
@@ -327,6 +470,7 @@ class TestIngest:
             "kb_ingest",
             {
                 "folder_path": str(file_path),
+                "collection": "not_a_dir",
             },
         )
 
@@ -341,7 +485,9 @@ class TestIngest:
 
         async def run():
             initial, final = await call_tool_and_await_job(
-                server, "kb_ingest", {"folder_path": str(folder)}
+                server,
+                "kb_ingest",
+                {"folder_path": str(folder), "collection": folder.name},
             )
             assert final["status"] == "error"
             assert "disk full" in final["error"]
@@ -368,6 +514,7 @@ class TestIngest:
             "kb_ingest",
             {
                 "folder_path": str(folder),
+                "collection": folder.name,
             },
         )
 
@@ -395,6 +542,7 @@ class TestIngest:
             "kb_ingest",
             {
                 "folder_path": str(folder),
+                "collection": folder.name,
             },
         )
 
@@ -444,6 +592,7 @@ class TestJobStatus:
                     "kb_ingest",
                     {
                         "folder_path": str(folder),
+                        "collection": folder.name,
                     },
                 )
                 assert initial["status"] == "started"

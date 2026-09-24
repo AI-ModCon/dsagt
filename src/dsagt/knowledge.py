@@ -1489,6 +1489,7 @@ class KnowledgeBase:
         collection_name: str | None = None,
         file_types: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
+        description: str | None = None,
     ) -> dict:
         """Ingest *folder* as a new collection in the internal store."""
         folder = Path(folder)
@@ -1509,9 +1510,16 @@ class KnowledgeBase:
         # Record source folder so the MCP server can detect re-ingests vs. conflicts.
         (coll_dir / "source.txt").write_text(str(folder.resolve()))
 
-        desc_src = folder / "DESCRIPTION.md"
-        if desc_src.exists():
-            (coll_dir / "DESCRIPTION.md").write_text(desc_src.read_text())
+        # The collection's purpose, which collection_info serves to
+        # kb_list_collections.  A caller's description wins over one carried by
+        # the ingested folder, since the caller knows why this collection is
+        # being made and the folder describes itself.
+        if description:
+            (coll_dir / "DESCRIPTION.md").write_text(description)
+        else:
+            desc_src = folder / "DESCRIPTION.md"
+            if desc_src.exists():
+                (coll_dir / "DESCRIPTION.md").write_text(desc_src.read_text())
 
         files = self._collect_files(folder, file_types, exclude_patterns)
         logger.info("Found %d files to process", len(files))
@@ -1550,9 +1558,16 @@ class KnowledgeBase:
         collection: str,
         paths: list[str | Path],
         file_types: list[str] | None = None,
+        description: str | None = None,
     ) -> dict:
-        """Append documents to an existing collection."""
+        """Append documents to an existing collection.
+
+        A description replaces the collection's purpose, so a collection whose
+        contents have grown past what it was made for can say what it holds now.
+        """
         file_types = file_types or self.FILE_TYPES
+        if description:
+            (self.index_dir / collection / "DESCRIPTION.md").write_text(description)
 
         obs.set_inputs(
             {
