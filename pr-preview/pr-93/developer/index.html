@@ -1213,6 +1213,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#agentic-coding" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1361,6 +1372,17 @@
     <span class="md-ellipsis">
       
         Pull requests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releases
       
     </span>
   </a>
@@ -1554,11 +1576,30 @@ site with <code>--strict</code> on every PR and deploys it to GitHub Pages from 
   and timely review; a large refactor invites a cursory one and hides important changes.</li>
 <li>Code an agent wrote gets a human review before it merges, the same as any
   other code.</li>
-<li>Work on a branch off <code>main</code>. Describe the intent, not the diff. Update
-  <code>docs/</code> and <code>CHANGELOG.md</code> in the same pull request when behavior changes.</li>
+<li>Work on a branch off <code>dev</code> and open the pull request against <code>dev</code>. Describe
+  the intent, not the diff. Update <code>docs/</code> and <code>CHANGELOG.md</code> in the same pull
+  request when behavior changes.</li>
 <li><code>ruff check</code>, <code>black --check</code>, and the unit suite pass before review.</li>
 <li>This is pre-1.0 code: prefer clean removal over a compatibility shim.</li>
 </ul>
+<h2 id="releases">Releases<a class="headerlink" href="#releases" title="Permanent link">&para;</a></h2>
+<p><code>main</code> is the last release and <code>dev</code> is the next one. <code>main</code> changes only by a
+release or a hotfix; a consumer installs a tag
+(<code>git+https://github.com/AI-ModCon/dsagt.git@&lt;version&gt;</code>) or <code>main</code>.</p>
+<ol>
+<li>A pull request into <code>dev</code> bumps <code>__version__</code> in <code>src/dsagt/__init__.py</code> and
+   moves the changelog's Unreleased section under the version and date.</li>
+<li>A pull request from <code>dev</code> to <code>main</code>, titled <code>Release &lt;version&gt;</code>, gets review
+   and CI.</li>
+<li>A maintainer with the release bypass fast-forwards <code>main</code> to <code>dev</code>:
+   <code>git push origin dev:main</code>. GitHub marks the pull request merged. A
+   fast-forward keeps the same commits on both branches; a squash or
+   rebase-merge would give <code>main</code> new commit hashes and the two branches would
+   diverge.</li>
+<li>Tag the release on <code>main</code>, push the tag, and make the GitHub release from it.</li>
+</ol>
+<p>A hotfix is a branch from <code>main</code> and a pull request into <code>main</code>, followed by a
+patch release and a merge of <code>main</code> into <code>dev</code>.</p>
 <h2 id="agentic-coding">Agentic coding<a class="headerlink" href="#agentic-coding" title="Permanent link">&para;</a></h2>
 <p><code>CLAUDE.md</code> at the repository root is the contract an agent works to here:
 what the project is, the commands, the glossary, and the invariants. How the
