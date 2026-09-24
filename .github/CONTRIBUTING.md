@@ -120,6 +120,9 @@ uv run mkdocs build --strict    # what CI runs
 - Work on a branch off `dev` and open the pull request against `dev`. Describe
   the intent, not the diff. Update `docs/` and `CHANGELOG.md` in the same pull
   request when behavior changes.
+- A pull request into `dev` merges by squash or rebase, never by merge commit.
+  `main` requires linear history and a release fast-forwards `main` to `dev`,
+  so one merge commit on `dev` blocks the next release.
 - `ruff check`, `black --check`, and the unit suite pass before review.
 - This is pre-1.0 code: prefer clean removal over a compatibility shim.
 
