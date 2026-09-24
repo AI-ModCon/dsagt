@@ -421,3 +421,34 @@ def test_readiness_reports_gives_the_current_report_or_says_how_to_make_one(tmp_
     reply = ask()
     assert reply["current"] is None
     assert [r["record_id"] for r in reply["earlier"]] == ["r1"]
+
+
+def test_save_code_spec_for_a_registered_script_is_refused(tmp_path):
+    """One script has one code: a second spec naming a file another code
+    already runs is refused, with the stored command to run instead."""
+    from dsagt.mcp.registry_tools import create_registry_server
+    from dsagt.skills import register_skill_scripts
+
+    runtime = tmp_path / "rt"
+    skill = runtime / "skills" / "vasp-to-isaac"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: vasp-to-isaac\ndescription: d\n---\nbody\n"
+    )
+    (skill / "scripts" / "convert.py").write_text("import argparse\n")
+    register_skill_scripts(runtime, "vasp-to-isaac")
+    server = create_registry_server(CodeRegistry(runtime_dir=str(runtime)))
+    reply = call_tool(
+        server,
+        "save_code_spec",
+        {
+            "spec": {
+                "name": "convert",
+                "description": "d",
+                "executable": "python ./skills/vasp-to-isaac/scripts/convert.py",
+                "parameters": {},
+            }
+        },
+    )
+    assert "was not saved" in reply and "vasp-to-isaac-convert already runs" in reply
+    assert not (runtime / "skills" / "convert").exists()

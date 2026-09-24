@@ -337,3 +337,37 @@ class TestAnAgentSavedSpecIsKept:
         # The skill's usage lines follow the stored command.
         text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
         assert f"{with_deps['executable']} --reads data/s1.fq.gz" in text
+
+    def test_a_script_registered_under_its_own_name_is_not_registered_again(
+        self, tmp_path, fresh_project
+    ):
+        """blastnet, Claude Code: save_code_spec registered a skill's script as
+        well-sample-points with h5py and file roles; a later save_skill on the
+        skill registered the same file again under the derived name, with
+        neither, and that code failed wherever h5py was not installed."""
+        import shutil
+
+        skill_src = _write_skill(tmp_path / "src")
+        project = fresh_project("p")
+        shutil.copytree(skill_src, project / "skills" / "trim-reads")
+        CodeRegistry(runtime_dir=project).save_tool(
+            {
+                "name": "trim",
+                "description": "Trim adapters from an interleaved FASTQ.",
+                "executable": "python ./skills/trim-reads/scripts/trim.py",
+                "parameters": {
+                    "reads": {"type": "string", "cli": "--reads", "role": "input"},
+                    "out": {"type": "string", "cli": "--out", "role": "output"},
+                },
+                "dependencies": ["pysam"],
+            }
+        )
+        stored = register_skill_scripts(project, "trim-reads")
+        registry = CodeRegistry(runtime_dir=project)
+        assert registry.get_code("trim-reads-trim") is None
+        assert [c["name"] for c in registry.list_codes_raw()] == ["trim"]
+        trim = registry.get_code("trim")
+        assert "uv run --with pysam" in trim["executable"]
+        assert stored == [trim["executable"]]
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        assert f"{trim['executable']} --reads data/s1.fq.gz" in text

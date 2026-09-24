@@ -151,6 +151,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **One script has one code.** `save_skill` registered a skill's script a
+  second time, under the derived name and without dependencies or roles, when
+  the agent had already registered it under its own name with
+  `save_code_spec`. `CodeRegistry.code_for_same_script` is the check both
+  paths make: `save_code_spec` refuses a second spec for the file, and
+  `register_skill_scripts` leaves the script to the code it has and rewrites
+  the skill's text to that code's command. `delete_skill` withdraws a code,
+  and the agent instructions name it (#86).
 - **`search_skills` describes the catalogs it searches.** Its description said
   it spanned installed skills; an installed skill is discovered natively and
   is not indexed, so the search covers the synced external catalogs, and the
