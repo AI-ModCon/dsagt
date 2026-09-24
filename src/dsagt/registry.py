@@ -29,7 +29,9 @@ stored string.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,6 +67,16 @@ def catalog_collection(slug: str) -> str:
 # ---------------------------------------------------------------------------
 # Helpers (codes only)
 # ---------------------------------------------------------------------------
+
+
+def _script_of(executable: str) -> str | None:
+    """The script file a stored or bare command line runs, normalized, or
+    None when the command names no ``.py`` or ``.sh`` file."""
+    tokens = shlex.split(executable.split(" -- ")[-1]) if executable else []
+    script = next((t for t in tokens if t.endswith((".py", ".sh"))), None)
+    # The agent may name the same file ./skills/x/scripts/y.py where the
+    # stored spec says skills/x/scripts/y.py; one spelling compares.
+    return os.path.normpath(script) if script else None
 
 
 def _uv_run_prefix(deps: list[str]) -> str:
@@ -413,6 +425,26 @@ class CodeRegistry:
         if path.exists():
             code = _parse_frontmatter(path)
             if code.get("name") == name and code.get("executable"):
+                return code
+        return None
+
+    def code_for_same_script(self, spec: dict) -> dict | None:
+        """The code, under another name, whose executable runs the same script
+        file as *spec*, or None.
+
+        One script has one code.  A skill's scripts are registered when the
+        skill is saved, and the agent may register one of them under its own
+        name with ``save_code_spec``; whichever came first is the code, and a
+        second registration of the same file is refused (``save_code_spec``)
+        or skipped (``register_skill_scripts``).
+        """
+        target = _script_of(spec.get("executable", ""))
+        if target is None:
+            return None
+        for code in self.list_codes_raw():
+            if code.get("name") != spec.get("name") and (
+                _script_of(code.get("executable", "")) == target
+            ):
                 return code
         return None
 

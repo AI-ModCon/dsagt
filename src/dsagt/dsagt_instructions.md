@@ -41,6 +41,8 @@ Before implementing anything, search for existing capabilities:
 
 To author a new skill, use the `skill-creator` skill installed in every project.
 
+`delete_skill(name=...)` removes an installed skill or a registered code: its directory, its native-skills entry, and its registry entry go together. A code registered by mistake is withdrawn this way; deleting its files by hand leaves `search_registry` returning it.
+
 **When the user asks for a specific code** ("use `foo`", "use `foo` from the registry", "run `foo`"), look it up first (`search_registry(code_name=...)` for an exact match, `get_registry()` to browse). Read the returned spec's `executable` field and each parameter's `cli` field, then invoke it from your shell. A task a registered code can do is done by that code, never by your own file or shell tools. (Section 1b has the verbatim-`executable` rule.)
 
 **Rendering parameters**: each parameter's `cli` field pins exactly how its value goes on the command line. Emit positional args first (in position order), then named args. Skip optional parameters whose value is absent; use the `default` when present.
