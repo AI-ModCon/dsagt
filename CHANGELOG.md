@@ -8,6 +8,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A collection an agent makes says what it is for.** `kb_ingest` and
+  `kb_append` take the collection's `description`, which `kb_list_collections`
+  serves. Every collection dsagt provisions had a purpose and every collection
+  an agent made had none, which is the wrong way round for the tool an agent
+  calls to choose between them. A folder carrying its own `DESCRIPTION.md`
+  still supplies one when the caller gives none.
+- **`kb_delete_collection` tool.** Removes a collection and its index, so a
+  collection made by mistake can be undone. The four collections dsagt owns
+  (`codes`, `code_use`, `session_memory`, `explicit_memory`) are refused, as is
+  one a background job is still writing. A collection that is a symlink to a
+  shared one is unlinked, leaving the shared copy.
+
 - **A run ended by a signal is recorded.** A run ended by SIGTERM, SIGINT, or
   SIGHUP still writes its record with the signal's status.
 - **File hashes in every record.** `execution.file_hashes` holds the SHA-256
@@ -49,6 +61,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a `dsagt.project` tag, both set once on creation.
 
 ### Changed
+
+- **`kb_ingest` names the collection `collection`, and requires it.** The
+  argument was `collection_name` where `kb_search` and `kb_append` take
+  `collection`, and an unnamed collection fell back to the ingested folder's
+  name, so a call that used the siblings' name indexed into a collection named
+  after the folder without saying so. The three tools now agree, and an ingest
+  without a collection is refused.
 
 - **`dsagt-run` takes one option.** `--code` names the registered code and
   the command follows `--`. `--input-files`, `--output-files`, `--session`,
