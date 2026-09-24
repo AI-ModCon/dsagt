@@ -4,7 +4,7 @@ Usage::
 
     uv run --no-sync python tests/headless_usecases.py <use_case_dir> <project>
         [--from N] [--only N,M] [--subst KEY=VALUE ...] [--model M]
-        [--log PATH] [--timeout SECONDS]
+        [--log PATH] [--timeout SECONDS] [--new-session]
 
 ``<project>`` is a registered dsagt project (``dsagt init <name> --agent
 claude|codex``); its config names the agent and the working directory, and
@@ -13,7 +13,9 @@ way ``dsagt start`` does.  Prompts are the ```text fences under
 ``## Execution`` and before ``## Post-Conditions`` in the README, numbered
 from 1.  The first prompt starts a session and every later one continues it
 (``claude -p --continue``; ``codex exec resume --last``, which under the
-per-project ``CODEX_HOME`` is this project's most recent session).  Each
+per-project ``CODEX_HOME`` is this project's most recent session);
+``--new-session`` starts one at whatever prompt the run begins with, for a
+walkthrough long enough to exhaust a single session's context.  Each
 response is appended to the log under a header so the run can be reviewed
 afterwards; the driver stops at the first non-zero exit.
 
@@ -53,6 +55,10 @@ CLAUDE_ALLOWED_TOOLS = [
     "Bash(aidrin:*)", "Bash(fastp:*)", "Bash(megahit:*)", "Bash(git:*)",
     "Bash(h5dump:*)", "Bash(h5ls:*)", "Bash(gunzip:*)", "Bash(zcat:*)", "Bash(gzip:*)",
     "Bash(tar:*)", "Bash(sort:*)", "Bash(cut:*)", "Bash(awk:*)", "Bash(sed:*)",
+    # A walkthrough that grounds the agent in published work fetches it:
+    # the literature-search skill searches the web and the papers download
+    # over HTTP.
+    "WebSearch", "WebFetch", "Bash(curl:*)", "Bash(wget:*)",
     "Bash(tr:*)", "Bash(xargs:*)", "Bash(env:*)", "Bash(which:*)", "Bash(true:*)",
     "Bash(test:*)", "Bash(seq:*)", "Bash(date:*)", "Bash(basename:*)", "Bash(dirname:*)",
     "Bash(cd:*)", "Bash(export:*)", "Bash(sqlite3:*)", "Bash(jq:*)",
@@ -162,6 +168,14 @@ def main() -> int:
         "--log", default=None, help="default <project_dir>/headless_run.log"
     )
     ap.add_argument("--timeout", type=int, default=3600, help="seconds per prompt")
+    ap.add_argument(
+        "--new-session",
+        action="store_true",
+        help="start a session at the first prompt run instead of continuing "
+        "the project's last one; a long walkthrough that exhausts one "
+        "session's context resumes in a fresh one, on the project state "
+        "dsagt holds on disk",
+    )
     args = ap.parse_args()
 
     config = load_config(args.project)
@@ -183,7 +197,7 @@ def main() -> int:
     log.parent.mkdir(parents=True, exist_ok=True)
 
     selected = selected_prompts(len(prompts), args.from_n, only)
-    first = bool(selected) and selected[0] == 1
+    first = bool(selected) and (selected[0] == 1 or args.new_session)
     for n, prompt in enumerate(prompts, start=1):
         if n not in selected:
             continue
