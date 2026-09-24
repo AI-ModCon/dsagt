@@ -1579,6 +1579,9 @@ site with <code>--strict</code> on every PR and deploys it to GitHub Pages from 
 <li>Work on a branch off <code>dev</code> and open the pull request against <code>dev</code>. Describe
   the intent, not the diff. Update <code>docs/</code> and <code>CHANGELOG.md</code> in the same pull
   request when behavior changes.</li>
+<li>A pull request into <code>dev</code> merges by squash or rebase, never by merge commit.
+  <code>main</code> requires linear history and a release fast-forwards <code>main</code> to <code>dev</code>,
+  so one merge commit on <code>dev</code> blocks the next release.</li>
 <li><code>ruff check</code>, <code>black --check</code>, and the unit suite pass before review.</li>
 <li>This is pre-1.0 code: prefer clean removal over a compatibility shim.</li>
 </ul>
