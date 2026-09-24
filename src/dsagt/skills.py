@@ -849,6 +849,35 @@ def _script_overrides(entry: dict) -> dict[str, dict]:
     return {c["script"]: c for c in entry.get("codes", ()) if "script" in c}
 
 
+def declared_codes(skill_name: str, frontmatter: dict) -> list[dict]:
+    """The codes a skill's own frontmatter declares, checked.
+
+    A ``codes`` list in SKILL.md has the shape of a :func:`base_skills` entry's
+    ``codes`` tuple: one entry per script (``name``, ``script``,
+    ``description``, ``parameters`` with ``cli`` and ``role``,
+    ``dependencies``) or per CLI the skill documents (``executable`` in place
+    of ``script``).  It is how an authored or catalog skill states what a
+    script's source cannot: the packages it imports and which arguments name
+    the files it reads and writes.  Raises ``ValueError`` naming the skill and
+    the entry when the list or an entry is malformed.
+    """
+    codes = frontmatter.get("codes") or []
+    if not isinstance(codes, list):
+        raise ValueError(f"skill {skill_name!r}: 'codes' must be a list of entries")
+    checked = []
+    for position, code in enumerate(codes):
+        where = f"skill {skill_name!r}, codes[{position}]"
+        if not isinstance(code, dict):
+            raise ValueError(f"{where}: an entry is a mapping")
+        for key in ("name", "description"):
+            if not code.get(key):
+                raise ValueError(f"{where}: {key!r} is required")
+        if bool(code.get("script")) == bool(code.get("executable")):
+            raise ValueError(f"{where}: give 'script' or 'executable', not both")
+        checked.append({"parameters": {}, **code})
+    return checked
+
+
 def _is_entry_script(path: Path) -> bool:
     """Whether a file under ``scripts/`` is something to run.
 
@@ -1016,14 +1045,16 @@ def register_skill_scripts(
     catalog skill, ``save_skill`` for the agent's own): each top-level
     ``scripts/*.py`` and ``scripts/*.sh``, except a helper whose name starts
     with an underscore, becomes a code whose spec is the override for that
-    script when one exists (a base skill's curated description, ``role``s,
-    and dependencies) and otherwise :func:`derive_code_spec`'s; a CLI the
-    skill documents (*cli_codes*, the ``aidrin`` entry) is registered the
-    same way.  Then every bare invocation of a script or CLI in the skill's
+    script when one exists and otherwise :func:`derive_code_spec`'s; a CLI
+    the skill documents is registered the same way.  An override is an
+    entry in the skill's own ``codes`` frontmatter list
+    (:func:`declared_codes`) or, for a base skill, in *overrides* and
+    *cli_codes* from the ``base_skills`` table, which win on the same
+    script.  Then every bare invocation of a script or CLI in the skill's
     markdown becomes the stored ``dsagt-run`` line, so the text the agent
     reads at invocation names the recorded command.  Raises
     ``FileNotFoundError`` when the skill or a script an override names is
-    absent.
+    absent, and ``ValueError`` when the skill's ``codes`` list is malformed.
     """
     from dsagt.registry import CodeRegistry  # lazy: keeps this module light
 
@@ -1031,7 +1062,12 @@ def register_skill_scripts(
     skill_dir = project_dir / "skills" / skill_name
     if not (skill_dir / "SKILL.md").exists():
         raise FileNotFoundError(f"no installed skill {skill_name!r} at {skill_dir}")
-    overrides = dict(overrides or {})
+    declared = declared_codes(skill_name, _parse_frontmatter(skill_dir / "SKILL.md"))
+    overrides = {
+        **{c["script"]: c for c in declared if "script" in c},
+        **(overrides or {}),
+    }
+    cli_codes = [c for c in declared if "executable" in c] + list(cli_codes)
     for script_rel in overrides:
         if not (skill_dir / script_rel).exists():
             raise FileNotFoundError(

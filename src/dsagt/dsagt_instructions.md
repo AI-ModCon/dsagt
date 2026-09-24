@@ -61,6 +61,8 @@ Booleans render as a bare flag when truthy, nothing when falsy.
 
 When registering a new code via `save_code_spec`, set the `cli` field on every parameter so the next invocation renders it without guessing, and set `role: input` or `role: output` on each parameter that names a file the code reads or writes: `dsagt-run` records those files on every run, and `reconstruct_pipeline` orders steps by them. Code names use lowercase letters, digits, and hyphens (for example `datacard-introspect`), the skill-standard character set, since registered codes are linked into your native skills directory.
 
+A skill saved with `save_skill` declares its scripts' codes the same way, in a `codes` list in its spec: one entry per script with `name`, `script` (the path inside the skill, `scripts/convert.py`), `description`, `parameters` with `cli` and `role`, and `dependencies`. A script with no entry gets a spec read from its argparse calls, which declares no dependencies and no roles, so it runs only where its imports are already installed.
+
 ### 3. Code Preference Hierarchy
 
 When implementing any data operation, follow this hierarchy:

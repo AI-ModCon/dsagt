@@ -509,13 +509,18 @@ class CodeRegistry:
         return action
 
     def _index_code(self, spec: dict, tool_path: Path) -> None:
-        """Index a code file into the ``codes`` KB collection.
+        """Index a code file into the ``codes`` KB collection, replacing the
+        code's previous entry.
 
         Errors propagate to the caller: a code that is on disk and absent
         from the KB is a state the agent cannot recover from (it would write
         a duplicate the next time it searched).  Registration is atomic: in
         the index, or not registered.
         """
+        # A re-save (a second save_skill on a skill that declares the code,
+        # every init for a base skill) would otherwise add a second entry
+        # beside the first, and search_registry would return both.
+        self._kb.delete_entries(CODES_COLLECTION, {"code_name": spec["name"]})
         self._kb.add_entries(
             texts=[tool_path.read_text()],
             collection=CODES_COLLECTION,

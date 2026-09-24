@@ -310,6 +310,29 @@ class TestToolIndexing:
         assert len(results) > 0
         assert any("csv-filter" in r["chunk"].get("text", "") for r in results)
 
+    def test_a_resaved_code_has_one_entry(self, tmp_path):
+        """A second save of a code (a save_skill on a skill that declares
+        it, an init for a base skill) replaces its entry."""
+        import json
+
+        server, reg, kb = _make_server_with_kb(tmp_path)
+        spec = {
+            "name": "resaved",
+            "description": "Count lines in a file.",
+            "executable": "wc -l",
+            "parameters": {},
+        }
+        call_tool(server, "save_code_spec", {"spec": spec})
+        call_tool(server, "save_code_spec", {"spec": {**spec, "tags": ["text"]}})
+        chunks = (tmp_path / "kb_index" / "codes" / "chunks.jsonl").read_text()
+        entries = [
+            json.loads(line)
+            for line in chunks.splitlines()
+            if json.loads(line)["metadata"].get("code_name") == "resaved"
+        ]
+        assert len(entries) == 1, [e["metadata"] for e in entries]
+        assert entries[0]["metadata"]["tags"] == "text"
+
     def test_search_registry_semantic(self, tmp_path):
         """Semantic search finds tools by description similarity."""
         server, reg, kb = _make_server_with_kb(tmp_path)
