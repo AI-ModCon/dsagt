@@ -117,10 +117,31 @@ uv run mkdocs build --strict    # what CI runs
   and timely review; a large refactor invites a cursory one and hides important changes.
 - Code an agent wrote gets a human review before it merges, the same as any
   other code.
-- Work on a branch off `main`. Describe the intent, not the diff. Update
-  `docs/` and `CHANGELOG.md` in the same pull request when behavior changes.
+- Work on a branch off `dev` and open the pull request against `dev`. Describe
+  the intent, not the diff. Update `docs/` and `CHANGELOG.md` in the same pull
+  request when behavior changes.
 - `ruff check`, `black --check`, and the unit suite pass before review.
 - This is pre-1.0 code: prefer clean removal over a compatibility shim.
+
+## Releases
+
+`main` is the last release and `dev` is the next one. `main` changes only by a
+release or a hotfix; a consumer installs a tag
+(`git+https://github.com/AI-ModCon/dsagt.git@<version>`) or `main`.
+
+1. A pull request into `dev` bumps `__version__` in `src/dsagt/__init__.py` and
+   moves the changelog's Unreleased section under the version and date.
+2. A pull request from `dev` to `main`, titled `Release <version>`, gets review
+   and CI.
+3. A maintainer with the release bypass fast-forwards `main` to `dev`:
+   `git push origin dev:main`. GitHub marks the pull request merged. A
+   fast-forward keeps the same commits on both branches; a squash or
+   rebase-merge would give `main` new commit hashes and the two branches would
+   diverge.
+4. Tag the release on `main`, push the tag, and make the GitHub release from it.
+
+A hotfix is a branch from `main` and a pull request into `main`, followed by a
+patch release and a merge of `main` into `dev`.
 
 ## Agentic coding
 

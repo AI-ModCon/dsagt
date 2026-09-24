@@ -4,6 +4,8 @@
 
 DSAgt (DataSmith Agent) is an MCP server and a CLI that give a user's own agent platform (Claude Code, Goose, Codex, opencode, Cline) code registration, a knowledge base, skill discovery, execution provenance, memory, and trace logging for building data-curation pipelines. Two facts every change respects: the agent talks to its own LLM provider and dsagt recovers its traces from the on-disk transcript; and all self-logging goes to one MLflow store, the project's `sqlite:///<pdir>/mlflow.db` unless `MLFLOW_TRACKING_URI` names a shared server, so a project is self-contained in its directory by default.
 
+Stage: release. Pull requests target `dev`; a release fast-forwards `main` to `dev` (`.github/CONTRIBUTING.md`, Releases).
+
 ## Documents
 
 - `README.md`: what it does, install, usage, rules.
