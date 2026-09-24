@@ -20,7 +20,6 @@ constructor.  Skill tools (``save_skill`` / ``search_skills`` /
 ``install_skill``) are defined in :mod:`dsagt.mcp.skill_tools`.
 """
 
-import os
 import asyncio
 import json
 import logging
@@ -48,31 +47,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Per-tool handlers (module-level, explicit dependencies)
 # ---------------------------------------------------------------------------
-
-
-def _code_for_same_script(registry: CodeRegistry, spec: dict) -> dict | None:
-    """A registered code, under another name, whose executable runs the same
-    script file as *spec*; a skill's scripts are registered when the skill
-    is saved, and a second registration of one script gives two codes."""
-    import shlex
-
-    def script_of(executable: str) -> str | None:
-        tokens = shlex.split(executable.split(" -- ")[-1]) if executable else []
-        script = next((t for t in tokens if t.endswith((".py", ".sh"))), None)
-        # The agent may name the same file ./skills/x/scripts/y.py where the
-        # stored spec says skills/x/scripts/y.py; one spelling compares.
-        return os.path.normpath(script) if script else None
-
-    target = script_of(spec.get("executable", ""))
-    if target is None:
-        return None
-    for code in registry.list_codes_raw():
-        if (
-            code.get("name") != spec.get("name")
-            and script_of(code.get("executable", "")) == target
-        ):
-            return code
-    return None
 
 
 async def _handle_save_code_spec(
@@ -106,7 +80,7 @@ async def _handle_save_code_spec(
                     f"{', '.join(codes) or 'none'}. Use one of those, or choose "
                     "another name."
                 )
-            existing = _code_for_same_script(registry, spec)
+            existing = registry.code_for_same_script(spec)
             if existing is not None:
                 return (
                     f"'{spec['name']}' was not saved: {existing['name']} already "
