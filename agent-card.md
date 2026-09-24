@@ -212,8 +212,8 @@ All 19 tools live on the single `dsagt-server` (stdio), split across four concer
 **Knowledge (6):**
 
 - `kb_search` — hybrid semantic search over one or more collections (optional metadata, regex, and substring filters). Side effects: reads data.
-- `kb_ingest` — index a folder as a new named collection (background job; poll `kb_job_status`). Side effects: reads sources, writes `<project>/kb_index/`.
-- `kb_append` — add documents to an existing collection (background job). Side effects: writes `<project>/kb_index/`.
+- `kb_ingest` — index a folder as a new named collection, with a description of what it holds (background job; poll `kb_job_status`). Side effects: reads sources, writes `<project>/kb_index/`.
+- `kb_append` — add documents to an existing collection, and replace its description (background job). Side effects: writes `<project>/kb_index/`.
 - `kb_list_collections` — list collections with document counts. Side effects: reads data.
 - `kb_job_status` — poll a background ingest/append job. Side effects: none.
 - `kb_delete_collection` — delete a collection and everything indexed in it; dsagt's own collections are refused. Side effects: deletes from `kb_index/`.
