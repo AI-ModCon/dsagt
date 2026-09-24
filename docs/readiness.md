@@ -72,4 +72,4 @@ baseline record holds the report that run printed. Clean up with `dsagt rm asses
 
 ## Demos
 
-The [cryo-EM curation demo](use-cases/cryoem.md) runs on real scientific data; the check measures the particle-curation step unprompted. The [AIDRIN example](use-cases/aidrin-ai-readiness.md) drives quality, fairness, and privacy metrics on a tabular dataset.
+The [cryo-EM curation demo](use-cases/cryoem.md) runs on real scientific data; the check measures the particle-curation step unprompted. The [AIDRIN example](use-cases/aidrin-ai-readiness.md) drives quality, fairness, and privacy metrics on a tabular dataset. The [BlastNet full-capability demo](use-cases/blastnet-well-rfa-demo.md) derives a point table from a structured HDF5 file the baseline cannot flatten, then adds the domain checks a conversion needs: physical bounds as custom outlier rules, and a custom AIDRIN module for species closure.

@@ -573,6 +573,34 @@ WALKTHROUGHS = {
             datacard_validation,
         ],
     },
+    "blastnet-well-rfa-demo": {
+        "mechanical": [
+            skills_installed("well-convert", "literature-search"),
+            kb_collection("combustion"),
+            code_registered(r"blastnet-inspect"),
+            files_exist("skills/blastnet-to-well/SKILL.md"),
+            files_exist("skills/blastnet-to-well/references/*", at_least=2),
+            files_exist("skills/blastnet-to-well/scripts/*.py", at_least=2),
+            code_registered(r"check-well-output"),
+            code_registered(r"blastnet-to-well|convert-to-well"),
+            code_registered(r"well-sample-points"),
+            files_exist("data/well_output/lifted_hydrogen_jet_traj_5000.hdf5"),
+            files_exist("audit/readiness/*.csv"),
+            files_exist("audit/species_closure.py"),
+            successful_records(r"check-well-output"),
+            successful_records(r"^aidrin$", at_least=3),
+            files_exist(".dsagt/explicit_memories.yaml"),
+            pipeline_script_saved,
+        ],
+        "outcome": [
+            datacard_validation,
+            tables_with_a_readiness_record,
+            count_of(
+                "failed checker runs on record",
+                "trace_archive/check-well-output_*.json",
+            ),
+        ],
+    },
     "combustion_simulation": {
         "mechanical": [
             files_exist("skills/blastnet-to-well/SKILL.md"),
