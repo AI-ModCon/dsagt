@@ -1,7 +1,5 @@
 """
 Tests for the explicit memory store.
-
-Drop this file into tests/test_memory.py
 """
 
 import yaml
@@ -232,8 +230,8 @@ class TestFileEdgeCases:
         assert mem.count() == 0
 
     def test_handles_corrupt_file(self, tmp_path):
-        """Corrupt YAML fails fast — get_all surfaces the YAMLError, never
-        silently recovers to an empty list (which would hide data loss)."""
+        """Corrupt YAML fails fast: get_all raises the YAMLError; a silent
+        recovery to an empty list would hide data loss."""
         mem = ExplicitMemory(runtime_dir=tmp_path)
         (tmp_path / ExplicitMemory.FILENAME).write_text("not: valid: yaml: [")
 

@@ -20,7 +20,7 @@ class FakeKB:
 
 
 def _one_turn_trace():
-    """A trace whose ``to_exchanges`` yields one exchange."""
+    """A trace whose ``to_exchanges`` gives one exchange."""
     trace = Trace("t", "proj:s", "claude", "proj")
     trace.add_agent_root("r1", "conv", start_time=1.0, prompt="filter the reads")
     trace.add_llm_span(
@@ -111,9 +111,9 @@ def test_empty_trace_writes_nothing(tmp_path):
 
 def test_extraction_span_tagged_episodic_with_inputs_outputs(tmp_path):
     """The per-turn embedding runs off the periodic pass, so it must carry
-    dsagt.source=episodic — filtering apart from the user-facing memory tools
-    (kb_remember / kb_get_memories) that carry dsagt.source=memory — and record
-    its turn/chunk counts as inputs/outputs so the trace isn't null-request."""
+    dsagt.source=episodic (filtered apart from the user-facing memory tools
+    kb_remember and kb_get_memories, which carry dsagt.source=memory) and record
+    its turn/chunk counts as inputs/outputs so the trace is not null-request."""
     from unittest.mock import patch
 
     opened = {}

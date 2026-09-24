@@ -4,22 +4,21 @@ Goose agent setup.
 Install: see https://github.com/block/goose.
 Generates: ``goose.yaml``, ``.goosehints``.
 
-BYOA: Goose talks directly to the user's provider via its own
-``~/.config/goose/config.yaml`` or ``GOOSE_PROVIDER`` / ``GOOSE_MODEL`` env;
-DSAGT sets no telemetry env.
+Goose talks directly to the user's provider via its own
+``~/.config/goose/config.yaml`` or ``GOOSE_PROVIDER`` / ``GOOSE_MODEL`` env.
 
-Telemetry / episodic memory: goose's turns come from its on-disk session
+Traces and episodic memory: goose's turns come from its on-disk session
 database through the periodic pass (``traces.GooseReader``), the same way as
-every agent's, so traces and episodic memory work for goose without any hook
-in goose itself.  The core capabilities (KB retrieval, registered tools,
-skills, tool-execution provenance via ``dsagt-run``) are agent-agnostic.  If goose gains a hook
-mechanism the options can be enabled.
+every agent's, so traces and episodic memory work for goose with no hook in
+goose itself.  The core capabilities (KB retrieval, registered tools,
+skills, tool-execution provenance via ``dsagt-run``) are agent-agnostic.
 
-Gateway note: goose's openai/anthropic providers read ``OPENAI_HOST`` /
+Gateway: goose's openai and anthropic providers read ``OPENAI_HOST`` /
 ``ANTHROPIC_HOST`` for the base URL (a goose-specific naming convention from
-its Rust client), NOT the standard ``OPENAI_BASE_URL`` / ``ANTHROPIC_BASE_URL``
-everything else uses.  Without HOST set, goose ignores BASE_URL and hits the
-provider's default endpoint — silently, for users on a lab gateway.
+its Rust client), where every other agent reads ``OPENAI_BASE_URL`` /
+``ANTHROPIC_BASE_URL``.  Without HOST set, goose ignores BASE_URL and sends
+requests to the provider's default endpoint, with no warning, which matters
+for users on a lab gateway.
 """
 
 from __future__ import annotations
@@ -60,8 +59,8 @@ class GooseSetup(AgentSetup):
         working_dir: Path,
         pdir: Path,
     ) -> list[str]:
-        """Write ``goose.yaml``.  Goose inherits parent env into MCP children,
-        so extension entries don't need an explicit env list."""
+        """Write ``goose.yaml``.  Goose passes its parent env to MCP children,
+        so an extension entry carries no env list."""
         del config, env, pdir
         actions: list[str] = []
 
@@ -86,8 +85,8 @@ class GooseSetup(AgentSetup):
         return actions
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
-        # Base default is just the static marker (.goosehints), but
-        # write_dynamic also writes goose.yaml — list both so switching
+        # The base default is the static marker (.goosehints) alone, and
+        # write_dynamic also writes goose.yaml; both are listed so switching
         # agents removes the MCP-extension config too.
         return [
             working_dir / ".goosehints",
@@ -95,9 +94,9 @@ class GooseSetup(AgentSetup):
         ]
 
     def interactive_command(self, config: dict) -> list[str]:
-        """Goose reads ``~/.config/goose/config.yaml`` for extensions, not a
-        project-local file — so the dsagt MCP server is passed via
-        ``--with-extension`` on the session command to attach for this project.
+        """Goose reads ``~/.config/goose/config.yaml`` for extensions, so the
+        dsagt MCP server is passed via ``--with-extension`` on the session
+        command to attach it for this project.
         """
         del config
         cmd = list(self.base_command)
@@ -112,7 +111,7 @@ class GooseSetup(AgentSetup):
         script_path: Path,
         max_turns: int,
     ) -> int:
-        """Single ``goose run`` call — goose's instructions file IS multi-turn."""
+        """Single ``goose run`` call; goose's instructions file is multi-turn."""
         del config
         env["GOOSE_MODE"] = "auto"
         cmd = [

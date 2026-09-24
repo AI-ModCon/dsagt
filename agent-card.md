@@ -31,11 +31,11 @@ agent_card:
   capabilities:
     streaming: false
     push_notifications: false
-    state_transition_history: true  # trace_archive + the serverless MLflow store record full execution history
+    state_transition_history: true  # trace_archive + the MLflow store record full execution history
 
   authentication:
     schemes: []  # BYOA — the agent platform owns its own LLM-provider auth; DSAgt never proxies or stores credentials
-    credentials: "N/A (optional: EMBEDDING_API_KEY in the shell for a hosted embedding backend — never written to disk)"
+    credentials: "N/A for the LLM provider.  DSAgt's own service credentials (EMBEDDING_API_KEY for a hosted embedding backend, MLFLOW_TRACKING_API_KEY or _TOKEN for a shared trace server) are read from the shell or ~/.config/dsagt/env, never written into a project or an agent config."
 
   default_input_modes:
     - "text/plain"
@@ -46,17 +46,17 @@ agent_card:
   skills:
     - id: "code_registration"
       name: "Code Registration"
-      description: "Register CLI codes as skill-standard directories (codes/<name>/SKILL.md) with machine-readable parameters; install dependencies via uv; every execution is wrapped with dsagt-run for provenance. Registered codes are also mirrored into the agent's native skills directory for in-context discovery."
+      description: "Register CLI codes as skill-standard directories (skills/<name>/SKILL.md) with machine-readable parameters; a declared Python dependency becomes a uv run --with prefix, and every execution is wrapped with dsagt-run for provenance. Registered codes are also mirrored into the agent's native skills directory for in-context discovery."
       tags: [registry, provenance, mcp, skills]
       examples:
         - "Register this analysis script as a reusable code."
-        - "Install Python dependencies for a custom analysis script."
+        - "Show me every code registered in this project."
       input_modes: ["text/plain"]
       output_modes: ["text/plain", "application/json"]
 
     - id: "knowledge_base"
       name: "Knowledge Base"
-      description: "Hybrid dense+sparse (sentence-transformers + BM25) semantic search over ChromaDB collections: code specs, skill catalogs, domain knowledge, code-use records, and session memory. Optional cross-encoder reranking and regex/substring document filters."
+      description: "Hybrid dense+sparse (a local ONNX bge embedder + BM25, fused by reciprocal rank) semantic search over ChromaDB collections: code specs, skill catalogs, domain knowledge, code-use records, and session memory. Metadata, regex, and substring filters narrow a search, and one call can span several collections."
       tags: [knowledge, chromadb, semantic-search, mcp]
       examples:
         - "Ingest domain documentation into a named collection."
@@ -66,7 +66,7 @@ agent_card:
 
     - id: "provenance"
       name: "Execution Provenance"
-      description: "Record every code invocation (command, stdout/stderr, exit code, timing, file I/O) to trace_archive/ and emit spans to the project's serverless MLflow store. Reconstruct the full execution history as a dependency-ordered pipeline."
+      description: "Record every code invocation (command, stdout/stderr, exit code, timing, file I/O, and the SHA-256 of each file) to trace_archive/ and emit spans to the project's MLflow store. Reconstruct the full execution history as a dependency-ordered pipeline."
       tags: [provenance, mlflow, reproducibility]
       examples:
         - "Reconstruct a reproducible pipeline from prior code executions."
@@ -86,7 +86,7 @@ agent_card:
 
     - id: "skill_discovery"
       name: "Skill Discovery and Installation"
-      description: "Search external skill catalogs (Genesis, Anthropic, K-Dense, and others cloned+indexed at init) and install skills into the project, where the agent auto-discovers them natively. Every project carries the base skills skill-creator, datacard-generator, and aidrin. Agents can also author and save their own skills."
+      description: "Search external skill catalogs (genesis, anthropic, k-dense-ai, antigravity, composio, or any git URL, cloned+indexed at init) and install skills into the project, where the agent auto-discovers them natively. Every project carries the base skills skill-creator, datacard-generator, and aidrin. Agents can also author and save their own skills."
       tags: [skills, catalog, mcp]
       examples:
         - "Search the skill catalog for a literature-search skill and install it."
@@ -98,7 +98,7 @@ Extensions:
     framework: "MCP (Model Context Protocol) over stdio; supported agent platforms: Claude Code, Goose, Codex, opencode, Cline"
     service_endpoint: "stdio (the single dsagt-server is launched as a subprocess by the agent platform)"
     rate_limits: "Determined by the underlying LLM provider configured in the agent platform (BYOA — DSAgt never proxies LLM traffic)."
-    logging: "Serverless MLflow store at sqlite:///<project>/mlflow.db (no server to run); full code execution records written to <project>/trace_archive/. Agent LLM-call history is recovered post-hoc from the agent's on-disk transcript."
+    logging: "One MLflow store: MLFLOW_TRACKING_URI when set, else sqlite:///<project>/mlflow.db (no server to run); full code execution records written to <project>/trace_archive/. Agent LLM-call history is recovered post-hoc from the agent's on-disk transcript."
     memory: "Stateful per-project. Explicit memory: <project>/.dsagt/explicit_memories.yaml + ChromaDB mirror. Episodic memory (opt-in): session_memory ChromaDB collection, embedded per turn. Code-use records: <project>/trace_archive/ + code_use ChromaDB collection."
 
 ---
@@ -107,7 +107,7 @@ Extensions:
 
 DSAgt is an AI-assisted data pipeline builder. It connects an MCP-compatible agent CLI (Claude Code, Goose, Codex, opencode, or Cline) to code registration, a semantic knowledge base, skill discovery, execution provenance, and observability infrastructure — without modifying the agent itself.
 
-*Last Updated*: **2026-09-12**
+*Last Updated*: **2026-09-21**
 
 ## Developed by
 
@@ -139,18 +139,17 @@ Scaffolding layer that gives any MCP-compatible agent CLI persistent code regist
 
 DSAgt wraps an unmodified agent CLI with four independently-operable concerns, exposed by one MCP server the agent discovers through the standard MCP tool protocol:
 
-1. **Code Registry** — The agent registers CLI codes as skill-standard directories (`codes/<name>/SKILL.md`, frontmatter carrying executable + parameters); the server handles dependency installation (`uv run --with`) and wraps each stored command with `dsagt-run` for provenance. Discovery is dual-path: semantic search via `search_registry`, plus a mirror into the agent's native skills directory so the exact runnable command is in context at invocation time.
-2. **Knowledge Base** — ChromaDB collections with hybrid dense (sentence-transformers) + sparse (BM25) search and optional cross-encoder reranking. Code specs and selected skill catalogs are indexed at `dsagt init`; per-project collections (code-use records, session memory) fill in during use. Long ingests run as background jobs.
-3. **Provenance** — `dsagt-run` captures every code execution (command, stdout/stderr, exit code, timing, file I/O) to `trace_archive/` and emits spans to the project's serverless MLflow store. `reconstruct_pipeline` renders the archive as a dependency-ordered execution history.
-4. **Observability & Memory** — All self-logging lands in `sqlite:///<project>/mlflow.db` (MLflow's serverless backend — nothing to run). Agent LLM-call traces are recovered post-hoc from the agent's on-disk transcript, uniformly across all five platforms. Explicit memory stores user-confirmed facts; opt-in episodic memory embeds every session turn for recency-weighted recall.
+1. **Code Registry** — The agent registers CLI codes as skill-standard directories (`skills/<name>/SKILL.md`, frontmatter carrying executable + parameters); the server wraps each stored command with `dsagt-run` for provenance and, when the spec declares Python dependencies, `uv run --with`. Discovery is dual-path: semantic search via `search_registry`, plus a mirror into the agent's native skills directory so the exact runnable command is in context at invocation time.
+2. **Knowledge Base** — ChromaDB collections with hybrid dense (a local ONNX bge embedder) + sparse (BM25) search, fused by reciprocal rank. Code specs and selected skill catalogs are indexed at `dsagt init`; per-project collections (code-use records, session memory) fill in during use. Long ingests run as background jobs.
+3. **Provenance** — `dsagt-run` captures every code execution (command, stdout/stderr, exit code, timing, file I/O) to `trace_archive/` and emits spans to the project's MLflow store. `reconstruct_pipeline` renders the archive as a dependency-ordered execution history.
+4. **Observability & Memory** — All self-logging lands in one MLflow store: `MLFLOW_TRACKING_URI` when it names a shared server, else `sqlite:///<project>/mlflow.db`, which needs nothing running. Agent LLM-call traces are recovered post-hoc from the agent's on-disk transcript, uniformly across all five platforms. Explicit memory stores user-confirmed facts; opt-in episodic memory embeds every session turn for recency-weighted recall.
 
 The data layer is agent-platform-agnostic: switching platforms preserves all accumulated knowledge, codes, skills, and traces.
 
 ## Underlying model(s)
 
 - Primary model(s): N/A — DSAgt is platform-agnostic and delegates LLM calls to the configured agent CLI (BYOA; DSAgt never proxies LLM traffic)
-- Embedding model: `sentence-transformers` (`bge-small-en-v1.5`, local, CPU-side, default); optionally any OpenAI-compatible hosted embedder (`embedding.backend: api`)
-- Cross-encoder reranking: optional, per search through the `rerank` argument of `kb_search`
+- Embedding model: `BAAI/bge-small-en-v1.5`, the model's ONNX export on onnxruntime, local and CPU-side, the default; optionally any OpenAI-compatible hosted embedder (`embedding.backend: api`)
 
 ## Inputs and outputs
 
@@ -165,21 +164,21 @@ The agent accepts natural-language instructions (text). Outputs include text res
 
 - **Skill ID**: `code_registration`
   **Name**: Code Registration
-  **Description**: Register CLI codes as skill-standard spec directories; install dependencies; wrap executions with `dsagt-run` for provenance; mirror specs into the agent's native skills dir.
+  **Description**: Register CLI codes as skill-standard spec directories; wrap executions with `dsagt-run` for provenance and a declared Python dependency with `uv run --with`; mirror specs into the agent's native skills dir.
   **Tags**: registry, provenance, mcp, skills
-  **Examples**: "Register this analysis script as a reusable code.", "Install Python dependencies for a custom analysis script."
+  **Examples**: "Register this analysis script as a reusable code.", "Show me every code registered in this project."
   **Input/Output Modes**: text/plain → text/plain, application/json
 
 - **Skill ID**: `knowledge_base`
   **Name**: Knowledge Base
-  **Description**: Hybrid semantic search (dense + BM25, optional reranking, regex/substring filters) over code specs, skill catalogs, domain knowledge, code-use records, and session memory.
+  **Description**: Hybrid semantic search (a local ONNX bge embedder + BM25, fused by reciprocal rank, with metadata, regex, and substring filters) over code specs, skill catalogs, domain knowledge, code-use records, and session memory.
   **Tags**: knowledge, chromadb, semantic-search, mcp
   **Examples**: "Ingest domain documentation into a named collection.", "Search for codes matching 'CSV statistics'."
   **Input/Output Modes**: text/plain → text/plain, application/json
 
 - **Skill ID**: `provenance`
   **Name**: Execution Provenance
-  **Description**: Record every code invocation to `trace_archive/` + the serverless MLflow store; reconstruct the full execution history as a dependency-ordered pipeline.
+  **Description**: Record every code invocation to `trace_archive/` + the MLflow store; reconstruct the full execution history as a dependency-ordered pipeline.
   **Tags**: provenance, mlflow, reproducibility
   **Examples**: "Reconstruct a reproducible pipeline from prior code executions."
   **Input/Output Modes**: text/plain → text/plain, application/json
@@ -204,7 +203,7 @@ All 19 tools live on the single `dsagt-server` (stdio), split across four concer
 
 **Registry (5):**
 
-- `search_registry` — semantic search over registered + bundled code specs. Side effects: reads data.
+- `search_registry` — semantic search over registered + built-in code specs. Side effects: reads data.
 - `get_registry` — list every registered code with its MCP-compatible schema. Side effects: reads data.
 - `save_code_spec` — register a code as `skills/<name>/SKILL.md` (executable auto-wrapped with `dsagt-run` + `uv run --with`). Side effects: writes to the project dir; indexes into ChromaDB.
 - `reconstruct_pipeline` — render `trace_archive/` as a dependency-ordered execution history. Side effects: reads data.
@@ -213,7 +212,7 @@ All 19 tools live on the single `dsagt-server` (stdio), split across four concer
 **Knowledge (6):**
 
 - `kb_search` — hybrid semantic search over one or more collections (optional metadata, regex, and substring filters). Side effects: reads data.
-- `kb_ingest` — index a file or directory into a named collection (background job for large corpora). Side effects: reads sources, writes `<project>/kb_index/`.
+- `kb_ingest` — index a folder as a new named collection (background job; poll `kb_job_status`). Side effects: reads sources, writes `<project>/kb_index/`.
 - `kb_append` — add documents to an existing collection (background job). Side effects: writes `<project>/kb_index/`.
 - `kb_list_collections` — list collections with document counts. Side effects: reads data.
 - `kb_job_status` — poll a background ingest/append job. Side effects: none.
@@ -222,7 +221,7 @@ All 19 tools live on the single `dsagt-server` (stdio), split across four concer
 **Memory (2):**
 
 - `kb_remember` — save a user-confirmed fact to explicit memory. Side effects: writes `<project>/.dsagt/explicit_memories.yaml` + ChromaDB.
-- `kb_get_memories` — retrieve explicit memories (optionally query-filtered). Side effects: reads data.
+- `kb_get_memories` — every active explicit memory for the project. Side effects: reads data.
 
 **Skills (6):**
 
@@ -241,7 +240,7 @@ All 19 tools live on the single `dsagt-server` (stdio), split across four concer
 
 ## Runtime Infrastructure
 
-DSAgt runs locally as a CLI tool. The MCP server is launched as a subprocess by the configured agent platform. There are no services to run: all self-logging goes to a serverless SQLite MLflow store (`sqlite:///<project>/mlflow.db`), browsable on demand with `mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db`.
+DSAgt runs locally as a CLI tool. The MCP server is launched as a subprocess by the configured agent platform. By default there are no services to run: self-logging goes to a serverless SQLite MLflow store (`sqlite:///<project>/mlflow.db`), browsable on demand with `mlflow ui --backend-store-uri sqlite:///<project>/mlflow.db`, and `MLFLOW_TRACKING_URI` sends it to a shared tracking server instead.
 
 ### Hardware
 
@@ -252,11 +251,13 @@ Runs on any developer workstation or compute node with Python 3.12+. The default
 Python 3.12 or later (CI tests 3.12 and 3.13), `uv` package manager. Key dependencies:
 
 - `mcp>=2.0,<3.0` — MCP server framework
-- `mlflow>=3.11,<4.0` — trace store and observability, serverless SQLite backend
+- `mlflow>=3.11,<4.0` — trace store and observability, serverless SQLite by default
 - `chromadb>=1.5.1` — vector store
-- `sentence-transformers>=6.0,<7.0` — local embeddings and reranking
+- `onnxruntime>=1.20`, `tokenizers>=0.20`, `huggingface_hub>=0.30` — the local embedder
 - `llama-index-core>=0.11` — document and code chunking
 - `rank-bm25>=0.2.2` — sparse keyword retrieval for hybrid search
+- `aidrin>=2026.8.2,<2027` — the AI-readiness check's CLI
+- `uv>=0.5` — runs a code whose spec declares Python dependencies
 - `questionary>=2.0` — interactive `dsagt init` menus
 
 See `pyproject.toml` for the complete dependency set.
@@ -292,6 +293,9 @@ Tested Use cases include:
 - Cryo-EM data curation (EMPIAR datasets)
 - Materials science DFT workflows (VASP via ISAAC)
 - Tokamak stability analysis (fusion energy, M3D-C1)
+- Plasma turbulence training data (XGC)
+- Combustion simulation conversion (BlastNet to WELL)
+- Skill-catalog data curation (Genesis skills)
 - AI data readiness assessment (AIDRIN)
 
 ## Out-of-Scope Use Cases
@@ -323,8 +327,7 @@ dsagt init
 - **System prompt / instructions**: generated by `dsagt init` as `CLAUDE.md` (Claude Code), `AGENTS.md` (Codex/opencode), `.goosehints` (Goose), or `.clinerules/dsagt_instructions.md` (Cline)
 - **MCP server config**: generated by `dsagt init` as `.mcp.json` (Claude Code), `goose.yaml`, `.codex-data/config.toml`, `opencode.json`, or via `cline mcp add`
 - **LLM provider auth**: owned entirely by the agent platform (BYOA) — configure the agent before pointing DSAgt at it; DSAgt never stores or proxies credentials
-- **Embedding backend**: set `embedding.backend: api` in `.dsagt/config.yaml` to use an OpenAI-compatible hosted embedder; the key comes from `EMBEDDING_API_KEY` in the shell (never on disk)
-- **Reranking**: pass `rerank: true` to `kb_search`
+- **Embedding backend**: set `embedding.backend: api` in `.dsagt/config.yaml` to use an OpenAI-compatible hosted embedder; the key comes from `EMBEDDING_API_KEY` in the shell or `~/.config/dsagt/env`, never from a project or an agent config
 - **Episodic memory**: opt in at init (`dsagt init --episodic` or the interactive prompt)
 
 ## Invocation / integration
@@ -371,20 +374,20 @@ DSAgt executes arbitrary CLI codes registered by the agent. The registry wraps c
 
 - **Code execution side effects**: Registered codes can read/write files, make network calls, and execute arbitrary subprocesses. The agent must be trusted to register only appropriate codes.
 - **Prompt injection**: Knowledge base documents and installed catalog skills are retrieved and injected into the agent context; malicious content in indexed documents or third-party skill catalogs could influence agent behavior.
-- **Secrets handling**: No credentials are written to disk by DSAgt. A hosted embedding backend reads `EMBEDDING_API_KEY` from the shell at runtime.
+- **Secrets handling**: DSAgt never reads or writes an LLM-provider credential, and writes none of its own into a project or an agent config. Its service credentials (`EMBEDDING_API_KEY`, and `MLFLOW_TRACKING_API_KEY` or `_TOKEN` for a shared trace server) are read at runtime from the shell or from `~/.config/dsagt/env`, a file in `$HOME` that the user owns. A name ending in `_KEY`, `_TOKEN`, or `_SECRET` is refused entry to the MCP config's env block.
 - **Data exfiltration**: If a hosted embedding backend is configured, document chunks are sent to that external service during ingestion and search.
 
 ## Limitations
 
 - Local-first: designed for single-user local or HPC use; no multi-user access control
-- Embedding model quality: default local `sentence-transformers` model (~130 MB) is effective for general text but may underperform on highly domain-specific technical corpora
+- Embedding model quality: the default local model (`bge-small-en-v1.5`, a 133 MB ONNX file) is effective for general text but may underperform on highly domain-specific technical corpora
 - Agent LLM-call traces are recovered post-hoc from the agent's on-disk transcript (uniform across all five platforms) — recovery granularity follows what each platform records
 - Cline batch mode is unsupported (cline's provider rewrites unrecognized model names); interactive cline use works
 - No GUI: all interaction is through the agent CLI or the MLflow web UI
 
 # Agent evaluation details
 
-- **Smoke test**: `dsagt smoke-test --agent <platform>` runs two full agent sessions non-interactively and asserts 18 artifacts: code registration + execution provenance, knowledge ingest + retrieval, skill catalog install, native skill mirroring, explicit + episodic memory, cross-session recall, agent-trace recovery, and session state
+- **Smoke test**: `dsagt smoke-test --agent <platform>` runs two full agent sessions non-interactively and checks the artifacts of each concern: code registration + execution provenance, knowledge ingest + retrieval, skill catalog install, native skill mirroring, explicit + episodic memory, cross-session recall, agent-trace recovery, and session state
 - **Unit tests**: `uv run python -m pytest -m "not integration"` (integration tests requiring credentials are in `test_*_integration.py`)
 - **Code-call correctness**: verified by checking `trace_archive/` records for expected exit codes and captured output
 - **Knowledge base precision**: evaluated via retrieval assertions in the smoke test (the agent must answer from ingested docs)
@@ -393,4 +396,4 @@ DSAgt executes arbitrary CLI codes registered by the agent. The registry wraps c
 
 - Full documentation: https://ai-modcon.github.io/dsagt/
 - Source code: https://github.com/AI-ModCon/dsagt
-- Use case walkthroughs: `use_cases/`, eight in all, summarized in `USE_CASES.md`
+- Use case walkthroughs: `use_cases/`, eight in all, at https://ai-modcon.github.io/dsagt/use-cases/

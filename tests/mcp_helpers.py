@@ -161,7 +161,7 @@ def mcp_call_tool(
 def start_server(cmd: list[str], env: dict = None, cwd: str = None) -> subprocess.Popen:
     """Start a server subprocess with stdio pipes.
 
-    ``cwd`` sets the working directory — ``dsagt-server`` discovers its project
+    ``cwd`` sets the working directory; ``dsagt-server`` discovers its project
     config from cwd (see ``observability.find_project_config``), so startup tests
     must run it from the project dir.
     """

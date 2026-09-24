@@ -2,8 +2,8 @@
 DSAgt project lifecycle: configuration, initialization, services, and extraction.
 
 Projects are registered in ~/dsagt-projects/projects.yaml (name → absolute path).
-Default project location is ~/dsagt-projects/<name>/.  Shared bundled-content
-KB lives alongside at ~/dsagt-projects/kb_index/ (provisioned by dsagt init).
+Default project location is ~/dsagt-projects/<name>/.  The shared knowledge
+base is at ~/dsagt-projects/kb_index/ (provisioned by dsagt init).
 
 Project directory layout::
 
@@ -42,10 +42,9 @@ logger = logging.getLogger(__name__)
 VALID_AGENTS = ("claude", "goose", "cline", "codex", "opencode")
 
 DEFAULT_PROJECTS_BASE = Path.home() / "dsagt-projects"
-# Registry + shared KB live alongside projects under one visible tree —
-# ``~/dsagt-projects/projects.yaml`` (name → path) and
-# ``~/dsagt-projects/kb_index/`` (shared bundled-content KB provisioned by
-# ``dsagt init``).  Migrated from ``~/.dsagt/`` on 2026-05-07.
+# The registry and the shared KB are beside the projects under one visible
+# tree: ``~/dsagt-projects/projects.yaml`` (name → path) and
+# ``~/dsagt-projects/kb_index/`` (the shared KB ``dsagt init`` provisions).
 REGISTRY_DIR = DEFAULT_PROJECTS_BASE
 #: Files a cached source clone carries at its root: the commit the clone
 #: was taken at and the branch or tag it was asked for.  Written by
@@ -57,10 +56,10 @@ SOURCE_REF_FILE = "SOURCE_REF"
 REGISTRY_FILE = REGISTRY_DIR / "projects.yaml"
 RESERVED_PROJECT_NAMES = ("projects.yaml", "kb_index", ".skill_sources", ".tools")
 
-# Per-project dsagt state lives under a hidden ``.dsagt/`` dir (alongside
-# explicit memory): ``config.yaml`` (the MCP-server object settings the user
-# chose at ``dsagt init``) and ``state.yaml`` (session log + memory cursor,
-# owned by the MCP server).
+# Per-project dsagt state is under a hidden ``.dsagt/`` dir (beside explicit
+# memory): ``config.yaml`` (the MCP-server object settings the user chose at
+# ``dsagt init``) and ``state.yaml`` (session log + memory cursor, owned by
+# the MCP server).
 CONFIG_DIRNAME = ".dsagt"
 CONFIG_FILENAME = "config.yaml"
 STATE_FILENAME = "state.yaml"
@@ -76,12 +75,12 @@ def state_path(pdir: Path) -> Path:
     return Path(pdir) / CONFIG_DIRNAME / STATE_FILENAME
 
 
-# Code defaults backfilled into a project's config on read (``_deep_merge``).
+# Code defaults merged into a project's config on read (``_deep_merge``).
 # They are code settings, held here as the one definition and filled in for
 # the MCP server and the KB; ``.dsagt/config.yaml`` and the ``dsagt init``
-# prompts carry user choices only.  Embedding is local (BYOA, no
-# credentials).  ``chunk_size`` default
-# in :class:`~dsagt.knowledge.KnowledgeBase`; ``skills.populate_native`` in
+# prompts carry user choices only.  Embedding is local by default, which
+# needs no credential.  The ``chunk_size`` default is in
+# :class:`~dsagt.knowledge.KnowledgeBase`; ``skills.populate_native`` in
 # :meth:`AgentSetup.setup_skills`.
 DEFAULTS = {
     "embedding": {
@@ -102,14 +101,14 @@ DEFAULTS = {
             },
         ],
     },
-    # Episodic memory: the periodic pass's MemoryExtractor subscriber.  ``enabled``
-    # is a compute/storage opt-in that mechanically chunks/tags/embeds each
-    # completed turn into session_memory (no credentials).
+    # Episodic memory: the periodic pass's MemoryExtractor subscriber.
+    # ``enabled`` is a compute/storage opt-in that chunks, tags, and embeds
+    # each completed turn into session_memory; it needs no credential.
     "episodic": {
         "enabled": False,
-        # Recency weighting for session_memory retrieval: a newer turn edges out
-        # a stale one without contradiction detection.  Half-life in days (a
-        # *boost*, never a penalty — durable old turns keep full relevance).
+        # Recency weighting for session_memory retrieval: a newer turn ranks
+        # above an older one.  Half-life in days; it is a boost, never a
+        # penalty, so an old turn keeps its full relevance.
         "recency_half_life_days": 14,
     },
 }
@@ -131,12 +130,12 @@ def load_user_env(path: Path = USER_ENV_FILE) -> list[str]:
     ``~/.config/dsagt/env`` holds ``KEY=VALUE`` lines (an ``export`` prefix,
     quotes and ``#`` comments are accepted) for the secrets an agent cannot
     hand to its MCP children: codex and cline start ``dsagt-server`` with only
-    the env block baked into their config, never the shell, so
+    the env block written into their config, never the shell, so
     ``MLFLOW_TRACKING_API_KEY`` / ``EMBEDDING_API_KEY`` exported in a terminal
-    never arrive.  The file is the ``~/.netrc`` pattern — in ``$HOME``, mode
-    600, never inside a project or an agent config, which is the line the
-    credential policy draws.  A key already in the environment wins, so a
-    shell export still overrides the file.  Returns the names it set.
+    never arrive.  The file follows the ``~/.netrc`` pattern: in ``$HOME``,
+    mode 600, and never inside a project or an agent config, which is the
+    credential policy's guarantee.  A key already in the environment wins, so
+    a shell export overrides the file.  Returns the names it set.
     """
     if not path.is_file():
         return []
@@ -189,21 +188,22 @@ def build_config(
 ) -> dict:
     """Assemble a project's ``.dsagt/config.yaml`` body.
 
-    The schema is a strict 1:1 mirror of the choices ``dsagt init`` offers —
-    every key here corresponds to an init prompt and vice versa:
+    The schema is a strict 1:1 mirror of the choices ``dsagt init`` offers:
+    every key here corresponds to an init prompt and vice versa.
 
-    - ``project`` / ``agent`` — identity (agent + name/location are prompted).
-    - ``knowledge.collections`` — the packaged document collections chosen
-      (default none; the bundled ``tools`` collection is always provisioned).
-    - ``skills.sources`` — the skill-catalog repos chosen.
-    - ``episodic`` — written *only when the user opted in* (it's an opt-in, so a
-      disabled project stays minimal and backfills ``enabled: false`` on read).
-    - ``readiness`` — the AI-readiness check setting (``auto_assess``; see
+    - ``project`` / ``agent``: identity (agent and name/location are prompted).
+    - ``knowledge.collections``: the packaged document collections chosen
+      (default none; the built-in ``tools`` collection is always provisioned).
+    - ``skills.sources``: the skill-catalog repos chosen.
+    - ``episodic``: written only when the user opted in, so a disabled
+      project's config stays minimal and ``enabled: false`` is merged in on
+      read.
+    - ``readiness``: the AI-readiness check setting (``auto_assess``; see
       :mod:`dsagt.readiness`), written when init asked the question.
 
-    Everything else (embedding backend, chunk_size, populate_native)
-    is a code default backfilled on read — NOT a written choice.  Credentials
-    are never here (shell env only); no MLflow port (serverless sqlite store).
+    Everything else (embedding backend, chunk_size, populate_native) is a
+    code default merged in on read.  Credentials are never written here; the
+    trace store is the project's sqlite file by default.
     """
     body = {
         "project": project_name,
@@ -320,8 +320,8 @@ def kb_from_config(config: dict, index_dir: Path | None = None) -> "KnowledgeBas
 def _recency_half_life(config: dict) -> float | None:
     """Episodic recency half-life (days) when enabled, else ``None`` (off).
 
-    Recency weighting only matters for ``session_memory``, which only has
-    content when episodic memory is enabled — so it's gated on that opt-in.
+    Recency weighting applies only to ``session_memory``, which has content
+    only when episodic memory is enabled, so it is gated on that opt-in.
     """
     epi = config.get("episodic", {}) or {}
     return epi.get("recency_half_life_days") if epi.get("enabled") else None
@@ -368,9 +368,10 @@ def load_config(project_name: str) -> dict:
 
 
 def read_config_file(pdir: Path) -> dict:
-    """Read a project's raw ``.dsagt/config.yaml`` by path (no registry, no
-    defaults merge).  Returns ``{}`` if absent — used to prefill the
-    re-run ``dsagt init`` dialogue with current values.
+    """Read a project's ``.dsagt/config.yaml`` by path, as written.
+
+    Returns ``{}`` when the file is absent.  The re-run ``dsagt init``
+    dialogue prefills its prompts from the result.
     """
     cfg_file = config_path(pdir)
     if not cfg_file.exists():
@@ -400,7 +401,7 @@ def _validate(config: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session state (`.dsagt/state.yaml`) — owned by the MCP server
+# Session state (`.dsagt/state.yaml`), owned by the MCP server
 # ---------------------------------------------------------------------------
 
 
@@ -426,9 +427,9 @@ def write_state(pdir: Path, state: dict) -> None:
 def append_session(pdir: Path) -> dict:
     """Append a new session entry and return it.
 
-    Called by the MCP server at startup — the server owns session-id
-    minting now (not ``dsagt start``), so a bare-launched agent gets a
-    session id too.  Id is a monotonic per-project counter.
+    Called by the MCP server at startup; the server mints the session id, so
+    a bare-launched agent gets one too.  The id is a monotonic per-project
+    counter.
     """
     state = read_state(pdir)
     sessions = state.setdefault("sessions", [])
@@ -479,16 +480,17 @@ def record_trace_source(pdir: Path, source) -> None:
     ``source`` is the agent-shaped session token from
     :meth:`dsagt.traces.Reader.active_source` (a transcript path, DB session id,
     or session-dir name).  The MCP server records it once the live collector
-    resolves a session, so the *next* session's catch-up can pin this exact
-    session — for *every* agent — when re-collecting turns an ungraceful
-    shutdown left unlogged.  No-op if no session has been minted yet.
+    resolves a session, so the next session's catch-up can pin this exact
+    session, for every agent, when re-collecting turns an ungraceful
+    shutdown left unlogged.  Returns without writing when no session has
+    been minted.
     """
     state = read_state(pdir)
     sessions = state.get("sessions") or []
     if not sessions:
         return
     if sessions[-1].get("trace_source") == source:
-        return  # already recorded — avoid churning the file
+        return  # already recorded; the file is left as it is
     sessions[-1]["trace_source"] = source
     write_state(pdir, state)
 
@@ -521,22 +523,21 @@ def setup_runtime_kb(
 
     Creates ``<runtime_dir>/kb_index`` if missing.  For each collection
     under *base_index_dir* that looks populated and has no project-local
-    twin yet, **copies** the entire
-    collection directory into the project's kb_index.
+    twin yet, copies the entire collection directory into the project's
+    kb_index.
 
     *collections*, when given, is an allowlist of collection-directory
-    names to copy — so a project gets exactly its requested asset set even
-    when the shared KB holds more (e.g. heavy collections another project
-    installed).  ``None`` copies every populated collection.
+    names to copy, so a project gets exactly its requested asset set even
+    when the shared KB holds more (heavy collections another project
+    installed, for example).  ``None`` copies every populated collection.
 
-    Why copy instead of symlink: different projects on the same machine
-    may run different dsagt versions, and a symlink would let one
-    project's KB rebuild mutate every project's view
-    of bundled content.  A copy pins each project to whatever bundled
-    content was current when the project first ran.
+    Each collection is copied, not symlinked, because projects on one
+    machine may run different dsagt versions, and a symlink would let one
+    project's KB rebuild change every project's copy.  A copy pins each
+    project to the shared content current when the project first ran.
 
-    Existing project-local collections are left alone, so an agent's
-    saved tools / skills / ingests are preserved across re-runs.
+    Existing project-local collections are left as they are, so an agent's
+    saved tools, skills, and ingests are preserved across re-runs.
     """
     runtime_kb_dir = runtime_dir / "kb_index"
     runtime_kb_dir.mkdir(parents=True, exist_ok=True)
@@ -553,8 +554,7 @@ def setup_runtime_kb(
         dest = runtime_kb_dir / collection_dir.name
         if dest.exists():
             continue
-        # Resolve in case the source collection itself is a symlink
-        # (older projects that used the symlink path).
+        # Resolve so a symlinked source collection is copied as a directory.
         shutil.copytree(collection_dir.resolve(), dest)
 
     return runtime_kb_dir
@@ -570,7 +570,7 @@ def _provision_kb(
     set into the project.  Returns the resolved asset names.
 
     The first project on a machine pays the one-time build (the base-skill
-    codes + genesis catalog by default); later projects just copy.  The copy is
+    codes + genesis catalog by default); later projects copy.  The copy is
     scoped to the requested set, so a project gets exactly what was asked
     for regardless of what else the shared cache holds.
 
@@ -594,15 +594,15 @@ def _provision_kb(
     first_ever = not shared.exists() or not any(
         _collection_exists(c) for c in shared.iterdir()
     )
-    # Which requested assets aren't in the shared cache yet — i.e. what this
-    # init will actually build (and narrate).  Empty → silent fast path.
+    # The requested assets absent from the shared cache, which this init
+    # builds and reports.  Empty: the fast path prints nothing.
     pending = [
         a for a in assets if not _collection_exists(shared / asset_collection_name(a))
     ]
     if pending:
         if first_ever:
             print(
-                "Performing initial dsagt setup — first project on this "
+                "Performing initial dsagt setup: first project on this "
                 "machine (one-time, may take a few minutes):",
                 flush=True,
             )
@@ -697,12 +697,12 @@ def init_project(
     episodic: dict | None = None,
     readiness: dict | None = None,
 ) -> Path:
-    """Create or reconfigure a project — ``dsagt init`` is re-runnable.
+    """Create or reconfigure a project; ``dsagt init`` is re-runnable.
 
-    BYOA model: we lay down everything the user needs to point their own
-    agent process at our MCP server.  The trace store is serverless
-    (``sqlite:///<pdir>/mlflow.db``), so there's no port to pick — the
-    MCP-server children resolve the store from the project dir.
+    Writes everything the user's own agent process needs to reach the MCP
+    server.  The trace store is the project's sqlite file by default
+    (``sqlite:///<pdir>/mlflow.db``), which the MCP-server children resolve
+    from the project dir.
 
     Idempotent: on a project that already has ``.dsagt/config.yaml`` this
     overwrites the config with the new choices and provisions any
@@ -757,8 +757,8 @@ def remove_collection(pdir: Path, collection: str) -> bool:
 
     Used by re-run ``dsagt init`` when the user opts to remove a collection
     that was dropped from the asset set.  Returns True if a directory was
-    removed.  Caller must guard agent-populated collections (``code_use``,
-    ``session_memory``) — this helper deletes whatever name it's given.
+    removed.  The caller must guard agent-populated collections (``code_use``,
+    ``session_memory``): this helper deletes whatever name it is given.
     """
     target = Path(pdir) / "kb_index" / collection
     if target.exists():
@@ -803,28 +803,28 @@ def remove_project(project_name: str, keep_files: bool = False) -> Path:
 
 
 def catch_up_extraction(pdir: Path, config: dict, kb=None) -> dict:
-    """Background post-session catch-up — run by the MCP server at startup.
+    """Background post-session catch-up, run by the MCP server at startup.
 
     The MCP server owns the session lifecycle: each launch, it spawns this
-    against a snapshot taken at startup, so it processes the *previous*
-    session's trailing trace records, never the live one.  This means no
-    reliable session-*end* trigger is required, and bare-launched agents get
-    full parity.
+    against a snapshot taken at startup, so it processes the previous
+    session's trailing trace records, never the live one.  The trigger is
+    the startup, which every launch has, so a bare-launched agent gets the
+    same coverage.
 
     Two phases, both best-effort:
 
     1. **Code-execution indexing** (always): embed the previous session's
        ``<pdir>/trace_archive/`` records into the ``code_use`` collection via
-       the shared :class:`~dsagt.provenance.CodeUseIndexer` — idempotent against
-       the same ``.dsagt/code_use_acks.json`` the periodic pass uses, so the
-       startup catch-up and the periodic pass never double-index.  No LLM, no
-       credentials (local-backend default).
+       the shared :class:`~dsagt.provenance.CodeUseIndexer`, idempotent
+       against the same ``.dsagt/code_use_acks.json`` the periodic pass uses,
+       so the startup catch-up and the periodic pass never double-index.
+       With the local backend this needs no credential.
     2. **Chat-trace catch-up** (:func:`_catch_up_traces`): re-collect the
-       previous session so any turns the periodic pass missed before an ungraceful
-       shutdown still reach MLflow (and episodic memory).  Pinned to the
-       trace-source token recorded in ``state.yaml`` (uniform across agents);
-       transcript-qualified acks dedupe against the live pass, so only dangling
-       turns emit.
+       previous session so any turns the periodic pass missed before an
+       ungraceful shutdown still reach MLflow (and episodic memory).  Pinned
+       to the trace-source token recorded in ``state.yaml`` (uniform across
+       agents); transcript-qualified acks dedupe against the live pass, so
+       only dangling turns emit.
     """
     pdir = Path(pdir)
     config = {**config, "project_dir": str(pdir)}
@@ -836,9 +836,9 @@ def catch_up_extraction(pdir: Path, config: dict, kb=None) -> dict:
     try:
         code_use_indexed = 0
         try:
-            # tick_traced: this catch-up runs off any tool-call trace, so tag
-            # the indexer's kb.* writes dsagt.source=code_use rather than let
-            # them orphan as untagged top-level traces.
+            # tick_traced: this catch-up runs outside any tool-call trace, so
+            # the indexer's kb.* writes are tagged dsagt.source=code_use;
+            # untagged, they would start their own top-level traces.
             code_use_indexed = CodeUseIndexer(kb, pdir).tick_traced()
         except Exception as e:  # noqa: BLE001 — never let a background task crash
             logger.warning("Code execution indexing failed: %s", e)
@@ -863,15 +863,15 @@ def _catch_up_traces(pdir: Path, config: dict, kb) -> int:
 
     Builds a trace collector pinned to the previous session's recorded
     trace-source token (and tagged with its session id), then runs one
-    ``collect(include_last=True)``.  The collector's transcript-qualified ack files
-    are shared with the live pass, so already-logged turns are skipped and only
-    those lost to an ungraceful shutdown are emitted to MLflow + episodic memory.
-    Uniform across agents — JSONL or SQLite — since the pin is the agent's own
-    session token, not a transcript-file assumption.
+    ``collect(include_last=True)``.  The collector's transcript-qualified ack
+    files are shared with the live pass, so already-logged turns are skipped
+    and only those lost to an ungraceful shutdown are emitted to MLflow and
+    episodic memory.  Uniform across agents (JSONL or SQLite), since the pin
+    is the agent's own session token.
 
-    Returns 0 (a no-op) when there is no previous session, or it stamped no
-    trace-source (a session too short for the periodic pass to record one), where
-    guessing would risk reading the *new* session's records.
+    Returns 0 when the state holds fewer than two sessions, or the previous
+    one recorded no trace-source (a session too short for the periodic pass
+    to record one); a guess could read the new session's records.
     """
     from dsagt.memory import episodic_consumers
     from dsagt.observability import experiment_name, resolve_tracking_uri

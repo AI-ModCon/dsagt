@@ -1,10 +1,9 @@
 """
-Tests for dsagt.observability — Stage 0.
+Tests for dsagt.observability.
 
 These tests read spans back from the serverless MLflow trace store (a
-per-test ``sqlite:///<tmp>/mlflow.db``) rather than from OTel's
-InMemorySpanExporter — the live-span path now uses ``mlflow.start_span``
-directly and installs no OTel TracerProvider.  They cover:
+per-test ``sqlite:///<tmp>/mlflow.db``); the live-span path uses
+``mlflow.start_span`` directly.  They cover:
 
 * init_tracing is a no-op outside a dsagt project dir
 * init_tracing points MLflow at the resolved store + experiment
@@ -13,8 +12,8 @@ directly and installs no OTel TracerProvider.  They cover:
 * child_span / typed helpers nest under the active span
 * internal traces are tagged ``dsagt.source`` + ``mlflow.trace.session``
 
-Each test gets its own fresh store, so the LAST trace in the store is the
-operation under test — no clear-then-read dance is needed.
+Each test gets its own fresh store, so the last trace in the store is the
+operation under test.
 """
 
 from __future__ import annotations
@@ -33,8 +32,8 @@ from dsagt.observability import experiment_name, child_span, init_tracing, obs, 
 def _reset_tracing(monkeypatch, tmp_path):
     """Point MLflow at a fresh per-test sqlite store and mark tracing live.
 
-    Each test gets its own store, so reading the LAST active trace always
-    yields the operation under test — no exporter to clear between calls.
+    Each test gets its own store, so the last active trace is always the
+    operation under test.
     """
     import mlflow
 
@@ -59,11 +58,11 @@ def _spans_by_name(_ignored=None):
 
 
 def test_init_tracing_outside_project_is_noop(monkeypatch):
-    """Serverless + never-raise: when cwd isn't a dsagt project dir (no
-    ``.dsagt/config.yaml`` with a ``project``), ``init_tracing`` logs and
-    no-ops rather than raising — one-shot tools / tests outside a project
-    simply run untraced.  The store itself never needs a server, so the
-    only reason to skip is "not in a project", which must not be fatal."""
+    """When cwd is not a dsagt project dir (no ``.dsagt/config.yaml`` with a
+    ``project``), ``init_tracing`` logs and returns without raising; one-shot
+    tools and tests outside a project run untraced.  The store needs no
+    server, so the one reason to skip is "not in a project", which is not
+    fatal."""
     monkeypatch.setattr(obs_module, "_initialized", False)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     # Repo root has no .dsagt/config.yaml → find_project_config returns None.
@@ -167,7 +166,7 @@ def test_root_span_source_tags_trace_and_session(_reset_tracing, monkeypatch):
 
     trace = _last_trace()
     assert trace.info.tags["dsagt.source"] == "knowledge"
-    # agent + version are metadata on internal and agent traces alike — the
+    # agent + version are metadata on internal and agent traces alike, the
     # one place `dsagt info` reads them from.
     assert trace.info.trace_metadata["dsagt.agent"] == "goose"
     assert trace.info.trace_metadata["mlflow.trace.session"] == "proj-xyz"
@@ -194,15 +193,15 @@ def test_inner_spans_inherit_root_source(_reset_tracing):
 
     trace = _last_trace()
     assert trace.info.tags["dsagt.source"] == "skill"
-    # Both the root and the kb.search child live in the one trace.
+    # Both the root and the kb.search child are in the one trace.
     names = {s.name for s in trace.data.spans}
     assert {"search_skills", "kb.search"} <= names
 
 
 def test_uncategorized_span_has_no_source(_reset_tracing):
     """A span opened with no source (inner span outside any root, e.g. a
-    background ``kb.*`` write) carries no ``dsagt.source`` — it doesn't leak
-    into the debug-view filter as a miscategorized concern.
+    background ``kb.*`` write) carries no ``dsagt.source``, so it does not
+    appear in the debug-view filter as a miscategorized concern.
     """
 
     @traced("kb.add_entries")
@@ -273,10 +272,10 @@ def test_init_tracing_points_mlflow_at_store_and_experiment(monkeypatch):
 # traced()'s wrapper:
 #
 #   1. traced() wraps sig.bind_partial in except TypeError so that a
-#      function whose signature was mangled by another decorator doesn't
+#      function whose signature was mangled by another decorator does not
 #      crash on every traced call.
 #   2. traced() wraps each user-supplied extractor lambda in except
-#      Exception so a buggy lambda doesn't crash the instrumented
+#      Exception so a buggy lambda does not crash the instrumented
 #      function.
 #
 # These tests pin the HAPPY PATH so that if those catches ever fire in
@@ -330,7 +329,7 @@ def test_extract_return_failure_logs_at_debug_and_does_not_crash(
 
 def test_attach_captured_args_happy_path_protects_bind_partial_catch(_reset_tracing):
     """Pin the happy path for arg capture so the silent 'except TypeError:
-    skip' catch can't hide a regression where args stop being captured due to
+    skip' catch cannot hide a regression where args stop being captured due to
     a signature-introspection bug.
 
     If sig.bind_partial silently failed for any reason, this test would
@@ -359,7 +358,7 @@ def test_attach_captured_args_happy_path_protects_bind_partial_catch(_reset_trac
 def _kb_with_mocked_embedder(tmp_path, backend: str = "api", model: str = "test-model"):
     """Build a KnowledgeBase with a mocked embedder for the given backend.
 
-    The mock patch lives for the whole context so cache misses on later
+    The mock patch is active for the whole context so cache misses on later
     embed() calls still resolve to the fake.
     """
     from unittest.mock import MagicMock, patch
@@ -585,7 +584,7 @@ def test_run_and_record_failed_tool_records_event_and_status(_reset_tracing, tmp
     span = _spans_by_name()["code.execute"]
 
     assert span.attributes["exit_code"] == 127
-    # Stderr was set by the FileNotFoundError branch — should be on the span.
+    # Stderr was set by the FileNotFoundError branch: it is on the span.
     assert "stderr_truncated" in span.attributes
     # code_failed event was added.
     assert any(e.name == "code_failed" for e in span.events)
@@ -670,8 +669,8 @@ def test_reconstruct_pipeline_emits_span(_reset_tracing, tmp_path):
 
     server = _make_registry_server(tmp_path)
 
-    # Empty trace_archive — reconstruct_pipeline should still emit a span,
-    # even though the script body will be empty / minimal.
+    # Empty trace_archive: reconstruct_pipeline still emits a span, even
+    # though the script body is empty or minimal.
     (tmp_path / "runtime" / "trace_archive").mkdir(parents=True, exist_ok=True)
 
     call_tool(server, "reconstruct_pipeline", {"format": "bash"})
@@ -686,7 +685,7 @@ def test_reconstruct_pipeline_emits_span(_reset_tracing, tmp_path):
 def test_search_registry_categorized_but_no_internal_span(_reset_tracing, tmp_path):
     """Every MCP call gets a categorized dispatch root span (so the concern
     shows up in the debug view), but high-frequency search still adds no
-    internal subsystem span — the trace is just the root, tagged ``registry``,
+    internal subsystem span: the trace is the root alone, tagged ``registry``,
     with no ``registry.*`` child."""
     from mcp_helpers import call_tool_sync as call_tool
 
@@ -752,7 +751,7 @@ def test_api_key_header_provider_sends_x_api_key_only_when_set(monkeypatch):
 
     from dsagt.observability import ApiKeyHeaderProvider
 
-    # Registered where MLflow looks for it, so every process picks it up.
+    # Registered where MLflow reads it, so every process picks it up.
     eps = {
         e.name: e.value for e in entry_points(group="mlflow.request_header_provider")
     }
@@ -767,8 +766,8 @@ def test_api_key_header_provider_sends_x_api_key_only_when_set(monkeypatch):
 
 
 def test_bound_masks_credential_shapes_inside_strings():
-    """Key-name redaction cannot see a bearer inside a ``run_command`` argv or
-    an API key in a URL query string — the value shape has to be masked."""
+    """Key-name redaction cannot match a bearer inside a recorded argv or an
+    API key in a URL query string; the value shape has to be masked."""
     from dsagt.observability import bound
 
     argv = {
@@ -808,7 +807,7 @@ def test_experiment_name_defaults_to_project_dir_hash_and_honors_config():
 
 def test_ensure_experiment_tags_only_on_first_creation(monkeypatch):
     """A description edited by hand on the server must not be overwritten on
-    every periodic pass — tags are written only when the experiment has none."""
+    every periodic pass: tags are written only when the experiment has none."""
     import mlflow
 
     from dsagt.observability import _ensure_experiment
@@ -838,7 +837,8 @@ def test_code_execute_nonzero_exit_is_an_error_trace(_reset_tracing, tmp_path):
 def test_init_tracing_survives_a_deleted_experiment(tmp_path, monkeypatch, caplog):
     """A deleted experiment on the store must not take the server down: the
     name is deterministic, so `set_experiment` would refuse it on every start
-    and the project could never run again.  Tracing goes off, loudly."""
+    and the project could never run again.  Tracing is turned off and the
+    failure is logged at ERROR."""
     import logging
 
     import mlflow
@@ -869,7 +869,7 @@ def test_init_tracing_survives_a_deleted_experiment(tmp_path, monkeypatch, caplo
 
 def test_init_tracing_activates_the_version_model(tmp_path, monkeypatch):
     """`mlflow.modelId` must reference a LoggedModel named for the dsagt
-    release, created once per experiment — that is what the UI's Version
+    release, created once per experiment; that is what the UI's Version
     column shows."""
     import mlflow
 
@@ -891,9 +891,9 @@ def test_init_tracing_activates_the_version_model(tmp_path, monkeypatch):
 
 def test_bound_leaves_ordinary_prose_alone_and_catches_json_keys():
     """The value-shape sweep is anchored: `Bearer`/`Basic` only after an
-    `Authorization:` label, key labels only before a token-shaped value —
-    otherwise a `read_file` of any document with "basic " or "bearer " in it
-    lost the next word in the stored preview.  JSON-quoted keys, the shape of
+    `Authorization:` label, key labels only before a token-shaped value;
+    otherwise a recorded document with "basic " or "bearer " in it
+    loses the next word in the stored preview.  JSON-quoted keys, the shape of
     a printed config, are caught."""
     from dsagt.observability import bound
 
@@ -924,8 +924,8 @@ def test_remote_store_retry_budget_is_bounded_but_overridable(monkeypatch):
 
 
 def test_init_tracing_quiets_mlflow_info_chatter(tmp_path, monkeypatch, capsys):
-    """MLflow narrates set_experiment / set_active_model at INFO on stderr —
-    "Active model is set to …" on every dsagt-run.  An agent capturing a
+    """MLflow logs set_experiment / set_active_model at INFO on stderr
+    ("Active model is set to …") on every dsagt-run.  An agent capturing a
     code's stderr would read that as the code's output."""
     import logging
 

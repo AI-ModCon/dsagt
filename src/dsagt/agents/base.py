@@ -1,11 +1,11 @@
 """
-Agent setup base class + shared helpers.
+Agent setup base class and shared helpers.
 
-The :class:`AgentSetup` ABC captures the contract every supported agent
-follows; subclasses live in sibling modules (one per agent) and own their
-quirks in one place.  See ``src/dsagt/agents/__init__.py`` for the public
-``agent_env`` / ``static_agent_record`` / ``dynamic_agent_record`` /
-``launch_agent`` API that wires this together.
+The :class:`AgentSetup` ABC is the contract every supported agent follows;
+each subclass is defined in its own sibling module and holds that agent's
+platform-specific details.  ``src/dsagt/agents/__init__.py`` holds the
+public ``agent_env`` / ``static_agent_record`` / ``dynamic_agent_record`` /
+``launch_agent`` API that calls into it.
 """
 
 from __future__ import annotations
@@ -22,11 +22,12 @@ from typing import ClassVar
 
 logger = logging.getLogger(__name__)
 
-# Master instructions ship with the package, one directory above this file.
+# The master instructions are part of the package, one directory above this
+# file.
 _INSTRUCTIONS_PATH = Path(__file__).parent.parent / "dsagt_instructions.md"
 
-# The dsagt instructions sit between these two lines in every per-agent
-# instructions file (CLAUDE.md, AGENTS.md, .goosehints,
+# The dsagt instructions are the text between these two lines in every
+# per-agent instructions file (CLAUDE.md, AGENTS.md, .goosehints,
 # .clinerules/dsagt_instructions.md).  ``_write_dsagt_block`` replaces the
 # text between them on every init and start, so a changed setting or an
 # upgraded dsagt reaches the agent, and keeps whatever the user wrote
@@ -34,11 +35,11 @@ _INSTRUCTIONS_PATH = Path(__file__).parent.parent / "dsagt_instructions.md"
 _BLOCK_BEGIN = "<!-- dsagt:begin -->"
 _BLOCK_END = "<!-- dsagt:end -->"
 
-# Tools the dsagt MCP server exposes — listed in ``alwaysAllow`` so cline
+# Tools the dsagt MCP server exposes, listed in ``alwaysAllow`` so cline
 # auto-approves them without a human-in-the-loop prompt.  Keep in
 # sync with the ``mcp/*_tools.py`` tool registrations (registry / knowledge /
 # memory / skill); a tool added there but not here means cline will hang on
-# its first call.  All dsagt MCP tools live behind the single ``dsagt-server``,
+# its first call.  The single ``dsagt-server`` serves every dsagt MCP tool,
 # so the always-allow list is one flat union.
 _DSAGT_MCP_ALWAYS_ALLOW = [
     "add_skill_source",
@@ -70,7 +71,8 @@ def _mcp_server_args() -> list[str]:
     """Build the argv tail for ``uv run dsagt-server``.
 
     The single merged server reads all configuration from the project's
-    ``.dsagt/config.yaml`` (located via cwd-walk) — no CLI args needed.
+    ``.dsagt/config.yaml`` (located via cwd-walk), so the argv carries no
+    options.
     """
     return ["run", "dsagt-server"]
 
@@ -104,23 +106,22 @@ def _mcp_env_block(
 ) -> dict[str, str]:
     """Env vars the dsagt MCP server children need at startup.
 
-    Two kinds. Routing: the project name + dir, the resolved
+    Two kinds. Routing: the project name and dir, the resolved
     ``MLFLOW_TRACKING_URI``, and the embedding-backend settings, which MCP
     children could read from ``.dsagt/config.yaml`` but which codex and
-    cline, whose children see only this block, need baked in.  The launching
-    shell's environment: :data:`_SHELL_ENV_PASSTHROUGH` plus the names the
-    config lists under ``mcp.env_passthrough`` for site-specific ones, copied
-    from *environ* (the process environment by default) at every ``dsagt
-    init`` and ``dsagt start``, so the server's python is the user's
-    activated one; a bare launch after a changed activation needs one of the
-    two.  Credentials are never part of it: a name matching
+    cline, whose children receive only this block, need written here.  The
+    launching shell's environment: :data:`_SHELL_ENV_PASSTHROUGH` plus the
+    names the config lists under ``mcp.env_passthrough`` for site-specific
+    ones, copied from *environ* (the process environment by default) at
+    every ``dsagt init`` and ``dsagt start``, so the server's python is the
+    user's activated one; a bare launch after a changed activation needs
+    one of the two.  Credentials are never part of it: a name matching
     :data:`_CREDENTIAL_NAME` is refused with ``ValueError``, and
     ``EMBEDDING_API_KEY`` and the trace store's key come from the shell or
     ``~/.config/dsagt/env`` (``session.load_user_env``).
 
-    No session id here — the MCP server mints it at startup into
-    ``.dsagt/state.yaml`` (it owns the session lifecycle now), so there's
-    nothing to thread through the env.
+    The MCP server mints the session id at startup into ``.dsagt/state.yaml``,
+    so the block carries no session id.
     """
     from dsagt.observability import resolve_tracking_uri
 
@@ -212,8 +213,8 @@ def _write_dsagt_block(path: Path, content: str) -> str | None:
 _NATIVE_DESCRIPTION_CAP = 1536
 
 #: Manifest filename inside a native skills dir listing the skill names
-#: dsagt placed there, so the mirror can reap its own stale entries on
-#: re-run without ever touching user-authored skills.
+#: dsagt placed there, so the mirror removes only its own stale entries on
+#: re-run and leaves user-authored skills in place.
 _SKILL_MANIFEST = ".dsagt-managed.json"
 
 
@@ -263,16 +264,16 @@ def _remove_mirror_entry(dest: Path) -> None:
 def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
     """Idempotently mirror *skill_dirs* into *target_dir* (e.g. .claude/skills).
 
-    Links each skill directory (SKILL.md + scripts/ + references/) at
+    Links each skill directory (SKILL.md, scripts/, references/) at
     ``target_dir/<dir-name>``, a relative symlink, so the agent reads the
-    live files and an edit to a skill's script or SKILL.md under ``skills/``
-    is what the next invocation sees; Claude Code and Codex both follow the
-    link.  A skill whose description exceeds the native cap is copied instead
-    and the copy's description truncated, since a link cannot be trimmed.  A
-    manifest tracks the names dsagt owns so a later run reaps skills that
-    were removed upstream **without ever touching user-authored skills**
-    that dsagt didn't place.  ``skill_dirs`` should list bundled dirs before
-    project dirs so a project skill wins a name collision (placed last).
+    current files and an edit to a skill's script or SKILL.md under
+    ``skills/`` is what the next invocation reads; Claude Code and Codex
+    both follow the link.  A skill whose description exceeds the native cap
+    is copied and the copy's description truncated, since a link cannot be
+    trimmed.  A manifest tracks the names dsagt owns so a later run removes
+    skills that were removed upstream and leaves user-authored skills in
+    place.  ``skill_dirs`` should list built-in dirs before project dirs so a
+    project skill wins a name collision (placed last).
     """
     actions: list[str] = []
     manifest_path = target_dir / _SKILL_MANIFEST
@@ -299,7 +300,8 @@ def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
         if name not in managed:
             managed.append(name)
 
-    # Reap skills dsagt placed on an earlier run that are gone from the source set.
+    # Remove skills dsagt placed on an earlier run that are gone from the
+    # source set.
     for stale in set(previously) - set(managed):
         _remove_mirror_entry(target_dir / stale)
 
@@ -331,10 +333,10 @@ def _build_mcp_servers_dict(env_block: dict | None) -> dict:
 def _toml_quote(value: str) -> str:
     """TOML-quote a string: escape backslashes and double-quotes only.
 
-    Codex config.toml is regular TOML — basic strings need backslash and
-    quote escaping but not control chars (which we don't have in any of
-    the values we emit: paths, URLs, model names).  Avoids pulling in a
-    TOML writer dep just for a few lines.
+    Codex config.toml is regular TOML: basic strings need backslash and
+    quote escaping, and the values emitted here (paths, URLs, model names)
+    hold no control characters.  This is a few lines, so it needs no TOML
+    writer dependency.
     """
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -347,8 +349,8 @@ def _run_simple_script(
 ) -> int:
     """Common ``subprocess.run`` wrapper used by every agent's script runner.
 
-    Returns the agent's exit code, 1 on FileNotFoundError (with a helpful
-    install hint), 0 on KeyboardInterrupt.
+    Returns the agent's exit code, 1 on FileNotFoundError (with the install
+    hint logged), 0 on KeyboardInterrupt.
     """
     logger.info("Launching: %s", " ".join(cmd))
     try:
@@ -368,24 +370,23 @@ def _run_simple_script(
 class AgentSetup(ABC):
     """Per-agent setup contract.
 
-    Each subclass owns one agent's quirks in one file: the marker file the
-    static record creates, the runtime config the dynamic record writes,
-    the env vars the agent's process needs, and how to launch it in
-    interactive vs script mode.
+    Each subclass holds one agent's platform-specific details in one file:
+    the marker file the static record creates, the runtime config the
+    dynamic record writes, the env vars the agent's process needs, and how
+    to launch it in interactive and script mode.
 
     Class attributes (set by every subclass):
 
-    - ``name``           — agent identifier as used in ``.dsagt/config.yaml``
-                          (e.g. ``"claude"``, ``"goose"``).
-    - ``base_command``   — argv list that launches the agent interactively.
-                          Subclasses may override :meth:`interactive_command`
-                          to extend it (goose appends ``--with-extension``).
-    - ``static_marker``  — filename relative to the working dir that
-                          :func:`static_agent_files_present` stats to decide
-                          whether the static record has already been written.
-    - ``install_hint``   — one-line install instruction shown on
-                          FileNotFoundError; surfaces what the user needs to
-                          install if the binary isn't on PATH.
+    - ``name``: agent identifier as used in ``.dsagt/config.yaml``
+      (e.g. ``"claude"``, ``"goose"``).
+    - ``base_command``: argv list that launches the agent interactively.
+      Subclasses may override :meth:`interactive_command` to extend it
+      (goose appends ``--with-extension``).
+    - ``static_marker``: filename relative to the working dir that
+      :func:`static_agent_files_present` stats to decide whether the
+      static record has already been written.
+    - ``install_hint``: one-line install instruction shown on
+      FileNotFoundError, when the binary is absent from PATH.
     """
 
     name: ClassVar[str]
@@ -395,17 +396,16 @@ class AgentSetup(ABC):
 
     #: Directory (relative to the working dir) the agent natively auto-discovers
     #: ``SKILL.md`` skill folders from.  ``setup_skills`` mirrors installed
-    #: (bundled + project) skills AND registered codes here so the agent
-    #: discovers/auto-invokes them without an MCP round-trip.  Every supported
-    #: agent has one — claude ``.claude/skills``, codex/goose/opencode
+    #: (built-in and project) skills and registered codes here so the agent
+    #: discovers and invokes them without an MCP round-trip.  Every supported
+    #: agent has one: claude ``.claude/skills``, codex/goose/opencode
     #: ``.agents/skills`` (the cross-agent standard), cline ``.cline/skills``.
-    #: ``None`` would mean the agent has no native skill discovery
-    #: (none currently).
+    #: ``None`` means the agent has no native skill discovery.
     native_skills_dir: ClassVar[str | None] = None
 
     @abstractmethod
     def write_static(self, working_dir: Path, *, auto_assess: bool = True) -> list[str]:
-        """Write the agent's instructions file + any state directories.
+        """Write the agent's instructions file and any state directories.
 
         Idempotent: if the dsagt marker is already in the instructions
         file, the write is skipped (preserves user edits).  *auto_assess*
@@ -428,19 +428,19 @@ class AgentSetup(ABC):
         """
 
     def setup_skills(self, working_dir: Path, config: dict) -> list[str]:
-        """Mirror installed skills AND registered codes into the agent's
-        native skills dir so it auto-discovers/auto-invokes them.
+        """Mirror installed skills and registered codes into the agent's
+        native skills dir so it auto-discovers and invokes them.
 
         Codes share the skill-standard envelope and the ``skills/`` directory,
         so the same copy serves both: native discovery puts a code's exact
-        dsagt-run command in context at invocation time — a second discovery
-        path alongside ``search_registry``, aimed at the from-memory
-        command-reconstruction failure mode.
+        dsagt-run command in context at invocation time, a second discovery
+        path beside ``search_registry``, so the agent reads the command
+        instead of reconstructing it from memory.
 
-        Idempotent — the manifest-tracked :func:`_mirror_skills_to` only
-        reaps skills dsagt placed, never user-authored ones.  No-op when the
-        agent declares no ``native_skills_dir`` or ``skills.populate_native``
-        is disabled.
+        Idempotent: the manifest-tracked :func:`_mirror_skills_to` removes
+        only skills dsagt placed and leaves user-authored ones in place.
+        Returns an empty list when the agent declares no
+        ``native_skills_dir`` or ``skills.populate_native`` is disabled.
         """
         if not self.native_skills_dir:
             return []
@@ -455,32 +455,32 @@ class AgentSetup(ABC):
         return _mirror_skills_to(target, src_dirs)
 
     def owned_artifacts(self, working_dir: Path) -> list[Path]:
-        """Files/dirs this agent's setup writes, for cleanup when a project
-        re-inits onto a *different* agent platform.
+        """Files and dirs this agent's setup writes, for cleanup when a project
+        re-inits onto a different agent platform.
 
-        Lists the instruction file, the per-agent MCP-config file(s), and the
-        agent's private per-project state dir(s) — NOT the shared
-        ``.agents/`` skill-mirror dir (managed by the manifest reaper), and
-        never project data (``.dsagt/``, ``kb_index/``, ``trace_archive/``,
-        ``skills/``).  Paths may not all exist; the caller filters.
+        Lists the instruction file, the per-agent MCP-config files, and the
+        agent's private per-project state dirs.  The shared ``.agents/``
+        skill-mirror dir is managed by the manifest, and project data
+        (``.dsagt/``, ``kb_index/``, ``trace_archive/``, ``skills/``) is
+        never listed.  Paths may not all exist; the caller filters.
 
-        Default = just the static marker; subclasses extend.
+        Default is the static marker alone; subclasses extend.
         """
         return [working_dir / self.static_marker]
 
     def runtime_env(self, config: dict) -> dict[str, str]:
-        """Dsagt-owned env vars the agent process needs at runtime (BYOA).
+        """Dsagt-owned env vars the agent process needs at runtime.
 
-        Default is empty: DSAGT sets no telemetry env on the
-        agent (agent traces are recovered post-hoc from the on-disk
-        transcript, not by native OTel emission).  Subclasses override
-        only to set per-project state-dir env (``CLINE_DIR``,
-        ``CODEX_HOME``) that isolates their global config per project.
+        Default is empty: agent traces are recovered from the on-disk
+        transcript, so the agent's environment needs no telemetry setting.
+        Subclasses override only to set per-project state-dir env
+        (``CLINE_MCP_SETTINGS_PATH``, ``CODEX_HOME``) that isolates their global config
+        per project.
 
         LLM-provider credentials (ANTHROPIC_*, OPENAI_*, GOOSE_*) are the
-        user's responsibility — exported in their shell, never read or
-        translated by dsagt.  DSAgt's own service credentials (trace store,
-        embedding backend) are a separate matter: see ``_mcp_env_block``.
+        user's responsibility, exported in their shell; dsagt never reads
+        or translates them.  DSAgt's own service credentials (trace store,
+        embedding backend) are handled by ``_mcp_env_block``.
         """
         del config
         return {}
@@ -510,7 +510,7 @@ class AgentSetup(ABC):
         """
 
     def vscode_hint(self, project_dir: Path) -> list[str] | None:
-        """One-or-two-line hint for users who run this agent as a VS Code
+        """One- or two-line hint for users who run this agent as a VS Code
         extension.  Returns ``None`` unless the agent's extension
         auto-discovers dsagt's per-project files from the workspace root,
         which claude's does.

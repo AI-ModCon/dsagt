@@ -1,11 +1,11 @@
-"""csv_summary — the quickstart's registerable, executable fixture code.
+"""csv_summary: the quickstart's registerable, executable fixture code.
 
 Stdlib-only (``csv`` + ``statistics``), so registering and running it via
-dsagt-run needs no dependency install — the dependency-free replacement for
-the csvkit demo.  Summarizes a CSV: column list, row count, per-column null
-count, and min/max/mean for numeric columns.  On ``samples.csv`` the null
-counts surface the empty ``status`` / ``timestamp`` cells, which is the fact
-the quickstart's explicit-memory step stores and recalls.
+dsagt-run needs no dependency install.  Summarizes a CSV: column list, row
+count, per-column null count, and min/max/mean for numeric columns.  On
+``samples.csv`` the null counts show the empty ``status`` / ``timestamp``
+cells, which is the fact the quickstart's explicit-memory step stores and
+recalls.
 """
 
 import argparse

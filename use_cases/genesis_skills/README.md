@@ -1,6 +1,6 @@
 ---
 title: Genesis Skills for Data Curation
-domain: Skill management — the external Genesis skill catalog driving a data-curation pipeline
+domain: Skill management, the external Genesis skill catalog driving a data-curation pipeline
 summary: >-
   Sync the Genesis skill catalog, install the Croissant validation skill,
   ground the curation skills in the dataset's domain documents, and produce a
@@ -11,20 +11,20 @@ order: 60
 
 # DSAgt Demo: Genesis Skills for a Data-Curation Pipeline
 
-> **Estimated time:** ~10 minutes (the data is tiny; the one external
-> dependency is a shallow clone of the Genesis catalog from GitHub — needs
+> **Estimated time:** ~10 minutes (the data is small; the one external
+> dependency is a shallow clone of the Genesis catalog from GitHub, which needs
 > network access to `github.com`).
 
-An end-to-end **data-preparation** walkthrough that exercises the skill catalog
-against the **Genesis** source (AI-ModCon on GitHub). The agent installs the
+An end-to-end data-preparation walkthrough that exercises the skill catalog
+against the Genesis source (AI-ModCon on GitHub). The agent installs the
 BASE-Data/ModCon Croissant validator from the catalog, grounds the
 `datacard-generator` base skill every project carries in the dataset's domain
-documents, then prepares and **datacards a finished dataset**.
+documents, then writes a datacard for a finished dataset.
 
-The "finished product" is a small curated dataset — a CO2-methanation **catalyst
-screen** (`dataset/catalyst_screening.csv`, 8 rows) — plus the domain docs that
-describe how it was produced. Everything is tiny, so the whole thing runs in
-seconds with no real instruments or HPC.
+The finished dataset is a small curated CO2-methanation catalyst screen
+(`dataset/catalyst_screening.csv`, 8 rows) plus the domain documents that
+describe how it was produced. The data is small, so the walkthrough runs in
+seconds with no instruments or HPC.
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ seconds with no real instruments or HPC.
   **already authenticated**.
 - Git, with network access to `github.com` (the Genesis catalog clones from
   `AI-ModCon/genesis-skills`).
-- Embedding credentials are optional — `search_skills` uses semantic search
+- Embedding credentials are optional: `search_skills` uses semantic search
   when `EMBEDDING_*` is set and falls back to a keyword scorer otherwise.
 
 ## Setup
@@ -42,7 +42,7 @@ dsagt init
 ```
 
 At the menu, name the project `genesis-skills`, pick your agent, and **uncheck `genesis`**
-at the skill-sources checkbox — the walkthrough has the agent enable that catalog itself
+at the skill-sources checkbox; the walkthrough has the agent enable that catalog itself
 in step 1. Then:
 
 ```bash
@@ -78,7 +78,7 @@ its skills indexed, source written to `.dsagt/config.yaml`.
 Search the catalog for a skill that validates Croissant / JSON-LD dataset metadata and install the best match into this project.
 ```
 
-**Expect:** `search_skills` surfaces **`croissant-validator`** → `install_skill`.
+**Expect:** `search_skills` returns **`croissant-validator`** → `install_skill`.
 It is installed into `<project>/skills/` and mirrored into the agent's native
 skills directory at install time, with a `PROVENANCE.txt` crediting the Genesis
 source. `datacard-generator` needs no install: it is a base skill, present
@@ -164,10 +164,10 @@ ls "$PROJ/trace_archive" | wc -l           # at least 2
    validator as a code; when it installs `mlcroissant` into the skill's own
    virtual environment instead, that run is outside the wrapper and leaves no
    record, which step 4 allows.
-6. MLflow traces (in the serverless `mlflow.db` store) capture the session —
-   `dsagt traces genesis-skills`.
+6. MLflow traces (in the serverless `mlflow.db` store) capture the session;
+   view them with `dsagt traces genesis-skills`.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

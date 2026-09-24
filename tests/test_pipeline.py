@@ -164,7 +164,7 @@ class TestBuildDependencyGraph:
         assert sorted(deps[3]) == [1, 2]
 
     def test_self_dependency_excluded(self):
-        """A tool that lists the same file as input and output doesn't depend on itself."""
+        """A tool that lists the same file as input and output does not depend on itself."""
         records = [
             _make_record("a", ["a"], input_files=["x.txt"], output_files=["x.txt"]),
         ]
@@ -403,7 +403,7 @@ class TestReconstructPipeline:
 
         script = reconstruct_pipeline(tmp_path, session_id="s1", fmt="bash")
         # Only the s1 record survives the filter: exactly one step (tool "a"),
-        # the s2 record ("b") is excluded — so there is no second step.
+        # the s2 record ("b") is excluded, so there is no second step.
         assert "Step 1: a" in script
         assert "Step 2:" not in script
 
@@ -467,11 +467,11 @@ class TestReadinessReports:
             "aidrin",
             ["aidrin", "data-quality", path, "--detail"],
             input_files=[path],
-            output_files=[report],
             record_id=record_id,
             timestamp=ts,
         )
         rec["execution"]["file_hashes"] = {path: digest}
+        rec["execution"]["stdout"] = report
         _write_record(project / "trace_archive", rec)
 
     def test_a_path_matches_however_it_was_spelled(self, tmp_path):
@@ -543,6 +543,7 @@ class TestReadinessReports:
         )
         reports = readiness_reports(project, "data/t.csv")
         assert [r["report"] for r in reports] == ["audit/post.json", "audit/pre.json"]
+        assert [r["record_id"] for r in reports] == ["r2", "r1"]
         assert reports[0]["unchanged"] is True
         assert reports[1]["unchanged"] is False
 

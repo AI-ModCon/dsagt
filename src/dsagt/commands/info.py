@@ -1,32 +1,32 @@
 """
-dsagt info <project> — summary of MLflow traces for triage.
+dsagt info <project>: summary of MLflow traces for triage.
 
-A terse, read-only snapshot of what the project's serverless
-``sqlite:///<pdir>/mlflow.db`` store already knows: counts and token
-totals grouped by session and by source (agent turn, embedding,
-extraction).  Errors surface inline so a user can see "which session
-broke" without scrolling.  Deep investigation still happens in the MLflow
-UI (``mlflow ui --backend-store-uri sqlite:///<pdir>/mlflow.db``); this
-command is the triage layer that tells you *where* to look first.
+A terse, read-only summary of the project's ``sqlite:///<pdir>/mlflow.db``
+store: counts and token totals grouped by session and by source (agent
+turn, embedding, extraction).  Errors are listed inline so a user can
+find the session that failed.  Deeper investigation happens in the
+MLflow UI (``mlflow ui --backend-store-uri sqlite:///<pdir>/mlflow.db``);
+this command indicates where to look first.
 
-Aggregation reads ``trace_metadata`` for token totals + session id
+Aggregation reads ``trace_metadata`` for token totals and session id
 (MLflow stamps per-trace token usage as a JSON blob under
 ``mlflow.trace.tokenUsage``; the live tracer stamps ``mlflow.trace.session``).
 
-Source bucketing reads the metadata DSAGT itself stamps on each trace — no
-span inspection:
-  - ``memory`` / ``skill`` / ``knowledge`` / ``registry`` — internal debug
+Source bucketing reads the metadata DSAGT itself stamps on each trace, with
+no span inspection:
+  - ``memory`` / ``skill`` / ``knowledge`` / ``registry``: internal debug
     traces, from the ``dsagt.source`` tag (the MCP tool category the agent
     invoked, set on the trace root by the dispatch shell).
-  - ``execution`` — dsagt-run tool-execute traces (``dsagt.source``).
-  - ``episodic`` / ``code_use`` — background emitters (per-turn memory
-    extraction; trace-archive indexing), tagged at their off-thread call site
-    so their embedding writes don't orphan as untagged ``unknown`` roots.
-  - ``claude`` / ``goose`` / ``cline`` / ``codex`` — agent traces, from the
+  - ``execution``: dsagt-run tool-execute traces (``dsagt.source``).
+  - ``episodic`` / ``code_use``: background emitters (per-turn memory
+    extraction; trace-archive indexing), tagged at their off-thread call
+    site so their embedding writes nest under a tagged root instead of
+    appearing as untagged ``unknown`` roots.
+  - ``claude`` / ``goose`` / ``cline`` / ``codex``: agent traces, from the
     ``dsagt.agent`` metadata stamped by ``MLflowSink`` (the bulk of traffic).
 
 The ``Agent turns`` / ``Internal/debug`` headline splits the recovered agent
-conversation from all of DSAGT's own bookkeeping traces (:data:`_INTERNAL_SOURCES`).
+conversation from DSAGT's own bookkeeping traces (:data:`_INTERNAL_SOURCES`).
 """
 
 from __future__ import annotations
@@ -43,8 +43,7 @@ from dsagt.session import load_config, project_dir, resolve_env_vars
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
 _SECRET_LEAF_KEYS = {"api_key"}
-# Internal/derived sections — irrelevant for "where does this credential
-# come from" triage and would just clutter the output.
+# Internal/derived sections, irrelevant to credential-source triage.
 _CONFIG_SOURCE_SKIP_PREFIXES = ("knowledge.", "skills.")
 
 
@@ -68,13 +67,11 @@ def _flatten(d: dict, prefix: str = ""):
 def _config_sources(project_name: str) -> list[dict]:
     """Return per-leaf source info for the project's .dsagt/config.yaml.
 
-    Walks the *raw* YAML (not the env-resolved version) so ${VAR} references
-    are visible.  For each leaf, reports where the resolved value came from:
-    ``config`` (literal in YAML), ``shell`` (``${VAR}`` resolved against
-    ``os.environ``), or ``unresolved`` (``${VAR}`` with no value anywhere).
-    No ``.env`` file is read — dsagt-internal config lives in
-    ``.dsagt/config.yaml``; user-provided shell exports are the only other
-    source.
+    Walks the raw YAML so ${VAR} references are visible.  For each leaf,
+    reports where the resolved value came from: ``config`` (literal in
+    YAML), ``shell`` (``${VAR}`` resolved against ``os.environ``), or
+    ``unresolved`` (``${VAR}`` with no value anywhere).  The two sources
+    are ``.dsagt/config.yaml`` and the user's shell exports.
     """
     pdir = project_dir(project_name)
     raw = yaml.safe_load((pdir / ".dsagt" / "config.yaml").read_text()) or {}
@@ -129,8 +126,8 @@ def _print_kb_collections(rows: list[dict]) -> None:
 def _print_kb_retrieval(rows: list[dict]) -> None:
     """Render per-session ``kb.search`` activity.
 
-    Quiet (single line + table) when present, omitted when no kb.search
-    spans exist (e.g. the agent never queried the knowledge base).
+    One line and a table when present, omitted when no kb.search span
+    exists (the agent never queried the knowledge base).
     """
     if not rows:
         return
@@ -161,11 +158,10 @@ def _print_config_sources(rows: list[dict]) -> None:
 def _tokens(metadata: dict) -> tuple[int, int]:
     """Pull (input, output) tokens from MLflow's ``mlflow.trace.tokenUsage``.
 
-    The value is a JSON string, not a dict — MLflow encodes structured
-    metadata as strings so it round-trips through the same storage path
-    as arbitrary user tags.  Missing key → (0, 0); some traces (e.g. an
-    agent's internal title-gen / session-namer call) legitimately have no
-    usage.
+    The value is a JSON string: MLflow encodes structured metadata as
+    strings so it round-trips through the same storage path as arbitrary
+    user tags.  A missing key gives (0, 0); some traces (an agent's
+    internal title-generation or session-naming call) have no usage.
     """
     raw = metadata.get("mlflow.trace.tokenUsage")
     if not raw:
@@ -181,13 +177,13 @@ def _tokens_from_spans(spans) -> tuple[int, int]:
     """Sum ``input_tokens`` / ``output_tokens`` across all LLM spans.
 
     Native claude OTel emission stamps these as span attributes on
-    ``claude_code.llm_request`` spans (string-encoded — MLflow's OTLP
+    ``claude_code.llm_request`` spans (string-encoded, since MLflow's OTLP
     receiver JSON-encodes every attribute).  When ``mlflow.trace.tokenUsage``
-    isn't present on the trace metadata we aggregate from the spans
-    themselves so the totals aren't always zero.
+    is absent from the trace metadata, the totals are aggregated from the
+    spans themselves.
 
-    Returns ``(0, 0)`` for non-LLM traces (kb.search, tool.execute) —
-    those don't carry token attributes.
+    Returns ``(0, 0)`` for a non-LLM trace (kb.search, tool.execute), which
+    carries no token attributes.
     """
     if spans is None:
         return 0, 0
@@ -232,7 +228,7 @@ def _fmt_count(n: int) -> str:
     return f"{n / 1_000_000:.1f}M"
 
 
-#: The ``dsagt.source`` categories — internal (debug) traces DSAGT emits, as
+#: The ``dsagt.source`` categories: internal (debug) traces DSAGT emits, as
 #: opposed to the recovered agent-conversation traces.  MCP tool categories
 #: (``memory`` / ``skill`` / ``knowledge`` / ``registry``), ``execution`` for
 #: dsagt-run, plus the two background emitters: ``episodic`` (per-turn memory
@@ -271,13 +267,12 @@ def _is_error(state) -> bool:
 
 
 def _project_created(pdir: Path) -> str | None:
-    """Best-effort project-start date from the project directory's metadata.
+    """Project-start date from the project directory's metadata.
 
-    Uses ``st_birthtime`` where the OS records it (macOS, BSDs); falls
-    back to ``st_ctime`` on Linux (which is "change time", not "creation
-    time", but is a reasonable proxy for a project directory written
-    once at ``dsagt init``).  Returns ``YYYY-MM-DD`` or ``None`` if the
-    stat fails.
+    Uses ``st_birthtime`` where the OS records it (macOS, BSDs), else
+    ``st_ctime`` on Linux, which is the change time and a close proxy for
+    a project directory written once at ``dsagt init``.  Returns
+    ``YYYY-MM-DD``, or ``None`` when the stat fails.
     """
     try:
         st = pdir.stat()
@@ -295,9 +290,9 @@ def _kb_collections(pdir: Path) -> list[dict]:
     """Per-collection summary read directly from ``<project>/kb_index/``.
 
     Reports chunk count and (when present) a ``metadata.source`` breakdown
-    so the codes and skills collections show the split by source at a glance.
-    Counts come from line-counting ``chunks.jsonl`` rather than loading
-    the vector index — fast, and survives even if Chroma's sqlite is locked.
+    so the codes and skills collections show the split by source.
+    Counts come from line-counting ``chunks.jsonl`` rather than the vector
+    index, which is fast and reads while Chroma's sqlite is locked.
     """
     kb_dir = pdir / "kb_index"
     if not kb_dir.exists():
@@ -331,9 +326,9 @@ def _kb_collections(pdir: Path) -> list[dict]:
 def _skills(pdir: Path) -> list[dict]:
     """Installed skills for the project.
 
-    Reads the project's ``skills/`` via ``SkillRegistry`` (no embedder
-    needed — this is a directory scan, not a search).  Returns ``[{"name", "description"}, ...]``; empty on any
-    failure so the report never crashes on a malformed skill.
+    Reads the project's ``skills/`` via ``SkillRegistry`` as a directory
+    scan, with no embedder.  Returns ``[{"name", "description"}, ...]``;
+    empty on any failure so the report never crashes on a malformed skill.
     """
     try:
         from dsagt.registry import SkillRegistry
@@ -348,7 +343,7 @@ def _skills(pdir: Path) -> list[dict]:
 
 
 def _print_skills(rows: list[dict]) -> None:
-    """Render the installed skill list (name — truncated description)."""
+    """Render the installed skill list (name, truncated description)."""
     if not rows:
         return
     name_w = max(len(r["name"]) for r in rows)
@@ -363,9 +358,9 @@ def _kb_retrieval(traces) -> list[dict]:
     """Per-session ``kb.search`` activity pulled from MLflow trace spans.
 
     Each ``kb.search`` span carries a ``hits`` attribute (set by the
-    ``traced`` decorator on ``KnowledgeBase.search``).  Group by
-    ``mlflow.trace.session`` so the user sees which session leaned hardest
-    on retrieval and how many results it actually got back.
+    ``traced`` decorator on ``KnowledgeBase.search``).  Grouped by
+    ``mlflow.trace.session`` so the user can compare retrieval counts and
+    results returned per session.
     """
     if traces is None or traces.empty:
         return []
@@ -403,11 +398,10 @@ def _kb_retrieval(traces) -> list[dict]:
 def _load_traces(tracking_uri: str, experiment: str):
     """Return (traces_df, experiment_id_or_none).
 
-    Reads whichever store the project logs to — the serverless
-    ``sqlite:///<pdir>/mlflow.db`` by default, or the shared tracking server
-    named by ``MLFLOW_TRACKING_URI``.  Separate from the main reporting logic
-    so the caller can decide what to print for a new project that has never
-    run.
+    Reads the store the project logs to: ``sqlite:///<pdir>/mlflow.db`` by
+    default, or the shared tracking server named by ``MLFLOW_TRACKING_URI``.
+    Separate from the reporting logic so the caller can decide what to
+    print for a new project that has never run.
     """
     import mlflow
 
@@ -444,8 +438,8 @@ def _report(project_name: str, config: dict, traces) -> dict:
             "kb_retrieval": [],
         }
 
-    # Extract flat columns we'll group on.  Using .apply over the metadata
-    # column once up front keeps pandas from re-parsing the dict on every
+    # Extract the flat columns to group on.  One .apply over the metadata
+    # column up front keeps pandas from re-parsing the dict on every
     # groupby.
     md = traces["trace_metadata"].apply(lambda m: m or {})
     tags = (
@@ -458,8 +452,8 @@ def _report(project_name: str, config: dict, traces) -> dict:
     errored = traces["state"].apply(_is_error)
 
     # Source comes from the metadata DSAGT stamps (dsagt.source tag /
-    # dsagt.agent), no span inspection.  Tokens still walk the spans column as
-    # a fallback because not all traces carry ``mlflow.trace.tokenUsage``.
+    # dsagt.agent).  Tokens walk the spans column as a fallback because
+    # some traces carry no ``mlflow.trace.tokenUsage``.
     spans_col = traces["spans"] if "spans" in traces.columns else None
 
     def _row_source(idx: int) -> str:
@@ -517,10 +511,9 @@ def _report(project_name: str, config: dict, traces) -> dict:
 
     errors = []
     for _, row in df[df["_err"]].iterrows():
-        # Trace inputs live in trace_metadata['mlflow.traceInputs'] as JSON;
-        # the request column is the display-friendly form.  For an error we
-        # just need "which session, which source, when" — the UI has the
-        # payload.
+        # Trace inputs are stored in trace_metadata['mlflow.traceInputs'] as
+        # JSON; the request column is the display form.  An error row needs
+        # only the session, the source, and the time; the UI has the payload.
         errors.append(
             {
                 "session": row["_session"],
@@ -575,11 +568,10 @@ def _print_text(r: dict) -> None:
         f"{_fmt_count(r['output_tokens'])} out"
     )
     print(f"  Errors: {r['total_errors']}")
-    # Split agent turns (the substance) from DSAGT's own internal/debug traces
-    # (embedding, indexing, tool spans) so the headline isn't dominated by
-    # bookkeeping.  ``unknown`` counts as internal/debug — it's an orphaned
-    # DSAGT span, not an agent turn (and should be empty now background work is
-    # tagged); only genuine agent-conversation traces count as agent turns.
+    # Split agent turns from DSAGT's own internal/debug traces (embedding,
+    # indexing, tool spans) so the headline reflects the conversation.
+    # ``unknown`` counts as internal/debug: it is an orphaned DSAGT span
+    # (background work is tagged, so the bucket is expected to be empty).
     agent_traces = sum(
         row["traces"]
         for row in r["by_source"]
@@ -620,8 +612,7 @@ def _print_text(r: dict) -> None:
 
 
 def run(project: str, as_json: bool) -> int:
-    # Resolve ${ENV_VAR} references so the header shows resolved values
-    # (not ${VAR} placeholders from .dsagt/config.yaml).
+    # Resolve ${ENV_VAR} references so the header shows resolved values.
     config = resolve_env_vars(load_config(project))
     pdir = Path(config["project_dir"])
     tracking_uri = resolve_tracking_uri(config)
@@ -665,9 +656,7 @@ def run(project: str, as_json: bool) -> int:
 
     try:
         traces, _ = _load_traces(tracking_uri, experiment_name(config))
-    except (
-        Exception
-    ) as e:  # noqa: BLE001 — a remote store can be down or refuse the key
+    except Exception as e:  # noqa: BLE001  a remote store can be down or refuse the key
         print(f"Could not read the trace store at {tracking_uri}: {e}")
         return 1
     r = _report(project, config, traces)

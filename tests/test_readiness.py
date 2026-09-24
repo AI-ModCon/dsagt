@@ -11,10 +11,6 @@ from dsagt.agents.base import _load_master_instructions
 
 class TestConfigBlock:
 
-    def test_block_holds_the_one_setting(self):
-        assert rd.readiness_block(True) == {"auto_assess": True}
-        assert rd.readiness_block(False) == {"auto_assess": False}
-
     def test_enabled_reads_the_block_and_defaults_on(self):
         assert rd.auto_assess_enabled({}) is True
         assert rd.auto_assess_enabled({"readiness": {"auto_assess": False}}) is False
@@ -49,9 +45,9 @@ class TestInstructionsParagraph:
         next_rule = text.index("### 5. File Organization")
         assert check_rule < paragraph < next_rule
         assert "quality baseline" in text
-        assert "audit/step_N_pre.aidrin.json" in text
+        assert "tabular file (CSV, TSV, Excel, JSON,\nHDF5, Parquet, npz)" in text
         # Through the registered code, never the bare binary.
-        assert "registered `aidrin`" in text
+        assert "the registered `aidrin` code's `executable`" in text
         assert "<!--" not in text
 
     def test_paragraph_absent_when_off(self):

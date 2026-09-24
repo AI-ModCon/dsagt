@@ -1,12 +1,12 @@
-"""Minimal ``dsagt`` MCP server for wire-level tests — not collected by pytest.
+"""Minimal ``dsagt`` MCP server for wire-level tests, not collected by pytest.
 
 Spawned as a subprocess by ``test_mcp_wire.py`` to exercise the one layer the
 in-process tests skip: :func:`dsagt.mcp.server.build_dispatch_server` attached to
 a real stdio transport via :func:`dsagt.mcp.server._run_stdio`.
 
-It deliberately does *not* go through ``main()`` — no project config, no
-KnowledgeBase, no tracing — so the transport is tested on its own, in under a
-second, without a model download.
+It bypasses ``main()`` (no project config, no KnowledgeBase, no tracing) so
+the transport is tested on its own, in under a second, without a model
+download.
 """
 
 import asyncio
@@ -50,8 +50,8 @@ async def _boom(arguments: dict) -> dict:
 
 async def _spawn(arguments: dict) -> dict:
     """Mirror ``provenance.run_and_record``: a captured child that writes to both
-    streams.  The transport owns fd 0/1 of this process, so spawning at all —
-    and keeping the JSON-RPC stream clean afterward — is the thing under test."""
+    streams.  The transport owns fd 0/1 of this process, so spawning at all,
+    and keeping the JSON-RPC stream clean afterward, is the thing under test."""
     proc = subprocess.run(
         [
             sys.executable,

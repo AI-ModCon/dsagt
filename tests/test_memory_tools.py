@@ -2,9 +2,9 @@
 Tests for the explicit-memory MCP tools (kb_remember, kb_get_memories).
 
 These tests use a real ExplicitMemory (file-backed, no mocking needed) and a
-mocked KnowledgeBase (same pattern as the other server tests).  The tools live
-in :mod:`dsagt.mcp.memory_tools`; ``create_memory_server`` exposes just that
-concern for driving via ``call_tool_sync``.
+mocked KnowledgeBase (same pattern as the other server tests).  The tools are
+defined in :mod:`dsagt.mcp.memory_tools`; ``create_memory_server`` exposes that
+concern alone for driving via ``call_tool_sync``.
 """
 
 import asyncio

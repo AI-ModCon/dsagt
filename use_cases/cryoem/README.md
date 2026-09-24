@@ -1,9 +1,9 @@
 ---
 title: Cryo-EM
-domain: Structural biology — EMPIAR-10017 β-galactosidase micrographs via CryoPPP
+domain: Structural biology, EMPIAR-10017 β-galactosidase micrographs via CryoPPP
 summary: >-
   DSAgt-assisted curation of cryo-EM data from the EMPIAR public archive
-  (EMPIAR-10017 β-galactosidase micrographs via CryoPPP) — register curation
+  (EMPIAR-10017 β-galactosidase micrographs via CryoPPP): register curation
   codes, ingest cryo-EM quality knowledge, and build a micrograph-preprocessing
   pipeline, with the AIDRIN AI-readiness check measuring the curation step
   before/after.
@@ -13,12 +13,13 @@ order: 20
 
 # DSAgt Demo: Cryo-EM Data Curation Pipeline
 
-> **Estimated time:** 12 to 25 minutes of session time. Setup pulls a **~0.5 GB data
-> download** (84 micrograph previews and the ground-truth particle tables), two
-> open-access papers, and the CryoPPP repository, then KB-ingests the repository
-> (minutes on the local embedder) before any pipeline work.
+> **Estimated time:** 12 to 25 minutes of session time. Setup downloads **~0.5 GB of
+> data** (84 micrograph previews and the ground-truth particle tables), two
+> open-access papers, and the CryoPPP repository, then ingests the repository into
+> the knowledge base (minutes on the local embedder) before any pipeline work.
 
-This guide documents a DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, multi-stage pipeline execution with domain-specific evaluation, and the [AI-readiness check](../../docs/readiness.md): with the check on, the agent runs the AIDRIN quality baseline before and after the tabular curation step on its own, so the pipeline's AI-readiness gain is *measured*. 
+This guide documents a DSAgt demonstration using cryo-electron microscopy (cryo-EM) data. It exercises knowledge ingestion, KB-guided pipeline design, code registration from third-party scripts, multi-stage pipeline execution with domain-specific evaluation, and the [AI-readiness check](../../docs/readiness.md): with the check on, the agent runs the AIDRIN quality baseline before and after the tabular curation step on its own, so the pipeline's AI-readiness gain is measured.
+
 ## Prerequisites
 
 - DSAgt installed
@@ -161,13 +162,10 @@ scores. The measurable gain of this pipeline is in the particle tables.
 
 The merge and the curation are the two data operations on the particle tables, so the prompt
 asks for them as registered codes: each run is then an execution record, and the AI-readiness
-check has a before and an after to measure. The merge has two input tables and no single
-"before" file, so the check pairs are: `particles.csv` is the merge's after and the curation's
-before, and `particles_curated.csv` is the curation's after. The check runs on the ground-truth tables as they arrive and
+check has something to measure. The check runs on the ground-truth tables as they arrive and
 on the output of each transformation: the derived metadata, the scored table, `particles.csv`,
-and `particles_curated.csv`. Each check's execution record holds the report. The two reports on the
-particle tables carry the gain post-condition 4 is
-judged on. Expected across the curation step:
+and `particles_curated.csv`. Each check's execution record holds the report. The gain
+post-condition 4 is judged on is in the particle tables. Expected across the curation step:
 
 | Metric | before → after | Reading |
 |---|---|---|
@@ -238,13 +236,13 @@ is. The agent may print the tree through a command; the reply then summarizes it
 1. Knowledge base contains `cryoppp` collection with repo code, docs, and appended papers.
 2. `skills/aidrin/` is present (installed at init); the code registry includes the two CryoPPP codes (the STAR-to-CSV converter and the box-file generator), the metadata-derivation code, and the quality-scoring code.
 3. Quality-scored CSV exists with tier distribution; `particles.csv` (merged) and `particles_curated.csv` (curated) exist with `trace_archive/` records for both operations.
-4. `trace_archive/` holds an `aidrin` record, which is the check report, for each table the pipeline wrote: `micrograph_metadata.csv`, the scored CSV, `particles.csv`, and `particles_curated.csv`. The two reports on the particle tables show curation returned the outlier score to the selected set's value (~0.041 → ~0.029).
+4. The check ran on the incoming tables and on each transformation's output, and the reports on `particles.csv` and `particles_curated.csv` show curation returned the outlier score to the selected set's value (~0.041 → ~0.029).
 5. A datacard exists for the processed dataset.
 6. `pipeline.sh` exists, saved by `reconstruct_pipeline`.
 7. Code execution records in `trace_archive/` document the full provenance chain, including one record per check run, each naming the table it read.
 8. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|

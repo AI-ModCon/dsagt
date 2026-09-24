@@ -1,59 +1,57 @@
 """
-Knowledge base — hybrid semantic retrieval over document collections, and the
+Knowledge base: hybrid semantic retrieval over document collections, the
 shared substrate every other DSAGT capability searches against.
 
 A :class:`KnowledgeBase` holds one or more vector stores (each a single embedder
 over many collections) and fuses their results by Reciprocal Rank Fusion (RRF).
-Fusion runs at two levels: *within* a collection, dense vector similarity is
-blended with a BM25 sparse leg, so exact identifiers and error strings that dense
-embeddings under-rank still surface; *across* collections and stores, per-
-collection rankings are fused by rank alone — letting results from different
-embedding spaces combine without any cross-space score normalization.  The same
-surface backs document/domain-knowledge retrieval, explicit and episodic memory,
-tool-usage provenance, and skills discovery.  Design-wise it keeps maintenance
-bounded: one embedder per store, a bring-your-own external store is just another
-:class:`VectorStore` subclass added to the list, and the heavy document parsers
-are imported lazily so only actual ingestion pays for them, not server startup.
+Fusion runs at two levels.  Within a collection, dense vector similarity is
+fused with a BM25 sparse leg, so exact identifiers and error strings that dense
+embeddings under-rank still rank.  Across collections and stores, per-collection
+rankings are fused by rank alone, so results from different embedding spaces
+combine without cross-space score normalization.  The same surface backs
+document retrieval, explicit and episodic memory, tool-usage provenance, and
+skills discovery.  Maintenance stays bounded: one embedder per store, an
+external store is another :class:`VectorStore` subclass added to the list, and
+the document parsers are imported lazily so only ingestion pays for them.
 
-The niche it fills
-------------------
-General coding agents have settled retrieval into two modes: agentic ``grep``
-and tool search over *code* (Claude Code, Cursor, Windsurf et al. dropped
-codebase vector indexing outright) and *web search* for open-ended questions.
-Neither serves **bounded, domain-scoped,
-vetted corpora of highly technical prose** — protocols, API references, domain
-knowledge, tool-use provenance — which is exactly where hybrid dense+sparse
-retrieval still wins and where general agents otherwise fall back to untrusted
-web search.  That curated, tagged, auditable, hit-it-*first* retrieval is the
-niche DSAGT fills to supplement general agents on specialized, highly technical
-task loads.  The design above is the 2026 best-practice answer to the two
-documented failure modes: hybrid search (BM25 recovers the exact identifiers
-dense vectors miss) and per-collection domain scoping (the antidote to
-"vector-search dilution", where pure-vector accuracy collapses on large
-heterogeneous corpora).
+Scope
+-----
+General coding agents retrieve two ways: agentic ``grep`` and tool search over
+code (Claude Code, Cursor, and Windsurf dropped codebase vector indexing), and
+web search for open-ended questions.  Neither serves bounded, domain-scoped,
+vetted corpora of technical prose (protocols, API references, domain knowledge,
+tool-use provenance), where hybrid dense and sparse retrieval is the stronger
+method and where a general agent otherwise falls back to untrusted web search.
+DSAGT supplies that curated, tagged, auditable retrieval, queried first, to
+supplement a general agent on specialized technical work.  The design answers
+the two documented failure modes: hybrid search (BM25 recovers the exact
+identifiers dense vectors miss) and per-collection domain scoping (pure-vector
+accuracy collapses on large heterogeneous corpora, the effect called
+vector-search dilution).
 
 References:
-  - Code agents drop vector indexing for agentic grep —
+  - Code agents drop vector indexing for agentic grep:
     https://www.mindstudio.ai/blog/is-rag-dead-what-ai-agents-use-instead ;
     https://vadim.blog/claude-code-no-indexing/
-  - Hybrid BM25 + dense retrieval —
+  - Hybrid BM25 + dense retrieval:
     https://www.digitalapplied.com/blog/hybrid-search-bm25-vector-reranking-reference-2026
   - "When More Documents Hurt RAG": vector-search dilution, fixed by
-    domain-scoped retrieval — https://arxiv.org/abs/2606.11350
-  - 2026 enterprise knowledge management — trust / traceability favor curated
-    KBs over web search —
+    domain-scoped retrieval: https://arxiv.org/abs/2606.11350
+  - 2026 enterprise knowledge management, where trust and traceability favor
+    curated KBs over web search:
     https://windowsforum.com/threads/2026-enterprise-ai-knowledge-management-from-search-to-governed-agent-workflows.410816/
 
-Class map — every edge is ``<branch>─<rel> Class``, where ``<rel>`` is one of
-``◇`` holds · ``◆`` owns · ``▷`` inherits  (``*`` = one per collection)::
+Class map (``◇`` holds · ``◆`` owns · ``▷`` inherits; ``*`` is one per
+collection)::
 
-    KnowledgeBase                   federation infra: ingest pipeline +
+    KnowledgeBase                   ingest pipeline and
     │                               cross-collection RRF (_rrf_across)
-    └─◇ VectorStore «abstract» 1..*   BYO adapter port: one embedder, many
-        │                             collections; single-collection add/search
+    └─◇ VectorStore «abstract» 1..*   external store adapter: one embedder,
+        │                             many collections; single-collection
+        │                             add/search
         └─▷ ChromaVectorStore         local Chroma; hybrid dense+BM25 per
             │                         collection, fused by _rrf_merge
-            ├─◇ Embedder «abstract» 1   text → vectors; .create() factory
+            ├─◇ Embedder «abstract» 1   text to vectors; .create() factory
             │   │                       (one per store; may be shared)
             │   ├─▷ LocalEmbedder       bge on onnxruntime, offline
             │   └─▷ APIEmbedder         OpenAI /v1/embeddings + rate-limit retry
@@ -104,13 +102,12 @@ _warnings.filterwarnings(
 
 import numpy as np
 
-# llama_index is intentionally NOT imported at module top: it pulls in ~400
-# transitive submodules and adds ~8s to import.  Only document *ingest*
-# (kb_ingest / the `dsagt init` KB build) needs the parsers — search, memory,
-# provenance indexing, and skills never do — so importing it at module top
-# would add ~8s of blocking load to every MCP-server startup (and to
-# post-session extraction) for a parser most sessions never invoke.
-# Lazy-imported inside _chunk_file() / _get_parser() so only ingest pays for it.
+# llama_index is imported lazily inside _chunk_file() and _get_parser(): it
+# pulls in about 400 transitive submodules and adds about 8 s to import, and
+# only document ingest (kb_ingest and the `dsagt init` KB build) needs the
+# parsers.  An import at module top would add that load to every MCP-server
+# startup and to post-session extraction, for a parser most sessions never
+# invoke.
 
 from dsagt.observability import (
     kb_embed_span,
@@ -136,16 +133,16 @@ CODE_LANGUAGES = {
 
 
 # ===========================================================================
-# Embedder — one per VectorStore
+# Embedder: one per VectorStore
 # ===========================================================================
 
 
 class Embedder(ABC):
     """Common interface for all embedding backends.
 
-    A stateless-after-construction leaf: a single :class:`VectorStore` has-a one
-    ``Embedder``, and the *same* instance can be shared by several stores (e.g. a
-    Chroma store and a FAISS store on one embedding space).
+    Stateless after construction: a :class:`VectorStore` holds one
+    ``Embedder``, and one instance can be shared by several stores on one
+    embedding space.
     """
 
     #: Short backend tag used for tracing spans ("local" / "api").
@@ -163,11 +160,10 @@ class Embedder(ABC):
         base_url: str | None = None,
         api_key: str | None = None,
     ) -> "Embedder":
-        """Factory: construct the one embedder for a store, with explicit args.
+        """Construct the one embedder for a store from explicit arguments.
 
-        The api-vs-local selector that stays after per-collection embedder
-        routing was removed: a store fixes a single embedder at construction.
-        Each backend pulls only the parameters it uses — no ``**kwargs`` splat.
+        A store fixes a single embedder at construction.  Each backend reads
+        only the parameters it uses.
         """
         backend = (backend or "api").lower()
         if backend == "local":
@@ -200,10 +196,10 @@ class LocalEmbedder(Embedder):
     backend = "local"
 
     #: Default local model.  ``bge-small-en-v1.5`` (33M params, 133 MB
-    #: ONNX file) is ~3× faster and ~3× smaller than ``bge-base`` for ~2
-    #: nDCG@10 points lower MTEB retrieval score — a hard-to-notice
-    #: difference for typical DSAGT KB sizes (single-digit thousands of
-    #: chunks).  Override via ``embedding.model`` in ``.dsagt/config.yaml``
+    #: ONNX file) is about 3× faster and 3× smaller than ``bge-base`` for
+    #: about 2 nDCG@10 points lower MTEB retrieval score, a difference that
+    #: is hard to notice at typical DSAGT KB sizes (single-digit thousands
+    #: of chunks).  Override via ``embedding.model`` in ``.dsagt/config.yaml``
     #: with any model whose repository publishes ``onnx/model.onnx``
     #: (``BAAI/bge-base-en-v1.5``, ``BAAI/bge-large-en-v1.5``).
     DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
@@ -279,12 +275,13 @@ class LocalEmbedder(Embedder):
 
 # --- rate-limit retry helpers (used by APIEmbedder) ----------------
 #
-# The API embedder talks to an OpenAI-compatible ``/v1/embeddings`` endpoint
-# over httpx.  We own the retry layer because lab gateways (notably PNNL's
-# Azure-fronted instance) return upstream 429s with the quota window in the
-# body and ask for 60s+ between retries — longer than a generic exponential
-# backoff would wait.  Rate-limit / transient errors retry with a
-# retry-after-aware wait; auth / bad-request errors fail fast.
+# The API embedder sends requests to an OpenAI-compatible ``/v1/embeddings``
+# endpoint over httpx.  The retry layer is defined here because lab gateways
+# (notably PNNL's Azure-fronted instance) return upstream 429s with the quota
+# window in the body and ask for 60 s or more between retries, longer than a
+# generic exponential backoff would wait.  Rate-limit and transient errors
+# retry with a retry-after-aware wait; auth and bad-request errors fail on the
+# first attempt.
 
 _RETRY_AFTER_RE = re.compile(
     r"retry after (\d+(?:\.\d+)?)\s*seconds?",
@@ -307,9 +304,9 @@ def _extract_retry_after_seconds(message: str, default: float = 60.0) -> float:
 def _is_retryable_embedding_error(exc: Exception) -> bool:
     """Decide whether an embedding exception is worth retrying.
 
-    Retries rate-limit (429) and transient server / network errors;
-    authentication and bad-request errors are explicitly NOT retryable so
-    we fail fast on misconfiguration.
+    Retries rate-limit (429) and transient server and network errors.
+    Authentication and bad-request errors are never retried, so a
+    misconfiguration fails on the first attempt.
     """
     import httpx
 
@@ -329,11 +326,11 @@ def _is_retryable_embedding_error(exc: Exception) -> bool:
 
 
 def _retry_wait_seconds(exc: Exception, attempt: int) -> float:
-    """How long to sleep before the next retry attempt.
+    """The wait before the next retry attempt.
 
-    Honors a ``Retry-After`` header (or a retry-after hint in the body) on
+    Uses a ``Retry-After`` header (or a retry-after hint in the body) on
     rate-limit responses; other transient errors get exponential backoff
-    capped at 30s.
+    capped at 30 s.
     """
     import httpx
 
@@ -355,20 +352,20 @@ def _retry_wait_seconds(exc: Exception, attempt: int) -> float:
 class APIEmbedder(Embedder):
     """Embedding client for an OpenAI-compatible ``/v1/embeddings`` endpoint.
 
-    Talks to the endpoint directly over httpx — no provider-abstraction
-    layer.  The model string is sent verbatim in the request body, so
-    gateway aliases (``text-embedding-3-small-project``) and HuggingFace-
-    style names with slashes (``nomic-ai/nomic-embed-text-v1``) pass
-    through unchanged.  Two things on top of the raw call:
+    Sends requests to the endpoint over httpx.  The model string is sent
+    verbatim in the request body, so gateway aliases
+    (``text-embedding-3-small-project``) and HuggingFace-style names with
+    slashes (``nomic-ai/nomic-embed-text-v1``) pass through unchanged.  Two
+    things on top of the raw call:
 
-    1. **Manual batching** of large inputs into ``batch_size``-sized
-       requests so a single rate-limit hit only loses one batch and the
-       user can see per-batch progress in the logs.
+    1. Batching of large inputs into ``batch_size``-sized requests, so a
+       single rate-limit hit loses one batch and the user can see per-batch
+       progress in the logs.
 
-    2. **Explicit rate-limit retry** with retry-after-aware backoff
-       (see ``_embed_batch_with_retry``) — what keeps large ``kb_ingest``
-       and ``dsagt init`` KB builds alive against the 60-second quota
-       windows lab gateways enforce.
+    2. Rate-limit retry with retry-after-aware backoff
+       (``_embed_batch_with_retry``), so large ``kb_ingest`` and
+       ``dsagt init`` KB builds complete against the 60-second quota windows
+       lab gateways enforce.
     """
 
     backend = "api"
@@ -406,12 +403,12 @@ class APIEmbedder(Embedder):
             )
 
         # ``base_url`` is the OpenAI-style root (typically ending in ``/v1``);
-        # the embeddings route hangs off it.
+        # the embeddings route is appended to it.
         self._embeddings_url = self.base_url.rstrip("/") + "/embeddings"
         self._client = httpx.Client(timeout=timeout)
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        # Single small input: one call, no batch logging.
+        # Single small input: one call.
         if len(texts) <= self.batch_size:
             return self._embed_batch_with_retry(texts)
 
@@ -471,7 +468,7 @@ class APIEmbedder(Embedder):
                 time.sleep(wait)
 
         # Response shape is OpenAI's: ``data`` is a list of ``{"index": i,
-        # "embedding": [...]}`` objects, not guaranteed to be in input order.
+        # "embedding": [...]}`` objects that may arrive out of input order.
         sorted_data = sorted(data["data"], key=lambda d: d["index"])
         vectors = [d["embedding"] for d in sorted_data]
         return np.array(vectors, dtype=np.float32)
@@ -481,16 +478,16 @@ class APIEmbedder(Embedder):
 
 
 # ===========================================================================
-# ChromaIndex — single-collection dense vector wrapper (ChromaVectorStore's leg)
+# ChromaIndex: single-collection dense vector wrapper (ChromaVectorStore's leg)
 # ===========================================================================
 
 
 class ChromaIndex:
-    """ChromaDB-backed dense index for ONE collection.  Requires ``chromadb``.
+    """Dense ChromaDB index for one collection.  Requires ``chromadb``.
 
-    A plain helper owned by :class:`ChromaVectorStore` — not a pluggable
-    "vector-DB backend".  Stores cosine-space HNSW vectors plus a positional
-    id list so returned integer indices line up with the chunk list.
+    A helper owned by :class:`ChromaVectorStore`.  Stores cosine-space HNSW
+    vectors and a positional id list so returned integer indices line up with
+    the chunk list.
     """
 
     _META_FILE = "chroma_ids.json"  # the chunk list's ids, in chunk order
@@ -503,7 +500,7 @@ class ChromaIndex:
         if persist_dir:
             self._client = chromadb.PersistentClient(path=str(persist_dir))
         else:
-            # chromadb.Client() was removed in v0.4+; use EphemeralClient for in-memory
+            # EphemeralClient is the in-memory client in chromadb 0.4 and later.
             self._client = chromadb.EphemeralClient()
         self._col = self._client.get_or_create_collection(
             collection_name, metadata={"hnsw:space": "cosine"}
@@ -540,8 +537,8 @@ class ChromaIndex:
             }
             if metadatas is not None:
                 kwargs["metadatas"] = metadatas[i : i + batch_size]
-            # Store the chunk text as the Chroma *document* too — that's what
-            # ``where_document`` ($contains / $regex) matches against.
+            # Store the chunk text as the Chroma document too: ``where_document``
+            # ($contains / $regex) matches against it.
             if documents is not None:
                 kwargs["documents"] = documents[i : i + batch_size]
             self._col.add(**kwargs)
@@ -586,7 +583,7 @@ class ChromaIndex:
         self._ids = [i for n, i in enumerate(self._ids) if n not in positions]
 
     def save(self, directory: Path) -> None:
-        # ChromaDB PersistentClient auto-saves; just write id list for rebuild.
+        # PersistentClient persists on write; the id list is written for rebuild.
         (directory / self._META_FILE).write_text(json.dumps(self._ids))
 
     @classmethod
@@ -604,15 +601,15 @@ class ChromaIndex:
 
 
 # ===========================================================================
-# BM25 — the sparse leg fused with dense vectors per collection
+# BM25: the sparse leg fused with dense vectors per collection
 # ===========================================================================
 
 # BM25 sparse-retrieval token splitter.  Splits on every non-alphanumeric
 # character so ``snake_case`` and ``kebab-case`` identifiers fan out into
 # their parts; this matters because much of what an agent searches the KB
 # for ("get_user_id", "kb-ingest") is identifier-shaped, and BM25 needs
-# token-level matches to score them at all.  CamelCase still survives as
-# a single token, which is fine — the dense embedding handles those.
+# token-level matches to score them at all.  CamelCase stays a single
+# token; the dense embedding handles those.
 _BM25_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
 
 
@@ -625,13 +622,13 @@ class BM25Index:
 
     Maintained alongside the dense vector index so single-collection search
     can fuse the two via Reciprocal Rank Fusion.  Stored as a single pickle
-    file (``bm25.pkl``) per collection — its presence is also what marks a
-    collection as *hybrid*.
+    file (``bm25.pkl``) per collection; its presence marks a collection as
+    hybrid.
 
     Rebuilt from scratch on every write because BM25 IDF stats are
     corpus-global, so every write changes every score.  For DSAGT corpus
     sizes (single-digit thousands of chunks) the rebuild is millisecond-scale.
-    Watch the cost if a collection grows past tens of thousands of entries.
+    The cost becomes noticeable past tens of thousands of entries.
     """
 
     _FILENAME = "bm25.pkl"
@@ -697,7 +694,7 @@ class BM25Index:
 
 
 # ===========================================================================
-# Reciprocal Rank Fusion — within a collection AND across collections/stores
+# Reciprocal Rank Fusion: within a collection and across collections/stores
 # ===========================================================================
 
 
@@ -710,7 +707,7 @@ def _rrf_merge(
     Each ranking is a list of positional indices in descending relevance.
     Combined RRF score for doc ``i`` is ``sum_r 1 / (k + rank_r(i) + 1)``
     summed across rankers that included ``i``.  *k=60* is the standard
-    constant from Cormack et al. — large enough to dampen the long tail
+    constant from Cormack et al.: large enough to dampen the long tail
     of the per-ranker rank curve, small enough that the top few ranks
     still dominate.
 
@@ -729,10 +726,10 @@ def _rrf_merge(
 def _chunk_key(chunk: dict) -> tuple:
     """Stable identity for a result chunk, for cross-collection RRF.
 
-    Different collections (and, later, different stores/embedders) live in
-    incomparable score spaces, so fusion is rank-only.  We key on the chunk's
-    own metadata rather than score; ``id``-based fallback keeps distinct chunks
-    distinct even when metadata is sparse.
+    Different collections and stores have incomparable score spaces, so
+    fusion is rank-only and the key is the chunk's own metadata, never its
+    score.  A text prefix in the key keeps distinct chunks distinct when the
+    metadata is sparse.
     """
     meta = chunk.get("metadata", {})
     return (
@@ -746,10 +743,10 @@ def _chunk_key(chunk: dict) -> tuple:
 def _rrf_across(result_lists: list[list[dict]], k: int = 60) -> list[dict]:
     """Rank-fuse per-collection result lists (each ``[{chunk, score}, ...]``).
 
-    Rank-only RRF across the lists — no cross-space score normalization, which
-    is exactly what lets results from different embedding spaces fuse correctly.
-    Returns a single list of result dicts (``score`` replaced by the RRF score),
-    sorted by descending fused score.
+    Rank-only RRF across the lists, so results from different embedding spaces
+    fuse without cross-space score normalization.  Returns a single list of
+    result dicts (``score`` replaced by the RRF score), sorted by descending
+    fused score.
     """
     scores: dict[tuple, float] = {}
     rep: dict[tuple, dict] = {}
@@ -766,7 +763,6 @@ def _rrf_across(result_lists: list[list[dict]], k: int = 60) -> list[dict]:
 # Recency weighting (episodic session_memory only)
 # ---------------------------------------------------------------------------
 
-#: The one collection recency applies to.  Mirrors
 #: dsagt's own collections and what each is for, listed by
 #: ``kb_list_collections`` with the collection's metadata keys so the agent
 #: chooses the collection, then the filter, then the query.  The catalog
@@ -791,14 +787,15 @@ DSAGT_COLLECTIONS = {
     "explicit_memory": "Facts the user asked to be remembered (kb_remember).",
 }
 
-#: ``memory.SESSION_MEMORY_COLLECTION`` as a literal to avoid a knowledge→memory
-#: import (memory imports knowledge, not the reverse).
+#: The one collection recency applies to: ``memory.SESSION_MEMORY_COLLECTION``
+#: as a literal, because memory imports knowledge and a reverse import would
+#: be circular.
 _RECENCY_COLLECTION = "session_memory"
 
-#: Max fractional boost a brand-new fact gets over its raw relevance.  A *boost*,
-#: never a penalty: recency only lifts recent facts, so a strongly-relevant old
-#: fact (e.g. a day-1 threshold that never changed) is never buried — it keeps
-#: its full relevance score while a same-relevance newer fact edges ahead.
+#: Max fractional boost a brand-new fact gets over its raw relevance.  A boost,
+#: never a penalty: recency only lifts recent facts, so a strongly relevant old
+#: fact (a day-1 threshold that never changed) is never buried: it keeps its
+#: full relevance score while a same-relevance newer fact edges ahead.
 _RECENCY_BOOST = 0.5
 
 
@@ -810,10 +807,10 @@ def _apply_recency(
 ) -> list[dict]:
     """Re-rank ``[{chunk, score}, ...]`` by relevance × a recency factor.
 
-    ``factor = 1 + boost · 2^(-age / half_life)`` — newest facts get up to
+    ``factor = 1 + boost · 2^(-age / half_life)``: the newest facts get up to
     ``1+boost``, decaying toward ``1`` (no change) with the given half-life.
     Facts without a numeric ``ts_epoch`` get factor ``1.0`` (unweighted), never
-    dropped.  Pure + side-effect-free so it's unit-testable without an embedder.
+    dropped.  Pure, so it is testable without an embedder.
     """
     hl_seconds = max(1.0, half_life_days * 86400.0)
     weighted = []
@@ -830,17 +827,17 @@ def _apply_recency(
 
 
 # ===========================================================================
-# VectorStore — one embedder, many collections (the BYO adapter port)
+# VectorStore: one embedder, many collections (the external store adapter)
 # ===========================================================================
 
 
 class VectorStore(ABC):
     """One :class:`Embedder`, many collections: store + single-collection search.
 
-    The adapter contract a BYO store implements: subclass this and wrap your
+    The adapter contract an external store implements: a subclass wraps its
     own backend.  :class:`KnowledgeBase` holds a list of these and fuses their
-    collections.  Heterogeneity (mixed embedding spaces) is expressed by having
-    *several* stores in the list, never by routing within one store.
+    collections.  Mixed embedding spaces are expressed as several stores in
+    the list, never by routing within one store.
 
     A dense-only store (an external adapter without a local sparse leg) is a
     separate store type.
@@ -902,16 +899,16 @@ class VectorStore(ABC):
 class ChromaVectorStore(VectorStore):
     """Local-ChromaDB store: one embedder, many collections under *index_dir*.
 
-    Each collection lives in ``<index_dir>/<name>/`` as a Chroma persistent
+    Each collection is stored in ``<index_dir>/<name>/`` as a Chroma persistent
     collection (dense), a ``chunks.jsonl`` payload, and a ``bm25.pkl`` sparse
     leg.  The embedder is fixed for the whole store; it is built lazily (via
-    :meth:`Embedder.create`) so server startup can background-load it, or injected
-    directly for reuse across stores.
+    :meth:`Embedder.create`) so server startup can load it in the background,
+    or injected directly for reuse across stores.
 
-    The local store is **unconditionally hybrid**: it writes a BM25 sparse leg on
-    every write and fuses dense + sparse on every (unfiltered) search.  A
-    metadata-``where`` filter searches the dense leg alone for that one query,
-    since BM25 has no filter equivalent; a dense-only *store* (an external or BYO
+    The local store is unconditionally hybrid: it writes a BM25 sparse leg on
+    every write and fuses dense + sparse on every unfiltered search.  A
+    metadata ``where`` filter searches the dense leg alone for that one query,
+    since BM25 has no filter equivalent; a dense-only store (an external
     adapter without a local sparse leg) is its own store type.
     """
 
@@ -939,7 +936,7 @@ class ChromaVectorStore(VectorStore):
             self._backend, self._model = backend, model
         self._base_url, self._api_key = base_url, api_key
         # Serializes embedder construction so a background preload and a
-        # foreground first-query call don't race and double-load the model.
+        # foreground first-query call do not race and double-load the model.
         self._embedder_lock = threading.Lock()
 
         # Collection runtime caches: name → (ChromaIndex, chunks) and name → BM25.
@@ -1083,7 +1080,7 @@ class ChromaVectorStore(VectorStore):
         metadatas: list[dict] | None = None,
         return_embeddings: bool = False,
     ) -> dict:
-        """Add raw *texts* (no parsing/chunking) as entries in *collection*."""
+        """Add raw *texts* as one entry each in *collection*."""
         coll_dir = self.index_dir / collection
         existing = 0
         if (coll_dir / "chunks.jsonl").exists():
@@ -1150,7 +1147,7 @@ class ChromaVectorStore(VectorStore):
         query_emb = self.embed([query])[0]
 
         # A ``where`` (metadata) or ``where_document`` (text content) filter
-        # disables the BM25 leg — BM25 has no filter equivalent, so a filtered
+        # disables the BM25 leg: BM25 has no filter equivalent, so a filtered
         # search is dense-only.
         filtered = where is not None or where_document is not None
         do_hybrid = not filtered
@@ -1229,13 +1226,13 @@ class ChromaVectorStore(VectorStore):
 
     @staticmethod
     def _stale_index_message(collection: str, exc: Exception) -> str | None:
-        """Return a user-friendly hint when *exc* looks like a dim mismatch.
+        """Return a user-facing hint when *exc* looks like a dimension mismatch.
 
         Chroma raises ``InvalidDimensionException`` with "dimension" in the
-        message when a query vector's dimension differs from the index's —
-        i.e. the embedder that BUILT the index was swapped for one with a
-        different output dim (the user changed ``embedding.backend`` /
-        ``embedding.model`` after init).  Detect on message-shape.
+        message when a query vector's dimension differs from the index's,
+        which means the embedder that built the index was swapped for one with
+        a different output dimension (the user changed ``embedding.backend``
+        or ``embedding.model`` after init).  Detected on message shape.
         """
         msg = str(exc).lower()
         if "dimension" in msg or "dim mismatch" in msg or "shape" in msg:
@@ -1258,7 +1255,7 @@ class ChromaVectorStore(VectorStore):
 
 
 # ===========================================================================
-# KnowledgeBase — the federation infra: a list of stores + ingest pipeline
+# KnowledgeBase: a list of stores + the ingest pipeline
 # ===========================================================================
 
 
@@ -1275,17 +1272,17 @@ def collection_purpose(name: str) -> str:
 
 
 class KnowledgeBase:
-    """Collection-based document retrieval over one-or-more vector stores.
+    """Collection-based document retrieval over one or more vector stores.
 
-    Holds a **list** of :class:`VectorStore`s (today just the internal local
-    Chroma store) and its job is to **fuse their collections**: collection→store
-    routing plus rank-fusion across collections.  It also owns the document
-    ingestion pipeline (collect / parse / chunk → ``VectorStore.add_chunks``) and
-    cross-collection fusion.  This is the shared substrate every KB consumer
-    (retrieval, memory, provenance, skills) calls into.
+    Holds a list of :class:`VectorStore`s (the internal local Chroma store)
+    and fuses their collections: routing from collection to store, then rank
+    fusion across collections.  It also owns the document ingestion pipeline
+    (collect, parse, chunk, then ``VectorStore.add_chunks``).  This is the
+    shared substrate every KB consumer (retrieval, memory, provenance, skills)
+    calls into.
 
-    Quick-start
-    -----------
+    Example
+    -------
     .. code-block:: python
 
         kb = KnowledgeBase(index_dir="./kb_store", default_embedder="local")
@@ -1303,10 +1300,10 @@ class KnowledgeBase:
         "json",
         "yaml",
         "yml",
-        # Packaging metadata: agents reading this index need to know which
-        # version of a library to install when registering tools that
-        # depend on it.  pyproject.toml is the modern standard; setup.cfg
-        # is still common in older codebases.
+        # Packaging metadata: an agent registering a code that depends on a
+        # library reads the version to install from this index.
+        # pyproject.toml is the current standard; setup.cfg is common in
+        # older codebases.
         "toml",
         "cfg",
     ]
@@ -1318,7 +1315,7 @@ class KnowledgeBase:
         chunk_overlap: int = 128,
         recency_half_life_days: float | None = None,
         # Internal store's embedder (one per store, fixed at construction).
-        # Explicit args — callers unpack their config here, no kwargs dict.
+        # Explicit arguments; callers unpack their config here.
         default_embedder: str | None = None,
         model: str | None = None,
         base_url: str | None = None,
@@ -1405,13 +1402,13 @@ class KnowledgeBase:
         """Kick off internal-store embedder construction in a daemon thread.
 
         Called at MCP server startup so the model load happens in parallel
-        with the rest of bootstrap.  Failure is swallowed: it resurfaces with a full traceback
-        on the first real embedding call.
+        with the rest of bootstrap.  Failure is swallowed: it resurfaces with
+        a full traceback on the first real embedding call.
         """
 
         def _load() -> None:
             try:
-                self._store.embedder  # noqa: B018 — triggers lazy construction
+                self._store.embedder  # noqa: B018  # triggers lazy construction
             except Exception as e:
                 logger.warning("Background embedder preload failed: %s", e)
 
@@ -1441,10 +1438,11 @@ class KnowledgeBase:
     ) -> dict:
         """Add pre-formed text entries with optional metadata to a collection.
 
-        Unlike ``ingest``/``append``, this skips document parsing and chunking.
-        Used by episodic memory, tool_executions, and other structured entry
-        types that produce their own text representations.  Metadata is stored
-        as native Chroma metadata for ``where`` filtering.
+        Each text is stored as one entry, as given; ``ingest`` and ``append``
+        parse and chunk documents.  Used by episodic memory, the ``code_use``
+        index, and other structured entry types that produce their own text
+        representations.  Metadata is stored as native Chroma metadata for
+        ``where`` filtering.
         """
         obs.set_inputs(
             {
@@ -1619,9 +1617,9 @@ class KnowledgeBase:
         """Search one or many collections, fusing across them by rank.
 
         A single collection routes straight to its store's hybrid search.
-        Multiple collections fan out — each store searched, then the per-
-        collection rankings fused by Reciprocal Rank Fusion (rank-only, so
-        different embedding spaces compose correctly).
+        Multiple collections fan out: each store is searched, then the
+        per-collection rankings are fused by Reciprocal Rank Fusion (rank-only,
+        so different embedding spaces compose correctly).
 
         Missing collections are skipped with a warning; the search fails only
         when *every* requested collection is absent.
@@ -1668,9 +1666,8 @@ class KnowledgeBase:
 
         fused = per_coll[0] if len(per_coll) == 1 else _rrf_across(per_coll)
 
-        # Episodic recency: a recent corrected fact outranks a stale one without
-        # any contradiction detection — recency is the ranker for session_memory,
-        # the one that matters for a time-ordered log.
+        # Episodic recency: in session_memory, a time-ordered log, a recent
+        # corrected fact outranks a stale one by recency alone.
         if recency_target and fused:
             final = _apply_recency(fused, self._recency_half_life_days, time.time())[
                 :top_k
@@ -1698,10 +1695,9 @@ class KnowledgeBase:
         """Walk *folder* for files matching *file_types*, applying optional
         glob exclusions.
 
-        Pure function relative to filesystem state — no caching, no
-        side-effecting attributes.  Patterns are checked against the relative
-        path, the basename, and each individual path segment, so ``"tests"``
-        excludes any file whose path contains a ``tests/`` directory.
+        Patterns are checked against the relative path, the basename, and
+        each individual path segment, so ``"tests"`` excludes any file whose
+        path contains a ``tests/`` directory.
         """
         from fnmatch import fnmatch
 
@@ -1732,7 +1728,7 @@ class KnowledgeBase:
         return kept
 
     def _chunk_file(self, path: Path, collection: str) -> Iterator[dict]:
-        # Lazy import — see the module-top comment about cold-start cost.
+        # Lazy import; see the module-top comment about cold-start cost.
         import contextlib
         import io as _io
         from llama_index.core import SimpleDirectoryReader
@@ -1755,7 +1751,7 @@ class KnowledgeBase:
             nodes = parser.get_nodes_from_documents(docs)
         except Exception as e:
             # A single malformed file (or a tree-sitter ABI mismatch in the
-            # code parser) must not abort the whole ingest — skip it.
+            # code parser) must not abort the whole ingest; skip it.
             logger.warning("Could not parse %s: %s", path, e)
             self._chunk_skip_count += 1
             return
@@ -1782,7 +1778,7 @@ class KnowledgeBase:
         if cached is not None:
             return cached
 
-        # Lazy import — see the module-top comment about cold-start cost.
+        # Lazy import; see the module-top comment about cold-start cost.
         from llama_index.core.node_parser import (
             CodeSplitter,
             MarkdownNodeParser,

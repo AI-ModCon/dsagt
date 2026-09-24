@@ -1,10 +1,10 @@
 """
 Tests for the knowledge-base asset builder (dsagt.commands.setup_core_kb),
-the engine behind ``dsagt init``'s KB provisioning.
+which ``dsagt init`` calls to provision the KB.
 
-These cover the helpers that don't require network access — the git clone
-subprocess is mocked so the tests can run offline.  The actual end-to-end
-behavior against real upstream repos is exercised manually.
+These cover the helpers that need no network access; the git clone
+subprocess is mocked so the tests run offline.  The end-to-end behavior
+against real upstream repos is exercised manually.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def fake_repo(tmp_path):
     repo = tmp_path / "fake_repo"
     repo.mkdir()
 
-    # Top-level metadata files (the things we want to make sure survive)
+    # Top-level metadata files (the files that must survive)
     (repo / "pyproject.toml").write_text(
         '[project]\nname = "fakelib"\nversion = "1.2.3"\n'
         'dependencies = ["numpy>=1.26"]\n'
@@ -141,7 +141,7 @@ def test_clone_with_include_keeps_top_level_files(fake_repo, tmp_path):
     assert (dest / "docs" / "guide.md").exists()
     assert (dest / "fakelib" / "core.py").exists()
 
-    # Top-level files that should survive even though they weren't in include.
+    # Top-level files that survive even though they were not in include.
     assert (dest / "pyproject.toml").exists()
     assert (dest / "setup.py").exists()
     assert (dest / "README.md").exists()
@@ -241,7 +241,7 @@ class TestResolveAssets:
         assert resolve_assets(include=["all"]) == all_assets()
 
     def test_include_subset_returns_canonical_order(self):
-        # input order shouldn't matter — cheap assets always built first.
+        # input order is irrelevant; cheap assets are built first.
         assert resolve_assets(include=["nemo_curator", "codes"]) == [
             "codes",
             "nemo_curator",
@@ -294,7 +294,7 @@ class TestEnsureAssetsTools:
         ):
             result = ensure_assets(["codes"], tmp_path)
         assert "codes" in result["built"]
-        # ChromaIndex.save writes chroma_ids.json — the collection marker.
+        # ChromaIndex.save writes chroma_ids.json, the collection marker.
         assert (tmp_path / "codes" / "chroma_ids.json").exists()
 
     def test_is_idempotent(self, tmp_path):

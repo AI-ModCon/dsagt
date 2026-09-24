@@ -49,7 +49,7 @@ def _write_tool(codes_dir: Path, spec: dict) -> None:
 def _make_server(tmp_path, tools=None):
     """Create (server, registry) with optional pre-populated tools.
 
-    Pre-populated tools are written into ``<runtime>/codes/`` — the
+    Pre-populated codes are written into ``<runtime>/skills/``, the
     single project layer every lookup reads.
     """
     runtime_dir = tmp_path / "runtime"
@@ -160,7 +160,7 @@ class TestSaveToolSpec:
         assert registry.get_code("stringy-tool") is not None
 
     def test_rejects_invalid_stringified_spec(self, server, registry):
-        """Non-JSON strings produce a clear error rather than crashing."""
+        """Non-JSON strings produce a clear error."""
         text = call_tool(server, "save_code_spec", {"spec": "not valid json {"})
 
         assert "Error" in text
@@ -198,16 +198,14 @@ class TestGetRegistry:
 class TestSearchRegistryNoKB:
     """search_registry with no KB configured.
 
-    The previous behavior was to silently fall back to substring matching,
-    which produced dramatically worse results than semantic search and hid
-    real KB failures.  The new contract: exact-name lookup still works
-    without a KB (it doesn't need one), but query-based semantic search
-    returns a helpful error message asking the user to configure embedding
-    credentials.
+    Exact-name lookup needs no KB and works without one; query-based
+    semantic search returns an error asking the user to configure embedding
+    credentials, so a missing KB is never hidden behind substring matching,
+    which gives worse results than semantic search.
     """
 
     def test_exact_name_lookup_works_without_kb(self, populated_server):
-        """code_name lookup is KB-free and must keep working."""
+        """code_name lookup needs no KB."""
         text = call_tool(
             populated_server, "search_registry", {"code_name": "tool-alpha"}
         )
@@ -221,12 +219,12 @@ class TestSearchRegistryNoKB:
         assert "No tool named 'nonexistent'" in text
 
     def test_query_search_without_kb_returns_helpful_error(self, populated_server):
-        """A semantic search request when no KB is configured must surface
-        the missing-KB condition clearly, not silently degrade.
+        """A semantic search request when no KB is configured reports the
+        missing KB.
 
-        The query "alpha" is a substring of the registered ``tool_alpha``;
-        the deleted string-matching fallback would have returned it, so the
-        ``not in`` assertion pins that the fallback stays gone.
+        The query "alpha" is a substring of the registered ``tool_alpha``; a
+        substring fallback would return it, so the ``not in`` assertion pins
+        that no such fallback runs.
         """
         text = call_tool(populated_server, "search_registry", {"query": "alpha"})
         assert "tool-alpha" not in text  # no silent substring fallback
@@ -265,7 +263,7 @@ class TestSaveToolSpecDependencies:
 def _make_server_with_kb(tmp_path, tools=None):
     """Create (server, registry, kb) with a real local-embedding KnowledgeBase.
 
-    Pre-populated tools are written to ``<runtime>/tools/`` so they
+    Pre-populated codes are written to ``<runtime>/skills/`` so they
     exercise the agent-saved code path.
     """
     from dsagt.knowledge import KnowledgeBase
@@ -379,3 +377,47 @@ def test_save_code_spec_under_an_installed_skills_name_is_refused(tmp_path):
     assert "is an installed skill" in reply and "vasp-to-isaac-convert" in reply
     assert "body" in (skill / "SKILL.md").read_text()
     assert "executable" not in (skill / "SKILL.md").read_text().split("---")[1]
+
+
+def test_readiness_reports_gives_the_current_report_or_says_how_to_make_one(tmp_path):
+    import asyncio
+    import hashlib
+    import json
+
+    from dsagt.mcp.registry_tools import _handle_readiness_reports
+
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "t.csv").write_text("a\n1\n")
+    (tmp_path / "trace_archive").mkdir()
+
+    def ask():
+        return asyncio.run(
+            _handle_readiness_reports({"path": "data/t.csv"}, runtime_dir=tmp_path)
+        )
+
+    reply = ask()
+    assert reply["current"] is None
+    assert "Check it with the aidrin skill" in reply["next"]
+
+    record = {
+        "record_id": "r1",
+        "code_name": "aidrin",
+        "execution": {
+            "exact_command": ["aidrin", "data-quality", "data/t.csv"],
+            "return_code": 0,
+            "stdout": '{"outliers": 0.03}',
+            "timestamp_start": "2026-01-01T00:00:00Z",
+            "input_files": ["data/t.csv"],
+            "output_files": [],
+            "file_hashes": {"data/t.csv": hashlib.sha256(b"a\n1\n").hexdigest()},
+        },
+    }
+    (tmp_path / "trace_archive" / "aidrin_r1.json").write_text(json.dumps(record))
+    reply = ask()
+    assert reply["current"]["report"] == '{"outliers": 0.03}'
+    assert "next" not in reply
+
+    (tmp_path / "data" / "t.csv").write_text("a\n2\n")
+    reply = ask()
+    assert reply["current"] is None
+    assert [r["record_id"] for r in reply["earlier"]] == ["r1"]

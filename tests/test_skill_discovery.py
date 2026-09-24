@@ -116,7 +116,7 @@ def test_rank_orders_and_breaks_ties_by_name():
 
 
 def test_search_keyword_is_catalog_only(tmp_path):
-    # Installed skills are NOT search candidates (they're natively discovered);
+    # Installed skills are not search candidates (they are natively discovered);
     # only the cached catalog is keyword-scored.
     reg = _registry(tmp_path, {"slurm-submit": "submit a batch job to slurm"})
     cache = tmp_path / "cache"
@@ -147,7 +147,7 @@ def test_search_keyword_includes_catalog_cache(tmp_path):
 
 
 def test_search_is_stateless(tmp_path):
-    # No recency queue: repeating a query yields the same result, no suppression.
+    # No recency queue: repeating a query gives the same result, no suppression.
     reg = _registry(tmp_path)
     cache = tmp_path / "cache"
     _mkskill(cache / "src" / "slurm-x", "slurm-x", "submit a batch job to slurm")
@@ -221,7 +221,7 @@ def test_list_sources_flags_synced(tmp_path):
     )
 
     kb = FakeKB(collections=[genesis_coll], index_dir=str(index_dir))
-    # list_sources needs only a KB — no skill_registry required.
+    # list_sources needs only a KB; no skill_registry is required.
     r = SkillRouter(kb=kb)
     sources = {s["name"]: s for s in r.list_sources()}
     assert sources["genesis"]["synced"] is True

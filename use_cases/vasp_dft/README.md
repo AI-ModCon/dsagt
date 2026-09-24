@@ -1,8 +1,8 @@
 ---
 title: VASP DFT → AI-Ready Records
-domain: Materials science — VASP DFT output to AI-ready records, via catalog skills and a registered code
+domain: Materials science, VASP DFT output to AI-ready records, via catalog skills and a registered code
 summary: >-
-  Convert VASP DFT output into AI-ready records — the agent discovers and
+  Convert VASP DFT output into AI-ready records: the agent discovers and
   installs a pymatgen skill from a catalog, authors a converter skill for a
   slab calculation, extends it to nudged-elastic-band calculations, registers
   that converter as a code, and runs it with provenance against a reference
@@ -26,7 +26,8 @@ through both of DSAgt's extension mechanisms:
 2. **Codes.** The agent extends its skill with a converter for nudged-elastic-band
    (NEB) calculations, registers that converter as a code, and runs it through
    `dsagt-run` on a five-image NEB fixture, so the execution is captured in
-   `trace_archive/` and can be reconstructed. A reference record is the oracle.
+   `trace_archive/` and can be reconstructed. The output is checked against a
+   reference record.
 
 Both parts use real `pymatgen.io.vasp` parsing. The slab data is a mock: valid
 VASP format, with an OUTCAR whose header comes from a real run and whose body
@@ -39,15 +40,15 @@ Folder contents:
 
 | Path | Role in the demo |
 |------|------------------|
-| [`reference/vasp_neb_to_isaac.py`](reference/vasp_neb_to_isaac.py) | a converter that produces the NEB reference record — a reference solution, not an input |
+| [`reference/vasp_neb_to_isaac.py`](reference/vasp_neb_to_isaac.py) | a converter that produces the NEB reference record: a reference solution, not an input |
 | [`reference/isaac_neb_record.json`](reference/isaac_neb_record.json) | the NEB reference record (also in the data bundle) |
-| [`reference/skills/vasp-to-isaac/`](reference/skills/vasp-to-isaac/) | a broader slab/bulk converter skill for `vasprun.xml`-bearing data; what the agent-authored skill can grow into |
+| [`reference/skills/vasp-to-isaac/`](reference/skills/vasp-to-isaac/) | a broader slab/bulk converter skill for `vasprun.xml`-bearing data; a broader version of the skill the agent authors |
 
 ## Prerequisites
 
 - DSAgt installed with the `vasp-dft` extra
   (`pip install "dsagt[vasp-dft] @ git+https://github.com/AI-ModCon/dsagt.git"`),
-  which brings `pymatgen`; both converters use `pymatgen.io.vasp`.
+  which installs `pymatgen`; both converters use `pymatgen.io.vasp`.
 - An agent platform installed and **already authenticated**.
 - Git, for the catalog clone.
 
@@ -74,9 +75,10 @@ dsagt start isaac-vasp                        # mirrors the skill-creator base s
 
 ## Execution
 
-Paste each prompt into the agent, one at a time. The arc: **see what you have →
-find more → sync a source → install the relevant skill → author a new one → run
-it → then register a converter as a code and run it with provenance.**
+Paste each prompt into the agent, one at a time. The sequence: check the
+installed skills, list the sources, sync a source, install the relevant skill,
+author a new one, run it, then register a converter as a code and run it with
+provenance.
 
 ### 1. Native skill discovery
 
@@ -84,12 +86,13 @@ it → then register a converter as a code and run it with provenance.**
 Do you have a skill available for scaffolding new skills? Name it and give me a one-line summary of what it does.
 ```
 
-**Expect:** the agent names **`skill-creator`** and summarizes it — discovered
-natively, with no MCP call. `dsagt init` installed the skill from the genesis
-catalog and `dsagt start` mirrored it into the
-agent's native skills directory, so the agent sees its name and description like
-any native skill and loads the full `SKILL.md` only when it is invoked.
-`search_skills` is for the not-yet-installed catalog only, so it should not fire here.
+**Expect:** the agent names **`skill-creator`** and summarizes it, discovered
+natively with no MCP call. `dsagt init` installed the skill from the genesis
+catalog and `dsagt start` mirrored it into the agent's native skills directory,
+so its name and description are in the agent's context like any native skill's,
+and the agent loads the full `SKILL.md` only when it invokes the skill.
+`search_skills` is for the not-yet-installed catalog only, so the agent should
+not call it here.
 
 ### 2. List the skill sources
 
@@ -113,7 +116,7 @@ Sync the "k-dense-ai" source so we can search its catalog.
 **Expect:** `add_skill_source(source="k-dense-ai")` → a shallow clone of K-Dense
 `scientific-agent-skills`, its skills indexed into
 `skills_catalog__k-dense-ai-scientific-agent-skills`, source persisted to
-`.dsagt/config.yaml`. The catalog is searchable immediately — no restart.
+`.dsagt/config.yaml`. The catalog is searchable immediately, with no restart.
 
 ### 4. Install the relevant skill
 
@@ -124,7 +127,7 @@ Search the catalog for a skill that helps parse VASP output with pymatgen, then 
 **Expect:** `search_skills` (catalog hits tagged `[catalog · install_skill to add]`,
 `pymatgen` at or near the top) → `install_skill(skill_name="pymatgen")`. The installed
 skill carries the reference docs (`pymatgen.io.vasp.Incar` / `Poscar` / `Outcar`)
-the converter uses next. **Verify** it landed:
+the converter uses next. **Verify** the install:
 
 ```bash
 ls "$PROJ/skills/"
@@ -188,7 +191,7 @@ not state it, so pass it to the converter. Read the cutoff, k-points, smearing,
 and convergence settings from the OUTCARs; the images have no INCAR.
 ```
 
-**Expect:** `dsagt-run --code vasp-neb-to-isaac -- ...` runs land in
+**Expect:** `dsagt-run --code vasp-neb-to-isaac -- ...` runs are recorded in
 `trace_archive/`; pymatgen parses the five OUTCARs (endpoints plus three
 intermediate images); the final record's `computation.transition_state` has
 `method: NEB`, `images: 3`, and the Fe vacancy-migration reaction, and its
@@ -259,10 +262,10 @@ ls "$PROJ/audit/" "$PROJ/trace_archive/"
    and identifiers, may differ); `trace_archive/` holds every NEB conversion attempt,
    including any that failed the comparison.
 7. `pipeline.sh` replays every recorded NEB conversion.
-8. MLflow traces (in the serverless `mlflow.db` store) capture the session —
-   `dsagt traces isaac-vasp`.
+8. MLflow traces (in the serverless `mlflow.db` store) capture the session;
+   view them with `dsagt traces isaac-vasp`.
 
-## What This Tests
+## Coverage
 
 | DSAgt Capability | Steps |
 |------------------|-------|
@@ -299,14 +302,14 @@ reused across projects; delete it to force a fresh clone.
   converter that produces the reference record; compare the agent's converter
   to it after step 8, not before.
 - With the default local embedder (`bge-small`), absolute `search_skills` scores
-  are low because short queries under-score long SKILL.md text — the ranking is
+  are low because short queries under-score long SKILL.md text; the ranking is
   still correct (`pymatgen` first). Set `embedding.backend: api` for sharper
   relevance. With no embedder at all, `search_skills` falls back to keyword
   scoring; `install_skill` and the native mirror are filesystem operations.
 - [`reference/skills/vasp-to-isaac/`](reference/skills/vasp-to-isaac/) is a
   broader slab/bulk converter skill that needs `vasprun.xml`-bearing slab or
-  bulk data. It is a reference for what the agent-authored skill can grow into,
-  not something this demo's data exercises.
-- Sister demo: [`genesis_skills`](../genesis_skills/) exercises the same catalog →
-  install → native loop plus KB domain ingest and datacard generation, against
-  the Genesis (OSTI GitLab) source.
+  bulk data. It is a reference for a broader version of the agent-authored
+  skill; this demo's data exercises the slab and NEB converters only.
+- The [`genesis_skills`](../genesis_skills/) walkthrough exercises the same
+  catalog search, install, and native-discovery sequence plus KB domain ingest
+  and datacard generation, against the Genesis (OSTI GitLab) source.

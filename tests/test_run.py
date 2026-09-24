@@ -155,26 +155,6 @@ class TestWriteRecord:
         assert data["code_name"] == "fastp"
         assert data["execution"]["return_code"] == 0
 
-    def test_record_is_valid_json(self, tmp_path):
-        record = {
-            "record_id": "x",
-            "code_name": "t",
-            "session_id": None,
-            "execution": {
-                "exact_command": ["echo"],
-                "return_code": 0,
-                "stdout": "",
-                "stderr": "",
-                "timestamp_start": "",
-                "timestamp_end": "",
-                "input_files": [],
-                "output_files": [],
-            },
-        }
-        path = _write_record(record, tmp_path)
-        # Should parse without error
-        json.loads(path.read_text())
-
 
 # ---------------------------------------------------------------------------
 # run_and_record
@@ -305,6 +285,7 @@ class TestRunAndRecord:
     def test_output_is_echoed_while_the_command_runs(self, tmp_path, monkeypatch):
         """A line the command prints is echoed before the command exits, so a
         slow code shows progress instead of looking hung until it finishes."""
+        import gc
         import sys
         import time
 
@@ -321,17 +302,27 @@ class TestRunAndRecord:
 
         writer = TimedWriter()
         monkeypatch.setattr(sys, "stdout", writer)
-        run_and_record(
-            code_name="slow",
-            command=[
-                sys.executable,
-                "-c",
-                "import time; print('started', flush=True); "
-                "time.sleep(1.0); print('done')",
-            ],
-            records_dir=tmp_path,
-            record_id="test-008",
-        )
+        # By this point the suite has left about 1.9 million objects in the
+        # process, and a generation-2 collection over them takes 0.8 to 1.0 s.
+        # One that starts inside Popen holds the main thread there, so the
+        # reader threads start late and the echo measures the suite's heap
+        # instead of the echo path.  dsagt-run's own process is light and
+        # collects in milliseconds.
+        gc.disable()
+        try:
+            run_and_record(
+                code_name="slow",
+                command=[
+                    sys.executable,
+                    "-c",
+                    "import time; print('started', flush=True); "
+                    "time.sleep(1.0); print('done')",
+                ],
+                records_dir=tmp_path,
+                record_id="test-008",
+            )
+        finally:
+            gc.enable()
         finished_at = time.monotonic()
 
         assert writer.first_write_at is not None
@@ -995,3 +986,41 @@ class TestFilesFromArguments:
         assert files_from_arguments(["python3.12", "convert.py", "data.csv"]) == [
             "data.csv"
         ]
+
+
+def test_a_uv_wrapped_interpreter_still_leaves_the_script_out(tmp_path, monkeypatch):
+    """The wrapper comes off before the interpreter is recognised."""
+    from dsagt.provenance import files_from_arguments, new_files_from_arguments
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "validate.py").write_text("")
+    (tmp_path / "card.md").write_text("x\n")
+    command = [
+        "uv",
+        "run",
+        "--with",
+        "pyyaml",
+        "--",
+        "python",
+        "validate.py",
+        "card.md",
+    ]
+    assert files_from_arguments(command) == ["card.md"]
+    assert new_files_from_arguments(command, ["card.md"]) == []
+
+
+def test_the_dsagt_run_path_imports_nothing_heavy():
+    """dsagt-run pays provenance's import on every recorded command, so the
+    retrieval stack stays behind TYPE_CHECKING and function-scope imports."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import dsagt.provenance, sys; "
+        "print([m for m in ('chromadb', 'torch', 'onnxruntime', 'mlflow') "
+        "if m in sys.modules])"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert done.stdout.strip() == "[]"

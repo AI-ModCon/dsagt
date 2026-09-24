@@ -105,7 +105,7 @@ class TestSearchFilterThreading:
         )
 
         # The handler emits one single-key dict per filter, in the fixed
-        # source key order (category, session_id, source_type, tool_name) —
+        # source key order (category, session_id, source_type, tool_name),
         # so session_id precedes tool_name. Pin the exact payload: a dropped
         # or duplicated filter must fail here.
         where = mock_kb.search.call_args[1]["where"]
@@ -148,7 +148,7 @@ class TestSearchFilterThreading:
             },
         )
 
-        # Fan-out lives in kb.search now; the handler makes a single call.
+        # Fan-out is in kb.search; the handler makes a single call.
         mock_kb.search.assert_called_once_with(
             query="test",
             collection=None,
@@ -303,7 +303,7 @@ class TestSearchSchemaFilters:
             assert param in props, f"Missing filter param: {param}"
 
     def test_filter_params_not_required(self, server):
-        """Filter params are optional — only query is required."""
+        """Filter params are optional; only query is required."""
         schema = self._get_kb_search_schema(server)
         assert schema["required"] == ["query"]
 
@@ -352,8 +352,8 @@ class TestSearchCollectionErrors:
         assert "All collections failed" in result["error"]
 
     def test_partial_multi_collection_returns_ok(self, mock_kb):
-        """Partial-skip happens inside kb.search; the handler just returns its
-        (already-fused) results as ok."""
+        """Partial-skip happens inside kb.search; the handler returns its
+        fused results as ok."""
         mock_kb.search.return_value = [make_search_result("found it", "/file.md")]
         server = create_knowledge_server(mock_kb)
 

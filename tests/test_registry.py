@@ -17,11 +17,12 @@ from dsagt.registry import (
 
 
 class TestLenientFrontmatter:
-    """Frontmatter that isn't strict YAML must still yield discovery fields.
+    """Frontmatter that is not strict YAML must still give discovery fields.
 
-    Real third-party skill catalogs (e.g. Genesis) ship SKILL.md files whose
+    Real third-party skill catalogs (e.g. Genesis) contain SKILL.md files whose
     unquoted ``description`` contains a colon (``...readiness levels: Level
-    1...``) — invalid YAML. These must be recovered, not dropped from discovery.
+    1...``), which is invalid YAML. These must be recovered, not dropped from
+    discovery.
     """
 
     def test_unquoted_colon_in_description_is_recovered(self, tmp_path):
@@ -153,7 +154,7 @@ class TestListTools:
         assert "required" in schema
 
     def test_required_vs_optional(self, registry):
-        """Required params appear in 'required', optional ones don't."""
+        """Required params appear in 'required', optional ones do not."""
         tool = registry.list_codes()[0]
         required = tool["inputSchema"]["required"]
 
@@ -258,7 +259,7 @@ class TestSaveTool:
         )
 
     def test_does_not_double_wrap(self, empty_registry):
-        """If executable already has dsagt-run, don't wrap again."""
+        """If executable already has dsagt-run, do not wrap again."""
         empty_registry.save_tool(
             {
                 "name": "mytool",
@@ -287,7 +288,7 @@ class TestSaveTool:
         )
 
     def test_no_deps_no_uv_run(self, empty_registry):
-        """Tools without dependencies don't get uv run prefix."""
+        """Tools without dependencies get no uv run prefix."""
         empty_registry.save_tool(
             {
                 "name": "simple",

@@ -3,7 +3,7 @@
 The README/docs quickstart has the agent register and run
 ``tests/smoke_test/csv_summary.py`` on ``samples.csv``; step 4's
 null-column finding is the fact the explicit-memory step (5-6) stores and
-recalls.  This pins that contract so the fixture can't silently drift out
+recalls.  This pins that contract so the fixture cannot silently drift out
 from under the docs.
 """
 
@@ -30,7 +30,7 @@ def test_summary_reports_columns_and_row_count():
 def test_summary_surfaces_the_null_columns_the_memory_step_stores():
     result = _load().summarize(str(_SAMPLES))
     # The quickstart's step 5 remembers "null values in the status and
-    # timestamp columns" — it must come from here, not thin air.
+    # timestamp columns", and that fact must come from this output.
     assert result["columns_with_nulls"] == ["status", "timestamp"]
     assert result["null_counts"]["status"] == 1
     assert result["null_counts"]["timestamp"] == 1
@@ -40,5 +40,5 @@ def test_summary_computes_numeric_stats_only_for_numeric_columns():
     result = _load().summarize(str(_SAMPLES))
     assert set(result["numeric_stats"]) == {"id", "score"}
     assert result["numeric_stats"]["score"]["max"] == 92.1
-    # timestamp is date-like, not numeric — must not appear.
+    # timestamp is date-like, not numeric, and must not appear.
     assert "timestamp" not in result["numeric_stats"]
