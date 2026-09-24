@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from dsagt.registry import CodeRegistry, SkillRegistry, _parse_frontmatter
 from dsagt.skills import register_skill_scripts
@@ -58,12 +59,13 @@ def _write_skill(root: Path) -> Path:
 
 def _state(project: Path) -> dict:
     """What the project holds for the skill, for equality across entry points."""
-    # Frontmatter and body, each stripped: save_skill and a copied file differ
-    # only in the blank line between them.
+    # Frontmatter as parsed and body stripped: save_skill and a copied file
+    # differ only in the blank line between them and in how yaml.dump
+    # indents a list against the hand-written frontmatter.
     _, frontmatter, body = (
         (project / "skills" / "trim-reads" / "SKILL.md").read_text().split("---", 2)
     )
-    skill_md = (frontmatter.strip(), body.strip())
+    skill_md = (yaml.safe_load(frontmatter), body.strip())
     codes = {
         p.parent.name: _parse_frontmatter(p)
         for p in sorted((project / "skills").glob("*/SKILL.md"))
@@ -371,3 +373,106 @@ class TestAnAgentSavedSpecIsKept:
         assert stored == [trim["executable"]]
         text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
         assert f"{trim['executable']} --reads data/s1.fq.gz" in text
+
+
+DECLARED_SKILL_MD = """\
+---
+name: trim-reads
+description: Trim adapters from interleaved reads with the bundled script.
+codes:
+  - name: trim
+    script: scripts/trim.py
+    description: Trim adapters from an interleaved FASTQ.
+    dependencies: [pysam]
+    parameters:
+      reads:
+        type: string
+        required: true
+        cli: --reads
+        role: input
+      out:
+        type: string
+        required: true
+        cli: --out
+        role: output
+---
+
+# trim-reads
+
+Run the trimmer on a sample:
+
+```bash
+python3 scripts/trim.py --reads data/s1.fq.gz --out data/s1.trimmed.fq.gz
+```
+"""
+
+
+class TestASkillDeclaresItsCodes:
+    """A skill's ``codes`` frontmatter list states what a script's source
+    cannot: the packages it imports and which arguments name files."""
+
+    def _skill_src(self, tmp_path) -> Path:
+        skill = _write_skill(tmp_path / "src")
+        (skill / "SKILL.md").write_text(DECLARED_SKILL_MD)
+        return skill
+
+    def test_the_declared_spec_is_the_code(self, tmp_path, fresh_project):
+        project = fresh_project("p")
+        stored = _via_copy(project, self._skill_src(tmp_path))
+        registry = CodeRegistry(runtime_dir=project)
+        assert [c["name"] for c in registry.list_codes_raw()] == ["trim"]
+        trim = registry.get_code("trim")
+        assert "uv run --with pysam" in trim["executable"]
+        assert trim["parameters"]["reads"]["role"] == "input"
+        assert trim["parameters"]["out"]["role"] == "output"
+        assert stored == [trim["executable"]]
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        assert f"{trim['executable']} --reads data/s1.fq.gz" in text
+
+    def test_save_skill_carries_the_declaration(self, tmp_path, fresh_project):
+        """The agent's own skill declares its codes in the save_skill spec,
+        and lands in the same state as a copied skill with the frontmatter."""
+        from dsagt.mcp.skill_tools import _handle_save_skill
+        import asyncio
+
+        skill_src = self._skill_src(tmp_path)
+        a = fresh_project("a")
+        b = fresh_project("b")
+        _via_copy(a, skill_src)
+        spec = _parse_frontmatter(skill_src / "SKILL.md")
+        body = (skill_src / "SKILL.md").read_text().split("---", 2)[2].lstrip("\n")
+        reply = asyncio.run(
+            _handle_save_skill(
+                {
+                    "spec": spec,
+                    "body": body,
+                    "reference_files": {
+                        "scripts/trim.py": TRIM_PY,
+                        "scripts/_helpers.py": "X = 1\n",
+                    },
+                },
+                skill_registry=SkillRegistry(runtime_dir=b, kb=None),
+            )
+        )
+        assert "uv run --with pysam" in reply
+        assert _state(a) == _state(b)
+
+    def test_a_malformed_entry_names_the_skill_and_the_field(
+        self, tmp_path, fresh_project
+    ):
+        skill_src = self._skill_src(tmp_path)
+        (skill_src / "SKILL.md").write_text(
+            DECLARED_SKILL_MD.replace("    script: scripts/trim.py\n", "")
+        )
+        project = fresh_project("p")
+        with pytest.raises(ValueError, match=r"'trim-reads', codes\[0\].*'script'"):
+            _via_copy(project, skill_src)
+
+    def test_a_declared_script_that_is_absent_is_an_error(
+        self, tmp_path, fresh_project
+    ):
+        skill_src = self._skill_src(tmp_path)
+        (skill_src / "scripts" / "trim.py").unlink()
+        project = fresh_project("p")
+        with pytest.raises(FileNotFoundError, match="scripts/trim.py"):
+            _via_copy(project, skill_src)

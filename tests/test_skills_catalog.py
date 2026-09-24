@@ -772,6 +772,9 @@ def test_registration_indexes_into_the_kb(tmp_path):
         def add_entries(self, *, texts, collection, metadatas):
             self.added.append((collection, [m["code_name"] for m in metadatas]))
 
+        def delete_entries(self, collection, where):
+            return 0
+
     proj = tmp_path / "proj"
     _base_skill_dirs(proj)
     kb = FakeKB()
