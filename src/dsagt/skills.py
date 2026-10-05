@@ -626,33 +626,29 @@ def base_skills() -> tuple[dict, ...]:
                     },
                 },
                 {
-                    "name": "datacard-validate",
-                    "script": "scripts/validate_datacard.py",
-                    "dependencies": ["pyyaml", "pydantic"],
+                    "name": "linkml-validate",
+                    "executable": "linkml-validate",
+                    "dependencies": ["linkml"],
                     "description": (
-                        "Validate a Genesis datacard file against the upstream "
-                        "Pydantic model and report every schema error and warning."
+                        "Validate a datacard's YAML frontmatter (split off the "
+                        ".md first) against the vendored Genesis LinkML schema: "
+                        "`-s skills/datacard-generator/scripts/genesis_datacard.yaml "
+                        "-C GenesisDatacardClass <card.yaml>`. Prints `No issues "
+                        "found` or one [ERROR] per problem."
                     ),
                     "parameters": {
-                        "file": {
+                        "args": {
                             "type": "string",
                             "required": True,
                             "cli": "positional",
-                            "role": "input",
-                            "description": "Path to the datacard .md file",
-                        },
-                        "json": {
-                            "type": "boolean",
-                            "required": False,
-                            "cli": "--json",
-                            "description": "Emit the report as JSON",
+                            "description": "The linkml-validate arguments",
                         },
                     },
                 },
                 {
                     "name": "datacard-convert-v1",
                     "script": "scripts/convert_v1_to_genesis.py",
-                    "dependencies": ["pyyaml", "pydantic"],
+                    "dependencies": ["pyyaml"],
                     "description": (
                         "Convert a v1 datacard to the Genesis format, writing "
                         "<input>.genesis.md and reporting the fields it mapped, "

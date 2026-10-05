@@ -388,8 +388,8 @@ def datacard_validation(project: Project):
     the agent ran outside ``dsagt-run`` validated the card and left nothing to
     read here.
     """
-    label = "datacard-validate runs on record, last exit code"
-    runs = project.records_of(r"datacard-validate")
+    label = "linkml-validate runs on record, last exit code"
+    runs = project.records_of(r"linkml-validate")
     if not runs:
         return (label, "no record")
     return (label, f"{runs[-1]['execution'].get('return_code')} after {len(runs)} runs")

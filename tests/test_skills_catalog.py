@@ -130,7 +130,7 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
     assert "Commit: ai-modcon-genesis-skills-commit" in provenance
     # The scripts the datacard workflow runs, and the aidrin CLI, are codes.
     assert (proj / "skills" / "datacard-introspect" / "SKILL.md").exists()
-    assert (proj / "skills" / "datacard-validate" / "SKILL.md").exists()
+    assert (proj / "skills" / "linkml-validate" / "SKILL.md").exists()
     assert (proj / "skills" / "aidrin" / "SKILL.md").exists()
 
 
@@ -180,10 +180,9 @@ def test_base_skill_scripts_are_codes_through_the_shared_registration(tmp_path):
     )
     assert introspect["parameters"]["dataset_dir"]["cli"] == "positional"
     assert introspect["parameters"]["dataset_dir"]["role"] == "input"
-    validate = registry.get_code("datacard-validate")
+    validate = registry.get_code("linkml-validate")
     assert validate["executable"] == (
-        "dsagt-run --code datacard-validate -- uv run --with pyyaml,pydantic -- "
-        "python skills/datacard-generator/scripts/validate_datacard.py"
+        "dsagt-run --code linkml-validate -- uv run --with linkml -- linkml-validate"
     )
     assert validate["tags"] == ["datacard-generator"]
     # The aidrin CLI is a code whose executable is the command on the path,
@@ -203,7 +202,7 @@ def test_base_skill_scripts_are_codes_through_the_shared_registration(tmp_path):
         "aidrin",
         "datacard-convert-v1",
         "datacard-introspect",
-        "datacard-validate",
+        "linkml-validate",
     ]
 
 
@@ -730,6 +729,8 @@ def test_install_base_skills_finishes_the_others_when_one_fetch_fails(
             if sc.resolve_source(b["source"])["url"] == source["url"]:
                 d = _mkskill(cache_dir / slug / "x" / b["name"], b["name"])
                 for code in b.get("codes", ()):
+                    if "script" not in code:
+                        continue
                     (d / code["script"]).parent.mkdir(parents=True, exist_ok=True)
                     (d / code["script"]).write_text("print('ok')\n")
         return {"slug": slug}
@@ -750,7 +751,7 @@ def test_base_skill_code_specs_hold_no_project_path():
     project."""
     specs = sc.base_skill_code_specs()
     names = {s["name"] for s in specs}
-    assert {"aidrin", "datacard-introspect", "datacard-validate"} <= names
+    assert {"aidrin", "datacard-introspect", "linkml-validate"} <= names
     for spec in specs:
         assert not spec["executable"].startswith("/")
         assert spec["tags"] and spec["parameters"] is not None

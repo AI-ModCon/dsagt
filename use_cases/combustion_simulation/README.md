@@ -185,12 +185,12 @@ the converter that passed.
 Use the datacard-generator skill to write a Level 1 datacard for the converted
 WELL file to audit/. Take the values from info.json and the conversion, and
 note anything unknown rather than asking. Validate the card with the registered
-datacard-validate code.
+linkml-validate code.
 ```
 
 **Expect:** the skill's `introspect.py` runs as the registered `datacard-introspect`
 code, so the introspection is an execution record; the card under `audit/` is in the
-Genesis template and `datacard-validate` accepts it (`ok: true`).
+Genesis template and `linkml-validate` accepts it (`ok: true`).
 
 ### 7. Reconstruct the pipeline
 
@@ -225,7 +225,7 @@ is. The agent may print the tree through a command; the reply then summarizes it
 2. Code registry contains the converter's code, registered by `save_skill` from the skill's script, and `check-well-output`, both under `skills/`.
 3. `well_output/lifted_hydrogen_jet_traj_5000.hdf5` exists and the full checker run reports an exact match to the holdout reference.
 4. `trace_archive/` holds every converter and checker run, including the failed checks that drove the fixes.
-5. A datacard for the converted dataset exists under `audit/`, in the Genesis template, and `datacard-validate` accepts it.
+5. A datacard for the converted dataset exists under `audit/`, in the Genesis template, and `linkml-validate` accepts it.
 6. `pipeline.sh`, saved by `reconstruct_pipeline`, replays the final conversion and both checks, calling the tools directly; the trajectory directory is the only variable to edit, and the output and reference paths are derived from it.
 7. MLflow traces (in the serverless `mlflow.db` store) capture the session;
    view them with `dsagt traces blastnet-well`.
