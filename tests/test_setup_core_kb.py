@@ -353,7 +353,7 @@ class TestEnsureAssetsTools:
         by_source = {}
         for m in kb.metadatas:
             by_source.setdefault(m["source"], set()).add(m["code_name"])
-        assert {"aidrin", "datacard-introspect", "datacard-validate"} <= by_source[
+        assert {"aidrin", "datacard-introspect", "linkml-validate"} <= by_source[
             "base-skill"
         ]
         expected = {render_code_spec(s) for s in base_skill_code_specs()}

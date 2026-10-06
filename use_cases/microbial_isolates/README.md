@@ -178,7 +178,7 @@ with a line on what each is. The reply may summarize a tree printed by a command
    - the trimmed R1 and R2 FASTQ files are under `data/processed/<sample>/`
    - the `fastp` HTML and JSON reports are beside them
    - `data/assemblies/<sample>/final.contigs.fa` exists
-4. A Level 1 datacard exists for the processed dataset and validates with the registered `datacard-validate` code with no findings.
+4. A Level 1 datacard exists for the processed dataset and validates with the registered `linkml-validate` code with no findings.
 5. A reconstructed pipeline script (bash or Snakemake) is available.
 6. Code execution records in `trace_archive/` document the full provenance chain.
 7. MLflow traces (in the serverless `mlflow.db` store) capture token usage, latency, and full request/response history. View with `dsagt traces isolate-pipeline`.

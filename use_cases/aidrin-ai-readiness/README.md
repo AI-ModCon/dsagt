@@ -158,9 +158,9 @@ unknown rather than asking, and write it as one file, data/genesis_datacard_adul
 
 The agent follows the `datacard-generator` base skill: it fills the skill's template from
 the dataset and the readiness reports, writes one Genesis Datacard,
-`data/genesis_datacard_adult.md`, and validates it with the registered `datacard-validate`
-code. The validator warns that the filename differs from the one it derives from the dataset
-name; that warning is expected, since the prompt fixes the filename.
+`data/genesis_datacard_adult.md`, and validates it with the registered `linkml-validate`
+code on the card's YAML frontmatter, which the skill splits off first; a valid card prints
+`No issues found`.
 
 ### 5. Review the execution records
 

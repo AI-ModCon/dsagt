@@ -626,33 +626,29 @@ def base_skills() -> tuple[dict, ...]:
                     },
                 },
                 {
-                    "name": "datacard-validate",
-                    "script": "scripts/validate_datacard.py",
-                    "dependencies": ["pyyaml", "pydantic"],
+                    "name": "linkml-validate",
+                    "executable": "linkml-validate",
+                    "dependencies": ["linkml"],
                     "description": (
-                        "Validate a Genesis datacard file against the upstream "
-                        "Pydantic model and report every schema error and warning."
+                        "Validate a datacard's YAML frontmatter (split off the "
+                        ".md first) against the vendored Genesis LinkML schema: "
+                        "`-s skills/datacard-generator/scripts/genesis_datacard.yaml "
+                        "-C GenesisDatacardClass <card.yaml>`. Prints `No issues "
+                        "found` or one [ERROR] per problem."
                     ),
                     "parameters": {
-                        "file": {
+                        "args": {
                             "type": "string",
                             "required": True,
                             "cli": "positional",
-                            "role": "input",
-                            "description": "Path to the datacard .md file",
-                        },
-                        "json": {
-                            "type": "boolean",
-                            "required": False,
-                            "cli": "--json",
-                            "description": "Emit the report as JSON",
+                            "description": "The linkml-validate arguments",
                         },
                     },
                 },
                 {
                     "name": "datacard-convert-v1",
                     "script": "scripts/convert_v1_to_genesis.py",
-                    "dependencies": ["pyyaml", "pydantic"],
+                    "dependencies": ["pyyaml"],
                     "description": (
                         "Convert a v1 datacard to the Genesis format, writing "
                         "<input>.genesis.md and reporting the fields it mapped, "
@@ -734,9 +730,10 @@ def install_base_skills(
 
     A skill already present in the project is left as it is: edits by the
     user or the agent win, and deleting the directory and re-running init
-    restores the upstream version.  Otherwise the source is cloned into the
-    cache when absent or held at another ref, and reused as is when
-    present, so an init with a warm cache needs no network.  A skill whose
+    restores the upstream version.  Otherwise the source is re-cloned into
+    the cache once per call, so init installs upstream's latest; when that
+    fetch fails and the cache holds an earlier clone, the skill is installed
+    from it with a warning, so an offline init still completes.  A skill whose
     CLI is a registered code has its examples rewritten to the code's
     executable (:func:`rewrite_cli_invocations`).  Each skill's codes are
     registered before the next skill starts, so a skill whose fetch fails
@@ -749,6 +746,7 @@ def install_base_skills(
     project_dir = Path(project_dir)
     results: list[dict] = []
     failures: list[str] = []
+    refreshed: set[str] = set()
     for entry in base_skills():
         dest = project_dir / "skills" / entry["name"]
         try:
@@ -760,8 +758,20 @@ def install_base_skills(
                 }
             else:
                 spec = resolve_source(entry["source"])
-                sync_source(spec, cache_dir=cache_dir)
-                qualified = f"{_repo_slug(spec['url'])}/{entry['name']}"
+                slug = _repo_slug(spec["url"])
+                if slug not in refreshed:
+                    try:
+                        sync_source(spec, cache_dir=cache_dir, force=True)
+                    except Exception as e:  # noqa: BLE001  the cached clone stands in
+                        if not (cache_dir / slug).exists():
+                            raise
+                        logger.warning(
+                            "could not refresh %s (%s); installing from the cached clone",
+                            spec["url"],
+                            e,
+                        )
+                    refreshed.add(slug)
+                qualified = f"{slug}/{entry['name']}"
                 result = install_into_project(
                     qualified, project_dir, cache_dir=cache_dir
                 )
@@ -1076,6 +1086,11 @@ def register_skill_scripts(
         executable = registry.get_code(spec["name"])["executable"]
         stored.append(executable)
         pairs.append((code["executable"], executable))
+        if code.get("dependencies"):
+            # Upstream's own spelling of the command with its dependencies
+            # (``uv run --with linkml linkml-validate``).
+            deps = ",".join(code["dependencies"])
+            pairs.append((f"uv run --with {deps} {code['executable']}", executable))
     if pairs:
         rewrite_cli_invocations(skill_dir, pairs)
     return stored

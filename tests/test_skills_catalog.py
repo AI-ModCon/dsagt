@@ -85,9 +85,9 @@ def test_base_skills_name_their_upstream_sources():
 
 def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
     """Each base skill absent from the project is installed by a
-    source-qualified name from the shared source cache without a forced
-    re-clone; a skill already in the project is kept as it is, and its
-    codes are still registered."""
+    source-qualified name from a source refreshed once per init; a skill
+    already in the project is kept as it is, and its codes are still
+    registered."""
     cache = tmp_path / "cache"
     synced = []
 
@@ -117,12 +117,9 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
         ("datacard-generator", "added"),
         ("aidrin", "kept"),
     ]
-    # No forced re-clone: a cached source is reused as is; a skill already
-    # in the project is not fetched at all.
-    assert synced == [
-        ("ai-modcon-genesis-skills", False),
-        ("ai-modcon-genesis-skills", False),
-    ]
+    # One forced refresh per source, so init installs upstream's latest; a
+    # skill already in the project is not fetched at all.
+    assert synced == [("ai-modcon-genesis-skills", True)]
     assert (proj / "skills" / "skill-creator" / "SKILL.md").exists()
     assert (proj / "skills" / "datacard-generator" / "SKILL.md").exists()
     assert "edited by the user" in (edited / "SKILL.md").read_text()
@@ -130,7 +127,7 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
     assert "Commit: ai-modcon-genesis-skills-commit" in provenance
     # The scripts the datacard workflow runs, and the aidrin CLI, are codes.
     assert (proj / "skills" / "datacard-introspect" / "SKILL.md").exists()
-    assert (proj / "skills" / "datacard-validate" / "SKILL.md").exists()
+    assert (proj / "skills" / "linkml-validate" / "SKILL.md").exists()
     assert (proj / "skills" / "aidrin" / "SKILL.md").exists()
 
 
@@ -180,10 +177,9 @@ def test_base_skill_scripts_are_codes_through_the_shared_registration(tmp_path):
     )
     assert introspect["parameters"]["dataset_dir"]["cli"] == "positional"
     assert introspect["parameters"]["dataset_dir"]["role"] == "input"
-    validate = registry.get_code("datacard-validate")
+    validate = registry.get_code("linkml-validate")
     assert validate["executable"] == (
-        "dsagt-run --code datacard-validate -- uv run --with pyyaml,pydantic -- "
-        "python skills/datacard-generator/scripts/validate_datacard.py"
+        "dsagt-run --code linkml-validate -- uv run --with linkml -- linkml-validate"
     )
     assert validate["tags"] == ["datacard-generator"]
     # The aidrin CLI is a code whose executable is the command on the path,
@@ -203,8 +199,27 @@ def test_base_skill_scripts_are_codes_through_the_shared_registration(tmp_path):
         "aidrin",
         "datacard-convert-v1",
         "datacard-introspect",
-        "datacard-validate",
+        "linkml-validate",
     ]
+
+
+def test_upstream_uv_run_form_of_a_cli_code_is_rewritten(tmp_path):
+    """The datacard skill validates with ``uv run --with linkml
+    linkml-validate``; the installed text names the registered command, so
+    the validation the agent runs from it is an execution record."""
+    proj = tmp_path / "proj"
+    _base_skill_dirs(proj)
+    skill_md = proj / "skills" / "datacard-generator" / "SKILL.md"
+    skill_md.write_text(
+        skill_md.read_text() + "```bash\nuv run --with linkml linkml-validate \\\n"
+        "  -s <skill_root>/scripts/genesis_datacard.yaml \\\n"
+        "  -C GenesisDatacardClass /tmp/card.yaml\n```\n"
+    )
+    _register_base(proj)
+    assert (
+        "\ndsagt-run --code linkml-validate -- uv run --with linkml -- "
+        "linkml-validate \\\n" in skill_md.read_text()
+    )
 
 
 def test_registration_requires_the_script_an_override_names(tmp_path):
@@ -730,6 +745,8 @@ def test_install_base_skills_finishes_the_others_when_one_fetch_fails(
             if sc.resolve_source(b["source"])["url"] == source["url"]:
                 d = _mkskill(cache_dir / slug / "x" / b["name"], b["name"])
                 for code in b.get("codes", ()):
+                    if "script" not in code:
+                        continue
                     (d / code["script"]).parent.mkdir(parents=True, exist_ok=True)
                     (d / code["script"]).write_text("print('ok')\n")
         return {"slug": slug}
@@ -744,13 +761,44 @@ def test_install_base_skills_finishes_the_others_when_one_fetch_fails(
     assert not (proj / "skills" / "aidrin").exists()
 
 
+def test_install_base_skills_uses_the_cached_clone_when_a_refresh_fails(
+    tmp_path, monkeypatch, caplog
+):
+    """Offline, a source already in the cache is installed from it with a
+    warning instead of failing init."""
+    cache = tmp_path / "cache"
+
+    def fake_sync(source, *, kb=None, cache_dir, force=False):
+        slug = sc._repo_slug(source["url"])
+        if force:
+            raise RuntimeError("offline")
+        (cache_dir / slug).mkdir(parents=True, exist_ok=True)
+        (cache_dir / slug / "SOURCE_COMMIT").write_text("c\n")
+        for b in sc.base_skills():
+            if sc.resolve_source(b["source"])["url"] == source["url"]:
+                d = _mkskill(cache_dir / slug / "x" / b["name"], b["name"])
+                for code in b.get("codes", ()):
+                    if "script" in code:
+                        (d / code["script"]).parent.mkdir(parents=True, exist_ok=True)
+                        (d / code["script"]).write_text("print('ok')\n")
+        return {"slug": slug}
+
+    monkeypatch.setattr(sc, "sync_source", fake_sync)
+    for b in sc.base_skills():  # a warm cache from an earlier init
+        fake_sync(sc.resolve_source(b["source"]), cache_dir=cache)
+    proj = tmp_path / "proj"
+    results = sc.install_base_skills(proj, cache_dir=cache)
+    assert [r["action"] for r in results] == ["added", "added", "added"]
+    assert "could not refresh" in caplog.text
+
+
 def test_base_skill_code_specs_hold_no_project_path():
     """Every base-skill code spec is project-independent: a script runs by a
     path relative to the project directory, so one embedding serves every
     project."""
     specs = sc.base_skill_code_specs()
     names = {s["name"] for s in specs}
-    assert {"aidrin", "datacard-introspect", "datacard-validate"} <= names
+    assert {"aidrin", "datacard-introspect", "linkml-validate"} <= names
     for spec in specs:
         assert not spec["executable"].startswith("/")
         assert spec["tags"] and spec["parameters"] is not None
