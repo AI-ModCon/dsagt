@@ -1718,8 +1718,8 @@ quasi-identifiers; bin or suppress before sharing.</p>
 <p>The agent follows the <code>datacard-generator</code> base skill: it fills the skill's template from
 the dataset and the readiness reports, writes one Genesis Datacard,
 <code>data/genesis_datacard_adult.md</code>, and validates it with the registered <code>linkml-validate</code>
-code. The validator warns that the filename differs from the one it derives from the dataset
-name; that warning is expected, since the prompt fixes the filename.</p>
+code on the card's YAML frontmatter, which the skill splits off first; a valid card prints
+<code>No issues found</code>.</p>
 <h3 id="5-review-the-execution-records">5. Review the execution records<a class="headerlink" href="#5-review-the-execution-records" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Show me the execution records for this session as a table of metric, command, and exit code.
 </code></pre></div>

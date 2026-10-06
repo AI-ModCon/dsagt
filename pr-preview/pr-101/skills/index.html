@@ -1384,7 +1384,7 @@
 </table>
 <p>The <code>genesis</code> source is the ModCon aggregation point: skills contributed by ModCon and AmSC teams are located there and become searchable on the next sync.</p>
 <h2 id="base-and-authored-skills">Base and authored skills<a class="headerlink" href="#base-and-authored-skills" title="Permanent link">&para;</a></h2>
-<p>Every <code>dsagt init</code> installs three base skills into <code>&lt;project&gt;/skills/</code> from the repositories that maintain them. A source is fetched once into the shared cache at <code>~/dsagt-projects/.skill_sources/</code> and reused by every later init; a cache held at another branch or tag than the one asked for is re-fetched, and <code>add_skill_source</code> with <code>force</code> re-fetches on request.</p>
+<p>Every <code>dsagt init</code> installs three base skills into <code>&lt;project&gt;/skills/</code> from the repositories that maintain them. Each init re-fetches the source into the shared cache at <code>~/dsagt-projects/.skill_sources/</code>, so a new project gets upstream's current version; when the fetch fails (offline), the skill is installed from the cached clone with a warning. <code>add_skill_source</code> with <code>force</code> re-fetches a catalog source on request.</p>
 <table>
 <thead>
 <tr>
