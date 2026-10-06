@@ -1,0 +1,1964 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DataSmith Agent — AI-assisted data pipeline builder">
+      
+      
+      
+        <link rel="canonical" href="https://ai-modcon.github.io/dsagt/use-cases/vasp_dft/">
+      
+      
+        <link rel="prev" href="../cryoem/">
+      
+      
+        <link rel="next" href="../tokamak_stability/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>VASP DFT → AI-Ready Records - DSAgt</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vasp-dft-ai-ready-records" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DSAgt" class="md-header__button md-logo" aria-label="DSAgt" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DSAgt
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              VASP DFT → AI-Ready Records
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AI-ModCon/dsagt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AI-ModCon/dsagt
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quick Start
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../provenance/" class="md-tabs__link">
+          
+  
+  
+  Capabilities
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../mcp-servers/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP Servers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../cli/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Use Cases
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../developer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Developer Guide
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DSAgt" class="md-nav__button md-logo" aria-label="DSAgt" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DSAgt
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AI-ModCon/dsagt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AI-ModCon/dsagt
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capabilities
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capabilities
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../provenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../knowledge-base/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Base
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI-Readiness Check
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-servers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Servers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use Cases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use Cases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../microbial_isolates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microbial Isolates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cryoem/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cryo-EM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VASP DFT → AI-Ready Records
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VASP DFT → AI-Ready Records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-native-skill-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Native skill discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-list-the-skill-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. List the skill sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-sync-a-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Sync a source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-install-the-relevant-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Install the relevant skill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-author-the-converter-skill-with-skill-creator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Author the converter skill with skill-creator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-run-the-skill-on-the-slab-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Run the skill on the slab calculation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-extend-the-skill-to-neb-calculations-and-register-the-converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Extend the skill to NEB calculations and register the converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-run-the-conversion-and-check-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Run the conversion and check it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-reconstruct-the-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Reconstruct the pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tokamak_stability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tokamak Stability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aidrin-ai-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AIDRIN
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../genesis_skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Genesis Skills for Data Curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plasma_turbulence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plasma Turbulence Training Data (XGC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../combustion_simulation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    BlastNet → WELL Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-native-skill-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Native skill discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-list-the-skill-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. List the skill sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-sync-a-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Sync a source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-install-the-relevant-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Install the relevant skill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-author-the-converter-skill-with-skill-creator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Author the converter skill with skill-creator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-run-the-skill-on-the-slab-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Run the skill on the slab calculation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-extend-the-skill-to-neb-calculations-and-register-the-converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Extend the skill to NEB calculations and register the converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-run-the-conversion-and-check-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Run the conversion and check it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-reconstruct-the-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Reconstruct the pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-review-the-project-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Review the project artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="vasp-dft-ai-ready-records">VASP DFT → AI-Ready Records<a class="headerlink" href="#vasp-dft-ai-ready-records" title="Permanent link">&para;</a></h1>
+<p><strong>Domain:</strong> Materials science, VASP DFT output to AI-ready records, via catalog skills and a registered code</p>
+<p><strong>Source:</strong> <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/vasp_dft/"><code>use_cases/vasp_dft/</code></a></p>
+<p>Convert VASP DFT output into AI-ready records: the agent discovers and installs a pymatgen skill from a catalog, authors a converter skill for a slab calculation, extends it to nudged-elastic-band calculations, registers that converter as a code, and runs it with provenance against a reference record (no DFT run, no HPC).</p>
+<blockquote>
+<p><strong>Estimated time:</strong> ~25 minutes</p>
+</blockquote>
+<p><strong>Goal:</strong> turn VASP calculations into AI-ready records in the
+<a href="https://github.com/ISAAC-DOE/isaac-ai-ready-record">ISAAC record schema</a>
+through both of DSAgt's extension mechanisms:</p>
+<ol>
+<li><strong>Skills.</strong> The agent discovers the external skill sources, syncs the K-Dense
+   catalog, installs its <code>pymatgen</code> skill, and uses the <code>skill-creator</code> base skill
+   to author a <code>vasp-to-isaac</code> skill whose converter parses VASP output with
+   <code>pymatgen.io.vasp</code>. It runs that skill on a small slab calculation.</li>
+<li><strong>Codes.</strong> The agent extends its skill with a converter for nudged-elastic-band
+   (NEB) calculations, registers that converter as a code, and runs it through
+   <code>dsagt-run</code> on a five-image NEB fixture, so the execution is captured in
+   <code>trace_archive/</code> and can be reconstructed. The output is checked against a
+   reference record.</li>
+</ol>
+<p>Both parts use real <code>pymatgen.io.vasp</code> parsing. The slab data is a mock: valid
+VASP format, with an OUTCAR whose header comes from a real run and whose body
+keeps the first and last ionic steps. The NEB data is
+a fixture from the pymatgen test suite. Reference outputs for both
+(<code>expected_isaac_record.json</code> for the slab, <code>isaac_neb_record.json</code> for the NEB)
+come with the data, so the agent's records can be checked.</p>
+<p>Folder contents:</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Role in the demo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/vasp_dft/reference/vasp_neb_to_isaac.py"><code>reference/vasp_neb_to_isaac.py</code></a></td>
+<td>a converter that produces the NEB reference record: a reference solution, not an input</td>
+</tr>
+<tr>
+<td><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/vasp_dft/reference/isaac_neb_record.json"><code>reference/isaac_neb_record.json</code></a></td>
+<td>the NEB reference record (also in the data bundle)</td>
+</tr>
+<tr>
+<td><a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/vasp_dft/reference/skills/vasp-to-isaac"><code>reference/skills/vasp-to-isaac/</code></a></td>
+<td>a broader slab/bulk converter skill for <code>vasprun.xml</code>-bearing data; a broader version of the skill the agent authors</td>
+</tr>
+</tbody>
+</table>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>DSAgt installed with the <code>vasp-dft</code> extra
+  (<code>pip install "dsagt[vasp-dft] @ git+https://github.com/AI-ModCon/dsagt.git"</code>),
+  which installs <code>pymatgen</code>; both converters use <code>pymatgen.io.vasp</code>.</li>
+<li>An agent platform installed and <strong>already authenticated</strong>.</li>
+<li>Git, for the catalog clone.</li>
+</ul>
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dsagt<span class="w"> </span>init
+</code></pre></div>
+<p>At the menu, name the project <code>isaac-vasp</code>, pick your agent, and keep the defaults:
+<code>genesis</code> is the default skill source, and the walkthrough has the agent discover, sync,
+and search a second one from inside the session. Then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">PROJ</span><span class="o">=</span>~/dsagt-projects/isaac-vasp
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># From the DSAgt use-case data folder: https://drive.google.com/drive/folders/1RWQAJeHaikIaD7CCf8ciJ71m55S1erp6</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># One bundle: the NEB images, the mock slab, and their reference records (data/).</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://drive.usercontent.google.com/download?id=14HFHhEY4HfcQLl-Yu430zODm2CJH-kRS&amp;export=download&amp;confirm=t&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>-o<span class="w"> </span>vasp_dft.tar.gz
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>tar<span class="w"> </span>xzf<span class="w"> </span>vasp_dft.tar.gz<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># $PROJ/data now holds neb/, isaac_neb_record.json, mock_slab/, expected_isaac_record.json</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>dsagt<span class="w"> </span>start<span class="w"> </span>isaac-vasp<span class="w">                        </span><span class="c1"># mirrors the skill-creator base skill into the agent&#39;s native skills dir</span>
+</code></pre></div>
+<h2 id="execution">Execution<a class="headerlink" href="#execution" title="Permanent link">&para;</a></h2>
+<p>Paste each prompt into the agent, one at a time. The sequence: check the
+installed skills, list the sources, sync a source, install the relevant skill,
+author a new one, run it, then register a converter as a code and run it with
+provenance.</p>
+<h3 id="1-native-skill-discovery">1. Native skill discovery<a class="headerlink" href="#1-native-skill-discovery" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Do you have a skill available for scaffolding new skills? Name it and give me a one-line summary of what it does.
+</code></pre></div>
+<p><strong>Expect:</strong> the agent names <strong><code>skill-creator</code></strong> and summarizes it, discovered
+natively with no MCP call. <code>dsagt init</code> installed the skill from the genesis
+catalog and <code>dsagt start</code> mirrored it into the agent's native skills directory,
+so its name and description are in the agent's context like any native skill's,
+and the agent loads the full <code>SKILL.md</code> only when it invokes the skill.
+<code>search_skills</code> is for the not-yet-installed catalog only, so the agent should
+not call it here.</p>
+<h3 id="2-list-the-skill-sources">2. List the skill sources<a class="headerlink" href="#2-list-the-skill-sources" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Where can I get more skills from? List the skill sources you can pull from and which are already synced.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>list_skill_sources</code> → the known sources (<code>k-dense-ai</code>, <code>anthropic</code>,
+<code>antigravity</code>, <code>composio</code>, <code>genesis</code>) with URLs; <code>genesis</code> is synced (the default
+source) and the rest are available but not synced. Synced means indexed into this
+project's knowledge base, so a source another project has cloned still shows as
+not synced here, and step 3 indexes it from the shared clone under
+<code>~/dsagt-projects/.skill_sources/</code>.</p>
+<h3 id="3-sync-a-source">3. Sync a source<a class="headerlink" href="#3-sync-a-source" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Sync the &quot;k-dense-ai&quot; source so we can search its catalog.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>add_skill_source(source="k-dense-ai")</code> → a shallow clone of K-Dense
+<code>scientific-agent-skills</code>, its skills indexed into
+<code>skills_catalog__k-dense-ai-scientific-agent-skills</code>, source persisted to
+<code>.dsagt/config.yaml</code>. The catalog is searchable immediately, with no restart.</p>
+<h3 id="4-install-the-relevant-skill">4. Install the relevant skill<a class="headerlink" href="#4-install-the-relevant-skill" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Search the catalog for a skill that helps parse VASP output with pymatgen, then install the most relevant one into this project.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>search_skills</code> (catalog hits tagged <code>[catalog · install_skill to add]</code>,
+<code>pymatgen</code> at or near the top) → <code>install_skill(skill_name="pymatgen")</code>. The installed
+skill carries the reference docs (<code>pymatgen.io.vasp.Incar</code> / <code>Poscar</code> / <code>Outcar</code>)
+the converter uses next. <strong>Verify</strong> the install:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span>
+</code></pre></div>
+<h3 id="5-author-the-converter-skill-with-skill-creator">5. Author the converter skill with skill-creator<a class="headerlink" href="#5-author-the-converter-skill-with-skill-creator" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Use the skill-creator skill to author a new project skill named &quot;vasp-to-isaac&quot;. Following the pymatgen skill you just installed, its converter should use `pymatgen.io.vasp` — `Incar.from_file` (ENCUT, NSW, ISPIN, LDAUU), `Poscar.from_file` (formula, atom counts), and `Outcar` (`final_energy`, which is the energy(sigma-&gt;0) of the last ionic step, and the total magnetization) — to read a VASP slab calc directory and emit an ISAAC-style JSON record. The mock has no vasprun.xml, and `Outcar` has no attribute for the ionic-step count, the largest residual force, or the VASP version, so read those three from the OUTCAR text: the number of `free  energy   TOTEN` lines (one per ionic step), the last TOTAL-FORCE block, and the header line. Target the shape in data/expected_isaac_record.json. Save it with save_skill.
+</code></pre></div>
+<p><strong>Expect:</strong> the agent reads <code>skill-creator</code>'s template and the <code>pymatgen</code> skill's IO
+docs, then <code>save_skill</code> writes <code>&lt;project&gt;/skills/vasp-to-isaac/</code> whose script
+imports <code>pymatgen.io.vasp</code> (not a hand-rolled regex parser).</p>
+<h3 id="6-run-the-skill-on-the-slab-calculation">6. Run the skill on the slab calculation<a class="headerlink" href="#6-run-the-skill-on-the-slab-calculation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Invoke the vasp-to-isaac skill on data/mock_slab/ and write the result to audit/mock_slab_isaac.json. Then diff its structure and values against data/expected_isaac_record.json and report any differences.
+</code></pre></div>
+<p><strong>Expect:</strong> the agent registers the skill's converter as a code and runs it through
+<code>dsagt-run</code>, so the run has a record in <code>trace_archive/</code>. pymatgen parses the mock
+directory and the converter writes <code>audit/mock_slab_isaac.json</code> with the key fields
+pymatgen extracted, matching the reference: final energy ≈ -132.8421 eV
+(<code>Outcar.final_energy</code>), 12 atoms (<code>Poscar</code>), ENCUT 520 / NSW 50 (<code>Incar</code>), total
+mag ≈ 8.0123 (<code>Outcar.total_mag</code>). The reference's <code>ionic_steps</code> is 2, the steps the mock OUTCAR
+holds; NSW 50 is the INCAR's limit. Its <code>code_version</code> is <code>5.4.1</code>, from the OUTCAR
+header. The energy(sigma-&gt;0) value is <code>Outcar.final_energy</code>; <code>final_energy_wo_entrp</code>
+is the energy-without-entropy line, -132.8 here, and a converter that maps
+<code>energy_sigma0_eV</code> to it reports a spurious difference.</p>
+<h3 id="7-extend-the-skill-to-neb-calculations-and-register-the-converter">7. Extend the skill to NEB calculations and register the converter<a class="headerlink" href="#7-extend-the-skill-to-neb-calculations-and-register-the-converter" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Extend the vasp-to-isaac skill with a second converter,
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>scripts/vasp_neb_to_isaac.py, for nudged-elastic-band calculations. It takes a
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>positional NEB directory containing 00/, 01/, ... image subdirectories and an
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>--output path, parses each image&#39;s OUTCAR with pymatgen.io.vasp.Outcar, and
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>writes an ISAAC v1.05 record whose computation block records the NEB method,
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>the number of intermediate images, and the reaction, and whose measurement
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>block carries the energy series along the path. Target the shape of
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>data/isaac_neb_record.json. Update SKILL.md to describe both converters. Then
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>register the new script as a code named vasp-neb-to-isaac with the positional
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>neb_dir and the --output option; run it with --help first.
+</code></pre></div>
+<p><strong>Verify:</strong> <code>Search the registry for the vasp-neb-to-isaac code.</code> →
+<code>$PROJ/skills/vasp-neb-to-isaac/SKILL.md</code> should exist.</p>
+<h3 id="8-run-the-conversion-and-check-it">8. Run the conversion and check it<a class="headerlink" href="#8-run-the-conversion-and-check-it" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Run the registered vasp-neb-to-isaac code, with its exact command, to convert data/neb/
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>and write the record to data/neb_record.json.
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Compare it against data/isaac_neb_record.json: report differences in structure
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>and in the computation and measurement blocks, fix the converter, and rerun the
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>registered code until they agree on the method, image count, reaction, and
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>energy series. The reaction is Fe(lattice) → Fe(vacancy site); the OUTCARs do
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>not state it, so pass it to the converter. Read the cutoff, k-points, smearing,
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>and convergence settings from the OUTCARs; the images have no INCAR.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>dsagt-run --code vasp-neb-to-isaac -- ...</code> runs are recorded in
+<code>trace_archive/</code>; pymatgen parses the five OUTCARs (endpoints plus three
+intermediate images); the final record's <code>computation.transition_state</code> has
+<code>method: NEB</code>, <code>images: 3</code>, and the Fe vacancy-migration reaction, and its
+<code>measurement.series</code> carries the five-point energy path matching the reference:
+endpoints at −255.980 eV and −255.981 eV, a barrier of 0.325 eV at image 2. The
+<code>computation.method</code> sub-fields (cutoff, k-points, smearing, convergence) are parsed
+from the OUTCAR text, where VASP echoes them; a converter that copies the reference's
+values as literals matches by construction and fails on any other calculation.</p>
+<p>One pitfall to watch for: reading <code>Outcar.final_energy_wo_entrp</code> instead of
+<code>Outcar.final_energy</code> (the energy(sigma→0) of the last ionic step) shifts every
+energy by about 0.33 eV and the barrier to 0.309 eV. An agent may then report
+structural agreement and attribute the offset to "different calculations". The
+reference values are the last <code>energy(sigma-&gt;0)</code> line of each image's OUTCAR;
+hold it to them.</p>
+<h3 id="9-reconstruct-the-pipeline">9. Reconstruct the pipeline<a class="headerlink" href="#9-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Reconstruct the pipeline from the execution records as a bash script and save it as
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>pipeline.sh.
+</code></pre></div>
+<p><strong>Expect:</strong> <code>reconstruct_pipeline</code> saves the script at the path given. It holds
+every recorded run of the NEB converter, including the attempts that failed the
+comparison, in the order they ran. The script creates its output directories and
+removes a repeated output before the step that rewrites it, so a converter that
+refuses to overwrite still replays.</p>
+<h3 id="10-review-the-project-artifacts">10. Review the project artifacts<a class="headerlink" href="#10-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Reply with a tree of my project folder, with the artifacts dsagt recorded during this session marked and one line on what each marked item is.
+</code></pre></div>
+<p><strong>Expect:</strong> a tree of the project directory in the reply that marks the execution
+records in <code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes and
+installed skills under <code>skills/</code>, the trace store <code>mlflow.db</code>, and the session's
+outputs, with a line on what each is.</p>
+<h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
+<p>Confirm from a shell (the native skills directory is <code>.claude/skills/</code> for Claude Code,
+<code>.agents/skills/</code> for Codex, Goose, and opencode, <code>.cline/skills/</code> for Cline):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>isaac-vasp<span class="w">                     </span><span class="c1"># KB shows the k-dense-ai catalog collection</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                        </span><span class="c1"># aidrin  datacard-generator  pymatgen  skill-creator  vasp-neb-to-isaac  vasp-to-isaac</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/trace_archive/&quot;</span>
+</code></pre></div>
+<ol>
+<li>The KB holds the <code>skills_catalog__k-dense-ai-scientific-agent-skills</code>
+   collection, synced in-session by the agent (step 3), searchable via
+   <code>search_skills</code> but absent from the agent's context.</li>
+<li>The <code>pymatgen</code> catalog skill is installed into <code>&lt;project&gt;/skills/</code> and
+   mirrored into the agent's native skills directory.</li>
+<li>A <code>vasp-to-isaac</code> skill, authored via <code>skill-creator</code> and parsing with
+   <code>pymatgen.io.vasp</code>, exists and is natively discoverable.</li>
+<li><code>audit/mock_slab_isaac.json</code> was produced from the mock slab directory by a
+   registered code, with a record in <code>trace_archive/</code>, and matches the ISAAC shape
+   and values.</li>
+<li>The <code>vasp-to-isaac</code> skill has a second script, <code>vasp_neb_to_isaac.py</code>, and
+   the code registry contains the <code>vasp-neb-to-isaac</code> spec at
+   <code>skills/vasp-neb-to-isaac/SKILL.md</code>.</li>
+<li><code>data/neb_record.json</code> has the structure of the reference <code>data/isaac_neb_record.json</code>
+   and agrees with it on the method, the image count, the reaction, and the energy series,
+   with the method sub-fields parsed from the OUTCARs (free-text fields, such as notes
+   and identifiers, may differ); <code>trace_archive/</code> holds every NEB conversion attempt,
+   including any that failed the comparison.</li>
+<li><code>pipeline.sh</code> replays every recorded NEB conversion.</li>
+<li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session;
+   view them with <code>dsagt traces isaac-vasp</code>.</li>
+</ol>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>DSAgt Capability</th>
+<th>Steps</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Native discovery of the <code>skill-creator</code> base skill</td>
+<td>1</td>
+</tr>
+<tr>
+<td>Skill-source listing and in-session sync (<code>list_skill_sources</code>, <code>add_skill_source</code>)</td>
+<td>2, 3</td>
+</tr>
+<tr>
+<td>Catalog search and install (<code>search_skills</code>, <code>install_skill</code>)</td>
+<td>4</td>
+</tr>
+<tr>
+<td>Skill authoring with <code>skill-creator</code> and <code>save_skill</code></td>
+<td>5</td>
+</tr>
+<tr>
+<td>Installed-skill execution</td>
+<td>6</td>
+</tr>
+<tr>
+<td>Agent-written converter from a reference record, added to its own skill</td>
+<td>7</td>
+</tr>
+<tr>
+<td>Code registration (<code>save_code_spec</code>) and registry search</td>
+<td>7</td>
+</tr>
+<tr>
+<td>Code execution with provenance through <code>dsagt-run</code>, iterated against a reference</td>
+<td>8</td>
+</tr>
+<tr>
+<td>Pipeline reconstruction</td>
+<td>9</td>
+</tr>
+<tr>
+<td>Review of the session's artifacts</td>
+<td>10</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>isaac-vasp<span class="w"> </span>-y
+</code></pre></div>
+<p>The shared catalog cache is stored at <code>~/dsagt-projects/.skill_sources/</code> and is
+reused across projects; delete it to force a fresh clone.</p>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>mock_slab/</code> is not real DFT output, but it is valid VASP format: the
+  INCAR/POSCAR parse cleanly, and the OUTCAR's header (dimensions, plane-wave
+  table) is copied from a real VASP 5 run so pymatgen's <code>Outcar</code> parses it,
+  while its body keeps only the first and last ionic steps (TOTEN,
+  <code>energy(sigma-&gt;0)</code>, magnetization, the force block). There is no
+  <code>vasprun.xml</code>, so the converter takes energy/forces from the OUTCAR.</li>
+<li>The <code>neb/</code> OUTCARs are public pymatgen test fixtures.
+  <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/vasp_dft/reference/vasp_neb_to_isaac.py"><code>reference/vasp_neb_to_isaac.py</code></a> is a
+  converter that produces the reference record; compare the agent's converter
+  to it after step 8, not before.</li>
+<li>With the default local embedder (<code>bge-small</code>), absolute <code>search_skills</code> scores
+  are low because short queries under-score long SKILL.md text; the ranking is
+  still correct (<code>pymatgen</code> first). Set <code>embedding.backend: api</code> for sharper
+  relevance. With no embedder at all, <code>search_skills</code> falls back to keyword
+  scoring; <code>install_skill</code> and the native mirror are filesystem operations.</li>
+<li><a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/vasp_dft/reference/skills/vasp-to-isaac"><code>reference/skills/vasp-to-isaac/</code></a> is a
+  broader slab/bulk converter skill that needs <code>vasprun.xml</code>-bearing slab or
+  bulk data. It is a reference for a broader version of the agent-authored
+  skill; this demo's data exercises the slab and NEB converters only.</li>
+<li>The <a href="../genesis_skills/"><code>genesis_skills</code></a> walkthrough exercises the same
+  catalog search, install, and native-discovery sequence plus KB domain ingest
+  and datacard generation, against the Genesis (OSTI GitLab) source.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
