@@ -1731,7 +1731,7 @@ with a line on what each is. The reply may summarize a tree printed by a command
 <li>the trimmed R1 and R2 FASTQ files are under <code>data/processed/&lt;sample&gt;/</code></li>
 <li>the <code>fastp</code> HTML and JSON reports are beside them</li>
 <li><code>data/assemblies/&lt;sample&gt;/final.contigs.fa</code> exists</li>
-<li>A Level 1 datacard exists for the processed dataset and validates with the registered <code>datacard-validate</code> code with no findings.</li>
+<li>A Level 1 datacard exists for the processed dataset and validates with the registered <code>linkml-validate</code> code with no findings.</li>
 <li>A reconstructed pipeline script (bash or Snakemake) is available.</li>
 <li>Code execution records in <code>trace_archive/</code> document the full provenance chain.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture token usage, latency, and full request/response history. View with <code>dsagt traces isolate-pipeline</code>.</li>

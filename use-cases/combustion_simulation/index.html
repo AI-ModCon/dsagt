@@ -1364,11 +1364,11 @@ the converter that passed.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Use the datacard-generator skill to write a Level 1 datacard for the converted
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>WELL file to audit/. Take the values from info.json and the conversion, and
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>note anything unknown rather than asking. Validate the card with the registered
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>datacard-validate code.
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>linkml-validate code.
 </code></pre></div>
 <p><strong>Expect:</strong> the skill's <code>introspect.py</code> runs as the registered <code>datacard-introspect</code>
 code, so the introspection is an execution record; the card under <code>audit/</code> is in the
-Genesis template and <code>datacard-validate</code> accepts it (<code>ok: true</code>).</p>
+Genesis template and <code>linkml-validate</code> accepts it (<code>No issues found</code>).</p>
 <h3 id="7-reconstruct-the-pipeline">7. Reconstruct the pipeline<a class="headerlink" href="#7-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Reconstruct the conversion and validation pipeline from the execution records
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>as a bash script, save it as pipeline.sh, and put the trajectory directory in a
@@ -1394,7 +1394,7 @@ is. The agent may print the tree through a command; the reply then summarizes it
 <li>Code registry contains the converter's code, registered by <code>save_skill</code> from the skill's script, and <code>check-well-output</code>, both under <code>skills/</code>.</li>
 <li><code>well_output/lifted_hydrogen_jet_traj_5000.hdf5</code> exists and the full checker run reports an exact match to the holdout reference.</li>
 <li><code>trace_archive/</code> holds every converter and checker run, including the failed checks that drove the fixes.</li>
-<li>A datacard for the converted dataset exists under <code>audit/</code>, in the Genesis template, and <code>datacard-validate</code> accepts it.</li>
+<li>A datacard for the converted dataset exists under <code>audit/</code>, in the Genesis template, and <code>linkml-validate</code> accepts it.</li>
 <li><code>pipeline.sh</code>, saved by <code>reconstruct_pipeline</code>, replays the final conversion and both checks, calling the tools directly; the trajectory directory is the only variable to edit, and the output and reference paths are derived from it.</li>
 <li>MLflow traces (in the serverless <code>mlflow.db</code> store) capture the session;
    view them with <code>dsagt traces blastnet-well</code>.</li>
