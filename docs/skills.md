@@ -35,7 +35,7 @@ The `genesis` source is the ModCon aggregation point: skills contributed by ModC
 
 ## Base and authored skills
 
-Every `dsagt init` installs three base skills into `<project>/skills/` from the repositories that maintain them. A source is fetched once into the shared cache at `~/dsagt-projects/.skill_sources/` and reused by every later init; a cache held at another branch or tag than the one asked for is re-fetched, and `add_skill_source` with `force` re-fetches on request.
+Every `dsagt init` installs three base skills into `<project>/skills/` from the repositories that maintain them. Each init re-fetches the source into the shared cache at `~/dsagt-projects/.skill_sources/`, so a new project gets upstream's current version; when the fetch fails (offline), the skill is installed from the cached clone with a warning. `add_skill_source` with `force` re-fetches a catalog source on request.
 
 | Skill | Source |
 |---|---|

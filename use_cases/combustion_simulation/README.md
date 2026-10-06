@@ -190,7 +190,7 @@ linkml-validate code.
 
 **Expect:** the skill's `introspect.py` runs as the registered `datacard-introspect`
 code, so the introspection is an execution record; the card under `audit/` is in the
-Genesis template and `linkml-validate` accepts it (`ok: true`).
+Genesis template and `linkml-validate` accepts it (`No issues found`).
 
 ### 7. Reconstruct the pipeline
 

@@ -11,7 +11,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`datacard-generator` installs cleanly again.** Upstream replaced
   `scripts/validate_datacard.py` with `linkml-validate`; the `datacard-validate`
   code is now the `linkml-validate` code, and the converter no longer
-  declares Pydantic.
+  declares Pydantic. The installed skill's `uv run --with linkml
+  linkml-validate` example is rewritten to the registered command, so each
+  validation is an execution record.
+- **`dsagt init` installs the base skills' latest upstream version.** Each
+  init re-fetches the source instead of reusing a cached clone indefinitely;
+  offline, it installs from the cache with a warning.
 
 ### Added
 
