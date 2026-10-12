@@ -1,4 +1,62 @@
 ---
+# --- xCard common spine -----------------------------------------------------
+# Added so this card validates as a Genesis xCard and can be registered in the
+# xCard Registry alongside data, model and resource cards.
+#
+# Everything below is additive. The only existing field altered is `license`,
+# which the spine types as an object rather than a string; the value is
+# unchanged. The A2A `agent_card` block stays the source of truth for the
+# values duplicated here.
+xCard:
+  card_type: agent
+  version: '0.1'
+id: dsagt
+name: DSAgt (DataSmith Agent Toolkit)
+description: >-
+  AI-assisted data pipeline builder developed under the DOE Genesis Mission.
+  Wraps an MCP-compatible agent CLI with code registration, a semantic knowledge
+  base, skill discovery, execution provenance, and observability infrastructure
+  to accelerate AI-ready scientific data preparation.
+science:
+  - general
+keywords:
+  - data-pipelines
+  - mcp
+  - provenance
+  - knowledge-base
+  - skill-discovery
+sensitivity: general
+developed_by:
+  - DOE AI ModCon Base Data Team (DOE Genesis Mission)
+provider:
+  name: DOE AI ModCon Base Data Team (DOE Genesis Mission)
+  url: https://github.com/AI-ModCon/dsagt
+version: '0.2.1'
+last_updated: '2026-10-09'
+documentation_url: https://ai-modcon.github.io/dsagt/
+io_contract:
+  input_modes:
+    - text/plain
+  output_modes:
+    - text/plain
+  modalities: []
+  task_tags: []
+relationships: []
+extension:
+  kind: agent
+  skills:
+    - Code Registration
+    - Knowledge Base
+    - Execution Provenance
+    - Explicit + Episodic Memory
+    - Skill Discovery and Installation
+  capabilities:
+    streaming: false
+    push_notifications: false
+    state_transition_history: true
+  protocol_version: ''
+
+# --- existing DSAgt front matter ---------------------------------------------
 language:
 - en
 tags:
@@ -7,7 +65,10 @@ tags:
 - type:agent
 - science:general
 - risk:general
-license: Apache-2.0
+license:
+  spdx_id: Apache-2.0
+  name: ''
+  url: ''
 base_model: N/A  # DSAgt is agent-platform-agnostic; it wraps Claude Code, Goose, Codex, opencode, or Cline
 
 datasets:
