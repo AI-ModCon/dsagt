@@ -208,15 +208,16 @@ async def _handle_kb_ingest(
     job_tracker: _JobTracker,
 ) -> dict:
     folder_path = Path(arguments["folder_path"])
-    collection_name = arguments.get("collection_name")
+    collection = arguments["collection"]
     file_types = arguments.get("file_types")
+    description = arguments.get("description")
 
     if not folder_path.exists():
         return {"status": "error", "error": f"Folder not found: {folder_path}"}
     if not folder_path.is_dir():
         return {"status": "error", "error": f"Not a directory: {folder_path}"}
 
-    target_name = collection_name or folder_path.name
+    target_name = collection
     warning = None
 
     if target_name in job_tracker.active_collections:
@@ -254,6 +255,8 @@ async def _handle_kb_ingest(
     ingest_kwargs: dict = {"collection_name": target_name}
     if file_types:
         ingest_kwargs["file_types"] = file_types
+    if description:
+        ingest_kwargs["description"] = description
 
     async def _ingest_with_logging():
         import traceback as _tb
@@ -300,6 +303,7 @@ async def _handle_kb_append(
     if isinstance(paths, str):
         paths = [paths]
     file_types = arguments.get("file_types")
+    description = arguments.get("description")
 
     if not _collection_exists(kb.index_dir / collection):
         return {"status": "error", "error": f"Collection '{collection}' not found"}
@@ -307,6 +311,8 @@ async def _handle_kb_append(
     append_kwargs: dict = {}
     if file_types:
         append_kwargs["file_types"] = file_types
+    if description:
+        append_kwargs["description"] = description
 
     job_id = job_tracker.start(
         asyncio.to_thread(kb.append, collection, paths, **append_kwargs),
@@ -347,7 +353,9 @@ async def _handle_kb_delete_collection(
         }
 
     # The listing is both the existence check and the chunk count, so the
-    # reply says what was removed.
+    # reply says what was removed.  It synthesizes an entry for a dsagt
+    # collection that has never been written, which the refusal above has
+    # already excluded.
     info = next((c for c in kb.list_collections() if c["name"] == collection), None)
     if info is None:
         return {"status": "error", "error": f"Collection '{collection}' not found"}
@@ -555,9 +563,18 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                         "type": "string",
                         "description": "Path to folder containing documents to index",
                     },
-                    "collection_name": {
+                    "collection": {
                         "type": "string",
-                        "description": "Name for the collection (default: folder name)",
+                        "description": "Name for the new collection",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": (
+                            "What the collection holds and what it is for, one "
+                            "or two sentences. kb_list_collections serves it, "
+                            "so it is what a later session reads to choose "
+                            "this collection over another."
+                        ),
                     },
                     "file_types": {
                         "type": "array",
@@ -565,7 +582,7 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                         "description": "File extensions to include, e.g. ['pdf', 'md', 'py']. Defaults to common types.",
                     },
                 },
-                "required": ["folder_path"],
+                "required": ["folder_path", "collection"],
             },
         ),
         types.Tool(
@@ -581,6 +598,13 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                     "collection": {
                         "type": "string",
                         "description": "Name of the existing collection to append to",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": (
+                            "Replaces what the collection says it holds, for a "
+                            "collection whose contents have grown past it."
+                        ),
                     },
                     "paths": {
                         "type": "array",

@@ -29,8 +29,8 @@ Semantic search and ingestion over indexed document collections. See the [Knowle
 | Tool | Description |
 |------|-------------|
 | `kb_search` | Hybrid semantic search across one or more collections; `where` filters on a collection's metadata keys, `regex` and `contains` on the chunk text |
-| `kb_ingest` | Index a folder as a new collection; returns a `job_id` to poll with `kb_job_status` |
-| `kb_append` | Add documents to an existing collection (background job) |
+| `kb_ingest` | Index a folder as a new collection, with what it holds as the collection's description; returns a `job_id` to poll with `kb_job_status` |
+| `kb_append` | Add documents to an existing collection, and replace its description (background job) |
 | `kb_list_collections` | Every collection with its purpose, the metadata keys its chunks carry, and its chunk count |
 | `kb_job_status` | Check the status of a background ingest/append job |
 | `kb_delete_collection` | Delete a collection and everything indexed in it; dsagt's own collections are refused |

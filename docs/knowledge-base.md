@@ -11,7 +11,9 @@ The knowledge base is DSAgt's catalog of domain knowledge, reference corpora and
 | **Reference corpus** | NeMo Curator (data-curation references) | `dsagt init` (chosen collections) |
 | **Your documents** | Papers, standards, protocols, schemas you ingest | Agent's `kb_ingest` |
 
-The agent has five knowledge base tools: `kb_ingest` (index a folder into a named collection; the ingest runs in the background), `kb_append` (add documents to an existing collection), `kb_job_status` (poll a background job), `kb_search` (retrieve across one or more collections, with a `where` metadata filter and regex or substring filters over the chunk text), and `kb_list_collections` (every collection with its purpose, the metadata keys a `where` filter takes, and its chunk count).
+The agent has six knowledge base tools: `kb_ingest` (index a folder into a named collection; the ingest runs in the background), `kb_append` (add documents to an existing collection), `kb_job_status` (poll a background job), `kb_search` (retrieve across one or more collections, with a `where` metadata filter and regex or substring filters over the chunk text), `kb_list_collections` (every collection with its purpose, the metadata keys a `where` filter takes, and its chunk count), and `kb_delete_collection` (remove a collection and its index; the four collections dsagt owns are refused).
+
+The three tools that name a collection take it as `collection`, and `kb_ingest` requires it: a collection is made only where one was asked for by name. `kb_ingest` and `kb_append` also take the collection's `description`, which is what `kb_list_collections` serves and what a later session reads to choose one collection over another; a folder with a `DESCRIPTION.md` of its own supplies it when the caller gives none.
 
 ## Hybrid vector search
 
