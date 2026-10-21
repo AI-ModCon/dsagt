@@ -21,6 +21,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`reconstruct_pipeline(output=...)`** saves the script under the project;
   the bash script creates the recorded output directories first and removes
   a repeated output before the step that rewrites it.
+- **A skill declares its codes.** A `codes` list in a skill's `SKILL.md`
+  frontmatter, one entry per script (name, script, description, parameters
+  with `cli` and `role`, dependencies), is the spec its script is registered
+  with; `save_skill` takes the list in its spec. A script with no entry is
+  registered from its argparse calls, with no dependencies and no roles.
 - **One install path for every skill.** `skills.register_skill_scripts`
   registers each `scripts/*.py` and `*.sh` of an installed skill as a code
   (spec from the overrides table or the script's argparse calls) and
@@ -151,6 +156,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **One script has one code.** `save_skill` registered a skill's script a
+  second time, under the derived name and without dependencies or roles, when
+  the agent had already registered it under its own name with
+  `save_code_spec`. `CodeRegistry.code_for_same_script` is the check both
+  paths make: `save_code_spec` refuses a second spec for the file, and
+  `register_skill_scripts` leaves the script to the code it has and rewrites
+  the skill's text to that code's command. `delete_skill` withdraws a code,
+  and the agent instructions name it (#86).
 - **`search_skills` describes the catalogs it searches.** Its description said
   it spanned installed skills; an installed skill is discovered natively and
   is not indexed, so the search covers the synced external catalogs, and the
@@ -160,6 +173,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it is now written only when the code does not exist, and `save_code_spec`
   rewrites the owning skill's usage lines to the stored command. A file a
   command moved away is an input, not an output.
+- **A re-saved code has one index entry.** Saving a code again replaced its
+  file and added a second `codes` entry beside the first.
 - **Records.** With no declared file parameters, an argument the run changed
   is an output (a converter's second run named none). A failed run lists only
   the outputs that exist. The reconstructed pipeline script keeps the

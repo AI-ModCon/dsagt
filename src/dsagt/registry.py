@@ -29,7 +29,9 @@ stored string.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,6 +67,16 @@ def catalog_collection(slug: str) -> str:
 # ---------------------------------------------------------------------------
 # Helpers (codes only)
 # ---------------------------------------------------------------------------
+
+
+def _script_of(executable: str) -> str | None:
+    """The script file a stored or bare command line runs, normalized, or
+    None when the command names no ``.py`` or ``.sh`` file."""
+    tokens = shlex.split(executable.split(" -- ")[-1]) if executable else []
+    script = next((t for t in tokens if t.endswith((".py", ".sh"))), None)
+    # The agent may name the same file ./skills/x/scripts/y.py where the
+    # stored spec says skills/x/scripts/y.py; one spelling compares.
+    return os.path.normpath(script) if script else None
 
 
 def _uv_run_prefix(deps: list[str]) -> str:
@@ -416,6 +428,26 @@ class CodeRegistry:
                 return code
         return None
 
+    def code_for_same_script(self, spec: dict) -> dict | None:
+        """The code, under another name, whose executable runs the same script
+        file as *spec*, or None.
+
+        One script has one code.  A skill's scripts are registered when the
+        skill is saved, and the agent may register one of them under its own
+        name with ``save_code_spec``; whichever came first is the code, and a
+        second registration of the same file is refused (``save_code_spec``)
+        or skipped (``register_skill_scripts``).
+        """
+        target = _script_of(spec.get("executable", ""))
+        if target is None:
+            return None
+        for code in self.list_codes_raw():
+            if code.get("name") != spec.get("name") and (
+                _script_of(code.get("executable", "")) == target
+            ):
+                return code
+        return None
+
     def save_tool(self, spec: dict) -> str:
         """Write or update a code's SKILL.md; returns 'added' or 'updated'.
 
@@ -477,13 +509,18 @@ class CodeRegistry:
         return action
 
     def _index_code(self, spec: dict, tool_path: Path) -> None:
-        """Index a code file into the ``codes`` KB collection.
+        """Index a code file into the ``codes`` KB collection, replacing the
+        code's previous entry.
 
         Errors propagate to the caller: a code that is on disk and absent
         from the KB is a state the agent cannot recover from (it would write
         a duplicate the next time it searched).  Registration is atomic: in
         the index, or not registered.
         """
+        # A re-save (a second save_skill on a skill that declares the code,
+        # every init for a base skill) would otherwise add a second entry
+        # beside the first, and search_registry would return both.
+        self._kb.delete_entries(CODES_COLLECTION, {"code_name": spec["name"]})
         self._kb.add_entries(
             texts=[tool_path.read_text()],
             collection=CODES_COLLECTION,
