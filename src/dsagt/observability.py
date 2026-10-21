@@ -28,10 +28,7 @@ Layout (top to bottom)
 ----------------------
   setup        find_project_config · resolve_tracking_uri · experiment_name
                init_tracing ─┬─ _ensure_experiment  (describe and tag the
-               │                                     experiment on creation)
-               │             ├─ _version_model_name (a LoggedModel per dsagt
-               │             │                       release, the Version
-               │             │                       column of every trace)
+               │             │                       experiment on creation)
                │             └─ _bound_remote_retries · _quiet_mlflow_chatter
                ApiKeyHeaderProvider  (``X-API-Key`` for a gateway, loaded by
                             MLflow from an entry point in every process)
@@ -131,9 +128,8 @@ def resolve_tracking_uri(config: dict | None) -> str:
     the database on first use), so self-logging needs no listener.  SQLite is
     MLflow's supported serverless backend; the filesystem store (``file:``,
     ``./mlruns``) is deprecated as of Feb 2026.  Spans and their metadata go
-    to the sqlite store; MLflow keeps a span's large inputs and outputs, and
-    the model record a trace is attached to, as files under the experiment's
-    artifact location, ``<project>/mlruns/``.
+    to the sqlite store; MLflow keeps a span's large inputs and outputs as
+    files under the experiment's artifact location, ``<project>/mlruns/``.
     """
     uri = os.environ.get("MLFLOW_TRACKING_URI")
     if uri:
@@ -191,20 +187,6 @@ def experiment_name(config: dict | None) -> str:
     return f"dsagt-{hashlib.sha1(str(base).encode()).hexdigest()[:8]}"
 
 
-def _version_model_name() -> str:
-    """The LoggedModel that stands for this dsagt release in an experiment.
-
-    MLflow's trace table fills its *Version* column from ``mlflow.modelId``,
-    which must reference a LoggedModel, MLflow 3's record of which version of
-    the application produced a trace.  ``set_active_model(name=…)`` creates
-    or reuses one per experiment and stamps every trace of the process,
-    replayed agent turns included.  Model names may not contain ``.``.
-    """
-    from dsagt import __version__
-
-    return f"dsagt-{__version__.replace('.', '_')}"
-
-
 def _current_user() -> str | None:
     """The local user for the trace table's *User* column (``mlflow.trace.user``).
 
@@ -220,10 +202,9 @@ def _current_user() -> str | None:
 def _quiet_mlflow_chatter() -> None:
     """Silence MLflow's INFO messages about routine setup.
 
-    ``set_experiment`` and ``set_active_model`` log "Experiment … does not
-    exist. Creating", "LoggedModel … creating one" and "Active model is set to
-    …" at INFO, the last on every ``dsagt-run``.  They go to stderr, and an
-    agent that captures a code's stderr reads them as the code's output.
+    ``set_experiment`` logs "Experiment … does not exist. Creating" at INFO.
+    It goes to stderr, and an agent that captures a code's stderr reads it as
+    the code's output.
     Warnings and errors are still logged.
     """
     logging.getLogger("mlflow.tracking.fluent").setLevel(logging.WARNING)
@@ -335,7 +316,6 @@ def init_tracing(
         _bound_remote_retries(mlflow_url)
         mlflow.set_tracking_uri(mlflow_url)
         _ensure_experiment(experiment, project_name)
-        mlflow.set_active_model(name=_version_model_name())
     except (
         Exception
     ) as e:  # noqa: BLE001  # a store problem must not take the server down
@@ -510,8 +490,6 @@ def _attach_trace_metadata(source: str | None) -> None:
       under one session (reserved MLflow key, drives the native session filter).
     - ``mlflow.trace.user`` metadata: the local user, the reserved key behind
       the trace table's *User* column.
-    - ``mlflow.modelId`` (set process-wide by :func:`init_tracing` through
-      ``set_active_model``): the dsagt release, behind the *Version* column.
     - ``dsagt.version`` metadata: which dsagt produced the trace.  On a shared
       server holding months of traces from many installs, nothing else says;
       MLflow's own ``mlflow.source.git.*`` are empty because the process runs
@@ -967,17 +945,17 @@ class MLflowSink:
         self._experiment = experiment
 
     def write(self, trace) -> list[str]:
-        """Log every turn subtree; return the MLflow trace id of each."""
+        """Log every turn subtree; return the MLflow trace id of each.
+
+        Sets the process's tracking URI and experiment to the sink's, so an
+        application that hosts the sink names its own store before it logs.
+        """
         import mlflow
 
         _quiet_mlflow_chatter()
         _bound_remote_retries(self._uri)
         mlflow.set_tracking_uri(self._uri)
         mlflow.set_experiment(self._experiment)
-        # The CLI catch-up path (`dsagt traces` / `dsagt info`) reaches here
-        # without init_tracing, so the version model is activated here as well;
-        # create-or-reuse, one call per write.
-        mlflow.set_active_model(name=_version_model_name())
 
         children: dict[str, list] = {}
         for span in trace.spans:

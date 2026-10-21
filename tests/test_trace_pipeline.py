@@ -265,11 +265,28 @@ def test_session_tag_and_canonical_id_on_trace(mlflow_sqlite):
     from dsagt import __version__
 
     assert md.get("dsagt.version") == __version__
-    # User and Version columns: the reserved user key, and a LoggedModel named
-    # for the dsagt release (mlflow.modelId), on replayed agent turns too.
+    # The User column: the reserved user key, on replayed agent turns too.
     import getpass
 
     assert md.get("mlflow.trace.user") == getpass.getuser()
-    assert mlflow.get_logged_model(
-        md["mlflow.modelId"]
-    ).name == "dsagt-" + __version__.replace(".", "_")
+
+
+def test_write_leaves_no_active_model(tmp_path, mlflow_sqlite):
+    """MLflow attaches the active LoggedModel to every metric the thread logs.
+    dsagt is not the application under evaluation, so a write sets none, and a
+    metric logged afterwards to another store is recorded; with a dsagt model
+    active, that store lacks the model and the insert fails."""
+    import mlflow
+    from mlflow import MlflowClient
+
+    trace = ClaudeTranslator().translate(
+        TRANSCRIPT, trace_id="tr6", session_id="proj:sess1", project="parity"
+    )
+    MLflowSink(mlflow_sqlite, "parity").write(trace)
+
+    app_uri = f"sqlite:///{tmp_path / 'app.db'}"
+    mlflow.set_tracking_uri(app_uri)
+    mlflow.set_experiment("app")
+    with mlflow.start_run() as run:
+        mlflow.log_metric("loss", 0.5)
+    assert MlflowClient(app_uri).get_run(run.info.run_id).data.metrics == {"loss": 0.5}
