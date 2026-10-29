@@ -1112,6 +1112,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#8b-point-at-the-full-slabbulk-skill-optional-needs-real-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8b. Point at the full slab/bulk skill (optional, needs real data)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#9-reconstruct-the-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1514,6 +1525,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#8b-point-at-the-full-slabbulk-skill-optional-needs-real-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8b. Point at the full slab/bulk skill (optional, needs real data)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#9-reconstruct-the-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1638,7 +1660,7 @@ come with the data, so the agent's records can be checked.</p>
 </thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/vasp_dft/reference/vasp_neb_to_isaac.py"><code>reference/vasp_neb_to_isaac.py</code></a></td>
+<td><a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/vasp_dft/scripts/vasp_neb_to_isaac.py"><code>scripts/vasp_neb_to_isaac.py</code></a></td>
 <td>a converter that produces the NEB reference record: a reference solution, not an input</td>
 </tr>
 <tr>
@@ -1646,7 +1668,7 @@ come with the data, so the agent's records can be checked.</p>
 <td>the NEB reference record (also in the data bundle)</td>
 </tr>
 <tr>
-<td><a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/vasp_dft/reference/skills/vasp-to-isaac"><code>reference/skills/vasp-to-isaac/</code></a></td>
+<td><a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/vasp_dft/skills/vasp-to-isaac"><code>skills/vasp-to-isaac/</code></a></td>
 <td>a broader slab/bulk converter skill for <code>vasprun.xml</code>-bearing data; a broader version of the skill the agent authors</td>
 </tr>
 </tbody>
@@ -1772,9 +1794,33 @@ energy by about 0.33 eV and the barrier to 0.309 eV. An agent may then report
 structural agreement and attribute the offset to "different calculations". The
 reference values are the last <code>energy(sigma-&gt;0)</code> line of each image's OUTCAR;
 hold it to them.</p>
+<h3 id="8b-point-at-the-full-slabbulk-skill-optional-needs-real-data">8b. Point at the full slab/bulk skill (optional, needs real data)<a class="headerlink" href="#8b-point-at-the-full-slabbulk-skill-optional-needs-real-data" title="Permanent link">&para;</a></h3>
+<p>Steps 5–8 have the agent author a narrower <code>vasp-to-isaac</code> skill against this
+demo's bundled mock slab and NEB fixtures. <a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/vasp_dft/skills/vasp-to-isaac"><code>skills/vasp-to-isaac/</code></a>
+is the broader version it was modeled on: the same skill, but with converters
+for both slab and bulk calculations against real, <code>vasprun.xml</code>-bearing VASP
+output (IrOx surface slabs and ternary oxide bulk DOS calculations, per its
+<code>SKILL.md</code>). This step is documentation, not a graded part of the walkthrough
+— the real dataset lives on NERSC, not in this repo, so there's no bundled
+fixture or reference record to run or check this against. Replace
+<code>&lt;NERSC_PATH&gt;</code> with the real calculation directory once you have access:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nb">source</span><span class="w"> </span>.venv/bin/activate
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1"># Slab</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>python3<span class="w"> </span>skills/vasp-to-isaac/scripts/vasp_slab_to_isaac.py<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span>&lt;NERSC_PATH&gt;/slab_calc<span class="w"> </span>slab_isaac.json<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">  </span>--electrode-type<span class="w"> </span>anode<span class="w"> </span>--surface-facet<span class="w"> </span><span class="m">101</span><span class="w"> </span>--surface-coverage<span class="w"> </span>4O
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="c1"># Bulk</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>python3<span class="w"> </span>skills/vasp-to-isaac/scripts/vasp_bulk_to_isaac.py<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">  </span>&lt;NERSC_PATH&gt;/bulk_material<span class="w"> </span>bulk_isaac.json
+</code></pre></div>
+<p>See <code>skills/vasp-to-isaac/SKILL.md</code> for the full CLI (batch conversion, the
+ASE DB pipeline for bulk) and its <code>references/*.md</code> docs (ISAAC schema,
+slab/bulk workflow detail, <code>cathub</code> organization, dependencies).</p>
 <h3 id="9-reconstruct-the-pipeline">9. Reconstruct the pipeline<a class="headerlink" href="#9-reconstruct-the-pipeline" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Reconstruct the pipeline from the execution records as a bash script and save it as
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>pipeline.sh.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Reconstruct the pipeline from the execution records as a bash script and save it as
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>pipeline.sh.
 </code></pre></div>
 <p><strong>Expect:</strong> <code>reconstruct_pipeline</code> saves the script at the path given. It holds
 every recorded run of the NEB converter, including the attempts that failed the
@@ -1782,7 +1828,7 @@ comparison, in the order they ran. The script creates its output directories and
 removes a repeated output before the step that rewrites it, so a converter that
 refuses to overwrite still replays.</p>
 <h3 id="10-review-the-project-artifacts">10. Review the project artifacts<a class="headerlink" href="#10-review-the-project-artifacts" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Reply with a tree of my project folder, with the artifacts dsagt recorded during this session marked and one line on what each marked item is.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Reply with a tree of my project folder, with the artifacts dsagt recorded during this session marked and one line on what each marked item is.
 </code></pre></div>
 <p><strong>Expect:</strong> a tree of the project directory in the reply that marks the execution
 records in <code>trace_archive/</code>, the reports in <code>audit/</code>, the registered codes and
@@ -1791,9 +1837,9 @@ outputs, with a line on what each is.</p>
 <h2 id="post-conditions">Post-Conditions<a class="headerlink" href="#post-conditions" title="Permanent link">&para;</a></h2>
 <p>Confirm from a shell (the native skills directory is <code>.claude/skills/</code> for Claude Code,
 <code>.agents/skills/</code> for Codex, Goose, and opencode, <code>.cline/skills/</code> for Cline):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>isaac-vasp<span class="w">                     </span><span class="c1"># KB shows the k-dense-ai catalog collection</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                        </span><span class="c1"># aidrin  datacard-generator  pymatgen  skill-creator  vasp-neb-to-isaac  vasp-to-isaac</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/trace_archive/&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>dsagt<span class="w"> </span>info<span class="w"> </span>isaac-vasp<span class="w">                     </span><span class="c1"># KB shows the k-dense-ai catalog collection</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/skills/&quot;</span><span class="w">                        </span><span class="c1"># aidrin  datacard-generator  pymatgen  skill-creator  vasp-neb-to-isaac  vasp-to-isaac</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>ls<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/audit/&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/trace_archive/&quot;</span>
 </code></pre></div>
 <ol>
 <li>The KB holds the <code>skills_catalog__k-dense-ai-scientific-agent-skills</code>
@@ -1870,7 +1916,7 @@ outputs, with a line on what each is.</p>
 </tbody>
 </table>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>isaac-vasp<span class="w"> </span>-y
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>dsagt<span class="w"> </span>rm<span class="w"> </span>isaac-vasp<span class="w"> </span>-y
 </code></pre></div>
 <p>The shared catalog cache is stored at <code>~/dsagt-projects/.skill_sources/</code> and is
 reused across projects; delete it to force a fresh clone.</p>
@@ -1883,7 +1929,7 @@ reused across projects; delete it to force a fresh clone.</p>
   <code>energy(sigma-&gt;0)</code>, magnetization, the force block). There is no
   <code>vasprun.xml</code>, so the converter takes energy/forces from the OUTCAR.</li>
 <li>The <code>neb/</code> OUTCARs are public pymatgen test fixtures.
-  <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/vasp_dft/reference/vasp_neb_to_isaac.py"><code>reference/vasp_neb_to_isaac.py</code></a> is a
+  <a href="https://github.com/AI-ModCon/dsagt/blob/main/use_cases/vasp_dft/scripts/vasp_neb_to_isaac.py"><code>scripts/vasp_neb_to_isaac.py</code></a> is a
   converter that produces the reference record; compare the agent's converter
   to it after step 8, not before.</li>
 <li>With the default local embedder (<code>bge-small</code>), absolute <code>search_skills</code> scores
@@ -1891,10 +1937,12 @@ reused across projects; delete it to force a fresh clone.</p>
   still correct (<code>pymatgen</code> first). Set <code>embedding.backend: api</code> for sharper
   relevance. With no embedder at all, <code>search_skills</code> falls back to keyword
   scoring; <code>install_skill</code> and the native mirror are filesystem operations.</li>
-<li><a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/vasp_dft/reference/skills/vasp-to-isaac"><code>reference/skills/vasp-to-isaac/</code></a> is a
-  broader slab/bulk converter skill that needs <code>vasprun.xml</code>-bearing slab or
-  bulk data. It is a reference for a broader version of the agent-authored
-  skill; this demo's data exercises the slab and NEB converters only.</li>
+<li><a href="https://github.com/AI-ModCon/dsagt/tree/main/use_cases/vasp_dft/skills/vasp-to-isaac"><code>skills/vasp-to-isaac/</code></a> is a broader slab/bulk
+  converter skill that needs <code>vasprun.xml</code>-bearing slab or bulk data. It is a
+  reference for a broader version of the agent-authored skill; this demo's
+  bundled data exercises the slab and NEB converters only. See
+  <a href="#8b-point-at-the-full-slabbulk-skill-optional-needs-real-data">§8b</a> for
+  running it on real data.</li>
 <li>The <a href="../genesis_skills/"><code>genesis_skills</code></a> walkthrough exercises the same
   catalog search, install, and native-discovery sequence plus KB domain ingest
   and datacard generation, against the Genesis (OSTI GitLab) source.</li>
