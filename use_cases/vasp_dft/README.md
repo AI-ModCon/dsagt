@@ -40,9 +40,9 @@ Folder contents:
 
 | Path | Role in the demo |
 |------|------------------|
-| [`reference/vasp_neb_to_isaac.py`](reference/vasp_neb_to_isaac.py) | a converter that produces the NEB reference record: a reference solution, not an input |
+| [`scripts/vasp_neb_to_isaac.py`](scripts/vasp_neb_to_isaac.py) | a converter that produces the NEB reference record: a reference solution, not an input |
 | [`reference/isaac_neb_record.json`](reference/isaac_neb_record.json) | the NEB reference record (also in the data bundle) |
-| [`reference/skills/vasp-to-isaac/`](reference/skills/vasp-to-isaac/) | a broader slab/bulk converter skill for `vasprun.xml`-bearing data; a broader version of the skill the agent authors |
+| [`skills/vasp-to-isaac/`](skills/vasp-to-isaac/) | a broader slab/bulk converter skill for `vasprun.xml`-bearing data; a broader version of the skill the agent authors |
 
 ## Prerequisites
 
@@ -208,6 +208,35 @@ structural agreement and attribute the offset to "different calculations". The
 reference values are the last `energy(sigma->0)` line of each image's OUTCAR;
 hold it to them.
 
+### 8b. Point at the full slab/bulk skill (optional, needs real data)
+
+Steps 5–8 have the agent author a narrower `vasp-to-isaac` skill against this
+demo's bundled mock slab and NEB fixtures. [`skills/vasp-to-isaac/`](skills/vasp-to-isaac/)
+is the broader version it was modeled on: the same skill, but with converters
+for both slab and bulk calculations against real, `vasprun.xml`-bearing VASP
+output (IrOx surface slabs and ternary oxide bulk DOS calculations, per its
+`SKILL.md`). This step is documentation, not a graded part of the walkthrough
+— the real dataset lives on NERSC, not in this repo, so there's no bundled
+fixture or reference record to run or check this against. Replace
+`<NERSC_PATH>` with the real calculation directory once you have access:
+
+```bash
+source .venv/bin/activate
+
+# Slab
+python3 skills/vasp-to-isaac/scripts/vasp_slab_to_isaac.py \
+  <NERSC_PATH>/slab_calc slab_isaac.json \
+  --electrode-type anode --surface-facet 101 --surface-coverage 4O
+
+# Bulk
+python3 skills/vasp-to-isaac/scripts/vasp_bulk_to_isaac.py \
+  <NERSC_PATH>/bulk_material bulk_isaac.json
+```
+
+See `skills/vasp-to-isaac/SKILL.md` for the full CLI (batch conversion, the
+ASE DB pipeline for bulk) and its `references/*.md` docs (ISAAC schema,
+slab/bulk workflow detail, `cathub` organization, dependencies).
+
 ### 9. Reconstruct the pipeline
 
 ```text
@@ -298,7 +327,7 @@ reused across projects; delete it to force a fresh clone.
   `energy(sigma->0)`, magnetization, the force block). There is no
   `vasprun.xml`, so the converter takes energy/forces from the OUTCAR.
 - The `neb/` OUTCARs are public pymatgen test fixtures.
-  [`reference/vasp_neb_to_isaac.py`](reference/vasp_neb_to_isaac.py) is a
+  [`scripts/vasp_neb_to_isaac.py`](scripts/vasp_neb_to_isaac.py) is a
   converter that produces the reference record; compare the agent's converter
   to it after step 8, not before.
 - With the default local embedder (`bge-small`), absolute `search_skills` scores
@@ -306,10 +335,12 @@ reused across projects; delete it to force a fresh clone.
   still correct (`pymatgen` first). Set `embedding.backend: api` for sharper
   relevance. With no embedder at all, `search_skills` falls back to keyword
   scoring; `install_skill` and the native mirror are filesystem operations.
-- [`reference/skills/vasp-to-isaac/`](reference/skills/vasp-to-isaac/) is a
-  broader slab/bulk converter skill that needs `vasprun.xml`-bearing slab or
-  bulk data. It is a reference for a broader version of the agent-authored
-  skill; this demo's data exercises the slab and NEB converters only.
+- [`skills/vasp-to-isaac/`](skills/vasp-to-isaac/) is a broader slab/bulk
+  converter skill that needs `vasprun.xml`-bearing slab or bulk data. It is a
+  reference for a broader version of the agent-authored skill; this demo's
+  bundled data exercises the slab and NEB converters only. See
+  [§8b](#8b-point-at-the-full-slabbulk-skill-optional-needs-real-data) for
+  running it on real data.
 - The [`genesis_skills`](../genesis_skills/) walkthrough exercises the same
   catalog search, install, and native-discovery sequence plus KB domain ingest
   and datacard generation, against the Genesis (OSTI GitLab) source.
