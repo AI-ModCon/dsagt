@@ -583,6 +583,47 @@ class TestInitProject:
         with pytest.raises(ValueError):
             init_project("myproj", "invalid-agent")
 
+    def test_tilde_expansion_in_project_location(self, tmp_path):
+        """Tilde notation (~) is expanded to home directory in project paths.
+
+        Regression test for issue #105: ensure that a path like ~/myproj is
+        expanded to /home/user/myproj, not a literal '~' folder.
+        """
+        from unittest.mock import Mock
+        import types
+        from dsagt.commands import cli
+
+        # Create a fake home directory under tmp_path
+        fake_home = tmp_path / "fake_home"
+        fake_home.mkdir()
+
+        # Mock the expanduser to use our fake home
+        with patch("os.path.expanduser", lambda p: str(fake_home / p[2:]) if p.startswith("~/") else p):
+            # Simulate non-interactive init with a tilde path
+            args = types.SimpleNamespace(
+                project="tildetest",
+                agent="goose",
+                location="~/test_location",
+                include=["codes"],
+                exclude=None,
+                episodic=False,
+                readiness=True,
+            )
+
+            # The location should be expanded
+            pdir = init_project(
+                "tildetest",
+                "goose",
+                location=Path(os.path.expanduser(args.location)),
+                exclude=["all"],
+            )
+
+            # Verify the project is NOT under a literal '~' directory
+            assert "~" not in str(pdir)
+            # Verify the project is under the expanded home path
+            assert str(fake_home) in str(pdir)
+            assert pdir.parent == fake_home / "test_location"
+
     def test_episodic_block_round_trips_through_config(self):
         """init_project writes the opted-in episodic block; load_config reads it
         back.  A project without it reads ``enabled: False`` from DEFAULTS."""
