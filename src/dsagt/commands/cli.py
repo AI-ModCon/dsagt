@@ -349,11 +349,11 @@ def _cmd_init(args):
     else:
         if interactive:
             default_full = str(DEFAULT_PROJECTS_BASE / name)
-            entered = Path(_prompt("Project location", default=default_full)).resolve()
+            entered = Path(os.path.expanduser(_prompt("Project location", default=default_full))).resolve()
             proj_dir = entered if entered.name == name else entered / name
             location = proj_dir.parent
         else:
-            location = Path(args.location).resolve() if args.location else None
+            location = Path(os.path.expanduser(args.location)).resolve() if args.location else None
         pdir_preview = (location or DEFAULT_PROJECTS_BASE) / name
 
     settings = _collect_settings(args, interactive, existing, pdir_preview)
@@ -476,7 +476,7 @@ def _cmd_list(args):
 
 def _cmd_mv(args):
     """Move a project to a new location."""
-    location = Path(args.location).resolve()
+    location = Path(os.path.expanduser(args.location)).resolve()
     new_path = move_project(args.project, location)
     print(f"  Moved {args.project} to {new_path}")
 
