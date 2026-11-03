@@ -144,7 +144,11 @@ def build_dispatch_server(
                 jsonschema.validate(instance=arguments, schema=schemas[tool_name])
                 result = await handler(arguments)
             except jsonschema.ValidationError as e:
-                rejection = f"Input validation error: {e.message}"
+                # The message names the value but not where it is ("'' should be
+                # non-empty"), so the argument's path is put in front of it.
+                where = "/".join(str(part) for part in e.absolute_path)
+                detail = f"argument '{where}': {e.message}" if where else e.message
+                rejection = f"Input validation error: {detail}"
                 result = {"status": "error", "error": rejection}
             except ValueError as e:
                 result = {"status": "error", "error": str(e)}

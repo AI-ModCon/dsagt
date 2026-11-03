@@ -220,7 +220,7 @@ class TestInputValidation:
     def test_wrong_type_rejected(self):
         out = json.loads(_call(self._server(), "demo", {"q": 7}))
         assert out["status"] == "error"
-        assert "Input validation error" in out["error"]
+        assert out["error"].startswith("Input validation error: argument 'q': ")
 
     def test_valid_arguments_dispatch(self):
         out = json.loads(_call(self._server(), "demo", {"q": "hello"}))

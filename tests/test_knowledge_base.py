@@ -704,6 +704,41 @@ class TestKnowledgeBaseIngest:
         # The collection is listed after ingest.
         assert "test_docs" in kb.collections
 
+    def test_append_to_a_missing_collection_raises_value_error(self, kb, tmp_path):
+        """A missing collection is a ValueError, with no description written."""
+        doc = tmp_path / "extra.md"
+        doc.write_text("# Extra\n\nMore text.\n")
+
+        with pytest.raises(ValueError, match="absent"):
+            kb.append("absent", [doc], description="Grown.")
+
+        assert not (kb.index_dir / "absent").exists()
+
+    def test_a_failed_append_keeps_the_description(self, kb, source_folder, tmp_path):
+        """The description is written only once the chunks are in the store."""
+        kb.ingest(source_folder)
+        desc_path = kb.index_dir / "test_docs" / "DESCRIPTION.md"
+        before = desc_path.read_text()
+        doc = tmp_path / "extra.md"
+        doc.write_text("# Extra\n\nMore text.\n")
+        store = kb._store_for("test_docs")
+
+        with patch.object(store, "add_chunks", side_effect=RuntimeError("disk full")):
+            with pytest.raises(RuntimeError, match="disk full"):
+                kb.append("test_docs", [doc], description="Grown.")
+
+        assert desc_path.read_text() == before
+
+    def test_append_replaces_the_description(self, kb, source_folder, tmp_path):
+        """An append that adds chunks writes the caller's description."""
+        kb.ingest(source_folder)
+        doc = tmp_path / "extra.md"
+        doc.write_text("# Extra\n\nMore text.\n")
+
+        kb.append("test_docs", [doc], description="Grown.")
+
+        assert (kb.index_dir / "test_docs" / "DESCRIPTION.md").read_text() == "Grown."
+
     def test_ingest_copies_description(self, kb, source_folder):
         """DESCRIPTION.md is copied from source to collection directory."""
         kb.ingest(source_folder)
