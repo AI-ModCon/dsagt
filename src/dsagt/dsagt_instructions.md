@@ -41,6 +41,8 @@ Before implementing anything, search for existing capabilities:
 
 To author a new skill, use the `skill-creator` skill installed in every project.
 
+`delete_skill(name=...)` removes an installed skill or a registered code: its directory, its native-skills entry, and its registry entry go together. A code registered by mistake is withdrawn this way; deleting its files by hand leaves `search_registry` returning it.
+
 **When the user asks for a specific code** ("use `foo`", "use `foo` from the registry", "run `foo`"), look it up first (`search_registry(code_name=...)` for an exact match, `get_registry()` to browse). Read the returned spec's `executable` field and each parameter's `cli` field, then invoke it from your shell. A task a registered code can do is done by that code, never by your own file or shell tools. (Section 1b has the verbatim-`executable` rule.)
 
 **Rendering parameters**: each parameter's `cli` field pins exactly how its value goes on the command line. Emit positional args first (in position order), then named args. Skip optional parameters whose value is absent; use the `default` when present.
@@ -58,6 +60,8 @@ To author a new skill, use the `skill-creator` skill installed in every project.
 Booleans render as a bare flag when truthy, nothing when falsy.
 
 When registering a new code via `save_code_spec`, set the `cli` field on every parameter so the next invocation renders it without guessing, and set `role: input` or `role: output` on each parameter that names a file the code reads or writes: `dsagt-run` records those files on every run, and `reconstruct_pipeline` orders steps by them. Code names use lowercase letters, digits, and hyphens (for example `datacard-introspect`), the skill-standard character set, since registered codes are linked into your native skills directory.
+
+A skill saved with `save_skill` declares its scripts' codes the same way, in a `codes` list in its spec: one entry per script with `name`, `script` (the path inside the skill, `scripts/convert.py`), `description`, `parameters` with `cli` and `role`, and `dependencies`. A script with no entry gets a spec read from its argparse calls, which declares no dependencies and no roles, so it runs only where its imports are already installed.
 
 ### 3. Code Preference Hierarchy
 

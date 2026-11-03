@@ -370,6 +370,24 @@ def _skill_tools_and_handlers(
                                         "items": {"type": "string"},
                                         "description": "Tags for categorizing the skill",
                                     },
+                                    "codes": {
+                                        "type": "array",
+                                        "items": {"type": "object"},
+                                        "description": (
+                                            "The codes the skill's scripts are "
+                                            "registered as, one entry per script: "
+                                            "name, script (the path inside the "
+                                            "skill, e.g. scripts/convert.py), "
+                                            "description, parameters (each with "
+                                            "cli, and role: input or output when "
+                                            "it names a file), and dependencies "
+                                            "(the packages the script imports, "
+                                            "run under uv run --with). A script "
+                                            "with no entry gets a spec read from "
+                                            "its argparse calls, with no "
+                                            "dependencies and no roles."
+                                        ),
+                                    },
                                 },
                                 "required": ["name", "description"],
                             },
