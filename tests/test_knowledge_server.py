@@ -12,14 +12,16 @@ the job completed use an async helper that lets the event loop tick.
 
 import asyncio
 import json
+import re
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from mcp_helpers import call_tool_async
 from mcp_helpers import call_tool_json as call_tool
 
-from dsagt.knowledge import KnowledgeBase
+from dsagt.knowledge import DSAGT_COLLECTIONS, KnowledgeBase
 from dsagt.mcp.knowledge_tools import create_knowledge_server, setup_runtime_kb
 
 
@@ -446,6 +448,41 @@ class TestIngest:
         assert "collection" in result["error"]
         assert not (folder.parent / "kb_index" / "docs").exists()
 
+    def test_ingest_refuses_an_empty_collection_name(self, server, mock_kb, tmp_path):
+        """An empty name is refused, where it fell back to the folder's name."""
+        folder = tmp_path / "docs"
+        folder.mkdir()
+
+        result = call_tool(
+            server, "kb_ingest", {"folder_path": str(folder), "collection": ""}
+        )
+
+        assert result["status"] == "error"
+        assert "collection" in result["error"]
+        mock_kb.ingest.assert_not_called()
+
+    @pytest.mark.parametrize("collection", sorted(DSAGT_COLLECTIONS))
+    def test_ingest_refuses_dsagt_collections(
+        self, server, mock_kb, tmp_path, collection
+    ):
+        """An ingest into a dsagt collection would replace its built-in purpose."""
+        folder = tmp_path / "docs"
+        folder.mkdir()
+
+        result = call_tool(
+            server,
+            "kb_ingest",
+            {
+                "folder_path": str(folder),
+                "collection": collection,
+                "description": "Something else.",
+            },
+        )
+
+        assert result["status"] == "error"
+        assert "dsagt's own collections" in result["error"]
+        mock_kb.ingest.assert_not_called()
+
     def test_ingest_folder_not_found(self, server):
         """Ingesting a nonexistent folder returns an error immediately."""
         result = call_tool(
@@ -655,6 +692,29 @@ class TestAppend:
             assert final["result"]["chunks_added"] == 10
 
         asyncio.run(run())
+
+    @pytest.mark.parametrize("collection", sorted(DSAGT_COLLECTIONS))
+    def test_append_refuses_dsagt_collections(
+        self, server, mock_kb, tmp_path, collection
+    ):
+        """An append's description would replace a dsagt collection's purpose."""
+        coll_dir = mock_kb.index_dir / collection
+        coll_dir.mkdir()
+        (coll_dir / "chroma_ids.json").write_text("fake")
+
+        result = call_tool(
+            server,
+            "kb_append",
+            {
+                "collection": collection,
+                "paths": [str(tmp_path)],
+                "description": "Something else.",
+            },
+        )
+
+        assert result["status"] == "error"
+        assert "dsagt's own collections" in result["error"]
+        mock_kb.append.assert_not_called()
 
     def test_append_collection_not_found(self, server, mock_kb):
         """Appending to a nonexistent collection returns an error immediately."""
@@ -998,3 +1058,34 @@ class TestKbSearchSchema:
     def test_kb_search_query_is_only_required(self, server):
         tool = self._get_tool(server, "kb_search")
         assert tool.input_schema["required"] == ["query"]
+
+
+# ---------------------------------------------------------------------------
+# The agent instructions against the tool schemas
+# ---------------------------------------------------------------------------
+
+
+INSTRUCTIONS = Path(__file__).parent.parent / "src" / "dsagt" / "dsagt_instructions.md"
+
+
+def test_instructions_call_each_knowledge_tool_with_its_schema(server):
+    """Every ``kb_*(args)`` form in the agent instructions matches its tool.
+
+    Every session reads the instructions, so a form that leaves out a required
+    argument is refused on the agent's first call, and one that names an
+    argument the tool lacks fails validation.
+    """
+    handler = server.get_request_handler("tools/list").handler
+    schemas = {t.name: t.input_schema for t in asyncio.run(handler(None, None)).tools}
+    forms = re.findall(r"`(kb_\w+)\(([^`]*)\)`", INSTRUCTIONS.read_text())
+    checked = 0
+    for name, args in forms:
+        if name not in schemas:
+            continue
+        named = {a.split("=")[0].strip() for a in args.split(",") if a.strip()}
+        properties = set(schemas[name]["properties"])
+        required = set(schemas[name].get("required", []))
+        assert named <= properties, f"{name}({args}) names {named - properties}"
+        assert required <= named, f"{name}({args}) leaves out {required - named}"
+        checked += 1
+    assert checked >= 3, f"found {checked} knowledge-tool forms in the instructions"

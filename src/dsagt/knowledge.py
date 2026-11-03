@@ -1566,8 +1566,6 @@ class KnowledgeBase:
         contents have grown past what it was made for can say what it holds now.
         """
         file_types = file_types or self.FILE_TYPES
-        if description:
-            (self.index_dir / collection / "DESCRIPTION.md").write_text(description)
 
         obs.set_inputs(
             {
@@ -1609,6 +1607,10 @@ class KnowledgeBase:
             }
 
         result = store.add_chunks(collection, new_chunks)
+        # Written once the chunks are in, so an append that fails on a missing
+        # collection or in the store leaves the purpose as it was.
+        if description:
+            (self.index_dir / collection / "DESCRIPTION.md").write_text(description)
         return {
             "collection": collection,
             "files": len(files),

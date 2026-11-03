@@ -201,6 +201,26 @@ async def _handle_kb_search(
     }
 
 
+def _dsagt_collection_refusal(collection: str) -> dict | None:
+    """The error for a write to one of dsagt's own collections, else None.
+
+    The registry, the execution records, and memory write these collections
+    themselves, and ``kb_list_collections`` serves their built-in purpose, so
+    an agent's ingest, append, description, or delete would corrupt what they
+    read.
+    """
+    if collection not in DSAGT_COLLECTIONS:
+        return None
+    return {
+        "status": "error",
+        "error": (
+            f"'{collection}' is one of dsagt's own collections "
+            f"({', '.join(sorted(DSAGT_COLLECTIONS))}); the registry, the "
+            f"execution records, and memory read them."
+        ),
+    }
+
+
 async def _handle_kb_ingest(
     arguments: dict,
     *,
@@ -212,6 +232,8 @@ async def _handle_kb_ingest(
     file_types = arguments.get("file_types")
     description = arguments.get("description")
 
+    if refusal := _dsagt_collection_refusal(collection):
+        return refusal
     if not folder_path.exists():
         return {"status": "error", "error": f"Folder not found: {folder_path}"}
     if not folder_path.is_dir():
@@ -305,6 +327,8 @@ async def _handle_kb_append(
     file_types = arguments.get("file_types")
     description = arguments.get("description")
 
+    if refusal := _dsagt_collection_refusal(collection):
+        return refusal
     if not _collection_exists(kb.index_dir / collection):
         return {"status": "error", "error": f"Collection '{collection}' not found"}
 
@@ -334,15 +358,8 @@ async def _handle_kb_delete_collection(
 ) -> dict:
     collection = arguments["collection"]
 
-    if collection in DSAGT_COLLECTIONS:
-        return {
-            "status": "error",
-            "error": (
-                f"'{collection}' is one of dsagt's own collections "
-                f"({', '.join(sorted(DSAGT_COLLECTIONS))}); the registry, the "
-                f"execution records, and memory read them."
-            ),
-        }
+    if refusal := _dsagt_collection_refusal(collection):
+        return refusal
     if collection in job_tracker.active_collections:
         return {
             "status": "error",
@@ -541,6 +558,7 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                 "properties": {
                     "collection": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Name of the collection to delete",
                     }
                 },
@@ -554,7 +572,8 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                 "Returns immediately with a job_id. "
                 "IMPORTANT: poll kb_job_status every 10 seconds and wait for "
                 "status='complete'. DO NOT call ingest again for the same "
-                "folder while a job is running."
+                "folder while a job is running. dsagt's own collections are "
+                "refused."
             ),
             inputSchema={
                 "type": "object",
@@ -565,6 +584,7 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
                     },
                     "collection": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Name for the new collection",
                     },
                     "description": {
@@ -590,13 +610,15 @@ def _knowledge_tools_and_handlers(kb: KnowledgeBase):
             description=(
                 "Add documents to an existing collection. Uses the same embedding "
                 "model and vector DB the collection was created with. "
-                "Returns immediately with a job_id; poll kb_job_status for progress."
+                "Returns immediately with a job_id; poll kb_job_status for progress. "
+                "dsagt's own collections are refused."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "collection": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Name of the existing collection to append to",
                     },
                     "description": {

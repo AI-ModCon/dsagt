@@ -142,7 +142,7 @@ The knowledge base contains domain documentation, package references, implementa
 
 - `kb_list_collections()`: every collection with its purpose and metadata keys
 - `kb_search(query, collection, top_k, where)`: semantic search, `where` filtering on the collection's metadata keys
-- `kb_ingest(folder_path)`: index new documents
+- `kb_ingest(folder_path, collection, description)`: index a folder as a new collection
 
 ## CODE GENERATION PATTERN
 
