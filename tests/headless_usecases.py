@@ -55,10 +55,15 @@ CLAUDE_ALLOWED_TOOLS = [
     "Bash(aidrin:*)", "Bash(fastp:*)", "Bash(megahit:*)", "Bash(git:*)",
     "Bash(h5dump:*)", "Bash(h5ls:*)", "Bash(gunzip:*)", "Bash(zcat:*)", "Bash(gzip:*)",
     "Bash(tar:*)", "Bash(sort:*)", "Bash(cut:*)", "Bash(awk:*)", "Bash(sed:*)",
-    # A walkthrough that grounds the agent in published work fetches it:
-    # the literature-search skill searches the web and the papers download
-    # over HTTP.
-    "WebSearch", "WebFetch", "Bash(curl:*)", "Bash(wget:*)",
+    # A walkthrough that grounds the agent in published work fetches it: the
+    # literature-search skill searches the web, and the papers and catalog
+    # pages download over HTTP.  A fetched page is untrusted text in a run
+    # nobody watches, so WebFetch is limited to the sites the walkthroughs
+    # read; curl and wget add no reach the python and bash entries lack.
+    "WebSearch",
+    "WebFetch(domain:arxiv.org)", "WebFetch(domain:doi.org)",
+    "WebFetch(domain:api.semanticscholar.org)", "WebFetch(domain:blastnet.github.io)",
+    "Bash(curl:*)", "Bash(wget:*)",
     "Bash(tr:*)", "Bash(xargs:*)", "Bash(env:*)", "Bash(which:*)", "Bash(true:*)",
     "Bash(test:*)", "Bash(seq:*)", "Bash(date:*)", "Bash(basename:*)", "Bash(dirname:*)",
     "Bash(cd:*)", "Bash(export:*)", "Bash(sqlite3:*)", "Bash(jq:*)",
@@ -92,15 +97,20 @@ def prompts_from(readme: Path) -> list[str]:
 
 
 def selected_prompts(count: int, from_n: int, only: set[int] | None) -> list[int]:
-    """The prompt numbers to run, in order.
-
-    The first of them starts the session; every later one continues it, so
-    ``--only 2,3`` and ``--from 2`` continue a session the earlier prompts
-    opened, while any selection that begins at prompt 1 starts a new one.
-    """
+    """The prompt numbers to run, in order."""
     return [
         n for n in range(1, count + 1) if n >= from_n and (only is None or n in only)
     ]
+
+
+def starts_session(selected: list[int], new_session: bool) -> bool:
+    """Whether the first selected prompt starts a session or continues one.
+
+    A selection that begins at prompt 1 starts one, and so does
+    ``--new-session``; otherwise ``--only 2,3`` and ``--from 2`` continue the
+    session the earlier prompts opened.
+    """
+    return selected[0] == 1 or new_session
 
 
 def set_shell_timeouts(env: dict, timeout: int) -> dict:
@@ -197,7 +207,9 @@ def main() -> int:
     log.parent.mkdir(parents=True, exist_ok=True)
 
     selected = selected_prompts(len(prompts), args.from_n, only)
-    first = bool(selected) and (selected[0] == 1 or args.new_session)
+    if not selected:
+        raise SystemExit(f"--from and --only select none of the {len(prompts)} prompts")
+    first = starts_session(selected, args.new_session)
     for n, prompt in enumerate(prompts, start=1):
         if n not in selected:
             continue
