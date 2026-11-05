@@ -94,11 +94,18 @@ def test_selected_prompts(from_n, only, expected):
     assert hu.selected_prompts(3, from_n, only) == expected
 
 
-def test_a_selection_starting_at_prompt_one_starts_the_session():
-    """``--only 1,2`` starts a session; ``--only 2,3`` continues one."""
-    assert hu.selected_prompts(3, 1, {1, 2})[0] == 1
-    assert hu.selected_prompts(3, 1, {2, 3})[0] != 1
-    assert hu.selected_prompts(3, 0, None)[0] == 1
+@pytest.mark.parametrize(
+    "selected, new_session, expected",
+    [
+        ([1, 2], False, True),
+        ([2, 3], False, False),
+        ([2, 3], True, True),
+        ([3], True, True),
+    ],
+)
+def test_starts_session(selected, new_session, expected):
+    """A selection from prompt 1 starts a session, and so does --new-session."""
+    assert hu.starts_session(selected, new_session) is expected
 
 
 def test_shell_timeouts_cover_the_applied_default_and_the_ceiling():
