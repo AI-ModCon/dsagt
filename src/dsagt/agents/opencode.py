@@ -165,7 +165,7 @@ class OpenCodeSetup(AgentSetup):
             opencode_model=env.get("OPENCODE_MODEL"),
         )
         config_path = working_dir / "opencode.json"
-        config_path.write_text(body + "\n")
+        config_path.write_text(body + "\n", encoding="utf-8")
         n_providers = sum(
             1 for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY") if present.get(k)
         )
@@ -192,7 +192,7 @@ class OpenCodeSetup(AgentSetup):
         ``max_turns`` is unused; opencode has no turn-cap option.
         """
         del config, max_turns
-        text = script_path.read_text().strip()
+        text = script_path.read_text(encoding="utf-8").strip()
         if not text:
             return 1
         model = env.get("OPENCODE_MODEL")

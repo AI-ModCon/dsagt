@@ -85,7 +85,7 @@ class ClaudeSetup(AgentSetup):
         mcp_config: dict = {"mcpServers": {"dsagt": entry}}
 
         mcp_path = working_dir / ".mcp.json"
-        mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
+        mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n", encoding="utf-8")
         actions.append(f"Wrote {mcp_path}")
 
         # Skills are mirrored into .claude/skills/ by AgentSetup.setup_skills
@@ -111,7 +111,7 @@ class ClaudeSetup(AgentSetup):
         enough for the bounded reasoning each smoke task needs.
         """
         del config, max_turns
-        text = script_path.read_text().strip()
+        text = script_path.read_text(encoding="utf-8").strip()
         if not text:
             return 1
         cmd = [
@@ -123,4 +123,6 @@ class ClaudeSetup(AgentSetup):
             "-p",
             text,
         ]
-        return _run_simple_script(cmd, env, working_dir, self.install_hint)
+        return _run_simple_script(
+            cmd, env, working_dir, self.install_hint, stdin_marker=[]
+        )

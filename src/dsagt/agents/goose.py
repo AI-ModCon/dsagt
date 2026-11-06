@@ -79,7 +79,8 @@ class GooseSetup(AgentSetup):
 
         goose_path = working_dir / "goose.yaml"
         goose_path.write_text(
-            yaml.dump(goose_config, default_flow_style=False, sort_keys=False)
+            yaml.dump(goose_config, default_flow_style=False, sort_keys=False),
+            encoding="utf-8",
         )
         actions.append(f"Wrote {goose_path}")
         return actions

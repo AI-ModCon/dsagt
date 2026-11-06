@@ -9,7 +9,7 @@ Documentation: **https://ai-modcon.github.io/dsagt**: quick start, capability pa
 
 DSAgt connects an MCP-compatible AI coding agent to code registration, a semantic knowledge base, skills discovery and creation, execution provenance, and observability infrastructure. It exposes these capabilities to a user's existing agent CLI or VS Code extension (Claude Code, OpenCode, Codex, and others).
 
-**Prerequisites:** Python 3.12 or later (CI tests 3.12 and 3.13) on Apple Silicon or Linux x86_64 (onnxruntime, which runs the local embedding model, has no Intel Mac wheel), and one of the agent platforms below, installed and authenticated against the LLM provider you intend to use.
+**Prerequisites:** Python 3.12 or later (CI tests 3.12 and 3.13) on Apple Silicon, Linux x86_64, or Windows x64 (onnxruntime, which runs the local embedding model, has no Intel Mac wheel; see [Windows](#windows) for what differs there), and one of the agent platforms below, installed and authenticated against the LLM provider you intend to use.
 
 <!-- md-shared:agents:start -->
 | Agent | Install | Verify |
@@ -54,6 +54,57 @@ pip install --upgrade "git+https://github.com/AI-ModCon/dsagt.git"
 ```
 
 > Pin to a specific release: e.g. `pip install "git+https://github.com/AI-ModCon/dsagt.git@0.2.0"`.
+
+### Windows
+
+DSAgt runs natively on Windows 10 and 11 (x64); WSL is not required. Everything below is typed in PowerShell.
+
+**1. Prerequisites.** Python 3.12 or 3.13, Git for Windows, and an agent CLI. With [winget](https://learn.microsoft.com/windows/package-manager/winget/) (skip what you already have):
+
+```powershell
+winget install Python.Python.3.12
+winget install Git.Git
+winget install Anthropic.ClaudeCode
+```
+
+Open a **new** PowerShell window afterwards, so the new programs are on `PATH`, and sign in to the agent once:
+
+```powershell
+claude --version
+claude            # follow the browser prompt to sign in, then /exit
+```
+
+A winget install of Claude Code does not update itself; run `winget upgrade Anthropic.ClaudeCode` from time to time. The other install routes in the [Claude Code setup guide](https://code.claude.com/docs/en/setup) (`irm https://claude.ai/install.ps1 | iex`, or npm) work as well.
+
+**2. Install DSAgt** into a virtual environment and activate it:
+
+```powershell
+py -3.12 -m venv $HOME\.venvs\dsagt
+& $HOME\.venvs\dsagt\Scripts\Activate.ps1
+pip install "git+https://github.com/AI-ModCon/dsagt.git"
+dsagt --version
+```
+
+If PowerShell refuses to run `Activate.ps1`, allow scripts for that window with `Set-ExecutionPolicy -Scope Process Bypass` and run it again. Activation lasts for the window it was done in: every new PowerShell window needs the `Activate.ps1` line before `dsagt` is found.
+
+**3. Create and start a project:**
+
+```powershell
+dsagt init
+dsagt start <my-project>
+```
+
+Claude Code asks once whether to trust the project folder and whether to enable the `dsagt` MCP server from `.mcp.json`; answer yes to both. `/mcp` inside the session lists `dsagt` as connected.
+
+What differs from Linux and macOS:
+
+- **Run `dsagt init` from PowerShell or Windows Terminal.** Its menus need a real console; Git Bash's default terminal (mintty) is not one.
+- **Git for Windows** gives Claude Code its Bash tool (without it Claude Code falls back to PowerShell) and provides the Git Bash that `dsagt smoke-test`, a bash script, runs under. WSL's `bash.exe` is never used.
+- **Keep projects out of other `uv` projects.** The agent starts the server with `uv run dsagt-server`; in a directory under a repository that has its own `pyproject.toml`, `uv` runs that repository's environment instead, and on Windows it can fail partway through replacing files that are in use. The default location, `~\dsagt-projects`, is safe.
+- **Skills are linked with directory junctions** when the account cannot create symlinks (no Developer Mode, not elevated). A junction behaves like the symlink used elsewhere; if neither can be made (a project on a network share), the skill is copied and the copy is refreshed at every `dsagt init`, `dsagt start`, and skill change.
+- **Registered commands are stored with forward slashes** (`python skills/x/scripts/y.py`), which Git Bash, PowerShell and Python all accept. `python3` in a command is run as `python`, since a Windows environment has no `python3`.
+- **Reconstructed pipelines are bash scripts** (`reconstruct_pipeline`), written with LF line ends; run them under Git Bash, or ask for the Snakemake format.
+- **Stop the agent before deleting or moving a project.** Windows does not let `dsagt rm` or `dsagt mv` remove files that a running `dsagt-server` has open.
 <!-- md-shared:install:end -->
 
 ## Quick Start

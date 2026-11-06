@@ -67,7 +67,7 @@ class TestSaveSkill:
         assert "added" in text
         skill_md = tmp_path / "runtime" / "skills" / "csv_inspector" / "SKILL.md"
         assert skill_md.exists()
-        content = skill_md.read_text()
+        content = skill_md.read_text(encoding="utf-8")
         assert "csv_inspector" in content
         assert "First, run head" in content
         after = len(skill_reg.list_skills())
@@ -95,7 +95,7 @@ class TestSaveSkill:
         )
         assert "updated" in text
         skill_md = tmp_path / "runtime" / "skills" / "wf" / "SKILL.md"
-        content = skill_md.read_text()
+        content = skill_md.read_text(encoding="utf-8")
         assert "v2 description" in content
         assert "Original workflow body" in content
 
@@ -114,7 +114,9 @@ class TestSaveSkill:
         assert "added" in text
         skill_dir = tmp_path / "runtime" / "skills" / "with_template"
         assert (skill_dir / "SKILL.md").exists()
-        assert (skill_dir / "template.json").read_text() == '{"foo": "bar"}\n'
+        assert (skill_dir / "template.json").read_text(
+            encoding="utf-8"
+        ) == '{"foo": "bar"}\n'
 
     def test_save_skill_string_encoded_spec(self, tmp_path):
         """MCP clients that JSON-encode nested object args still work."""
@@ -152,7 +154,9 @@ class TestNativeMirror:
         server, skill_reg, kb = _make_skill_server(tmp_path)
         runtime = tmp_path / "runtime"
         (runtime / ".dsagt").mkdir()
-        (runtime / ".dsagt" / "config.yaml").write_text("project: p\nagent: claude\n")
+        (runtime / ".dsagt" / "config.yaml").write_text(
+            "project: p\nagent: claude\n", encoding="utf-8"
+        )
 
         call_tool_sync(
             server,
@@ -165,7 +169,9 @@ class TestNativeMirror:
 
         native = runtime / ".claude" / "skills"
         assert (native / "mirror-me" / "SKILL.md").exists()
-        manifest = json.loads((native / ".dsagt-managed.json").read_text())
+        manifest = json.loads(
+            (native / ".dsagt-managed.json").read_text(encoding="utf-8")
+        )
         assert "mirror-me" in manifest
 
     def test_save_skill_without_project_config_skips_mirror(self, tmp_path):
@@ -216,13 +222,15 @@ class TestInstallSkill:
         runtime = tmp_path / "runtime"
         skill = runtime / "skills" / "datacard-generator"
         skill.mkdir(parents=True)
-        (skill / "SKILL.md").write_text("---\nname: datacard-generator\n---\nedited\n")
+        (skill / "SKILL.md").write_text(
+            "---\nname: datacard-generator\n---\nedited\n", encoding="utf-8"
+        )
         server = create_skill_server(kb=MagicMock(), runtime_dir=str(runtime))
         text = call_tool_sync(
             server, "install_skill", {"skill_name": "datacard-generator"}
         )
         assert "already installed" in text
-        assert (skill / "SKILL.md").read_text().endswith("edited\n")
+        assert (skill / "SKILL.md").read_text(encoding="utf-8").endswith("edited\n")
 
 
 # ---------------------------------------------------------------------------
@@ -280,8 +288,10 @@ class TestReplacingAnInstalledSkill:
     def _installed(self, tmp_path, name="croissant-validator"):
         d = tmp_path / "runtime" / "skills" / name
         d.mkdir(parents=True, exist_ok=True)
-        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: upstream\n---\n")
-        (d / "PROVENANCE.txt").write_text("source: genesis\n")
+        (d / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: upstream\n---\n", encoding="utf-8"
+        )
+        (d / "PROVENANCE.txt").write_text("source: genesis\n", encoding="utf-8")
         return d
 
     def test_save_skill_refuses_a_skill_installed_from_a_catalog(self, tmp_path):
@@ -296,7 +306,7 @@ class TestReplacingAnInstalledSkill:
 
         assert "was installed from a catalog" in text
         assert "delete_skill" in text
-        assert "upstream" in (d / "SKILL.md").read_text()
+        assert "upstream" in (d / "SKILL.md").read_text(encoding="utf-8")
 
     def test_an_authored_skill_is_still_updated(self, tmp_path):
         server, _, _ = _make_skill_server(tmp_path)
@@ -310,7 +320,9 @@ class TestReplacingAnInstalledSkill:
         )
 
         assert "updated" in text
-        md = (tmp_path / "runtime" / "skills" / "mine" / "SKILL.md").read_text()
+        md = (tmp_path / "runtime" / "skills" / "mine" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         assert "second" in md
 
     def test_delete_skill_clears_the_way(self, tmp_path):

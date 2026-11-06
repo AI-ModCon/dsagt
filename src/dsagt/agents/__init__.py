@@ -37,6 +37,7 @@ from pathlib import Path
 
 from .base import (
     AgentSetup,
+    _resolved,
     _build_mcp_servers_dict,
     _mcp_env_block,
     _mcp_server_args,
@@ -224,7 +225,9 @@ def launch_agent(
     cmd = setup.interactive_command(config)
     logger.info("Launching: %s", " ".join(cmd))
     try:
-        return subprocess.run(cmd, env=env, cwd=str(working_dir)).returncode
+        return subprocess.run(
+            _resolved(cmd, env), env=env, cwd=str(working_dir)
+        ).returncode
     except FileNotFoundError:
         logger.error("Command not found: %s. %s", cmd[0], setup.install_hint)
         return 1

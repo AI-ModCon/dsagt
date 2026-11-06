@@ -171,7 +171,7 @@ def _parse_frontmatter(path: Path) -> dict:
     ``name`` / ``description`` / ``tags`` are still recovered. dsagt-authored
     code/skill specs are valid YAML, so the fallback never fires for them.
     """
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if not text.startswith("---"):
         return {}
     parts = text.split("---", 2)
@@ -456,7 +456,7 @@ class CodeRegistry:
         body = ""
         existing: dict = {}
         if path.exists():
-            parts = path.read_text().split("---", 2)
+            parts = path.read_text(encoding="utf-8").split("---", 2)
             if len(parts) == 3:
                 body = parts[2]
             existing = _parse_frontmatter(path)
@@ -466,10 +466,10 @@ class CodeRegistry:
             if existing.get("description") and not existing.get("executable"):
                 merged["description"] = existing["description"]
             frontmatter = yaml.dump(merged, default_flow_style=False, sort_keys=False)
-            path.write_text(f"---\n{frontmatter}---\n{body}")
+            path.write_text(f"---\n{frontmatter}---\n{body}", encoding="utf-8")
             wrapped = merged
         else:
-            path.write_text(render_code_spec(spec))
+            path.write_text(render_code_spec(spec), encoding="utf-8")
 
         if self._kb:
             self._index_code(wrapped, path)
@@ -485,7 +485,7 @@ class CodeRegistry:
         the index, or not registered.
         """
         self._kb.add_entries(
-            texts=[tool_path.read_text()],
+            texts=[tool_path.read_text(encoding="utf-8")],
             collection=CODES_COLLECTION,
             metadatas=[code_metadata(spec, "registered")],
         )
@@ -565,7 +565,7 @@ class SkillRegistry:
         # Preserve a hand-edited body when updating, unless the caller passed
         # an explicit replacement, the same contract as CodeRegistry.save_tool.
         if body is None and skill_md.exists():
-            existing = skill_md.read_text()
+            existing = skill_md.read_text(encoding="utf-8")
             parts = existing.split("---", 2)
             if len(parts) == 3:
                 body = parts[2]
@@ -573,12 +573,14 @@ class SkillRegistry:
             body = f"\n# {name}\n\n{spec.get('description', '')}\n"
 
         frontmatter = yaml.dump(spec, default_flow_style=False, sort_keys=False)
-        skill_md.write_text(f"---\n{frontmatter}---\n{body}")
+        skill_md.write_text(f"---\n{frontmatter}---\n{body}", encoding="utf-8")
 
         for rel_path, contents in (reference_files or {}).items():
             target = skill_dir / rel_path
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(contents)
+            # LF as given: a reference file may be a shell script, and bash
+            # rejects one whose lines end in CRLF.
+            target.write_text(contents, encoding="utf-8", newline="\n")
 
         return action
 
@@ -598,4 +600,4 @@ class SkillRegistry:
     def get_skill_content(self, name: str) -> str | None:
         """Get the full SKILL.md content for a skill."""
         path = self._skill_md_path(name)
-        return path.read_text() if path is not None else None
+        return path.read_text(encoding="utf-8") if path is not None else None

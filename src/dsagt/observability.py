@@ -65,7 +65,7 @@ import os
 import re
 import time
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Callable, Iterable, Mapping
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ def find_project_config() -> tuple[Path | None, dict | None]:
     try:
         import yaml
 
-        return cwd, yaml.safe_load(candidate.read_text()) or {}
+        return cwd, yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
     except Exception as e:
         logger.debug("could not parse %s: %s", candidate, e)
         return cwd, None
@@ -141,7 +141,19 @@ def resolve_tracking_uri(config: dict | None) -> str:
     cfg = config or {}
     pdir = cfg.get("project_dir")
     base = Path(pdir).resolve() if pdir else Path.cwd().resolve()
-    return f"sqlite:///{base / 'mlflow.db'}"
+    return sqlite_store_uri(base / "mlflow.db")
+
+
+def sqlite_store_uri(db: PurePath | str) -> str:
+    """The MLflow tracking URI of the sqlite store at *db*.
+
+    Forward slashes on every platform: ``sqlite:///C:/Users/x/mlflow.db`` is
+    the form SQLAlchemy and MLflow document for Windows, and a backslash in
+    a URI is read as an escape by some of the code a tracking URI passes
+    through.
+    """
+    posix = db.as_posix() if isinstance(db, PurePath) else Path(db).as_posix()
+    return f"sqlite:///{posix}"
 
 
 class ApiKeyHeaderProvider:
@@ -213,7 +225,9 @@ def _current_user() -> str | None:
     identity."""
     try:
         return getpass.getuser()
-    except (KeyError, OSError):
+    except (KeyError, OSError, ImportError):
+        # ImportError: Python 3.12 on Windows, with no USERNAME in the
+        # environment, falls through to the POSIX-only ``pwd`` module.
         return None
 
 

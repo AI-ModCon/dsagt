@@ -48,6 +48,8 @@ from pathlib import Path
 
 import yaml
 
+from dsagt._compat import remove_tree, rename_path
+
 from dsagt.registry import (
     CODES_COLLECTION,
     CATALOG_COLLECTION_PREFIX,
@@ -247,14 +249,16 @@ def persist_source_to_config(project_dir: str | Path, spec: dict) -> bool:
     cfg_path = Path(project_dir) / ".dsagt" / "config.yaml"
     if not cfg_path.exists():
         return False
-    cfg = yaml.safe_load(cfg_path.read_text()) or {}
+    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     sources = cfg.setdefault("skills", {}).setdefault("sources", [])
     if any(s.get("url") == spec.get("url") for s in sources):
         return False
     sources.append(
         {k: spec[k] for k in ("name", "url", "branch", "subdir") if k in spec}
     )
-    cfg_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
+    cfg_path.write_text(
+        yaml.dump(cfg, default_flow_style=False, sort_keys=False), encoding="utf-8"
+    )
     return True
 
 
@@ -345,16 +349,18 @@ def sync_source(
 
     branch = spec.get("branch", "main")
     # A set-aside clone from a sync that died before cleaning up.
-    shutil.rmtree(dest.with_name(dest.name + _PREVIOUS_SUFFIX), ignore_errors=True)
+    remove_tree(dest.with_name(dest.name + _PREVIOUS_SUFFIX), ignore_errors=True)
     if dest.exists() and not force:
         stamp = dest / SOURCE_REF_FILE
-        force = not stamp.exists() or stamp.read_text().strip() != branch
+        force = (
+            not stamp.exists() or stamp.read_text(encoding="utf-8").strip() != branch
+        )
     previous: Path | None = None
     if force and dest.exists():
         # Set the old clone aside rather than deleting it: a failed re-clone
         # (offline, or a private repository) must leave the cache as it was.
         previous = dest.with_name(dest.name + _PREVIOUS_SUFFIX)
-        dest.rename(previous)
+        rename_path(dest, previous)
     if not dest.exists():
         from dsagt.commands.setup_core_kb import clone_github  # lazy: break cycle
 
@@ -367,12 +373,12 @@ def sync_source(
             # A failed clone must not leave the empty dir behind: it would
             # satisfy the dest.exists() skip above on every later sync,
             # leaving the source at zero skills until a forced resync.
-            shutil.rmtree(dest, ignore_errors=True)
+            remove_tree(dest, ignore_errors=True)
             if previous is not None:
-                previous.rename(dest)
+                rename_path(previous, dest)
             raise
         if previous is not None:
-            shutil.rmtree(previous)
+            remove_tree(previous)
 
     walk_root = dest / spec["subdir"] if spec.get("subdir") else dest
     skill_dirs = _discover_skill_dirs(walk_root)
@@ -407,12 +413,20 @@ def _catalog_embed_text(spec: dict, fallback_name: str) -> str:
     return f"{name}: {desc} {tags}".strip()
 
 
+def _release_collection(kb, collection: str) -> None:
+    """Have *kb* close *collection*'s files before its directory is removed."""
+    release = getattr(kb, "release_collection", None)
+    if release is not None:
+        release(collection)
+
+
 def index_catalog(skill_dirs: list[Path], slug: str, url: str, kb) -> int:
     """Wipe + rebuild source *slug*'s catalog collection from *skill_dirs*."""
     collection = catalog_collection(slug)
     coll_dir = Path(kb.index_dir) / collection
     if coll_dir.exists():
-        shutil.rmtree(coll_dir)
+        _release_collection(kb, collection)
+        remove_tree(coll_dir)
 
     texts: list[str] = []
     metas: list[dict] = []
@@ -528,12 +542,12 @@ def _capture_attribution(src: Path, dest: Path, cache_dir: Path) -> list[str]:
 
     provenance = (
         f"Installed by dsagt from catalog source: {slug}\n"
-        f"Source path in repo: {rel}\n"
+        f"Source path in repo: {rel.as_posix()}\n"
     )
     stamp = repo_root / SOURCE_COMMIT_FILE
     if stamp.exists():
-        provenance += f"Commit: {stamp.read_text().strip()}\n"
-    (dest / "PROVENANCE.txt").write_text(provenance)
+        provenance += f"Commit: {stamp.read_text(encoding="utf-8").strip()}\n"
+    (dest / "PROVENANCE.txt").write_text(provenance, encoding="utf-8")
     return captured
 
 
@@ -565,7 +579,7 @@ def install_into_project(
     dest = Path(project_dir) / "skills" / skill_name
     action = "updated" if dest.exists() else "added"
     if dest.exists():
-        shutil.rmtree(dest)
+        remove_tree(dest)
     shutil.copytree(src, dest)
     attribution = _capture_attribution(src, dest, cache_dir)
 
@@ -810,7 +824,7 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
     applied: list[tuple[str, str]] = []
     for md in skill_dir.rglob("*.md"):
         out = []
-        for line in md.read_text().splitlines(keepends=True):
+        for line in md.read_text(encoding="utf-8").splitlines(keepends=True):
             new = line
             for bare, wrapped in pairs:
                 before = new
@@ -820,16 +834,24 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
                 # pattern below is anchored so it cannot match inside a
                 # wrapper it has already written.
                 if wrapped not in new:
+                    # The replacement is a function: a string would have its
+                    # backslashes read as escapes.
                     new = re.sub(
-                        rf"^(\s*){re.escape(bare)}(?=\s)", rf"\1{wrapped}", new
+                        rf"^(\s*){re.escape(bare)}(?=\s)",
+                        lambda m: m.group(1) + wrapped,
+                        new,
                     )
-                    new = re.sub(rf"`{re.escape(bare)}(?=\s)", f"`{wrapped}", new)
+                    new = re.sub(
+                        rf"`{re.escape(bare)}(?=\s)", lambda m: "`" + wrapped, new
+                    )
                     if "/" in bare:
                         # A script path is specific enough to rewrite
                         # mid-sentence ("Run python3 scripts/x.py on ...");
                         # a bare CLI name is not ("uv run aidrin" stays).
                         new = re.sub(
-                            rf"(?<=\s)(?<!-- ){re.escape(bare)}(?=\s)", wrapped, new
+                            rf"(?<=\s)(?<!-- ){re.escape(bare)}(?=\s)",
+                            lambda m: wrapped,
+                            new,
                         )
                 if "/" in bare and wrapped not in new and "dsagt-run" in new:
                     # A wrapped line whose code name is a guess (the agent
@@ -838,16 +860,16 @@ def rewrite_cli_invocations(skill_dir: Path, pairs: list[tuple[str, str]]) -> in
                     # the whole wrapper.
                     new = re.sub(
                         rf"dsagt-run --code \S+ -- (?:uv run [^\n`]*? -- )?{re.escape(bare)}(?=\s|`|$)",
-                        wrapped,
+                        lambda m: wrapped,
                         new,
                     )
                 if new != before and (bare, wrapped) not in applied:
                     applied.append((bare, wrapped))
             changed += new != line
             out.append(new)
-        md.write_text("".join(out))
+        md.write_text("".join(out), encoding="utf-8")
     if applied:
-        with (skill_dir / "PROVENANCE.txt").open("a") as f:
+        with (skill_dir / "PROVENANCE.txt").open("a", encoding="utf-8") as f:
             for bare, wrapped in applied:
                 f.write(f"CLI examples rewritten by dsagt: `{bare}` -> `{wrapped}`\n")
     return changed
@@ -873,7 +895,7 @@ def _is_entry_script(path: Path) -> bool:
         return True
     if path.suffix != ".py":
         return False
-    text = path.read_text(errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
     return (
         '__name__ == "__main__"' in text
         or "__name__ == '__main__'" in text
@@ -915,7 +937,9 @@ def derive_code_spec(skill_name: str, script: Path) -> dict:
     spec = {
         "name": script_code_name(skill_name, script),
         "description": f"Script {script.name} of the {skill_name} skill.",
-        "executable": f"{interpreter} {Path('skills') / skill_name / 'scripts' / script.name}",
+        # Forward slashes on every platform: the line is run by the agent's
+        # shell, and bash on Windows reads a backslash as an escape.
+        "executable": f"{interpreter} skills/{skill_name}/scripts/{script.name}",
         "parameters": {
             "args": {
                 "type": "string",
@@ -929,7 +953,7 @@ def derive_code_spec(skill_name: str, script: Path) -> dict:
     if script.suffix != ".py":
         return spec
     try:
-        tree = ast.parse(script.read_text(errors="replace"))
+        tree = ast.parse(script.read_text(encoding="utf-8", errors="replace"))
     except (SyntaxError, OSError):
         return spec
     parameters: dict[str, dict] = {}
@@ -999,7 +1023,7 @@ def delete_skill(project_dir: str | Path, name: str, *, kb=None) -> dict:
         # and searchable, rather than on disk with no entry or the reverse.
         entries_removed = kb.delete_entries(CODES_COLLECTION, {"code_name": name})
 
-    shutil.rmtree(skill_dir)
+    remove_tree(skill_dir)
     from dsagt.agents import refresh_native_skills
 
     refresh_native_skills(project_dir)
@@ -1054,13 +1078,13 @@ def register_skill_scripts(
         sorted(
             p
             for p in (skill_dir / "scripts").glob("*")
-            if _is_entry_script(p) or str(p.relative_to(skill_dir)) in overrides
+            if _is_entry_script(p) or p.relative_to(skill_dir).as_posix() in overrides
         )
         if (skill_dir / "scripts").is_dir()
         else []
     )
     for script in scripts:
-        script_rel = str(script.relative_to(skill_dir))
+        script_rel = script.relative_to(skill_dir).as_posix()
         if script_rel in overrides:
             spec = _code_spec(
                 {"name": skill_name}, {**overrides[script_rel], "script": script_rel}
@@ -1114,7 +1138,9 @@ def base_skill_code_specs() -> list[dict]:
 
 def _code_spec(entry: dict, code: dict) -> dict:
     if "script" in code:
-        executable = f"python {Path('skills') / entry['name'] / code['script']}"
+        # Forward slashes on every platform (see derive_code_spec).
+        script = Path(code["script"]).as_posix()
+        executable = f"python skills/{entry['name']}/{script}"
     else:
         executable = code["executable"]
     spec = {
@@ -1326,7 +1352,7 @@ class SkillsCatalog:
             return 0
         ids = Path(self._kb.index_dir) / collection / "chroma_ids.json"
         try:
-            return len(json.loads(ids.read_text()))
+            return len(json.loads(ids.read_text(encoding="utf-8")))
         except (FileNotFoundError, ValueError, OSError):
             return 0
 

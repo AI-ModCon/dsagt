@@ -170,11 +170,13 @@ class CodexSetup(AgentSetup):
         # Build config.toml: the user's prefs plus the MCP sections.
         config_path = codex_home / "config.toml"
         user_config = user_codex / "config.toml"
-        base_toml = user_config.read_text() if user_config.exists() else ""
+        base_toml = (
+            user_config.read_text(encoding="utf-8") if user_config.exists() else ""
+        )
         mcp_env = _mcp_env_block(config)
         body = _render_codex_config(mcp_env)
         merged = base_toml.rstrip() + "\n\n" + body if base_toml else body
-        config_path.write_text(merged + "\n")
+        config_path.write_text(merged + "\n", encoding="utf-8")
         actions.append(f"Wrote {config_path} ({len(mcp_env)} MCP env vars)")
         return actions
 
@@ -200,7 +202,7 @@ class CodexSetup(AgentSetup):
     ) -> int:
         """Single ``codex exec`` call in non-interactive mode."""
         del config, max_turns
-        text = script_path.read_text().strip()
+        text = script_path.read_text(encoding="utf-8").strip()
         if not text:
             return 1
         cmd = [
@@ -212,4 +214,6 @@ class CodexSetup(AgentSetup):
             str(working_dir),
             text,
         ]
-        return _run_simple_script(cmd, env, working_dir, self.install_hint)
+        return _run_simple_script(
+            cmd, env, working_dir, self.install_hint, stdin_marker=["-"]
+        )

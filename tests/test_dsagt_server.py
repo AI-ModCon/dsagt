@@ -367,7 +367,7 @@ class TestPinTraceSource:
         from dsagt.session import read_state
 
         old = tmp_path / "old.jsonl"
-        old.write_text("{}\n")
+        old.write_text("{}\n", encoding="utf-8")
         stale = os.path.getmtime(old) - 100
         os.utime(old, (stale, stale))  # written before this server started
         monkeypatch.setattr(server_mod, "_SERVER_STARTED_AT", stale + 50)
@@ -380,7 +380,7 @@ class TestPinTraceSource:
             def active_source(self):
                 seen.append(1)
                 if len(seen) >= 3:  # the agent's first message creates the new file
-                    new.write_text("{}\n")
+                    new.write_text("{}\n", encoding="utf-8")
                     return str(new)
                 return str(old)
 
@@ -462,7 +462,7 @@ class TestPinTraceSourceResume:
         (tmp_path / ".dsagt").mkdir()
         append_session(tmp_path)
         same = tmp_path / "same.jsonl"
-        same.write_text("{}\n")
+        same.write_text("{}\n", encoding="utf-8")
         record_trace_source(tmp_path, str(same))
         append_session(tmp_path)
         monkeypatch.setattr(
@@ -499,11 +499,12 @@ def test_reconstruct_pipeline_saves_to_a_project_path(tmp_path):
                     "output_files": [],
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
     out = _call(server, "reconstruct_pipeline", {"output": "audit/pipeline.sh"})
     assert out.startswith("Saved to audit/pipeline.sh")
-    saved = (tmp_path / "runtime" / "audit" / "pipeline.sh").read_text()
+    saved = (tmp_path / "runtime" / "audit" / "pipeline.sh").read_text(encoding="utf-8")
     assert "echo hi" in saved
     outside = _call(server, "reconstruct_pipeline", {"output": "../escape.sh"})
     assert outside.startswith("Error: output must be a path under the project")
@@ -519,7 +520,9 @@ def test_the_agent_card_lists_the_tools_the_server_serves(tmp_path):
 
     server = _make_merged_server(tmp_path)
     served = set(_list_tools(server))
-    card = (Path(__file__).resolve().parents[1] / "agent-card.md").read_text()
+    card = (Path(__file__).resolve().parents[1] / "agent-card.md").read_text(
+        encoding="utf-8"
+    )
     listed = {m.group(1) for m in re.finditer(r"^- `(\w+)` — ", card, re.M)}
     assert listed == served
     # Every count the card states of the current server, not just the one

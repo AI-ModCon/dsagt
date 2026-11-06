@@ -65,7 +65,7 @@ def test_docs_page_quotes_the_paragraph_verbatim():
     from dsagt.readiness import INSTRUCTIONS_PARAGRAPH
 
     page = Path(__file__).resolve().parents[1] / "docs" / "readiness.md"
-    text = page.read_text()
+    text = page.read_text(encoding="utf-8")
     start = text.index("> #### AI-readiness check")
     end = text.index("\n## ", start)
     quoted = "\n".join(
@@ -110,9 +110,11 @@ def test_every_dsagt_run_the_shipped_text_names_parses():
     package = Path(dsagt.__file__).resolve().parent
     sources = {
         "INSTRUCTIONS_PARAGRAPH": rd.INSTRUCTIONS_PARAGRAPH,
-        "dsagt_instructions.md": (package / "dsagt_instructions.md").read_text(),
-        "docs/readiness.md": (docs / "readiness.md").read_text(),
-        "docs/provenance.md": (docs / "provenance.md").read_text(),
+        "dsagt_instructions.md": (package / "dsagt_instructions.md").read_text(
+            encoding="utf-8"
+        ),
+        "docs/readiness.md": (docs / "readiness.md").read_text(encoding="utf-8"),
+        "docs/provenance.md": (docs / "provenance.md").read_text(encoding="utf-8"),
     }
     named = 0
     for name, text in sources.items():

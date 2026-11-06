@@ -19,6 +19,8 @@ import pytest
 from mcp_helpers import call_tool_async
 from mcp_helpers import call_tool_json as call_tool
 
+from dsagt._compat import is_dir_link, link_dir
+
 from dsagt.mcp.knowledge_tools import create_knowledge_server, setup_runtime_kb
 
 
@@ -320,7 +322,7 @@ class TestIngest:
     def test_ingest_not_a_directory(self, server, tmp_path):
         """Ingesting a file (not a directory) returns an error immediately."""
         file_path = tmp_path / "not_a_dir.txt"
-        file_path.write_text("I'm a file")
+        file_path.write_text("I'm a file", encoding="utf-8")
 
         result = call_tool(
             server,
@@ -359,7 +361,7 @@ class TestIngest:
         existing = mock_kb.index_dir / "docs"
         existing.mkdir()
         (existing / "chroma_ids.json").write_bytes(b"fake")
-        (existing / "source.txt").write_text("/some/other/folder")
+        (existing / "source.txt").write_text("/some/other/folder", encoding="utf-8")
 
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
 
@@ -385,9 +387,9 @@ class TestIngest:
         base_dir = tmp_path / "base_docs"
         base_dir.mkdir()
         (base_dir / "chroma_ids.json").write_bytes(b"fake")
-        (base_dir / "source.txt").write_text("/some/other/folder")
+        (base_dir / "source.txt").write_text("/some/other/folder", encoding="utf-8")
 
-        (mock_kb.index_dir / "docs").symlink_to(base_dir)
+        assert link_dir(base_dir, mock_kb.index_dir / "docs")
         mock_kb.ingest.return_value = {"collection": "docs1", "files": 3, "chunks": 10}
 
         result = call_tool(
@@ -403,7 +405,7 @@ class TestIngest:
         assert "warning" in result
         assert "docs1" in result["warning"]
         # Base symlink should still exist untouched
-        assert (mock_kb.index_dir / "docs").is_symlink()
+        assert is_dir_link(mock_kb.index_dir / "docs")
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +474,7 @@ class TestAppend:
         # Create a fake existing collection
         coll_dir = mock_kb.index_dir / "docs"
         coll_dir.mkdir(exist_ok=True)
-        (coll_dir / "chroma_ids.json").write_text("fake")
+        (coll_dir / "chroma_ids.json").write_text("fake", encoding="utf-8")
 
         result = call_tool(
             server,
@@ -491,7 +493,7 @@ class TestAppend:
         """Background append job completes successfully."""
         coll_dir = mock_kb.index_dir / "docs"
         coll_dir.mkdir(exist_ok=True)
-        (coll_dir / "chroma_ids.json").write_text("fake")
+        (coll_dir / "chroma_ids.json").write_text("fake", encoding="utf-8")
 
         async def run():
             initial, final = await call_tool_and_await_job(
@@ -673,9 +675,9 @@ class TestSetupRuntimeKb:
         base = tmp_path / "base_index"
         coll_dir = base / "my_collection"
         coll_dir.mkdir(parents=True)
-        (coll_dir / "chroma_ids.json").write_text("fake index")
-        (coll_dir / "chunks.jsonl").write_text('{"id": "1"}\n')
-        (coll_dir / "DESCRIPTION.md").write_text("Test collection")
+        (coll_dir / "chroma_ids.json").write_text("fake index", encoding="utf-8")
+        (coll_dir / "chunks.jsonl").write_text('{"id": "1"}\n', encoding="utf-8")
+        (coll_dir / "DESCRIPTION.md").write_text("Test collection", encoding="utf-8")
 
         runtime = tmp_path / "runtime"
         result = setup_runtime_kb(base, runtime)
@@ -685,7 +687,7 @@ class TestSetupRuntimeKb:
         assert copied.exists()
         assert not copied.is_symlink()  # copy not symlink
         assert (copied / "chroma_ids.json").exists()
-        assert (copied / "chroma_ids.json").read_text() == "fake index"
+        assert (copied / "chroma_ids.json").read_text(encoding="utf-8") == "fake index"
         assert (copied / "chunks.jsonl").exists()
         assert (copied / "DESCRIPTION.md").exists()
 
@@ -694,23 +696,25 @@ class TestSetupRuntimeKb:
         base = tmp_path / "base_index"
         coll = base / "codes"
         coll.mkdir(parents=True)
-        (coll / "chroma_ids.json").write_text("v1")
+        (coll / "chroma_ids.json").write_text("v1", encoding="utf-8")
 
         runtime = tmp_path / "runtime"
         setup_runtime_kb(base, runtime)
 
         # Mutate the base, simulating ``dsagt setup-kb --rebuild``.
-        (coll / "chroma_ids.json").write_text("v2 newer")
+        (coll / "chroma_ids.json").write_text("v2 newer", encoding="utf-8")
 
         # Project copy stays at v1.
         project_copy = runtime / "kb_index" / "codes" / "chroma_ids.json"
-        assert project_copy.read_text() == "v1"
+        assert project_copy.read_text(encoding="utf-8") == "v1"
 
     def test_skips_non_collection_dirs(self, tmp_path):
         """Directories without chroma_ids.json are not copied."""
         base = tmp_path / "base_index"
         (base / "random_dir").mkdir(parents=True)
-        (base / "random_dir" / "notes.txt").write_text("not a collection")
+        (base / "random_dir" / "notes.txt").write_text(
+            "not a collection", encoding="utf-8"
+        )
 
         runtime = tmp_path / "runtime"
         result = setup_runtime_kb(base, runtime)
@@ -730,16 +734,20 @@ class TestSetupRuntimeKb:
         base = tmp_path / "base_index"
         coll = base / "docs"
         coll.mkdir(parents=True)
-        (coll / "chroma_ids.json").write_text("base version")
+        (coll / "chroma_ids.json").write_text("base version", encoding="utf-8")
 
         runtime = tmp_path / "runtime"
         runtime_coll = runtime / "kb_index" / "docs"
         runtime_coll.mkdir(parents=True)
-        (runtime_coll / "chroma_ids.json").write_text("runtime version")
+        (runtime_coll / "chroma_ids.json").write_text(
+            "runtime version", encoding="utf-8"
+        )
 
         setup_runtime_kb(base, runtime)
 
-        assert (runtime_coll / "chroma_ids.json").read_text() == "runtime version"
+        assert (runtime_coll / "chroma_ids.json").read_text(
+            encoding="utf-8"
+        ) == "runtime version"
 
 
 # ---------------------------------------------------------------------------

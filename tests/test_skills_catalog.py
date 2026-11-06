@@ -7,6 +7,8 @@ import os
 
 import pytest
 
+from dsagt._compat import is_dir_link
+
 from dsagt.agents.base import (
     _NATIVE_DESCRIPTION_CAP,
     _SKILL_MANIFEST,
@@ -19,7 +21,8 @@ from dsagt.registry import CATALOG_COLLECTION_PREFIX, catalog_collection
 def _mkskill(d, name, desc="a short description"):
     d.mkdir(parents=True, exist_ok=True)
     (d / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: {desc}\n---\n# {name}\nbody\n"
+        f"---\nname: {name}\ndescription: {desc}\n---\n# {name}\nbody\n",
+        encoding="utf-8",
     )
     return d
 
@@ -96,7 +99,9 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
         slug = sc._repo_slug(source["url"])
         synced.append((slug, force))
         (cache_dir / slug).mkdir(parents=True, exist_ok=True)
-        (cache_dir / slug / "SOURCE_COMMIT").write_text(f"{slug}-commit\n")
+        (cache_dir / slug / "SOURCE_COMMIT").write_text(
+            f"{slug}-commit\n", encoding="utf-8"
+        )
         subdir = source.get("subdir") or ""
         for b in sc.base_skills():
             if sc.resolve_source(b["source"])["url"] == source["url"]:
@@ -104,7 +109,9 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
                 for code in b.get("codes", ()):
                     if "script" in code:
                         (d / code["script"]).parent.mkdir(parents=True, exist_ok=True)
-                        (d / code["script"]).write_text("print('ok')\n")
+                        (d / code["script"]).write_text(
+                            "print('ok')\n", encoding="utf-8"
+                        )
         return {"slug": slug}
 
     monkeypatch.setattr(sc, "sync_source", fake_sync)
@@ -122,8 +129,10 @@ def test_install_base_skills_reuses_cache_and_installs(tmp_path, monkeypatch):
     assert synced == [("ai-modcon-genesis-skills", True)]
     assert (proj / "skills" / "skill-creator" / "SKILL.md").exists()
     assert (proj / "skills" / "datacard-generator" / "SKILL.md").exists()
-    assert "edited by the user" in (edited / "SKILL.md").read_text()
-    provenance = (proj / "skills" / "datacard-generator" / "PROVENANCE.txt").read_text()
+    assert "edited by the user" in (edited / "SKILL.md").read_text(encoding="utf-8")
+    provenance = (proj / "skills" / "datacard-generator" / "PROVENANCE.txt").read_text(
+        encoding="utf-8"
+    )
     assert "Commit: ai-modcon-genesis-skills-commit" in provenance
     # The scripts the datacard workflow runs, and the aidrin CLI, are codes.
     assert (proj / "skills" / "datacard-introspect" / "SKILL.md").exists()
@@ -137,14 +146,14 @@ def _base_skill_dirs(proj):
         skill_dir = proj / "skills" / entry["name"]
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: {entry['name']}\ndescription: d\n---\n"
+            f"---\nname: {entry['name']}\ndescription: d\n---\n", encoding="utf-8"
         )
         for code in entry.get("codes", ()):
             if "script" not in code:
                 continue
             script = skill_dir / code["script"]
             script.parent.mkdir(parents=True, exist_ok=True)
-            script.write_text("print('ok')\n")
+            script.write_text("print('ok')\n", encoding="utf-8")
 
 
 def _register_base(proj, kb=None):
@@ -211,14 +220,16 @@ def test_upstream_uv_run_form_of_a_cli_code_is_rewritten(tmp_path):
     _base_skill_dirs(proj)
     skill_md = proj / "skills" / "datacard-generator" / "SKILL.md"
     skill_md.write_text(
-        skill_md.read_text() + "```bash\nuv run --with linkml linkml-validate \\\n"
+        skill_md.read_text(encoding="utf-8")
+        + "```bash\nuv run --with linkml linkml-validate \\\n"
         "  -s <skill_root>/scripts/genesis_datacard.yaml \\\n"
-        "  -C GenesisDatacardClass /tmp/card.yaml\n```\n"
+        "  -C GenesisDatacardClass /tmp/card.yaml\n```\n",
+        encoding="utf-8",
     )
     _register_base(proj)
     assert (
         "\ndsagt-run --code linkml-validate -- uv run --with linkml -- "
-        "linkml-validate \\\n" in skill_md.read_text()
+        "linkml-validate \\\n" in skill_md.read_text(encoding="utf-8")
     )
 
 
@@ -226,7 +237,7 @@ def test_registration_requires_the_script_an_override_names(tmp_path):
     proj = tmp_path / "proj"
     (proj / "skills" / "datacard-generator").mkdir(parents=True)
     (proj / "skills" / "datacard-generator" / "SKILL.md").write_text(
-        "---\nname: x\n---\n"
+        "---\nname: x\n---\n", encoding="utf-8"
     )
     entry = next(e for e in sc.base_skills() if e["name"] == "datacard-generator")
     with pytest.raises(FileNotFoundError, match="datacard-generator"):
@@ -240,18 +251,22 @@ def test_persist_source_to_config_appends_and_dedupes(tmp_path):
 
     (tmp_path / ".dsagt").mkdir()
     cfg = tmp_path / ".dsagt" / "config.yaml"
-    cfg.write_text(yaml.dump({"project": "p", "skills": {"sources": []}}))
+    cfg.write_text(
+        yaml.dump({"project": "p", "skills": {"sources": []}}), encoding="utf-8"
+    )
     spec = {
         "name": "anthropic",
         "url": "https://github.com/anthropics/skills",
         "branch": "main",
     }
     assert sc.persist_source_to_config(tmp_path, spec) is True
-    sources = yaml.safe_load(cfg.read_text())["skills"]["sources"]
+    sources = yaml.safe_load(cfg.read_text(encoding="utf-8"))["skills"]["sources"]
     assert sources[-1]["name"] == "anthropic"
     # Idempotent: same URL is not appended twice.
     assert sc.persist_source_to_config(tmp_path, spec) is False
-    assert len(yaml.safe_load(cfg.read_text())["skills"]["sources"]) == 1
+    assert (
+        len(yaml.safe_load(cfg.read_text(encoding="utf-8"))["skills"]["sources"]) == 1
+    )
     # No config file → no-op, no crash.
     assert sc.persist_source_to_config(tmp_path / "nope", spec) is False
 
@@ -280,7 +295,7 @@ def test_discover_skill_dirs_flat_and_nested(tmp_path):
     # A dir whose SKILL.md has no name is ignored.
     bad = root / "noname"
     bad.mkdir(parents=True)
-    (bad / "SKILL.md").write_text("---\ndescription: x\n---\nbody")
+    (bad / "SKILL.md").write_text("---\ndescription: x\n---\nbody", encoding="utf-8")
     names = sorted(p.name for p in sc._discover_skill_dirs(tmp_path))
     assert names == ["flat", "nested"]
 
@@ -332,7 +347,9 @@ def test_install_into_project_source_qualified(tmp_path):
         sc.install_into_project("dup", proj, cache_dir=cache)
     info = sc.install_into_project("srcB/dup", proj, cache_dir=cache)
     assert info["name"] == "dup"
-    assert (proj / "skills" / "dup" / "SKILL.md").read_text().count("from B") == 1
+    assert (proj / "skills" / "dup" / "SKILL.md").read_text(encoding="utf-8").count(
+        "from B"
+    ) == 1
 
 
 def test_install_rejects_path_traversal_name(tmp_path):
@@ -356,9 +373,9 @@ def test_install_into_project_copies_subdirs(tmp_path):
     cache = tmp_path / "cache"
     skill = _mkskill(cache / "src" / "vasp-to-isaac", "vasp-to-isaac")
     (skill / "scripts").mkdir()
-    (skill / "scripts" / "run.py").write_text("print(1)")
+    (skill / "scripts" / "run.py").write_text("print(1)", encoding="utf-8")
     (skill / "references").mkdir()
-    (skill / "references" / "spec.md").write_text("# spec")
+    (skill / "references" / "spec.md").write_text("# spec", encoding="utf-8")
 
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -402,7 +419,7 @@ def test_sync_source_reuses_cached_clone_without_force(tmp_path, monkeypatch):
     def fake_clone(url, dest, branch="main", include=None):
         clones.append(branch)
         dest.mkdir(parents=True, exist_ok=True)
-        (dest / "SOURCE_REF").write_text(branch + "\n")
+        (dest / "SOURCE_REF").write_text(branch + "\n", encoding="utf-8")
         _mkskill(dest / "skills" / "s1", "s1")
 
     monkeypatch.setattr("dsagt.commands.setup_core_kb.clone_github", fake_clone)
@@ -433,14 +450,14 @@ def test_sync_source_keeps_the_cache_when_a_reclone_fails(tmp_path, monkeypatch)
 
     cache = tmp_path / "cache"
     old = _mkskill(cache / "x-y" / "skills" / "s1", "s1")
-    (cache / "x-y" / "SOURCE_REF").write_text("main\n")
+    (cache / "x-y" / "SOURCE_REF").write_text("main\n", encoding="utf-8")
     monkeypatch.setattr("dsagt.commands.setup_core_kb.clone_github", failing_clone)
     spec = {"url": "https://github.com/x/y", "branch": "v2.0", "subdir": "skills"}
 
     with pytest.raises(RuntimeError, match="Username"):
         sc.sync_source(spec, cache_dir=cache)
     assert (old / "SKILL.md").exists()
-    assert (cache / "x-y" / "SOURCE_REF").read_text() == "main\n"
+    assert (cache / "x-y" / "SOURCE_REF").read_text(encoding="utf-8") == "main\n"
     assert not (cache / "x-y.previous").exists()
 
 
@@ -491,7 +508,7 @@ def test_mirror_manifest_preserves_user_skills_and_reaps(tmp_path):
         "skill-creator",
         "user-skill",
     ]
-    manifest = json.loads((target / _SKILL_MANIFEST).read_text())
+    manifest = json.loads((target / _SKILL_MANIFEST).read_text(encoding="utf-8"))
     assert manifest == ["alpha", "skill-creator"]
     assert "user-skill" not in manifest
 
@@ -514,15 +531,20 @@ def test_rewrite_cli_invocations_to_the_registered_code(tmp_path):
         "Run `aidrin run completeness <file>` or, in a fence:\n"
         "```bash\naidrin list\n  aidrin data-quality f.csv --detail\n```\n"
         "Already wrapped: `dsagt-run --code aidrin -- aidrin list`.\n"
-        "Untouched: `aidrin`, aidrin-mcp, `uv run aidrin list`, skills/aidrin/x.\n"
+        "Untouched: `aidrin`, aidrin-mcp, `uv run aidrin list`, skills/aidrin/x.\n",
+        encoding="utf-8",
     )
     (skill / "reference").mkdir()
-    (skill / "reference" / "metrics.md").write_text("`aidrin run duplicity <file>`\n")
-    (skill / "PROVENANCE.txt").write_text("Installed by dsagt from catalog source: x\n")
+    (skill / "reference" / "metrics.md").write_text(
+        "`aidrin run duplicity <file>`\n", encoding="utf-8"
+    )
+    (skill / "PROVENANCE.txt").write_text(
+        "Installed by dsagt from catalog source: x\n", encoding="utf-8"
+    )
 
     pairs = [("aidrin", "dsagt-run --code aidrin -- aidrin")]
     assert sc.rewrite_cli_invocations(skill, pairs) == 4
-    text = (skill / "SKILL.md").read_text()
+    text = (skill / "SKILL.md").read_text(encoding="utf-8")
     assert "Run `dsagt-run --code aidrin -- aidrin run completeness <file>`" in text
     assert "\ndsagt-run --code aidrin -- aidrin list\n" in text
     assert "\n  dsagt-run --code aidrin -- aidrin data-quality f.csv --detail\n" in text
@@ -533,16 +555,19 @@ def test_rewrite_cli_invocations_to_the_registered_code(tmp_path):
         "Untouched: `aidrin`, aidrin-mcp, `uv run aidrin list`, skills/aidrin/x."
         in text
     )
-    assert (skill / "reference" / "metrics.md").read_text() == (
+    assert (skill / "reference" / "metrics.md").read_text(encoding="utf-8") == (
         "`dsagt-run --code aidrin -- aidrin run duplicity <file>`\n"
     )
-    assert (
-        "CLI examples rewritten by dsagt: `aidrin` -> `dsagt-run --code aidrin -- aidrin`"
-        in (skill / "PROVENANCE.txt").read_text()
+    assert "CLI examples rewritten by dsagt: `aidrin` -> `dsagt-run --code aidrin -- aidrin`" in (
+        skill / "PROVENANCE.txt"
+    ).read_text(
+        encoding="utf-8"
     )
     # A second pass changes nothing and stamps nothing more.
     assert sc.rewrite_cli_invocations(skill, pairs) == 0
-    assert (skill / "PROVENANCE.txt").read_text().count("rewritten") == 1
+    assert (skill / "PROVENANCE.txt").read_text(encoding="utf-8").count(
+        "rewritten"
+    ) == 1
 
 
 def test_mirror_truncates_long_description(tmp_path):
@@ -553,11 +578,11 @@ def test_mirror_truncates_long_description(tmp_path):
 
     import yaml
 
-    mirrored = (target / "big" / "SKILL.md").read_text()
+    mirrored = (target / "big" / "SKILL.md").read_text(encoding="utf-8")
     front = yaml.safe_load(mirrored.split("---", 2)[1])
     assert len(front["description"]) <= _NATIVE_DESCRIPTION_CAP
     # Source untouched.
-    assert len((src / "SKILL.md").read_text()) > _NATIVE_DESCRIPTION_CAP
+    assert len((src / "SKILL.md").read_text(encoding="utf-8")) > _NATIVE_DESCRIPTION_CAP
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +629,7 @@ def test_setup_skills_mirrors_registered_codes(tmp_path):
     mirrored = tmp_path / ".claude" / "skills" / "my-code" / "SKILL.md"
     assert mirrored.exists()
     # The mirrored copy carries the exact dsagt-run command the agent must run.
-    assert "dsagt-run --code my-code -- echo hi" in mirrored.read_text()
+    assert "dsagt-run --code my-code -- echo hi" in mirrored.read_text(encoding="utf-8")
 
 
 def test_setup_skills_project_skill_wins_code_name_collision(tmp_path):
@@ -622,7 +647,9 @@ def test_setup_skills_project_skill_wins_code_name_collision(tmp_path):
     )
     _mkskill(tmp_path / "skills" / "clash", "clash")
     AGENTS["claude"]().setup_skills(tmp_path, {})
-    text = (tmp_path / ".claude" / "skills" / "clash" / "SKILL.md").read_text()
+    text = (tmp_path / ".claude" / "skills" / "clash" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
     assert "dsagt-run" not in text  # the skill copy, not the code copy
 
 
@@ -646,10 +673,12 @@ def test_install_captures_ancestor_attribution(tmp_path):
     cache = tmp_path / "cache"
     repo = cache / "srcrepo"
     repo.mkdir(parents=True)
-    (repo / "LICENSE").write_text("Apache-2.0")  # repo-root license
+    (repo / "LICENSE").write_text("Apache-2.0", encoding="utf-8")  # repo-root license
     cat = repo / "skills" / "modcon"
     cat.mkdir(parents=True)
-    (cat / "ATTRIBUTION.md").write_text("upstream credits")  # per-subtree
+    (cat / "ATTRIBUTION.md").write_text(
+        "upstream credits", encoding="utf-8"
+    )  # per-subtree
     _mkskill(cat / "myskill", "myskill")
 
     proj = tmp_path / "proj"
@@ -657,9 +686,9 @@ def test_install_captures_ancestor_attribution(tmp_path):
     info = sc.install_into_project("myskill", proj, cache_dir=cache)
     dest = proj / "skills" / "myskill"
     assert (dest / "SKILL.md").exists()
-    assert (dest / "ATTRIBUTION.md").read_text() == "upstream credits"
-    assert (dest / "LICENSE").read_text() == "Apache-2.0"
-    prov = (dest / "PROVENANCE.txt").read_text()
+    assert (dest / "ATTRIBUTION.md").read_text(encoding="utf-8") == "upstream credits"
+    assert (dest / "LICENSE").read_text(encoding="utf-8") == "Apache-2.0"
+    prov = (dest / "PROVENANCE.txt").read_text(encoding="utf-8")
     assert "srcrepo" in prov and "skills/modcon/myskill" in prov
     assert set(info["attribution"]) == {"ATTRIBUTION.md", "LICENSE"}
 
@@ -668,16 +697,18 @@ def test_install_skill_local_license_wins(tmp_path):
     cache = tmp_path / "cache"
     repo = cache / "srcrepo"
     repo.mkdir(parents=True)
-    (repo / "LICENSE").write_text("ROOT")  # repo-root license
+    (repo / "LICENSE").write_text("ROOT", encoding="utf-8")  # repo-root license
     skill = _mkskill(repo / "myskill", "myskill")
-    (skill / "LICENSE").write_text("SKILL-LOCAL")  # skill bundles its own
+    (skill / "LICENSE").write_text(
+        "SKILL-LOCAL", encoding="utf-8"
+    )  # skill bundles its own
 
     proj = tmp_path / "proj"
     proj.mkdir()
     info = sc.install_into_project("myskill", proj, cache_dir=cache)
     dest = proj / "skills" / "myskill"
     # The skill's own LICENSE (copied by copytree) must not be overwritten.
-    assert (dest / "LICENSE").read_text() == "SKILL-LOCAL"
+    assert (dest / "LICENSE").read_text(encoding="utf-8") == "SKILL-LOCAL"
     assert "LICENSE" not in info["attribution"]
 
 
@@ -702,7 +733,8 @@ def test_index_catalog_embeds_frontmatter_not_body(tmp_path):
     skill.mkdir()
     (skill / "SKILL.md").write_text(
         "---\nname: myskill\ndescription: does a thing\ntags: [hpc, slurm]\n---\n"
-        "# Body\nSECRET_BODY_MARKER should not be embedded.\n"
+        "# Body\nSECRET_BODY_MARKER should not be embedded.\n",
+        encoding="utf-8",
     )
     dirs = sc._discover_skill_dirs(tmp_path)
     sc.index_catalog(dirs, "slug", "http://x", _KB())
@@ -740,7 +772,7 @@ def test_install_base_skills_finishes_the_others_when_one_fetch_fails(
             raise RuntimeError("clone failed")
         slug = sc._repo_slug(source["url"])
         (cache_dir / slug).mkdir(parents=True, exist_ok=True)
-        (cache_dir / slug / "SOURCE_COMMIT").write_text("c\n")
+        (cache_dir / slug / "SOURCE_COMMIT").write_text("c\n", encoding="utf-8")
         for b in sc.base_skills():
             if sc.resolve_source(b["source"])["url"] == source["url"]:
                 d = _mkskill(cache_dir / slug / "x" / b["name"], b["name"])
@@ -748,7 +780,7 @@ def test_install_base_skills_finishes_the_others_when_one_fetch_fails(
                     if "script" not in code:
                         continue
                     (d / code["script"]).parent.mkdir(parents=True, exist_ok=True)
-                    (d / code["script"]).write_text("print('ok')\n")
+                    (d / code["script"]).write_text("print('ok')\n", encoding="utf-8")
         return {"slug": slug}
 
     monkeypatch.setattr(sc, "sync_source", fake_sync)
@@ -773,14 +805,16 @@ def test_install_base_skills_uses_the_cached_clone_when_a_refresh_fails(
         if force:
             raise RuntimeError("offline")
         (cache_dir / slug).mkdir(parents=True, exist_ok=True)
-        (cache_dir / slug / "SOURCE_COMMIT").write_text("c\n")
+        (cache_dir / slug / "SOURCE_COMMIT").write_text("c\n", encoding="utf-8")
         for b in sc.base_skills():
             if sc.resolve_source(b["source"])["url"] == source["url"]:
                 d = _mkskill(cache_dir / slug / "x" / b["name"], b["name"])
                 for code in b.get("codes", ()):
                     if "script" in code:
                         (d / code["script"]).parent.mkdir(parents=True, exist_ok=True)
-                        (d / code["script"]).write_text("print('ok')\n")
+                        (d / code["script"]).write_text(
+                            "print('ok')\n", encoding="utf-8"
+                        )
         return {"slug": slug}
 
     monkeypatch.setattr(sc, "sync_source", fake_sync)
@@ -834,7 +868,7 @@ def test_a_previous_clone_left_behind_is_not_a_source(tmp_path, monkeypatch):
     next sync."""
     cache = tmp_path / "cache"
     live = _mkskill(cache / "x-y" / "skills" / "s1", "s1")
-    (cache / "x-y" / "SOURCE_REF").write_text("main\n")
+    (cache / "x-y" / "SOURCE_REF").write_text("main\n", encoding="utf-8")
     _mkskill(cache / "x-y.previous" / "skills" / "s1", "s1")
 
     # One source, not an ambiguous pair.
@@ -858,20 +892,23 @@ def test_mirror_is_a_relative_symlink_to_the_live_skill(tmp_path):
     the mirrored skill runs, with no copy that could drift."""
     src = _mkskill(tmp_path / "proj" / "skills" / "alpha", "alpha")
     (src / "scripts").mkdir()
-    (src / "scripts" / "a.py").write_text("print(1)\n")
+    (src / "scripts" / "a.py").write_text("print(1)\n", encoding="utf-8")
     target = tmp_path / "proj" / ".claude" / "skills"
     _mirror_skills_to(target, [src])
     link = target / "alpha"
-    assert link.is_symlink()
-    assert not os.path.isabs(os.readlink(link))
-    assert (link / "scripts" / "a.py").read_text() == "print(1)\n"
-    (src / "scripts" / "a.py").write_text("print(2)\n")
-    assert (link / "scripts" / "a.py").read_text() == "print(2)\n"
+    # A relative symlink; on Windows without the symlink privilege, a
+    # directory junction, which is absolute by nature.
+    assert is_dir_link(link)
+    if link.is_symlink():
+        assert not os.path.isabs(os.readlink(link))
+    assert (link / "scripts" / "a.py").read_text(encoding="utf-8") == "print(1)\n"
+    (src / "scripts" / "a.py").write_text("print(2)\n", encoding="utf-8")
+    assert (link / "scripts" / "a.py").read_text(encoding="utf-8") == "print(2)\n"
     # A second pass replaces the link in place; reaping removes it.
     _mirror_skills_to(target, [src])
-    assert link.is_symlink()
+    assert is_dir_link(link)
     _mirror_skills_to(target, [])
-    assert not link.exists() and not link.is_symlink()
+    assert not link.exists() and not is_dir_link(link)
 
 
 def test_a_line_naming_two_scripts_wraps_both(tmp_path):
@@ -885,7 +922,8 @@ def test_a_line_naming_two_scripts_wraps_both(tmp_path):
     skill = tmp_path / "x"
     skill.mkdir()
     (skill / "SKILL.md").write_text(
-        "Run python scripts/extract.py and python scripts/load.py in order.\n"
+        "Run python scripts/extract.py and python scripts/load.py in order.\n",
+        encoding="utf-8",
     )
     pairs = [
         (
@@ -895,13 +933,13 @@ def test_a_line_naming_two_scripts_wraps_both(tmp_path):
         ("python scripts/load.py", "dsagt-run --code x-load -- python scripts/load.py"),
     ]
     rewrite_cli_invocations(skill, pairs)
-    text = (skill / "SKILL.md").read_text()
+    text = (skill / "SKILL.md").read_text(encoding="utf-8")
     assert "dsagt-run --code x-extract -- python scripts/extract.py" in text
     assert "dsagt-run --code x-load -- python scripts/load.py" in text
 
     # Applying the same pairs again leaves the text alone.
     rewrite_cli_invocations(skill, pairs)
-    assert (skill / "SKILL.md").read_text() == text
+    assert (skill / "SKILL.md").read_text(encoding="utf-8") == text
 
 
 def test_a_script_code_name_is_valid_for_a_skill_named_with_underscores(tmp_path):

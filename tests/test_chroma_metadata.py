@@ -314,7 +314,7 @@ class TestAddEntries:
             # Verify chunks.jsonl includes metadata
             chunks_path = tmp_path / "kb" / "mem" / "chunks.jsonl"
             assert chunks_path.exists()
-            chunk = json.loads(chunks_path.read_text().strip())
+            chunk = json.loads(chunks_path.read_text(encoding="utf-8").strip())
             assert chunk["metadata"]["tool_name"] == "fastp"
             assert chunk["metadata"]["session_id"] == "s1"
             assert chunk["metadata"]["collection"] == "mem"

@@ -141,7 +141,7 @@ class ClineSetup(AgentSetup):
         settings: dict = {"mcpServers": {}}
         if settings_path.exists():
             try:
-                settings = json.loads(settings_path.read_text())
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
                 settings.setdefault("mcpServers", {})
             except (json.JSONDecodeError, OSError):
                 settings = {"mcpServers": {}}
@@ -155,7 +155,9 @@ class ClineSetup(AgentSetup):
         if mcp_env:
             transport["env"] = mcp_env
         settings["mcpServers"]["dsagt"] = {"transport": transport}
-        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        settings_path.write_text(
+            json.dumps(settings, indent=2) + "\n", encoding="utf-8"
+        )
         return [
             f"Wrote {settings_path} ({len(mcp_env)} MCP env vars; loaded via "
             "CLINE_MCP_SETTINGS_PATH at dsagt start)"

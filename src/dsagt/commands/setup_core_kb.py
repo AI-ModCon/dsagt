@@ -28,6 +28,7 @@ from urllib.parse import quote
 
 import httpx
 
+from dsagt._compat import remove_tree, rename_path
 from dsagt.session import (
     REGISTRY_DIR,
     SOURCE_COMMIT_FILE,
@@ -179,8 +180,8 @@ def fetch_github_tree(url: str, ref: str, into: Path) -> str:
             top = members[0].name.split("/", 1)[0]
             tar.extractall(scratch, filter="data")
         if into.exists():
-            shutil.rmtree(into)
-        (scratch / top).rename(into)
+            remove_tree(into)
+        rename_path(scratch / top, into)
     return sha
 
 
@@ -190,6 +191,8 @@ def _git_clone(url: str, ref: str, into: Path) -> str:
         ["git", "clone", "--depth", "1", "--branch", ref, url, str(into)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         raise RuntimeError(f"Git clone failed: {result.stderr}")
@@ -197,10 +200,12 @@ def _git_clone(url: str, ref: str, into: Path) -> str:
         ["git", "-C", str(into), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if head.returncode != 0 or not head.stdout.strip():
         raise RuntimeError(f"Git rev-parse failed after clone: {head.stderr}")
-    shutil.rmtree(into / ".git", ignore_errors=True)
+    remove_tree(into / ".git", ignore_errors=True)
     return head.stdout.strip()
 
 
@@ -243,8 +248,8 @@ def clone_github(
                 )
                 commit = _git_clone(url, branch, tmp_path)
         dest.mkdir(parents=True, exist_ok=True)
-        (dest / SOURCE_COMMIT_FILE).write_text(commit + "\n")
-        (dest / SOURCE_REF_FILE).write_text(branch + "\n")
+        (dest / SOURCE_COMMIT_FILE).write_text(commit + "\n", encoding="utf-8")
+        (dest / SOURCE_REF_FILE).write_text(branch + "\n", encoding="utf-8")
 
         if include:
             # Copy the requested subdirectories.
@@ -329,7 +334,9 @@ def setup_collection(
                 raise ValueError(f"Unknown source type: {source['type']!r}")
 
         # Write DESCRIPTION.md
-        (download_dir / "DESCRIPTION.md").write_text(config["description"])
+        (download_dir / "DESCRIPTION.md").write_text(
+            config["description"], encoding="utf-8"
+        )
 
         owned_kb = kb is None
         if owned_kb:
@@ -520,7 +527,7 @@ def _codes_current(index_dir: Path) -> bool:
     return (
         _collection_exists(coll_dir)
         and stamp.exists()
-        and stamp.read_text().strip() == _codes_stamp(_codes_entries())
+        and stamp.read_text(encoding="utf-8").strip() == _codes_stamp(_codes_entries())
     )
 
 
@@ -534,7 +541,10 @@ def _build_codes(kb, index_dir: Path) -> int:
 
     coll_dir = index_dir / CODES_COLLECTION
     if coll_dir.exists():
-        shutil.rmtree(coll_dir)
+        release = getattr(kb, "release_collection", None)
+        if release is not None:
+            release(CODES_COLLECTION)
+        remove_tree(coll_dir)
 
     entries = _codes_entries()
     current_version = _current_dsagt_version()
@@ -544,7 +554,9 @@ def _build_codes(kb, index_dir: Path) -> int:
         metadatas=[{**meta, "dsagt_version": current_version} for _, meta in entries],
     )
     coll_dir.mkdir(parents=True, exist_ok=True)
-    (coll_dir / CODES_STAMP_FILE).write_text(_codes_stamp(entries) + "\n")
+    (coll_dir / CODES_STAMP_FILE).write_text(
+        _codes_stamp(entries) + "\n", encoding="utf-8"
+    )
     return len(entries)
 
 
@@ -637,7 +649,8 @@ def ensure_assets(
                 )
                 coll = index_dir / asset_collection_name(asset)
                 if coll.exists():
-                    shutil.rmtree(coll)
+                    kb.release_collection(asset_collection_name(asset))
+                    remove_tree(coll)
                 setup_collection(
                     asset,
                     COLLECTIONS[asset],

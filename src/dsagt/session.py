@@ -18,7 +18,6 @@ Project directory layout::
         kb_index/           # knowledge base collections
 """
 
-import fcntl
 import logging
 import os
 import re
@@ -29,6 +28,12 @@ from pathlib import Path
 
 import yaml
 
+from dsagt._compat import (
+    file_lock,
+    read_text_any_encoding,
+    remove_tree,
+    replace_file,
+)
 from dsagt.knowledge import KnowledgeBase
 from dsagt.provenance import CodeUseIndexer
 
@@ -140,7 +145,7 @@ def load_user_env(path: Path = USER_ENV_FILE) -> list[str]:
     if not path.is_file():
         return []
     loaded = []
-    for raw in path.read_text().splitlines():
+    for raw in read_text_any_encoding(path).splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -248,7 +253,7 @@ def _load_registry() -> dict[str, str]:
     """Load the project registry. Returns empty dict if no registry exists."""
     if not REGISTRY_FILE.exists():
         return {}
-    return yaml.safe_load(REGISTRY_FILE.read_text()) or {}
+    return yaml.safe_load(REGISTRY_FILE.read_text(encoding="utf-8")) or {}
 
 
 def _save_registry(registry: dict[str, str]) -> None:
@@ -256,8 +261,8 @@ def _save_registry(registry: dict[str, str]) -> None:
     half written."""
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
     scratch = REGISTRY_FILE.with_name(REGISTRY_FILE.name + ".tmp")
-    scratch.write_text(yaml.dump(registry, default_flow_style=False))
-    os.replace(scratch, REGISTRY_FILE)
+    scratch.write_text(yaml.dump(registry, default_flow_style=False), encoding="utf-8")
+    replace_file(scratch, REGISTRY_FILE)
 
 
 @contextmanager
@@ -268,8 +273,7 @@ def _registry_update():
     two ``dsagt init`` runs at once both end up registered.
     """
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
-    with open(REGISTRY_DIR / ".projects.yaml.lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with file_lock(REGISTRY_DIR / ".projects.yaml.lock"):
         registry = _load_registry()
         yield registry
         _save_registry(registry)
@@ -357,7 +361,7 @@ def load_config(project_name: str) -> dict:
     if not cfg_file.exists():
         raise FileNotFoundError(f"Config not found: {cfg_file}")
 
-    raw = yaml.safe_load(cfg_file.read_text()) or {}
+    raw = yaml.safe_load(cfg_file.read_text(encoding="utf-8")) or {}
 
     config = _deep_merge(DEFAULTS, raw)
     config = resolve_env_vars(config)
@@ -376,7 +380,7 @@ def read_config_file(pdir: Path) -> dict:
     cfg_file = config_path(pdir)
     if not cfg_file.exists():
         return {}
-    return yaml.safe_load(cfg_file.read_text()) or {}
+    return yaml.safe_load(cfg_file.read_text(encoding="utf-8")) or {}
 
 
 def write_config_file(pdir: Path, config: dict) -> None:
@@ -385,7 +389,9 @@ def write_config_file(pdir: Path, config: dict) -> None:
     """
     cfg_file = config_path(pdir)
     cfg_file.parent.mkdir(parents=True, exist_ok=True)
-    cfg_file.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
+    cfg_file.write_text(
+        yaml.dump(config, default_flow_style=False, sort_keys=False), encoding="utf-8"
+    )
 
 
 def _validate(config: dict) -> None:
@@ -414,14 +420,16 @@ def read_state(pdir: Path) -> dict:
     sp = state_path(pdir)
     if not sp.exists():
         return _empty_state()
-    return yaml.safe_load(sp.read_text()) or _empty_state()
+    return yaml.safe_load(sp.read_text(encoding="utf-8")) or _empty_state()
 
 
 def write_state(pdir: Path, state: dict) -> None:
     """Write ``.dsagt/state.yaml`` (creates ``.dsagt/`` if needed)."""
     sp = state_path(pdir)
     sp.parent.mkdir(parents=True, exist_ok=True)
-    sp.write_text(yaml.dump(state, default_flow_style=False, sort_keys=False))
+    sp.write_text(
+        yaml.dump(state, default_flow_style=False, sort_keys=False), encoding="utf-8"
+    )
 
 
 def append_session(pdir: Path) -> dict:
@@ -762,7 +770,7 @@ def remove_collection(pdir: Path, collection: str) -> bool:
     """
     target = Path(pdir) / "kb_index" / collection
     if target.exists():
-        shutil.rmtree(target)
+        remove_tree(target)
         return True
     return False
 
@@ -790,7 +798,7 @@ def remove_project(project_name: str, keep_files: bool = False) -> Path:
     pdir = project_dir(project_name)
 
     if not keep_files and pdir.exists():
-        shutil.rmtree(pdir)
+        remove_tree(pdir)
 
     with _registry_update() as registry:
         registry.pop(project_name, None)

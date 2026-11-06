@@ -401,12 +401,12 @@ def test_reader_leaves_a_partial_trailing_line(tmp_path):
     assert [r["a"] for r in reader.read()] == [1]
 
     # A half-written append (no newline) must not be parsed.
-    with open(f, "a") as fh:
+    with open(f, "a", encoding="utf-8") as fh:
         fh.write('{"a": 2')
     assert [r["a"] for r in reader.read()] == [1]
 
     # Once the line completes, it is read.
-    with open(f, "a") as fh:
+    with open(f, "a", encoding="utf-8") as fh:
         fh.write("}\n")
     assert [r["a"] for r in reader.read()] == [1, 2]
 
