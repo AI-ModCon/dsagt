@@ -424,12 +424,21 @@ def read_state(pdir: Path) -> dict:
 
 
 def write_state(pdir: Path, state: dict) -> None:
-    """Write ``.dsagt/state.yaml`` (creates ``.dsagt/`` if needed)."""
+    """Write ``.dsagt/state.yaml`` (creates ``.dsagt/`` if needed).
+
+    Replaced in one step, like the project registry: ``dsagt-run`` and the
+    periodic pass read this file while the server writes it, and a reader
+    must never find it half written.  A plain write truncates first, which
+    leaves a zero-byte file visible for long enough on Windows that a
+    reader parses it as nothing.
+    """
     sp = state_path(pdir)
     sp.parent.mkdir(parents=True, exist_ok=True)
-    sp.write_text(
+    scratch = sp.with_name(sp.name + ".tmp")
+    scratch.write_text(
         yaml.dump(state, default_flow_style=False, sort_keys=False), encoding="utf-8"
     )
+    replace_file(scratch, sp)
 
 
 def append_session(pdir: Path) -> dict:

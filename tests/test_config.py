@@ -655,6 +655,38 @@ class TestSessionState:
         append_session(pdir)
         assert current_session_tag(pdir, "proj") == "proj-1"
 
+    def test_write_state_replaces_in_one_step(self, tmp_path, monkeypatch):
+        """A reader never finds ``state.yaml`` half written.
+
+        ``dsagt-run`` reads the session tag from this file on every recorded
+        command, while the server writes it.  A plain write truncates first,
+        which left a zero-byte file visible long enough on Windows for a
+        reader to parse it as nothing.  The spy stands in for that reader at
+        the one moment the old file is still in place.
+        """
+        from dsagt import session as session_mod
+
+        pdir = tmp_path / "proj"
+        pdir.mkdir()
+        session_mod.write_state(pdir, {"sessions": [{"id": 1}], "memory_cursor": {}})
+
+        seen = []
+        real_replace = session_mod.replace_file
+
+        def spy(src, dst):
+            seen.append(session_mod.read_state(pdir))
+            real_replace(src, dst)
+
+        monkeypatch.setattr(session_mod, "replace_file", spy)
+        session_mod.write_state(
+            pdir, {"sessions": [{"id": 1}, {"id": 2}], "memory_cursor": {}}
+        )
+
+        # Mid-write the reader saw the previous state whole, not an empty file.
+        assert seen == [{"sessions": [{"id": 1}], "memory_cursor": {}}]
+        assert session_mod.read_state(pdir)["sessions"][-1]["id"] == 2
+        assert list((pdir / ".dsagt").glob("*.tmp")) == []
+
     def test_update_cursor_roundtrip(self, tmp_path):
         from dsagt.session import read_state, update_cursor
 
