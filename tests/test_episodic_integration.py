@@ -75,7 +75,7 @@ def test_periodic_pass_indexes_turn_into_session_memory(tmp_path):
         ),
         _user("2026-06-28T15:00:02.000Z", "what next?", "u2"),  # opens turn 2
     ]
-    with open(transcript, "w") as fh:
+    with open(transcript, "w", encoding="utf-8") as fh:
         for r in records:
             fh.write(json.dumps(r) + "\n")
 

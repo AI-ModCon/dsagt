@@ -39,13 +39,13 @@ not a prompt either
 
 def test_prompts_are_the_text_fences_between_the_headings(tmp_path):
     readme = tmp_path / "README.md"
-    readme.write_text(README)
+    readme.write_text(README, encoding="utf-8")
     assert hu.prompts_from(readme) == ["Build the pipeline.", "Show the records."]
 
 
 def test_missing_heading_raises(tmp_path):
     readme = tmp_path / "README.md"
-    readme.write_text("# Demo\n\n## Execution\n\n```text\nx\n```\n")
+    readme.write_text("# Demo\n\n## Execution\n\n```text\nx\n```\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Post-Conditions"):
         hu.prompts_from(readme)
 

@@ -344,7 +344,7 @@ def _write_project(tmp_path, monkeypatch, raw_yaml: str):
 
     pdir = tmp_path / "proj"
     (pdir / ".dsagt").mkdir(parents=True)
-    (pdir / ".dsagt" / "config.yaml").write_text(raw_yaml)
+    (pdir / ".dsagt" / "config.yaml").write_text(raw_yaml, encoding="utf-8")
 
     registry_dir = tmp_path / "registry"
     registry_dir.mkdir()
@@ -485,7 +485,7 @@ def test_kb_collections_skips_dirs_without_chunks_jsonl(tmp_path):
 
     kb = tmp_path / "kb_index"
     (kb / "no_chunks").mkdir(parents=True)
-    (kb / "no_chunks" / "route.json").write_text("{}")
+    (kb / "no_chunks" / "route.json").write_text("{}", encoding="utf-8")
     assert _kb_collections(tmp_path) == []
 
 

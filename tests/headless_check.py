@@ -40,7 +40,8 @@ from pathlib import Path
 # dsagt's own parser and its own native-mirror rule, so what the registry
 # reads and what the mirror decides are what the checker reads and decides.
 from dsagt.agents.base import _description_fits_native_cap
-from dsagt.observability import resolve_tracking_uri
+from dsagt._compat import is_dir_link
+from dsagt.observability import resolve_tracking_uri, sqlite_store_uri
 from dsagt.registry import _parse_frontmatter
 
 #: This repository, which holds each walkthrough's reference fixtures.
@@ -64,7 +65,7 @@ class Project:
         if not (root / ".dsagt" / "config.yaml").exists():
             raise SystemExit(f"{root} is not a dsagt project (no .dsagt/config.yaml)")
         records = [
-            json.loads(path.read_text())
+            json.loads(path.read_text(encoding="utf-8"))
             for path in sorted((root / "trace_archive").glob("*.json"))
         ]
         codes = {}
@@ -90,10 +91,10 @@ class Project:
         """
         if os.path.isabs(path):
             try:
-                return str(Path(path).resolve().relative_to(self.root.resolve()))
+                return Path(path).resolve().relative_to(self.root.resolve()).as_posix()
             except ValueError:
                 return path
-        return os.path.normpath(path)
+        return Path(os.path.normpath(path)).as_posix()
 
     def outputs_of(self, record: dict) -> list[str]:
         return [self.relative(f) for f in record["execution"].get("output_files", [])]
@@ -109,7 +110,7 @@ class Project:
         path = self.root / database
         if not path.exists():
             return []
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        connection = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
         try:
             return connection.execute(sql).fetchall()
         finally:
@@ -143,7 +144,7 @@ def common_checks(project: Project) -> list[tuple[str, bool | None, str]]:
         for mirror in mirrors
         for entry in mirror.iterdir()
         if entry.is_dir()
-        and not entry.is_symlink()
+        and not is_dir_link(entry)
         and (root / "skills" / entry.name / "SKILL.md").exists()
     ]
     # dsagt copies rather than links a skill whose description exceeds the
@@ -221,7 +222,7 @@ def common_checks(project: Project) -> list[tuple[str, bool | None, str]]:
     # names no shared server; against a server the checker has no store to
     # count, which is a different thing from a run that logged nothing.
     store = resolve_tracking_uri({"project_dir": str(root)})
-    if store != f"sqlite:///{root.resolve() / 'mlflow.db'}":
+    if store != sqlite_store_uri(root.resolve() / "mlflow.db"):
         results.append(("one code.execute trace per record", None, f"store is {store}"))
     else:
         traced = project.query(
@@ -239,14 +240,16 @@ def common_checks(project: Project) -> list[tuple[str, bool | None, str]]:
         )
 
     trace_log = root / ".dsagt" / "run_trace.log"
-    failed = trace_log.read_text().strip() if trace_log.exists() else ""
+    failed = trace_log.read_text(encoding="utf-8").strip() if trace_log.exists() else ""
     results.append(("run_trace.log is empty", not failed, failed[:200]))
 
     server_log = root / "dsagt_server.log"
     errors = (
         [
             line
-            for line in server_log.read_text(errors="replace").splitlines()
+            for line in server_log.read_text(
+                errors="replace", encoding="utf-8"
+            ).splitlines()
             if re.search(r"Traceback|\bERROR\b", line)
         ]
         if server_log.exists()
@@ -429,7 +432,7 @@ def grep_counts(path: str, *values: str):
         target = project.root / path
         if not target.exists():
             return (f"{path} holds the expected values", "file absent")
-        text = target.read_text(errors="replace")
+        text = target.read_text(errors="replace", encoding="utf-8")
         present = [v for v in values if v in text]
         return (f"{path} holds the expected values", f"{len(present)} of {len(values)}")
 
@@ -454,7 +457,9 @@ def json_fields_match(path: str, reference: str, *fields: str):
         produced, expected = project.root / path, REPO_ROOT / reference
         if not produced.exists() or not expected.exists():
             return (f"{path} against {reference}", "file absent")
-        a, b = json.loads(produced.read_text()), json.loads(expected.read_text())
+        a, b = json.loads(produced.read_text(encoding="utf-8")), json.loads(
+            expected.read_text(encoding="utf-8")
+        )
         same = [
             f
             for f in fields

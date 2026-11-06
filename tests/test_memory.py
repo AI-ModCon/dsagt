@@ -99,7 +99,7 @@ class TestSupersede:
 
         history_path = tmp_path / ExplicitMemory.HISTORY_FILENAME
         assert history_path.exists()
-        history = yaml.safe_load(history_path.read_text())
+        history = yaml.safe_load(history_path.read_text(encoding="utf-8"))
         assert len(history) == 1
         assert history[0]["id"] == r1["entry_id"]
         assert history[0]["superseded_by"]
@@ -166,7 +166,7 @@ class TestRemove:
         mem.remove(r["entry_id"])
 
         history_path = tmp_path / ExplicitMemory.HISTORY_FILENAME
-        history = yaml.safe_load(history_path.read_text())
+        history = yaml.safe_load(history_path.read_text(encoding="utf-8"))
         assert len(history) == 1
         assert history[0]["removed_at"]
 
@@ -224,7 +224,7 @@ class TestFileEdgeCases:
 
     def test_handles_empty_file(self, tmp_path):
         mem = ExplicitMemory(runtime_dir=tmp_path)
-        (tmp_path / ExplicitMemory.FILENAME).write_text("")
+        (tmp_path / ExplicitMemory.FILENAME).write_text("", encoding="utf-8")
 
         assert mem.get_all() == []
         assert mem.count() == 0
@@ -233,7 +233,9 @@ class TestFileEdgeCases:
         """Corrupt YAML fails fast: get_all raises the YAMLError; a silent
         recovery to an empty list would hide data loss."""
         mem = ExplicitMemory(runtime_dir=tmp_path)
-        (tmp_path / ExplicitMemory.FILENAME).write_text("not: valid: yaml: [")
+        (tmp_path / ExplicitMemory.FILENAME).write_text(
+            "not: valid: yaml: [", encoding="utf-8"
+        )
 
         with pytest.raises(yaml.YAMLError):
             mem.get_all()
@@ -241,6 +243,6 @@ class TestFileEdgeCases:
     def test_file_is_human_readable(self, mem, tmp_path):
         mem.remember("readable fact", category="test")
 
-        content = (tmp_path / ExplicitMemory.FILENAME).read_text()
+        content = (tmp_path / ExplicitMemory.FILENAME).read_text(encoding="utf-8")
         assert "readable fact" in content
         assert "category" in content

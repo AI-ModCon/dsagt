@@ -43,7 +43,9 @@ def _write_tool(codes_dir: Path, spec: dict) -> None:
     code_dir = codes_dir / spec["name"]
     code_dir.mkdir(parents=True, exist_ok=True)
     fm = yaml.dump(spec, default_flow_style=False, sort_keys=False)
-    (code_dir / "SKILL.md").write_text(f"---\n{fm}---\n\n# {spec['name']}\n")
+    (code_dir / "SKILL.md").write_text(
+        f"---\n{fm}---\n\n# {spec['name']}\n", encoding="utf-8"
+    )
 
 
 def _make_server(tmp_path, tools=None):
@@ -357,9 +359,9 @@ def test_save_code_spec_under_an_installed_skills_name_is_refused(tmp_path):
     skill = runtime / "skills" / "vasp-to-isaac"
     (skill / "scripts").mkdir(parents=True)
     (skill / "SKILL.md").write_text(
-        "---\nname: vasp-to-isaac\ndescription: d\n---\nbody\n"
+        "---\nname: vasp-to-isaac\ndescription: d\n---\nbody\n", encoding="utf-8"
     )
-    (skill / "scripts" / "convert.py").write_text("import argparse\n")
+    (skill / "scripts" / "convert.py").write_text("import argparse\n", encoding="utf-8")
     register_skill_scripts(runtime, "vasp-to-isaac")
     server = create_registry_server(CodeRegistry(runtime_dir=str(runtime)))
     reply = call_tool(
@@ -375,8 +377,11 @@ def test_save_code_spec_under_an_installed_skills_name_is_refused(tmp_path):
         },
     )
     assert "is an installed skill" in reply and "vasp-to-isaac-convert" in reply
-    assert "body" in (skill / "SKILL.md").read_text()
-    assert "executable" not in (skill / "SKILL.md").read_text().split("---")[1]
+    assert "body" in (skill / "SKILL.md").read_text(encoding="utf-8")
+    assert (
+        "executable"
+        not in (skill / "SKILL.md").read_text(encoding="utf-8").split("---")[1]
+    )
 
 
 def test_readiness_reports_gives_the_current_report_or_says_how_to_make_one(tmp_path):
@@ -387,7 +392,7 @@ def test_readiness_reports_gives_the_current_report_or_says_how_to_make_one(tmp_
     from dsagt.mcp.registry_tools import _handle_readiness_reports
 
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "t.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "t.csv").write_bytes(b"a\n1\n")
     (tmp_path / "trace_archive").mkdir()
 
     def ask():
@@ -412,12 +417,14 @@ def test_readiness_reports_gives_the_current_report_or_says_how_to_make_one(tmp_
             "file_hashes": {"data/t.csv": hashlib.sha256(b"a\n1\n").hexdigest()},
         },
     }
-    (tmp_path / "trace_archive" / "aidrin_r1.json").write_text(json.dumps(record))
+    (tmp_path / "trace_archive" / "aidrin_r1.json").write_text(
+        json.dumps(record), encoding="utf-8"
+    )
     reply = ask()
     assert reply["current"]["report"] == '{"outliers": 0.03}'
     assert "next" not in reply
 
-    (tmp_path / "data" / "t.csv").write_text("a\n2\n")
+    (tmp_path / "data" / "t.csv").write_text("a\n2\n", encoding="utf-8")
     reply = ask()
     assert reply["current"] is None
     assert [r["record_id"] for r in reply["earlier"]] == ["r1"]

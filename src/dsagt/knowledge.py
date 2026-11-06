@@ -507,6 +507,26 @@ class ChromaIndex:
         )
         self._ids: list[str] = []  # one id per chunk, in the chunk list's order
 
+    def close(self) -> None:
+        """Release the collection's files (the sqlite store and the HNSW
+        segment).  Windows refuses to delete or replace a file a process
+        still has open, so a collection is closed before its directory is
+        removed.  The index is unusable afterwards; safe to call twice."""
+        client, self._client, self._col = self._client, None, None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 - closing must never raise
+                logger.debug("closing Chroma client failed", exc_info=True)
+
+    def __del__(self):
+        # An index dropped without close() would keep Chroma's shared
+        # handle on the directory counted, and the files open.
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001 - interpreter shutdown
+            pass
+
     # ChromaDB stores ids internally; this list holds them in the chunk
     # list's order, so a search hit maps back to its chunk by position in it.
     # An id is opaque: one past the highest minted so far and never reused,
@@ -584,7 +604,9 @@ class ChromaIndex:
 
     def save(self, directory: Path) -> None:
         # PersistentClient persists on write; the id list is written for rebuild.
-        (directory / self._META_FILE).write_text(json.dumps(self._ids))
+        (directory / self._META_FILE).write_text(
+            json.dumps(self._ids), encoding="utf-8"
+        )
 
     @classmethod
     def load(cls, directory: Path) -> "ChromaIndex":
@@ -592,7 +614,7 @@ class ChromaIndex:
         name = directory.name
         obj = cls(collection_name=name, persist_dir=directory)
         if meta_path.exists():
-            obj._ids = json.loads(meta_path.read_text())
+            obj._ids = json.loads(meta_path.read_text(encoding="utf-8"))
         return obj
 
     @property
@@ -892,6 +914,12 @@ class VectorStore(ABC):
     ) -> list[dict]:
         """Single-collection hybrid search → ``[{chunk, score}, ...]``."""
 
+    def release(self, collection: str) -> None:
+        """Let go of every file the store holds open for *collection*, so the
+        caller can remove or replace its directory.  The collection is loaded
+        again on its next use."""
+        del collection
+
     def close(self) -> None:
         pass
 
@@ -995,7 +1023,9 @@ class ChromaVectorStore(VectorStore):
         coll_dir = self.index_dir / name
         desc_path = coll_dir / "DESCRIPTION.md"
         description = (
-            desc_path.read_text() if desc_path.exists() else collection_purpose(name)
+            desc_path.read_text(encoding="utf-8")
+            if desc_path.exists()
+            else collection_purpose(name)
         )
         keys: list[str] = []
         count = 0
@@ -1056,7 +1086,7 @@ class ChromaVectorStore(VectorStore):
             raise
         index.save(coll_dir)
 
-        with open(coll_dir / "chunks.jsonl", "a") as f:
+        with open(coll_dir / "chunks.jsonl", "a", encoding="utf-8") as f:
             for chunk in chunks:
                 f.write(json.dumps(chunk) + "\n")
 
@@ -1126,7 +1156,7 @@ class ChromaVectorStore(VectorStore):
         index.remove(doomed)
         index.save(coll_dir)
         kept = [c for i, c in enumerate(chunks) if i not in doomed]
-        with open(coll_dir / "chunks.jsonl", "w") as f:
+        with open(coll_dir / "chunks.jsonl", "w", encoding="utf-8") as f:
             for chunk in kept:
                 f.write(json.dumps(chunk) + "\n")
         self._rebuild_bm25(collection, kept)
@@ -1218,7 +1248,7 @@ class ChromaVectorStore(VectorStore):
             raise ValueError(f"Collection '{name}' not found")
 
         index = ChromaIndex.load(coll_dir)
-        with open(coll_dir / "chunks.jsonl") as f:
+        with open(coll_dir / "chunks.jsonl", encoding="utf-8") as f:
             chunks = [json.loads(line) for line in f]
 
         self._cache[name] = (index, chunks)
@@ -1240,17 +1270,30 @@ class ChromaVectorStore(VectorStore):
                 f"Embedding dimension mismatch in collection {collection!r}. "
                 f"The index was built with a different embedder than the one "
                 f"currently configured.  Drop the stale collection "
-                f"(`rm -rf <project>/kb_index/{collection}`) and re-create the "
+                f"(delete the directory `<project>/kb_index/{collection}`) and re-create the "
                 f"project with `dsagt init` so it rebuilds with the active "
                 f"embedding settings."
             )
         return None
 
+    def release(self, collection: str) -> None:
+        cached = self._cache.pop(collection, None)
+        self._bm25_cache.pop(collection, None)
+        if cached is not None:
+            cached[0].close()
+            del cached
+            # Chroma's native store closes its files when the last reference
+            # to it is collected, not when the client is closed.
+            import gc
+
+            gc.collect()
+
     def close(self) -> None:
         if self._embedder is not None:
             self._embedder.close()
         self._embedder = None
-        self._cache.clear()
+        for name in list(self._cache):
+            self.release(name)
         self._bm25_cache.clear()
 
 
@@ -1507,11 +1550,13 @@ class KnowledgeBase:
         coll_dir.mkdir(parents=True, exist_ok=True)
 
         # Record source folder so the MCP server can detect re-ingests vs. conflicts.
-        (coll_dir / "source.txt").write_text(str(folder.resolve()))
+        (coll_dir / "source.txt").write_text(str(folder.resolve()), encoding="utf-8")
 
         desc_src = folder / "DESCRIPTION.md"
         if desc_src.exists():
-            (coll_dir / "DESCRIPTION.md").write_text(desc_src.read_text())
+            (coll_dir / "DESCRIPTION.md").write_text(
+                desc_src.read_text(encoding="utf-8"), encoding="utf-8"
+            )
 
         files = self._collect_files(folder, file_types, exclude_patterns)
         logger.info("Found %d files to process", len(files))
@@ -1802,6 +1847,12 @@ class KnowledgeBase:
 
         self._parsers[file_type] = parser
         return parser
+
+    def release_collection(self, collection: str) -> None:
+        """Close *collection*'s files in every store, ahead of removing or
+        replacing its directory (required on Windows, harmless elsewhere)."""
+        for store in self._stores:
+            store.release(collection)
 
     def close(self) -> None:
         for store in self._stores:

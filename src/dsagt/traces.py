@@ -45,7 +45,6 @@ Class map: ``▷`` inherits · ``◆`` owns · ``◇`` holds  (``*`` = many)::
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
@@ -56,6 +55,8 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+
+from dsagt._compat import IS_WINDOWS, file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -463,8 +464,44 @@ def _transcript_dir(project_dir: str | Path, projects_root: Path | None = None) 
     claude``, so cwd == project_dir.
     """
     root = projects_root or (Path.home() / ".claude" / "projects")
-    mangled = re.sub(r"[^a-zA-Z0-9]", "-", os.path.abspath(project_dir))
-    return root / mangled
+    spellings = [os.path.abspath(project_dir)]
+    if IS_WINDOWS:
+        # Claude mangles the cwd it was started in.  Resolving a path on
+        # Windows can rewrite it (a mapped drive to its UNC name, a subst
+        # drive, a junction, a short 8.3 name), so the directory may be
+        # under either spelling; the one that exists is the transcript's.
+        try:
+            spellings.append(str(Path(project_dir).resolve()))
+        except OSError:
+            pass
+    candidates = [root / re.sub(r"[^a-zA-Z0-9]", "-", s) for s in spellings]
+    return next((c for c in candidates if c.is_dir()), candidates[0])
+
+
+def _same_dir(a: str | None, b: str | None) -> bool:
+    """Whether two directory paths name the same place.  Windows paths are
+    compared without regard to case or slash direction (an agent may record
+    ``c:/Users/x`` for the ``C:\\Users\\x`` dsagt holds)."""
+    if a is None or b is None:
+        return False
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def _latest_by_folded_dir(rows, project_dir: str):
+    """The id of the first ``(id, directory)`` row whose directory is
+    *project_dir* under Windows' rules (see :func:`_same_dir`); the exact
+    string match the query does misses ``c:/Users/x`` for ``C:\\Users\\x``."""
+    for session_id, directory in rows:
+        if _same_dir(directory, project_dir):
+            return session_id
+    return None
+
+
+def _readonly_uri(db: Path) -> str:
+    """A read-only sqlite URI for *db*.  Built from the path's ``file:`` URI,
+    so a drive letter, a space or a ``#`` in the path is spelled the way
+    sqlite's URI parser reads it."""
+    return Path(db).absolute().as_uri() + "?mode=ro"
 
 
 class ClaudeReader(JsonlReader):
@@ -527,12 +564,22 @@ class CodexReader(JsonlReader):
             reverse=True,
         )
         for f in files:
-            if self._rollout_cwd(f) == self._project_dir:
+            if _same_dir(self._rollout_cwd(f), self._project_dir):
                 return f
         return None
 
 
-_GOOSE_DB = Path.home() / ".local" / "share" / "goose" / "sessions" / "sessions.db"
+def _goose_db() -> Path:
+    """Goose's session store: under ``~/.local/share`` on Linux and macOS,
+    under ``%APPDATA%\\Block\\goose\\data`` on Windows."""
+    if IS_WINDOWS:
+        appdata = os.environ.get("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return base / "Block" / "goose" / "data" / "sessions" / "sessions.db"
+    return Path.home() / ".local" / "share" / "goose" / "sessions" / "sessions.db"
+
+
+_GOOSE_DB = _goose_db()
 
 
 class GooseReader(Reader):
@@ -550,6 +597,13 @@ class GooseReader(Reader):
             "ORDER BY updated_at DESC LIMIT 1",
             (self._project_dir,),
         ).fetchone()
+        if row is None and IS_WINDOWS:
+            return _latest_by_folded_dir(
+                con.execute(
+                    "SELECT id, working_dir FROM sessions ORDER BY updated_at DESC"
+                ),
+                self._project_dir,
+            )
         return row[0] if row else None
 
     def active_source(self):
@@ -557,7 +611,7 @@ class GooseReader(Reader):
             return self._pinned
         if not self._db.exists():
             return None
-        con = sqlite3.connect(f"file:{self._db}?mode=ro", uri=True)
+        con = sqlite3.connect(_readonly_uri(self._db), uri=True)
         try:
             return self._latest_session(con)
         finally:
@@ -566,7 +620,7 @@ class GooseReader(Reader):
     def read(self) -> list[dict]:
         if not self._db.exists():
             return []
-        con = sqlite3.connect(f"file:{self._db}?mode=ro", uri=True)
+        con = sqlite3.connect(_readonly_uri(self._db), uri=True)
         try:
             sid = (
                 self._pinned if self._pinned is not None else self._latest_session(con)
@@ -609,6 +663,13 @@ class OpenCodeReader(Reader):
             "ORDER BY time_updated DESC LIMIT 1",
             (self._project_dir,),
         ).fetchone()
+        if row is None and IS_WINDOWS:
+            return _latest_by_folded_dir(
+                con.execute(
+                    "SELECT id, directory FROM session ORDER BY time_updated DESC"
+                ),
+                self._project_dir,
+            )
         return row[0] if row else None
 
     def active_source(self):
@@ -616,7 +677,7 @@ class OpenCodeReader(Reader):
             return self._pinned
         if not self._db.exists():
             return None
-        con = sqlite3.connect(f"file:{self._db}?mode=ro", uri=True)
+        con = sqlite3.connect(_readonly_uri(self._db), uri=True)
         try:
             return self._latest_session(con)
         finally:
@@ -625,7 +686,7 @@ class OpenCodeReader(Reader):
     def read(self) -> list[dict]:
         if not self._db.exists():
             return []
-        con = sqlite3.connect(f"file:{self._db}?mode=ro", uri=True)
+        con = sqlite3.connect(_readonly_uri(self._db), uri=True)
         try:
             sid = (
                 self._pinned if self._pinned is not None else self._latest_session(con)
@@ -688,10 +749,10 @@ class ClineReader(Reader):
             if not meta.exists():
                 continue
             try:
-                cwd = json.loads(meta.read_text()).get("cwd", "")
+                cwd = json.loads(meta.read_text(encoding="utf-8")).get("cwd", "")
             except (json.JSONDecodeError, OSError):
                 continue
-            if os.path.abspath(cwd) == self._project_dir:
+            if _same_dir(os.path.abspath(cwd), self._project_dir):
                 return d
         return None
 
@@ -713,7 +774,7 @@ class ClineReader(Reader):
         if not msgs_path.exists():
             return []
         try:
-            data = json.loads(msgs_path.read_text())
+            data = json.loads(msgs_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return []
         model = self._session_model(d)
@@ -724,7 +785,9 @@ class ClineReader(Reader):
 
     def _session_model(self, session_dir: Path) -> str | None:
         try:
-            meta = json.loads((session_dir / f"{session_dir.name}.json").read_text())
+            meta = json.loads(
+                (session_dir / f"{session_dir.name}.json").read_text(encoding="utf-8")
+            )
             return meta.get("model")
         except (json.JSONDecodeError, OSError):
             return None
@@ -1474,23 +1537,19 @@ class TraceCollector:
 
     def _load_acks(self, name: str) -> set[str]:
         try:
-            return set(json.loads(self._acks_path(name).read_text()))
+            return set(json.loads(self._acks_path(name).read_text(encoding="utf-8")))
         except FileNotFoundError:
             return set()
 
     def _save_acks(self, name: str, acks: set[str]) -> None:
         self._ack_dir.mkdir(parents=True, exist_ok=True)
-        self._acks_path(name).write_text(json.dumps(sorted(acks)))
+        self._acks_path(name).write_text(json.dumps(sorted(acks)), encoding="utf-8")
 
     @contextmanager
     def _lock_file(self):
         self._ack_dir.mkdir(parents=True, exist_ok=True)
-        with open(self._ack_dir / "trace_acks.lock", "w") as lf:
-            fcntl.flock(lf, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lf, fcntl.LOCK_UN)
+        with file_lock(self._ack_dir / "trace_acks.lock"):
+            yield
 
     def collect(self, *, include_last: bool = False) -> int:
         """Read → translate → hand completed turns to each consumer.

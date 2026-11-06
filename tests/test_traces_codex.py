@@ -167,10 +167,11 @@ def test_reader_picks_the_rollout_matching_the_project_cwd(tmp_path):
     root.mkdir(parents=True)
     # Two rollouts; only one's session_meta.cwd matches the project dir.
     mine = root / "rollout-mine.jsonl"
-    mine.write_text("\n".join(json.dumps(r) for r in _session()))
+    mine.write_text("\n".join(json.dumps(r) for r in _session()), encoding="utf-8")
     other = root / "rollout-other.jsonl"
     other.write_text(
-        json.dumps(_rec("t", "session_meta", {"id": "o", "cwd": "/elsewhere"})) + "\n"
+        json.dumps(_rec("t", "session_meta", {"id": "o", "cwd": "/elsewhere"})) + "\n",
+        encoding="utf-8",
     )
     reader = CodexReader("/p", sessions_root=tmp_path / "sessions")
     # _session()'s session_meta cwd is "/p".

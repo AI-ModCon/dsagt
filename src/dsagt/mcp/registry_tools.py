@@ -39,6 +39,7 @@ from dsagt.observability import (
     registry_reconstruct_pipeline_span,
     registry_save_code_span,
 )
+from dsagt._compat import native_path
 from dsagt.provenance import CodeUseIndexer, readiness_reports, reconstruct_pipeline
 from dsagt.registry import CODES_COLLECTION, CodeRegistry
 
@@ -54,10 +55,10 @@ def _code_for_same_script(registry: CodeRegistry, spec: dict) -> dict | None:
     """A registered code, under another name, whose executable runs the same
     script file as *spec*; a skill's scripts are registered when the skill
     is saved, and a second registration of one script gives two codes."""
-    import shlex
+    from dsagt._compat import split_command
 
     def script_of(executable: str) -> str | None:
-        tokens = shlex.split(executable.split(" -- ")[-1]) if executable else []
+        tokens = split_command(executable.split(" -- ")[-1]) if executable else []
         script = next((t for t in tokens if t.endswith((".py", ".sh"))), None)
         # The agent may name the same file ./skills/x/scripts/y.py where the
         # stored spec says skills/x/scripts/y.py; one spelling compares.
@@ -123,7 +124,10 @@ async def _handle_save_code_spec(
         stored = registry.get_code(spec["name"])
         # A changed executable (added dependencies) makes the usage line in
         # the owning skill's text stale; the shared registration rewrites it.
-        owner = re.search(r"\bskills/([^/\s]+)/(scripts/\S+)", stored["executable"])
+        owner = re.search(
+            r"\bskills/([^/\s]+)/(scripts/\S+)",
+            stored["executable"].replace("\\", "/"),
+        )
         if owner:
             from dsagt.skills import rewrite_cli_invocations
 
@@ -226,7 +230,7 @@ async def _handle_search_registry(
 
 
 async def _handle_readiness_reports(arguments: dict, *, runtime_dir: Path) -> dict:
-    path = arguments["path"]
+    path = native_path(arguments["path"])
     reports = await asyncio.to_thread(readiness_reports, runtime_dir, path)
     current = next((r for r in reports if r["unchanged"] and r["report"]), None)
     reply = {
@@ -276,7 +280,8 @@ async def _handle_reconstruct_pipeline(
             if not target.resolve().is_relative_to(runtime_dir.resolve()):
                 return f"Error: output must be a path under the project, got {output!r}"
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(script)
+            # LF on every platform: bash rejects a script with CRLF line ends.
+            target.write_text(script, encoding="utf-8", newline="\n")
             return f"Saved to {output}\n\n{script}"
         return script
 

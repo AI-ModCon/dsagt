@@ -121,8 +121,12 @@ def test_empty_is_none():
 def _make_session(root, sid, cwd, messages, model="m"):
     d = root / sid
     d.mkdir(parents=True)
-    (d / f"{sid}.json").write_text(json.dumps({"cwd": cwd, "model": model}))
-    (d / f"{sid}.messages.json").write_text(json.dumps({"messages": messages}))
+    (d / f"{sid}.json").write_text(
+        json.dumps({"cwd": cwd, "model": model}), encoding="utf-8"
+    )
+    (d / f"{sid}.messages.json").write_text(
+        json.dumps({"messages": messages}), encoding="utf-8"
+    )
 
 
 def test_reader_picks_newest_session_for_the_cwd(tmp_path):

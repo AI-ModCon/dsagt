@@ -20,6 +20,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Native Windows support.** `dsagt`, `dsagt-server` and `dsagt-run` run on
+  Windows 10 and 11 (x64) without WSL. The POSIX-only pieces are behind one
+  module, `dsagt._compat`: file locks (`msvcrt` in place of `fcntl`), signal
+  forwarding in `dsagt-run` (no SIGHUP; Ctrl+Break is forwarded), the detached
+  trace writer, directory junctions where symlinks need a privilege, and
+  removal of read-only and still-open files. Text files are read and written
+  as UTF-8 on every platform instead of in the system code page, agent CLIs
+  installed as `.cmd` shims are found, and the lock file resolves for
+  `win_amd64`. See the Windows section of the README for what differs.
 - **A run ended by a signal is recorded.** A run ended by SIGTERM, SIGINT, or
   SIGHUP still writes its record with the signal's status.
 - **File hashes in every record.** `execution.file_hashes` holds the SHA-256

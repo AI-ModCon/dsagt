@@ -6,10 +6,12 @@ exit code propagation, error handling, and env var fallbacks.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 import pytest
+from conftest import posix_only
 
 from dsagt.provenance import (
     _resolve_records_dir,
@@ -29,7 +31,7 @@ from dsagt.commands.run_code import (
 def _project(tmp_path, monkeypatch):
     """A project directory the command runs from; returns its trace_archive."""
     (tmp_path / ".dsagt").mkdir(exist_ok=True)
-    (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
+    (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     return tmp_path / "trace_archive"
 
@@ -96,7 +98,9 @@ class TestResolveRecordsDir:
         ``<cwd>/.dsagt/config.yaml`` and uses ``<cwd>/trace_archive``."""
         monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         (tmp_path / ".dsagt").mkdir()
-        (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (tmp_path / ".dsagt" / "config.yaml").write_text(
+            "project: t\n", encoding="utf-8"
+        )
         monkeypatch.chdir(tmp_path)
         assert _resolve_records_dir() == tmp_path / "trace_archive"
 
@@ -105,7 +109,9 @@ class TestResolveRecordsDir:
         project even when the command runs from a subdirectory."""
         project = tmp_path / "proj"
         (project / ".dsagt").mkdir(parents=True)
-        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (project / ".dsagt" / "config.yaml").write_text(
+            "project: t\n", encoding="utf-8"
+        )
         (project / "data").mkdir()
         monkeypatch.setenv("DSAGT_PROJECT_DIR", str(project))
         monkeypatch.chdir(project / "data")
@@ -151,7 +157,7 @@ class TestWriteRecord:
         assert "fastp" in path.name
         assert "abc123" in path.name
 
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         assert data["code_name"] == "fastp"
         assert data["execution"]["return_code"] == 0
 
@@ -177,7 +183,7 @@ class TestRunAndRecord:
         records = list(tmp_path.glob("*.json"))
         assert len(records) == 1
 
-        data = json.loads(records[0].read_text())
+        data = json.loads(records[0].read_text(encoding="utf-8"))
         assert data["code_name"] == "echo_test"
         assert data["record_id"] == "test-001"
         assert data["execution"]["return_code"] == 0
@@ -195,7 +201,7 @@ class TestRunAndRecord:
 
         assert exit_code == 42
 
-        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text(encoding="utf-8"))
         assert data["execution"]["return_code"] == 42
         assert "oops" in data["execution"]["stderr"]
 
@@ -210,7 +216,7 @@ class TestRunAndRecord:
 
         assert exit_code == 127
 
-        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text(encoding="utf-8"))
         assert data["execution"]["return_code"] == 127
         assert "command not found" in data["execution"]["stderr"]
 
@@ -230,7 +236,9 @@ class TestRunAndRecord:
             record_id="test-004",
         )
 
-        data = json.loads(list(tmp_path.glob("*_test-004.json"))[0].read_text())
+        data = json.loads(
+            list(tmp_path.glob("*_test-004.json"))[0].read_text(encoding="utf-8")
+        )
         assert data["session_id"] == "t-1"
 
     def test_explicit_session_overrides_state(self, tmp_path, monkeypatch):
@@ -248,7 +256,9 @@ class TestRunAndRecord:
             record_id="test-005",
         )
 
-        data = json.loads(list(tmp_path.glob("*_test-005.json"))[0].read_text())
+        data = json.loads(
+            list(tmp_path.glob("*_test-005.json"))[0].read_text(encoding="utf-8")
+        )
         assert data["session_id"] == "explicit-session"
 
     def test_file_lists_recorded(self, tmp_path):
@@ -262,7 +272,7 @@ class TestRunAndRecord:
             record_id="test-006",
         )
 
-        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text(encoding="utf-8"))
         assert data["execution"]["input_files"] == ["in1.fq", "in2.fq"]
         assert data["execution"]["output_files"] == ["out.fa"]
 
@@ -275,7 +285,7 @@ class TestRunAndRecord:
             record_id="test-007",
         )
 
-        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text(encoding="utf-8"))
         assert data["execution"]["timestamp_start"]
         assert data["execution"]["timestamp_end"]
         assert (
@@ -329,7 +339,7 @@ class TestRunAndRecord:
         assert (
             finished_at - writer.first_write_at >= 0.9
         ), "the first line was echoed only after the command exited"
-        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text(encoding="utf-8"))
         assert data["execution"]["stdout"] == "started\ndone\n"
 
     def test_auto_generates_record_id(self, tmp_path):
@@ -340,7 +350,7 @@ class TestRunAndRecord:
             records_dir=tmp_path,
         )
 
-        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+        data = json.loads(list(tmp_path.glob("*.json"))[0].read_text(encoding="utf-8"))
         assert data["record_id"]
         assert len(data["record_id"]) == 12
 
@@ -359,7 +369,9 @@ class TestMain:
         name comes from ``.dsagt/config.yaml`` and the session id from
         ``.dsagt/state.yaml``, both under the working directory."""
         (tmp_path / ".dsagt").mkdir(exist_ok=True)
-        (tmp_path / ".dsagt" / "config.yaml").write_text("project: test\n")
+        (tmp_path / ".dsagt" / "config.yaml").write_text(
+            "project: test\n", encoding="utf-8"
+        )
         monkeypatch.chdir(tmp_path)
         # Serverless: init_tracing resolves a sqlite store from the project
         # dir via MLflow's native provider — no OTLP exporter.  Stub the
@@ -388,7 +400,8 @@ class TestMain:
         from dsagt import observability as obs_module
 
         (tmp_path / ".dsagt" / "state.yaml").write_text(
-            "sessions:\n- id: 7\n  started_at: '2026-01-01T00:00:00Z'\n"
+            "sessions:\n- id: 7\n  started_at: '2026-01-01T00:00:00Z'\n",
+            encoding="utf-8",
         )
         monkeypatch.setattr(obs_module, "_initialized", False)
         monkeypatch.setattr(obs_module, "_default_session_id", None)
@@ -423,6 +436,7 @@ class TestMain:
             if "dsagt.commands.log_trace" not in argv:
                 return real_popen(argv, **kw)
             started.append((argv, kw))
+            return object()
 
         monkeypatch.setattr(subprocess, "Popen", popen)
         records = tmp_path / "trace_archive"
@@ -435,7 +449,13 @@ class TestMain:
             "dsagt.commands.log_trace",
             str(record.resolve()),
         ]
-        assert kw["cwd"] == tmp_path and kw["start_new_session"] is True
+        assert kw["cwd"] == tmp_path
+        # Detached: its own session on POSIX, its own process group (and
+        # out of the harness's job object, when allowed) on Windows.
+        if os.name == "nt":
+            assert kw["creationflags"] & subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            assert kw["start_new_session"] is True
         assert run_code._log_trace_detached(tmp_path / "elsewhere") is None
 
     def test_record_files_come_from_the_spec_roles(self, tmp_path, monkeypatch):
@@ -447,10 +467,12 @@ class TestMain:
 
         project = tmp_path / "proj"
         (project / ".dsagt").mkdir(parents=True)
-        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (project / ".dsagt" / "config.yaml").write_text(
+            "project: t\n", encoding="utf-8"
+        )
         script = project / "codes" / "conv" / "scripts" / "conv.py"
         script.parent.mkdir(parents=True)
-        script.write_text("import sys; print(sys.argv[1:])\n")
+        script.write_text("import sys; print(sys.argv[1:])\n", encoding="utf-8")
         CodeRegistry(runtime_dir=project).save_tool(
             {
                 "name": "conv",
@@ -481,7 +503,7 @@ class TestMain:
         assert rc == 0
         records = list((project / "trace_archive").glob("*.json"))
         assert len(records) == 1
-        execution = json.loads(records[0].read_text())["execution"]
+        execution = json.loads(records[0].read_text(encoding="utf-8"))["execution"]
         assert execution["input_files"] == ["data/in.csv"]
         assert execution["output_files"] == ["data/out.csv"]
 
@@ -553,7 +575,10 @@ class TestChildEnv:
         )
         assert exit_code == 0
         (record,) = tmp_path.glob("*.json")
-        assert "found" in json.loads(record.read_text())["execution"]["stdout"]
+        assert (
+            "found"
+            in json.loads(record.read_text(encoding="utf-8"))["execution"]["stdout"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -563,6 +588,7 @@ class TestChildEnv:
 
 class TestSignal:
 
+    @posix_only
     def test_a_terminated_run_still_writes_its_record(self, tmp_path):
         """SIGTERM to dsagt-run reaches the child and the record says so."""
         import os
@@ -572,7 +598,9 @@ class TestSignal:
         import time
 
         (tmp_path / ".dsagt").mkdir()
-        (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (tmp_path / ".dsagt" / "config.yaml").write_text(
+            "project: t\n", encoding="utf-8"
+        )
         proc = subprocess.Popen(
             [
                 sys.executable,
@@ -591,7 +619,7 @@ class TestSignal:
         proc.wait(timeout=10)
         records = list((tmp_path / "trace_archive").glob("*.json"))
         assert len(records) == 1
-        record = json.loads(records[0].read_text())
+        record = json.loads(records[0].read_text(encoding="utf-8"))
         assert record["execution"]["return_code"] == -signal.SIGTERM
         assert "SIGTERM" in record["execution"]["stderr"]
         assert proc.returncode != 0
@@ -608,7 +636,7 @@ class TestFileHashes:
         import hashlib
 
         _project(tmp_path, monkeypatch)
-        (tmp_path / "in.txt").write_text("alpha\n")
+        (tmp_path / "in.txt").write_bytes(b"alpha\n")
         main(
             [
                 "--code",
@@ -620,7 +648,9 @@ class TestFileHashes:
             ]
         )
         record = json.loads(
-            next((tmp_path / "trace_archive").glob("*.json")).read_text()
+            next((tmp_path / "trace_archive").glob("*.json")).read_text(
+                encoding="utf-8"
+            )
         )
         digest = hashlib.sha256(b"alpha\n").hexdigest()
         assert record["execution"]["file_hashes"] == {
@@ -639,7 +669,9 @@ class TestFileHashes:
             log_trace=None,
         )
         record = json.loads(
-            next((tmp_path / "trace_archive").glob("*.json")).read_text()
+            next((tmp_path / "trace_archive").glob("*.json")).read_text(
+                encoding="utf-8"
+            )
         )
         assert record["execution"]["file_hashes"] == {}
 
@@ -656,7 +688,9 @@ class TestArgumentDerivedFiles:
         project = tmp_path / "proj"
         (project / "trace_archive").mkdir(parents=True)
         (project / ".dsagt").mkdir()
-        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (project / ".dsagt" / "config.yaml").write_text(
+            "project: t\n", encoding="utf-8"
+        )
         CodeRegistry(runtime_dir=project).save_tool(
             {
                 "name": "aidrin",
@@ -668,7 +702,7 @@ class TestArgumentDerivedFiles:
             }
         )
         (project / "data").mkdir()
-        (project / "data" / "t.csv").write_text("a,b\n1,2\n")
+        (project / "data" / "t.csv").write_text("a,b\n1,2\n", encoding="utf-8")
         monkeypatch.chdir(project)
         main(
             [
@@ -680,7 +714,7 @@ class TestArgumentDerivedFiles:
             ]
         )
         record = json.loads(
-            next((project / "trace_archive").glob("*.json")).read_text()
+            next((project / "trace_archive").glob("*.json")).read_text(encoding="utf-8")
         )
         assert record["execution"]["input_files"] == ["data/t.csv"]
         assert record["execution"]["output_files"] == []
@@ -693,7 +727,7 @@ class TestRolesAndArgumentsPerSide:
         """fastp's spec names -i and -o; the agent ran --in1/--out1. The role
         match gives nothing on either side, and the scan fills both."""
         _project(tmp_path, monkeypatch)
-        (tmp_path / "in.fq").write_text("@r\nA\n+\nF\n")
+        (tmp_path / "in.fq").write_text("@r\nA\n+\nF\n", encoding="utf-8")
         main(
             [
                 "--code",
@@ -705,7 +739,9 @@ class TestRolesAndArgumentsPerSide:
             ]
         )
         record = json.loads(
-            next((tmp_path / "trace_archive").glob("*.json")).read_text()
+            next((tmp_path / "trace_archive").glob("*.json")).read_text(
+                encoding="utf-8"
+            )
         )
         assert record["execution"]["input_files"] == ["in.fq"]
         assert record["execution"]["output_files"] == ["out.fq"]
@@ -720,7 +756,9 @@ class TestRolesAndArgumentsPerSide:
         project = tmp_path / "proj"
         (project / "trace_archive").mkdir(parents=True)
         (project / ".dsagt").mkdir()
-        (project / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (project / ".dsagt" / "config.yaml").write_text(
+            "project: t\n", encoding="utf-8"
+        )
         CodeRegistry(runtime_dir=project).save_tool(
             {
                 "name": "t",
@@ -741,7 +779,7 @@ class TestRolesAndArgumentsPerSide:
                 },
             }
         )
-        (project / "in.fq").write_text("x\n")
+        (project / "in.fq").write_text("x\n", encoding="utf-8")
         monkeypatch.chdir(project)
         main(
             [
@@ -754,7 +792,7 @@ class TestRolesAndArgumentsPerSide:
             ]
         )
         record = json.loads(
-            next((project / "trace_archive").glob("*.json")).read_text()
+            next((project / "trace_archive").glob("*.json")).read_text(encoding="utf-8")
         )
         assert record["execution"]["input_files"] == ["in.fq"]
         assert record["execution"]["output_files"] == ["out.fq"]
@@ -771,20 +809,27 @@ class TestNestedRuns:
         from dsagt.provenance import load_pipeline_records
 
         (tmp_path / ".dsagt").mkdir()
-        (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (tmp_path / ".dsagt" / "config.yaml").write_text(
+            "project: t\n", encoding="utf-8"
+        )
         _project(tmp_path, monkeypatch)
         records = tmp_path / "trace_archive"
         inner = (
-            f"{sys.executable} -m dsagt.commands.run_code --code inner -- echo inner"
+            # as_posix: the line is read by bash, where a backslash escapes.
+            f"{Path(sys.executable).as_posix()} -m dsagt.commands.run_code "
+            "--code inner -- echo inner"
         )
         script = tmp_path / "loop.sh"
-        script.write_text(f"#!/bin/bash\n{inner}\n")
+        script.write_text(f"#!/bin/bash\n{inner}\n", encoding="utf-8")
         monkeypatch.delenv("DSAGT_RUN_PARENT", raising=False)
         rc = main(["--code", "loop", "--", "bash", str(script)])
         assert rc == 0
         by_name = {
             r.get("code_name"): r
-            for r in (json.loads(p.read_text()) for p in records.glob("*.json"))
+            for r in (
+                json.loads(p.read_text(encoding="utf-8"))
+                for p in records.glob("*.json")
+            )
         }
         outer, child = by_name["loop"], by_name["inner"]
         assert "parent_record_id" not in outer
@@ -832,8 +877,8 @@ class TestArgumentScanDetails:
 
         monkeypatch.chdir(tmp_path)
         (tmp_path / "case").mkdir()
-        (tmp_path / "tool.py").write_text("print(1)\n")
-        (tmp_path / "t.csv").write_text("a\n")
+        (tmp_path / "tool.py").write_text("print(1)\n", encoding="utf-8")
+        (tmp_path / "t.csv").write_text("a\n", encoding="utf-8")
         assert files_from_arguments(
             ["python", "tool.py", "case", "t.csv", "--n", "3"]
         ) == [
@@ -852,7 +897,7 @@ class TestFindingsFromThe0919Runs:
         """With no roles, the second run of a converter found its output
         already present, listed it as an input, and named no output."""
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "in.txt").write_text("a")
+        (tmp_path / "in.txt").write_text("a", encoding="utf-8")
         write = "import sys, time; open(sys.argv[2], 'w').write(str(time.time()))"
         records = tmp_path / "trace_archive"
         for _ in range(2):
@@ -862,7 +907,10 @@ class TestFindingsFromThe0919Runs:
                 records,
                 log_trace=None,
             )
-        runs = [json.loads(p.read_text())["execution"] for p in records.glob("*.json")]
+        runs = [
+            json.loads(p.read_text(encoding="utf-8"))["execution"]
+            for p in records.glob("*.json")
+        ]
         second = max(runs, key=lambda e: e["timestamp_start"])
         assert "out.txt" in second["output_files"]
         assert (
@@ -880,7 +928,10 @@ class TestFindingsFromThe0919Runs:
         )
         assert rc != 0
         [path] = records.glob("*.json")
-        assert json.loads(path.read_text())["execution"]["output_files"] == []
+        assert (
+            json.loads(path.read_text(encoding="utf-8"))["execution"]["output_files"]
+            == []
+        )
 
     def test_the_children_of_a_killed_parent_stay_in_the_reconstruction(self, tmp_path):
         from dsagt.provenance import load_pipeline_records
@@ -897,7 +948,9 @@ class TestFindingsFromThe0919Runs:
             }
             if parent:
                 raw["parent_record_id"] = parent
-            (tmp_path / f"{record_id}.json").write_text(json.dumps(raw))
+            (tmp_path / f"{record_id}.json").write_text(
+                json.dumps(raw), encoding="utf-8"
+            )
 
         record("a-loop-killed", -15)
         record("b-child", 0, parent="a-loop-killed")
@@ -910,11 +963,11 @@ class TestFindingsFromThe0919Runs:
 def test_a_moved_input_is_not_an_output(tmp_path, monkeypatch):
     """aidrin, codex: `mv a b` recorded a as an output with no hash."""
     _project(tmp_path, monkeypatch)
-    (tmp_path / "a.csv").write_text("x\n")
+    (tmp_path / "a.csv").write_text("x\n", encoding="utf-8")
     records = tmp_path / "trace_archive"
     run_and_record("move", ["mv", "a.csv", "b.csv"], records, log_trace=None)
     [path] = records.glob("*.json")
-    execution = json.loads(path.read_text())["execution"]
+    execution = json.loads(path.read_text(encoding="utf-8"))["execution"]
     assert execution["input_files"] == ["a.csv"]
     assert execution["output_files"] == ["b.csv"]
     assert set(execution["file_hashes"]) == {"a.csv", "b.csv"}
@@ -928,6 +981,7 @@ def test_a_run_without_a_code_name_is_refused(tmp_path, capsys):
     assert list(tmp_path.glob("*.json")) == []
 
 
+@posix_only
 def test_forwarding_a_signal_to_an_exited_child_is_not_an_error():
     """The child may take the same signal from the process group first.
 
@@ -961,8 +1015,8 @@ class TestFilesFromArguments:
         the dependency graph gained an edge to whichever step wrote it.
         """
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "convert.py").write_text("")
-        (tmp_path / "data.csv").write_text("a\n")
+        (tmp_path / "convert.py").write_text("", encoding="utf-8")
+        (tmp_path / "data.csv").write_text("a\n", encoding="utf-8")
         command = [
             "uv",
             "run",
@@ -981,8 +1035,8 @@ class TestFilesFromArguments:
         from dsagt.provenance import files_from_arguments
 
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "convert.py").write_text("")
-        (tmp_path / "data.csv").write_text("a\n")
+        (tmp_path / "convert.py").write_text("", encoding="utf-8")
+        (tmp_path / "data.csv").write_text("a\n", encoding="utf-8")
         assert files_from_arguments(["python3.12", "convert.py", "data.csv"]) == [
             "data.csv"
         ]
@@ -993,8 +1047,8 @@ def test_a_uv_wrapped_interpreter_still_leaves_the_script_out(tmp_path, monkeypa
     from dsagt.provenance import files_from_arguments, new_files_from_arguments
 
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "validate.py").write_text("")
-    (tmp_path / "card.md").write_text("x\n")
+    (tmp_path / "validate.py").write_text("", encoding="utf-8")
+    (tmp_path / "card.md").write_text("x\n", encoding="utf-8")
     command = [
         "uv",
         "run",

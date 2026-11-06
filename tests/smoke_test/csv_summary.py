@@ -25,7 +25,7 @@ def _as_number(value):
 
 
 def summarize(path):
-    with open(path, newline="") as fh:
+    with open(path, encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
         columns = reader.fieldnames or []
         rows = list(reader)

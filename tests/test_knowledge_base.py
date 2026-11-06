@@ -59,25 +59,30 @@ def make_http_response(texts: list[str], dim: int = EMBEDDING_DIM, status: int =
 
 def create_test_docs(folder: Path):
     """Create a small set of test documents in a folder."""
-    (folder / "DESCRIPTION.md").write_text("Test collection for unit tests.")
+    (folder / "DESCRIPTION.md").write_text(
+        "Test collection for unit tests.", encoding="utf-8"
+    )
 
     (folder / "readme.md").write_text(
         "# Test Project\n\n"
         "This is a test project with some documentation.\n\n"
         "## Installation\n\n"
-        "Run pip install to get started.\n"
+        "Run pip install to get started.\n",
+        encoding="utf-8",
     )
 
     (folder / "notes.txt").write_text(
         "These are some plain text notes about the project.\n"
-        "They contain useful information for testing search.\n"
+        "They contain useful information for testing search.\n",
+        encoding="utf-8",
     )
 
     (folder / "example.py").write_text(
         '"""Example module."""\n\n'
         "def hello(name: str) -> str:\n"
         '    """Greet someone."""\n'
-        '    return f"Hello, {name}!"\n'
+        '    return f"Hello, {name}!"\n',
+        encoding="utf-8",
     )
 
 
@@ -429,37 +434,47 @@ class TestIngestExcludePatterns:
 
         # Public source
         (root / "mylib").mkdir()
-        (root / "mylib" / "__init__.py").write_text('"""Mylib package."""\n')
-        (root / "mylib" / "core.py").write_text("def public_fn():\n    return 1\n")
-        (root / "mylib" / "_internal.py").write_text("def _hidden():\n    return 2\n")
+        (root / "mylib" / "__init__.py").write_text(
+            '"""Mylib package."""\n', encoding="utf-8"
+        )
+        (root / "mylib" / "core.py").write_text(
+            "def public_fn():\n    return 1\n", encoding="utf-8"
+        )
+        (root / "mylib" / "_internal.py").write_text(
+            "def _hidden():\n    return 2\n", encoding="utf-8"
+        )
 
         # Tests in a subdirectory
         (root / "mylib" / "tests").mkdir()
-        (root / "mylib" / "tests" / "__init__.py").write_text("")
+        (root / "mylib" / "tests" / "__init__.py").write_text("", encoding="utf-8")
         (root / "mylib" / "tests" / "test_core.py").write_text(
-            "def test_public_fn():\n    assert True\n"
+            "def test_public_fn():\n    assert True\n", encoding="utf-8"
         )
 
         # Top-level tests dir as well
         (root / "tests").mkdir()
         (root / "tests" / "test_integration.py").write_text(
-            "def test_smoke():\n    assert True\n"
+            "def test_smoke():\n    assert True\n", encoding="utf-8"
         )
-        (root / "tests" / "conftest.py").write_text("import pytest\n")
+        (root / "tests" / "conftest.py").write_text("import pytest\n", encoding="utf-8")
 
         # Examples (kept on purpose for the agent)
         (root / "examples").mkdir()
         (root / "examples" / "quickstart.py").write_text(
-            "from mylib import public_fn\nprint(public_fn())\n"
+            "from mylib import public_fn\nprint(public_fn())\n", encoding="utf-8"
         )
 
         # Docs
         (root / "docs").mkdir()
-        (root / "docs" / "guide.md").write_text("# Guide\n\nUse mylib.\n")
+        (root / "docs" / "guide.md").write_text(
+            "# Guide\n\nUse mylib.\n", encoding="utf-8"
+        )
 
         # Build cruft
         (root / "mylib" / "__pycache__").mkdir()
-        (root / "mylib" / "__pycache__" / "core.cpython-312.pyc").write_text("")
+        (root / "mylib" / "__pycache__" / "core.cpython-312.pyc").write_text(
+            "", encoding="utf-8"
+        )
 
         return root
 
@@ -525,7 +540,9 @@ class TestIngestExcludePatterns:
         """__pycache__ should be excluded by directory-segment match."""
         # Pre-populate the cache with a parseable .py file so it appears
         # in the file list when the filter is off.
-        (repo_layout / "mylib" / "__pycache__" / "fake.py").write_text("x = 1\n")
+        (repo_layout / "mylib" / "__pycache__" / "fake.py").write_text(
+            "x = 1\n", encoding="utf-8"
+        )
 
         result_unfiltered = kb.ingest(
             repo_layout,
@@ -564,14 +581,16 @@ class TestIngestExcludePatterns:
         root = tmp_path / "pkg_repo"
         root.mkdir()
         (root / "pyproject.toml").write_text(
-            '[project]\nname = "mylib"\nversion = "1.2.3"\n'
+            '[project]\nname = "mylib"\nversion = "1.2.3"\n', encoding="utf-8"
         )
         (root / "setup.py").write_text(
-            'from setuptools import setup\nsetup(name="mylib")\n'
+            'from setuptools import setup\nsetup(name="mylib")\n', encoding="utf-8"
         )
-        (root / "setup.cfg").write_text("[metadata]\nname = mylib\n")
+        (root / "setup.cfg").write_text("[metadata]\nname = mylib\n", encoding="utf-8")
         (root / "mylib").mkdir()
-        (root / "mylib" / "core.py").write_text("def f():\n    return 1\n")
+        (root / "mylib" / "core.py").write_text(
+            "def f():\n    return 1\n", encoding="utf-8"
+        )
 
         result = kb.ingest(
             root,
@@ -609,15 +628,21 @@ class TestCollectFilesDirectly:
         """Tiny repo with public source, tests, examples, and a __pycache__."""
         root = tmp_path / "minirepo"
         root.mkdir()
-        (root / "core.py").write_text("def f(): return 1\n")
-        (root / "_priv.py").write_text("def _g(): return 2\n")
+        (root / "core.py").write_text("def f(): return 1\n", encoding="utf-8")
+        (root / "_priv.py").write_text("def _g(): return 2\n", encoding="utf-8")
         (root / "tests").mkdir()
-        (root / "tests" / "test_core.py").write_text("def test_f(): assert True\n")
+        (root / "tests" / "test_core.py").write_text(
+            "def test_f(): assert True\n", encoding="utf-8"
+        )
         (root / "examples").mkdir()
-        (root / "examples" / "demo.py").write_text("from minirepo import f\n")
+        (root / "examples" / "demo.py").write_text(
+            "from minirepo import f\n", encoding="utf-8"
+        )
         (root / "__pycache__").mkdir()
-        (root / "__pycache__" / "core.cpython-312.pyc").write_text("binary")
-        (root / "README.md").write_text("# Mini\n")
+        (root / "__pycache__" / "core.cpython-312.pyc").write_text(
+            "binary", encoding="utf-8"
+        )
+        (root / "README.md").write_text("# Mini\n", encoding="utf-8")
         return root
 
     def test_no_exclude_returns_all_matching_extensions(self, kb, repo):
@@ -710,7 +735,7 @@ class TestKnowledgeBaseIngest:
 
         desc_path = kb.index_dir / "test_docs" / "DESCRIPTION.md"
         assert desc_path.exists()
-        assert "unit tests" in desc_path.read_text()
+        assert "unit tests" in desc_path.read_text(encoding="utf-8")
 
     def test_list_collections_includes_description(self, kb, source_folder):
         """list_collections returns description text."""
@@ -727,7 +752,7 @@ class TestKnowledgeBaseIngest:
         chunks_path = kb.index_dir / "test_docs" / "chunks.jsonl"
         assert chunks_path.exists()
 
-        with open(chunks_path) as f:
+        with open(chunks_path, encoding="utf-8") as f:
             chunks = [json.loads(line) for line in f]
 
         assert len(chunks) == result["chunks"]
@@ -753,7 +778,7 @@ class TestKnowledgeBaseIngest:
 
         # Only .txt files should be processed
         chunks_path = kb.index_dir / "test_docs" / "chunks.jsonl"
-        with open(chunks_path) as f:
+        with open(chunks_path, encoding="utf-8") as f:
             chunks = [json.loads(line) for line in f]
 
         for chunk in chunks:
@@ -763,7 +788,7 @@ class TestKnowledgeBaseIngest:
         """Collection without DESCRIPTION.md gets empty description."""
         folder = tmp_path / "no_desc"
         folder.mkdir()
-        (folder / "file.txt").write_text("Some content for testing.")
+        (folder / "file.txt").write_text("Some content for testing.", encoding="utf-8")
 
         kb.ingest(folder)
 
@@ -831,11 +856,15 @@ class TestKnowledgeBaseSearch:
 
         folder_a = tmp_path / "collection_a"
         folder_a.mkdir()
-        (folder_a / "doc.txt").write_text("Alpha collection content about rockets.")
+        (folder_a / "doc.txt").write_text(
+            "Alpha collection content about rockets.", encoding="utf-8"
+        )
 
         folder_b = tmp_path / "collection_b"
         folder_b.mkdir()
-        (folder_b / "doc.txt").write_text("Beta collection content about submarines.")
+        (folder_b / "doc.txt").write_text(
+            "Beta collection content about submarines.", encoding="utf-8"
+        )
 
         mock_client = MagicMock()
         mock_client.embed = fake_embed
@@ -864,7 +893,9 @@ class TestKnowledgeBaseLoad:
         index_dir = tmp_path / "index"
         source_folder = tmp_path / "docs"
         source_folder.mkdir()
-        (source_folder / "file.txt").write_text("Content for caching test.")
+        (source_folder / "file.txt").write_text(
+            "Content for caching test.", encoding="utf-8"
+        )
 
         mock_client = MagicMock()
         mock_client.embed = fake_embed

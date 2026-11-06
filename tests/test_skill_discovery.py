@@ -14,7 +14,8 @@ from dsagt.skills import SkillRouter, rank_skills, score_skill
 def _mkskill(d, name, desc):
     d.mkdir(parents=True, exist_ok=True)
     (d / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: {desc}\n---\n# {name}\nbody\n"
+        f"---\nname: {name}\ndescription: {desc}\n---\n# {name}\nbody\n",
+        encoding="utf-8",
     )
     return d
 
@@ -217,7 +218,7 @@ def test_list_sources_flags_synced(tmp_path):
     index_dir = tmp_path / "idx"
     (index_dir / genesis_coll).mkdir(parents=True)
     (index_dir / genesis_coll / "chroma_ids.json").write_text(
-        json.dumps(["1", "2", "3"])
+        json.dumps(["1", "2", "3"]), encoding="utf-8"
     )
 
     kb = FakeKB(collections=[genesis_coll], index_dir=str(index_dir))

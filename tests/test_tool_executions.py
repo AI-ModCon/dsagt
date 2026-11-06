@@ -178,7 +178,7 @@ class TestCodeUseIndexer:
         trace_dir.mkdir(parents=True, exist_ok=True)
         rid = record["record_id"]
         (trace_dir / f"{record.get('code_name', 'x')}_{rid}.json").write_text(
-            json.dumps(record)
+            json.dumps(record), encoding="utf-8"
         )
 
     def test_incremental_and_idempotent(self, tmp_path):
@@ -207,7 +207,9 @@ class TestCodeUseIndexer:
             assert indexer.tick() == 0
 
             # The ack set persists exactly the indexed record ids.
-            acks = json.loads((pdir / ".dsagt" / "code_use_acks.json").read_text())
+            acks = json.loads(
+                (pdir / ".dsagt" / "code_use_acks.json").read_text(encoding="utf-8")
+            )
             assert set(acks) == {"r1", "r2"}
             kb.close()
 
@@ -301,7 +303,7 @@ class TestIndexTraceArchive:
         for i, record in enumerate(records):
             rid = record.get("record_id", f"rec_{i}")
             path = trace_dir / f"{record.get('code_name', 'unknown')}_{rid}.json"
-            path.write_text(json.dumps(record))
+            path.write_text(json.dumps(record), encoding="utf-8")
 
     def test_indexes_all_records(self, tmp_path):
         """Indexes all records in trace_dir."""
@@ -486,7 +488,7 @@ class TestIndexAndSearch:
         for r in records:
             rid = r.get("record_id", "x")
             path = trace_dir / f"{r.get('code_name', 'unknown')}_{rid}.json"
-            path.write_text(json.dumps(r))
+            path.write_text(json.dumps(r), encoding="utf-8")
         return trace_dir
 
     def test_search_by_tool_name(self, tmp_path):

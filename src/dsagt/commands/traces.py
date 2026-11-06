@@ -24,7 +24,11 @@ import os
 import subprocess
 from pathlib import Path
 
-from dsagt.observability import experiment_name, resolve_tracking_uri
+from dsagt.observability import (
+    experiment_name,
+    resolve_tracking_uri,
+    sqlite_store_uri,
+)
 from dsagt.session import catch_up_extraction, load_config
 
 logger = logging.getLogger(__name__)
@@ -43,6 +47,23 @@ def _resolve_experiment_id(tracking_uri: str, experiment: str) -> str | None:
     except Exception as e:  # noqa: BLE001  a missing id only costs the deep link
         logger.debug("Could not resolve experiment id for %s: %s", experiment, e)
         return None
+
+
+def _mlflow_command() -> list[str]:
+    """The ``mlflow`` CLI of this installation.
+
+    ``mlflow`` when PATH has it.  A ``dsagt`` started by its full path, or
+    installed with pipx or ``uv tool``, has ``mlflow`` only in its own
+    environment; there it is run as a module of this interpreter, which
+    also avoids the ``.exe`` lookup rules on Windows.
+    """
+    import shutil
+    import sys
+
+    found = shutil.which("mlflow")
+    if found is None:
+        return [sys.executable, "-m", "mlflow"]
+    return [found] if os.name == "nt" else ["mlflow"]
 
 
 def run(project: str, port: int = _DEFAULT_PORT) -> int:
@@ -73,7 +94,10 @@ def run(project: str, port: int = _DEFAULT_PORT) -> int:
     # served by `mlflow ui` below; only the project's own default file can
     # mean "never started".
     db = pdir / "mlflow.db"
-    if tracking_uri == f"sqlite:///{db}" and not db.exists():
+    if (
+        tracking_uri in (sqlite_store_uri(db), sqlite_store_uri(db.resolve()))
+        and not db.exists()
+    ):
         print(
             f"No trace store yet for '{project}' ({db} not found). "
             "Run a session first: dsagt start "
@@ -105,7 +129,7 @@ def run(project: str, port: int = _DEFAULT_PORT) -> int:
     #    warnings.
     env = {**os.environ, "PYTHONWARNINGS": "ignore"}
     cmd = [
-        "mlflow",
+        *_mlflow_command(),
         "ui",
         "--backend-store-uri",
         tracking_uri,
