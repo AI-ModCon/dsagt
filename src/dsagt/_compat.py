@@ -12,6 +12,7 @@ imports this on every recorded command.
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import stat
@@ -34,14 +35,28 @@ else:
 # ---------------------------------------------------------------------------
 
 
+#: ``msvcrt.locking``'s "someone else holds this region" errno.  Windows and
+#: Linux spell it ``EDEADLOCK``, macOS only ``EDEADLK``; the comparison below
+#: runs on Windows, where both names are the same number.
+_EDEADLOCK = getattr(errno, "EDEADLOCK", errno.EDEADLK)
+
+#: How long :func:`file_lock` waits on Windows for another process to let go.
+#: Generous next to the sharing retry below: a holder is doing a unit of real
+#: work (registering a project, indexing a pass of records), not closing a
+#: file it has just written.  The bound is there so a lock that will never be
+#: granted fails instead of hanging dsagt.
+_LOCK_WAIT_SECONDS = 120.0
+
+
 @contextmanager
 def file_lock(path: str | os.PathLike):
     """Hold an exclusive lock on the file at *path* for the ``with`` block.
 
     Blocks until the lock is free.  The lock is advisory and is released when
     the block ends or the process dies.  ``flock`` on POSIX; on Windows a
-    one-byte ``msvcrt.locking`` region, which gives up after ten seconds on
-    its own and is therefore retried until it succeeds.
+    one-byte ``msvcrt.locking`` region, which waits ten seconds and then
+    reports the region as contended rather than blocking, so it is asked
+    again until the holder lets go or :data:`_LOCK_WAIT_SECONDS` is up.
 
     The file is opened for append, never truncated: Windows refuses to
     truncate a file another process holds a lock in.
@@ -49,14 +64,19 @@ def file_lock(path: str | os.PathLike):
     with open(path, "a+b") as handle:
         if IS_WINDOWS:
             handle.seek(0)
+            deadline = time.monotonic() + _LOCK_WAIT_SECONDS
             while True:
                 try:
                     msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
                     break
-                except OSError:
+                except OSError as e:
                     # LK_LOCK tries once a second for ten seconds, then
-                    # raises; a holder that is still working is not an error.
-                    continue
+                    # raises EDEADLOCK; a holder that is still working is
+                    # not an error.  Any other errno (a closed descriptor, a
+                    # region the filesystem refuses to lock) would never
+                    # clear, and waiting on it would hang the caller.
+                    if e.errno != _EDEADLOCK or time.monotonic() >= deadline:
+                        raise
             try:
                 yield
             finally:
@@ -379,6 +399,23 @@ def popen_detached(argv: list[str], **kwargs) -> subprocess.Popen:
     return subprocess.Popen(argv, **kwargs, **detached)
 
 
+def _has_console_mode(fileno: int) -> bool:
+    """Whether the Windows handle behind *fileno* is a console.
+
+    Asking the handle for its console mode is the only way to tell: ``NUL``
+    and a console are both character devices, which is all ``isatty()``
+    reports.
+    """
+    import ctypes
+
+    try:
+        handle = msvcrt.get_osfhandle(fileno)
+        mode = ctypes.c_ulong()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except (OSError, ValueError):
+        return False
+
+
 def stdin_is_interactive() -> bool:
     """Whether a person can answer a prompt on stdin.
 
@@ -389,18 +426,12 @@ def stdin_is_interactive() -> bool:
     try:
         if not sys.stdin or not sys.stdin.isatty():
             return False
+        if not IS_WINDOWS:
+            return True
+        fileno = sys.stdin.fileno()
     except (OSError, ValueError):
         return False
-    if not IS_WINDOWS:
-        return True
-    import ctypes
-
-    try:
-        handle = msvcrt.get_osfhandle(sys.stdin.fileno())
-        mode = ctypes.c_ulong()
-        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
-    except (OSError, ValueError):
-        return False
+    return _has_console_mode(fileno)
 
 
 def use_utf8_stdio() -> None:

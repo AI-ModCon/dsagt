@@ -60,10 +60,12 @@ def _mlflow_command() -> list[str]:
     import shutil
     import sys
 
+    from dsagt._compat import IS_WINDOWS
+
     found = shutil.which("mlflow")
     if found is None:
         return [sys.executable, "-m", "mlflow"]
-    return [found] if os.name == "nt" else ["mlflow"]
+    return [found] if IS_WINDOWS else ["mlflow"]
 
 
 def run(project: str, port: int = _DEFAULT_PORT) -> int:

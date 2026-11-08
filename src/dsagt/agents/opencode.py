@@ -214,4 +214,8 @@ class OpenCodeSetup(AgentSetup):
             model,
             text,
         ]
-        return _run_simple_script(cmd, env, working_dir, self.install_hint)
+        # opencode appends non-TTY stdin to the prompt, so dropping the
+        # argument leaves the prompt itself (see the module docstring).
+        return _run_simple_script(
+            cmd, env, working_dir, self.install_hint, stdin_marker=[]
+        )

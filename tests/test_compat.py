@@ -6,6 +6,7 @@ the module, so the rule is exercised on every CI runner and the real system
 call is exercised on its own.
 """
 
+import errno
 import os
 import stat
 import subprocess
@@ -95,6 +96,41 @@ def test_file_lock_keeps_the_lock_file_contents(tmp_path):
 
 
 # -- replace_file / remove_tree ----------------------------------------------
+
+
+def test_file_lock_gives_up_on_a_failure_that_will_not_clear(tmp_path, monkeypatch):
+    """A contended region is waited on again; any other failure is raised.
+
+    ``msvcrt.locking`` waits ten seconds and then reports a holder that is
+    still working as ``EDEADLOCK``, which is worth asking about again.  A
+    closed descriptor or a filesystem that refuses the region reports
+    something else, and no amount of waiting fixes it; waiting on one anyway
+    would hang whoever took the lock.
+    """
+
+    class FakeMsvcrt:
+        LK_LOCK = LK_UNLCK = 0
+
+        def __init__(self):
+            self.calls = 0
+
+        def locking(self, fd, mode, nbytes):
+            self.calls += 1
+            if self.calls <= 2:
+                raise OSError(_compat._EDEADLOCK, "already locked")
+            raise OSError(errno.EACCES, "permission denied")
+
+    fake = FakeMsvcrt()
+    monkeypatch.setattr(_compat, "IS_WINDOWS", True)
+    monkeypatch.setattr(_compat, "msvcrt", fake, raising=False)
+
+    with pytest.raises(OSError) as caught:
+        with file_lock(tmp_path / "x.lock"):
+            pass
+
+    assert caught.value.errno == errno.EACCES
+    # Two contended waits, then the failure that was raised rather than spun on.
+    assert fake.calls == 3
 
 
 def test_replace_file_overwrites(tmp_path):
@@ -434,3 +470,53 @@ def test_rewriting_a_usage_line_keeps_backslashes(tmp_path):
     wrapped = r"dsagt-run --code s-x -- python C:\data\scripts\x.py"
     rewrite_cli_invocations(skill, [("python scripts/x.py", wrapped)])
     assert wrapped in (skill / "SKILL.md").read_text(encoding="utf-8")
+
+
+def test_stdin_from_the_null_device_is_not_interactive(tmp_path):
+    """A scripted run is asked nothing, so ``dsagt init`` works from flags.
+
+    POSIX settles this with ``isatty()``, which is false for ``/dev/null``.
+    Windows counts ``NUL`` a character device just as it counts a console
+    one and answers true, so init tried to prompt and died on the EOF;
+    only a handle that has a console mode is a console.
+    """
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "from dsagt._compat import stdin_is_interactive\n"
+        "print(stdin_is_interactive())\n",
+        encoding="utf-8",
+    )
+    with open(os.devnull) as devnull:
+        done = subprocess.run(
+            [sys.executable, str(probe)],
+            stdin=devnull,
+            capture_output=True,
+            text=True,
+        )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "False"
+
+
+def test_a_tty_that_is_not_a_console_is_not_interactive(monkeypatch):
+    """The Windows rule the test above can only reach on a Windows runner.
+
+    ``NUL`` answers ``isatty()`` with true, so the console mode is what
+    decides; a handle that has one is a person's console, and a handle that
+    has none is a redirect.
+    """
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+        def fileno(self):
+            return 0
+
+    monkeypatch.setattr(_compat, "IS_WINDOWS", True)
+    monkeypatch.setattr(_compat.sys, "stdin", FakeStdin())
+
+    monkeypatch.setattr(_compat, "_has_console_mode", lambda fd: False)
+    assert _compat.stdin_is_interactive() is False
+
+    monkeypatch.setattr(_compat, "_has_console_mode", lambda fd: True)
+    assert _compat.stdin_is_interactive() is True
