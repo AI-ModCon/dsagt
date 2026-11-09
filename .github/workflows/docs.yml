@@ -47,8 +47,9 @@ jobs:
     concurrency:
       group: preview-${{ github.event.number }}
     steps:
+      # Not gated on the event: pr-preview-action commits the removal to the
+      # preview branch, so it needs a repository even when the build is skipped.
       - uses: actions/checkout@v4
-        if: github.event.action != 'closed'
 
       - uses: actions/setup-python@v5
         if: github.event.action != 'closed'
