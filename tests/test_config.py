@@ -589,16 +589,17 @@ class TestInitProject:
         Regression test for issue #105: ensure that a path like ~/myproj is
         expanded to /home/user/myproj, not a literal '~' folder.
         """
-        from unittest.mock import Mock
         import types
-        from dsagt.commands import cli
 
         # Create a fake home directory under tmp_path
         fake_home = tmp_path / "fake_home"
         fake_home.mkdir()
 
         # Mock the expanduser to use our fake home
-        with patch("os.path.expanduser", lambda p: str(fake_home / p[2:]) if p.startswith("~/") else p):
+        with patch(
+            "os.path.expanduser",
+            lambda p: str(fake_home / p[2:]) if p.startswith("~/") else p,
+        ):
             # Simulate non-interactive init with a tilde path
             args = types.SimpleNamespace(
                 project="tildetest",
