@@ -592,18 +592,21 @@ class GooseReader(Reader):
         self._db = Path(db_path) if db_path else _GOOSE_DB
 
     def _latest_session(self, con):
-        row = con.execute(
-            "SELECT id FROM sessions WHERE working_dir = ? "
-            "ORDER BY updated_at DESC LIMIT 1",
-            (self._project_dir,),
-        ).fetchone()
-        if row is None and IS_WINDOWS:
+        if IS_WINDOWS:
+            # Not as a fallback: an exact match may be an older session than
+            # one the same directory spelled another way, and the collector
+            # would read the stale one.
             return _latest_by_folded_dir(
                 con.execute(
                     "SELECT id, working_dir FROM sessions ORDER BY updated_at DESC"
                 ),
                 self._project_dir,
             )
+        row = con.execute(
+            "SELECT id FROM sessions WHERE working_dir = ? "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (self._project_dir,),
+        ).fetchone()
         return row[0] if row else None
 
     def active_source(self):
@@ -658,18 +661,19 @@ class OpenCodeReader(Reader):
         self._db = Path(db_path) if db_path else _OPENCODE_DB
 
     def _latest_session(self, con):
-        row = con.execute(
-            "SELECT id FROM session WHERE directory = ? "
-            "ORDER BY time_updated DESC LIMIT 1",
-            (self._project_dir,),
-        ).fetchone()
-        if row is None and IS_WINDOWS:
+        if IS_WINDOWS:
+            # Newest first, whatever the spelling; see GooseReader.
             return _latest_by_folded_dir(
                 con.execute(
                     "SELECT id, directory FROM session ORDER BY time_updated DESC"
                 ),
                 self._project_dir,
             )
+        row = con.execute(
+            "SELECT id FROM session WHERE directory = ? "
+            "ORDER BY time_updated DESC LIMIT 1",
+            (self._project_dir,),
+        ).fetchone()
         return row[0] if row else None
 
     def active_source(self):

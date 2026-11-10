@@ -166,3 +166,23 @@ def test_end_to_end_through_the_sink(mlflow_sqlite):
     exp = mlflow.get_experiment_by_name("ocproj")
     traces = mlflow.search_traces(locations=[exp.experiment_id], return_type="list")
     assert len(traces) == 2
+
+
+def test_reader_prefers_the_newest_session_however_windows_spelled_it(
+    tmp_path, monkeypatch
+):
+    """The same ordering fix as GooseReader's; see that test."""
+    from dsagt import traces
+
+    db = tmp_path / "opencode.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE session(id TEXT, directory TEXT, time_updated INTEGER)")
+    con.execute("INSERT INTO session VALUES('s_exact','/proj',100)")
+    con.execute("INSERT INTO session VALUES('s_newer','/proj/',200)")
+    con.commit()
+    con.close()
+
+    reader = OpenCodeReader("/proj", db_path=db)
+    assert reader.active_source() == "s_exact"
+    monkeypatch.setattr(traces, "IS_WINDOWS", True)
+    assert reader.active_source() == "s_newer"
