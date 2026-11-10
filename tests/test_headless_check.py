@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from dsagt.agents.base import _NATIVE_DESCRIPTION_CAP
-from dsagt._compat import link_dir
+from dsagt._compat import link_dir, remove_dir_link
 
 spec = importlib.util.spec_from_file_location(
     "headless_check", Path(__file__).parent / "headless_check.py"
@@ -118,7 +118,7 @@ def test_a_skill_over_the_native_description_cap_may_be_a_copy(tmp_path):
 
 def test_a_copied_skill_under_the_cap_is_a_failure(tmp_path):
     root = _project(tmp_path, "convert")
-    (root / ".claude" / "skills" / "convert").unlink()
+    remove_dir_link(root / ".claude" / "skills" / "convert")
     (root / ".claude" / "skills" / "convert").mkdir()
     (root / ".claude" / "skills" / "convert" / "SKILL.md").write_text(
         "---\nx: 1\n---\n", encoding="utf-8"
