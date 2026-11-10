@@ -22,6 +22,8 @@ from typing import ClassVar
 
 from dsagt._compat import (
     IS_WINDOWS,
+    is_batch_program,
+    popen_command,
     resolve_executable,
     is_dir_link,
     link_dir,
@@ -413,16 +415,13 @@ def _run_simple_script(
     logger.info("Launching: %s", " ".join(cmd))
     argv = _resolved(cmd, env)
     prompt = None
-    if (
-        stdin_marker is not None
-        and IS_WINDOWS
-        and argv[0].lower().endswith((".cmd", ".bat"))
-    ):
+    if stdin_marker is not None and IS_WINDOWS and is_batch_program(argv[0]):
         prompt = argv[-1]
         argv = [*argv[:-1], *stdin_marker]
     try:
         return subprocess.run(
-            argv,
+            # Quoted for cmd.exe when the CLI is a shim; see popen_command.
+            popen_command(argv),
             env=env,
             cwd=str(working_dir),
             input=prompt,

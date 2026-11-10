@@ -349,6 +349,31 @@ def test_split_command_keeps_windows_backslashes(monkeypatch):
     ]
 
 
+def test_popen_command_quotes_for_a_batch_shim(monkeypatch):
+    """cmd.exe parses the line a second time, so an & in a project path
+    would start a second command."""
+    monkeypatch.setattr(_compat, "IS_WINDOWS", True)
+    argv = [r"C:\npm\codex.cmd", "-C", r"C:\work\R&D", "exec"]
+    assert _compat.popen_command(argv) == (
+        r'"C:\npm\codex.cmd" "-C" "C:\work\R&D" "exec"'
+    )
+    # A quote inside an argument is doubled, the one escape cmd honours
+    # inside a quoted word.
+    assert _compat.popen_command([r"a.bat", 'say "hi"']) == r'"a.bat" "say ""hi"""'
+    # Anything Windows runs itself is left as a list.
+    assert _compat.popen_command([r"C:\py\python.exe", "-c", "1&2"]) == [
+        r"C:\py\python.exe",
+        "-c",
+        "1&2",
+    ]
+
+
+def test_popen_command_is_a_no_op_on_posix(monkeypatch):
+    monkeypatch.setattr(_compat, "IS_WINDOWS", False)
+    argv = ["./run.cmd", "a&b"]
+    assert _compat.popen_command(argv) == argv
+
+
 def test_detached_child_outlives_and_runs(tmp_path):
     """The kwargs start a real process on this platform."""
     out = tmp_path / "ran.txt"

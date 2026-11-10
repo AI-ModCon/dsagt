@@ -55,7 +55,13 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from dsagt._compat import IS_WINDOWS, file_lock, resolve_command, split_command
+from dsagt._compat import (
+    IS_WINDOWS,
+    file_lock,
+    popen_command,
+    resolve_command,
+    split_command,
+)
 
 if TYPE_CHECKING:
     # Annotation-only (this module has ``from __future__ import annotations``, so
@@ -319,7 +325,8 @@ def _run_streaming(
     # the record keeps the command as it was typed.
     argv = resolve_command(command, env.get("PATH"))
     proc = subprocess.Popen(
-        argv,
+        # A batch file re-parses its arguments; see popen_command.
+        popen_command(argv),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

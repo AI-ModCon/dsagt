@@ -407,6 +407,38 @@ def resolve_command(command: list[str], path: str | None = None) -> list[str]:
     return [resolve_executable(first, path), *command[1:]]
 
 
+#: What ``CreateProcess`` hands to ``cmd.exe`` instead of running itself.
+_BATCH_SUFFIXES = (".cmd", ".bat")
+
+
+def is_batch_program(program: str) -> bool:
+    """Whether *program* is a batch file, which Windows runs through
+    ``cmd.exe`` rather than directly.  Every npm-installed agent CLI is
+    one."""
+    return program.lower().endswith(_BATCH_SUFFIXES)
+
+
+def popen_command(argv: list[str]) -> list[str] | str:
+    """*argv* as ``Popen`` should receive it on this platform.
+
+    The list itself, except on Windows when the program is a batch file.
+    ``cmd.exe`` parses the command line a second time, and it does not
+    share the C runtime's quoting rules that ``subprocess`` follows, so an
+    argument holding ``&``, ``|``, ``<`` or ``>`` -- a project at
+    ``C:\\work\\R&D`` -- is read as a second command.  Quoting each word
+    here puts those characters where ``cmd`` treats them as text, and the
+    result goes to ``Popen`` as one string, which Windows passes to
+    ``CreateProcess`` unchanged.
+
+    Ceiling: ``cmd`` expands ``%NAME%`` inside quotes as well, and a
+    literal percent sign in a path is legal, so refusing to run would cost
+    more than it saves.
+    """
+    if not IS_WINDOWS or not argv or not is_batch_program(argv[0]):
+        return list(argv)
+    return " ".join('"' + word.replace('"', '""') + '"' for word in argv)
+
+
 def detached_process_kwargs() -> dict:
     """``Popen`` keyword arguments for a child that outlives its parent's
     session: its own session on POSIX, its own process group and no console

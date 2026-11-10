@@ -35,6 +35,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from dsagt._compat import popen_command
+
 from .base import (
     AgentSetup,
     _resolved,
@@ -226,7 +228,7 @@ def launch_agent(
     logger.info("Launching: %s", " ".join(cmd))
     try:
         return subprocess.run(
-            _resolved(cmd, env), env=env, cwd=str(working_dir)
+            popen_command(_resolved(cmd, env)), env=env, cwd=str(working_dir)
         ).returncode
     except FileNotFoundError:
         logger.error("Command not found: %s. %s", cmd[0], setup.install_hint)
