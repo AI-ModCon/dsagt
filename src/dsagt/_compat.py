@@ -357,13 +357,27 @@ def _literal_backslashes(command: str) -> str:
     """
     out: list[str] = []
     quote: str | None = None
+    escaped = False
     for i, char in enumerate(command):
+        if escaped:
+            # The quote this escapes is text, so it opens and closes nothing.
+            escaped = False
+            out.append(char)
+            continue
+        if char == "\\":
+            if quote == "'":
+                out.append(char)  # single quotes already keep it
+            elif i + 1 < len(command) and command[i + 1] in "\"'":
+                escaped = True
+                out.append(char)
+            else:
+                out.append("\\\\")
+            continue
         if quote is None and char in "\"'":
             quote = char
         elif char == quote:
             quote = None
-        escaping = i + 1 < len(command) and command[i + 1] in "\"'"
-        out.append("\\\\" if char == "\\" and quote != "'" and not escaping else char)
+        out.append(char)
     return "".join(out)
 
 
