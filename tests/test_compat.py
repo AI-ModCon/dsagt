@@ -174,6 +174,39 @@ def test_remove_tree_removes_read_only_files(tmp_path):
     assert not (tmp_path / "clone").exists()
 
 
+def test_the_rmtree_handler_waits_out_a_file_held_open(tmp_path, monkeypatch):
+    """A sharing violation is not a read-only attribute: clearing the
+    attribute and retrying at once still fails, and the tree would be left
+    half deleted."""
+    target = tmp_path / "held"
+    target.write_text("x", encoding="utf-8")
+    calls = []
+
+    def busy_twice(path):
+        calls.append(path)
+        if len(calls) < 3:
+            raise PermissionError(13, "in use")
+        os.unlink(path)
+
+    _compat._clear_readonly_and_retry(busy_twice, target, None)
+    assert len(calls) == 3
+    assert not target.exists()
+
+
+def test_the_rmtree_handler_gives_up_on_a_refusal_that_will_not_clear(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "locked"
+    target.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(_compat, "_SHARING_RETRY_SECONDS", 0.0)
+
+    def always_busy(_path):
+        raise PermissionError(13, "in use")
+
+    with pytest.raises(PermissionError):
+        _compat._clear_readonly_and_retry(always_busy, target, None)
+
+
 def test_remove_tree_ignore_errors_on_a_missing_path(tmp_path):
     remove_tree(tmp_path / "absent", ignore_errors=True)
     with pytest.raises(OSError):

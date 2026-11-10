@@ -180,7 +180,11 @@ def _clear_readonly_and_retry(func, path, _exc):
     """``shutil.rmtree`` error handler: make *path* writable and try again.
 
     Git marks its object files read-only, and Windows refuses to delete a
-    read-only file (POSIX only needs the directory to be writable).
+    read-only file (POSIX only needs the directory to be writable).  A
+    read-only attribute is not the only thing that stops a delete, so a
+    refusal is retried the way :func:`replace_file` retries: the entry may
+    be held open for a moment.  ``rmtree`` calls this per failing entry, so
+    a tree whose files are all held open takes that wait for each of them.
     """
     deadline = time.monotonic() + _SHARING_RETRY_SECONDS
     while True:
