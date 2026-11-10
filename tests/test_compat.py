@@ -321,6 +321,26 @@ def test_split_command_keeps_windows_backslashes(monkeypatch):
         r"C:\data\x.py",
         "two words",
     ]
+    # A quoted path keeps one backslash per separator, whichever quote it
+    # was written with; doubling them all gave the single-quoted form two,
+    # and a declared file role stopped matching the argument.
+    for quoted in (
+        r"python 'C:\data folder\convert.py'",
+        'python "C:\\data folder\\convert.py"',
+    ):
+        assert split_command(quoted) == ["python", r"C:\data folder\convert.py"]
+    # A backslash before a quote is that quote's escape, not a separator;
+    # doubling it ended the word early and raised ValueError.
+    assert split_command('python -c "print(\\"don\'t\\")"') == [
+        "python",
+        "-c",
+        'print("don\'t")',
+    ]
+    assert split_command(r"python C:\a\x.py \\server\share\f.csv") == [
+        "python",
+        r"C:\a\x.py",
+        r"\\server\share\f.csv",
+    ]
     monkeypatch.setattr(_compat, "IS_WINDOWS", False)
     assert split_command("python skills/x/scripts/y.py 'a b'") == [
         "python",

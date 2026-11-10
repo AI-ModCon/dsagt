@@ -341,18 +341,44 @@ def find_bash() -> str | None:
     return None
 
 
+def _literal_backslashes(command: str) -> str:
+    """*command* with every backslash that stands for itself doubled, so
+    ``shlex`` hands it back.
+
+    Doubling all of them is wrong twice over: inside single quotes
+    ``shlex`` already keeps a backslash, so the argument would come back
+    with two of them and stop matching the file it names; and a backslash
+    before a quote is the quote's escape, so doubling it ends the quoted
+    word early -- ``python -c "print(\\"don't\\")"`` raised ``ValueError:
+    No closing quotation``.  Both are left alone here, which is also how
+    Windows' own parser reads them.  A quoted argument that ends in a
+    backslash (``"C:\\data\\"``) therefore reads as an escaped quote, as it
+    does for every other program on the platform.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    for i, char in enumerate(command):
+        if quote is None and char in "\"'":
+            quote = char
+        elif char == quote:
+            quote = None
+        escaping = i + 1 < len(command) and command[i + 1] in "\"'"
+        out.append("\\\\" if char == "\\" and quote != "'" and not escaping else char)
+    return "".join(out)
+
+
 def split_command(command: str) -> list[str]:
     """Split a command line into arguments, as the stored ``executable`` of a
     code is read.
 
-    POSIX shell rules.  On Windows a backslash is kept as a literal
-    character instead of an escape, so ``python C:\\data\\x.py`` keeps its
-    path; quotes group words on both.
+    POSIX shell rules.  On Windows a backslash is a literal character
+    rather than an escape, so ``python C:\\data\\x.py`` keeps its path
+    (see :func:`_literal_backslashes`); quotes group words on both.
     """
     import shlex
 
     if IS_WINDOWS:
-        command = command.replace("\\", "\\\\")
+        command = _literal_backslashes(command)
     return shlex.split(command)
 
 
