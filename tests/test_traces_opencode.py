@@ -182,7 +182,7 @@ def test_reader_prefers_the_newest_session_however_windows_spelled_it(
     con.commit()
     con.close()
 
-    reader = OpenCodeReader("/proj", db_path=db)
-    assert reader.active_source() == "s_exact"
+    # Set before the reader runs: on a Windows runner IS_WINDOWS is already
+    # true, so the rule under test is the only one this may assert.
     monkeypatch.setattr(traces, "IS_WINDOWS", True)
-    assert reader.active_source() == "s_newer"
+    assert OpenCodeReader("/proj", db_path=db).active_source() == "s_newer"

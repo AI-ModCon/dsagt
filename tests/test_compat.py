@@ -331,10 +331,13 @@ def test_split_command_keeps_windows_backslashes(monkeypatch):
         assert split_command(quoted) == ["python", r"C:\data folder\convert.py"]
     # A backslash before a quote is that quote's escape, not a separator;
     # doubling it ended the word early and raised ValueError.
-    assert split_command('python -c "print(\\"don\'t\\")"') == [
+    # An escaped quote is text: it neither opens nor closes a quoted word,
+    # so what follows is still outside quotes and keeps its separators.
+    assert split_command('python -c "print(\\"don\'t\\")" C:\\data\\in.csv') == [
         "python",
         "-c",
         'print("don\'t")',
+        r"C:\data\in.csv",
     ]
     assert split_command(r"python C:\a\x.py \\server\share\f.csv") == [
         "python",
