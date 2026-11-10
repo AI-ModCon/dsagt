@@ -434,11 +434,16 @@ def write_state(pdir: Path, state: dict) -> None:
     """
     sp = state_path(pdir)
     sp.parent.mkdir(parents=True, exist_ok=True)
-    scratch = sp.with_name(sp.name + ".tmp")
-    scratch.write_text(
-        yaml.dump(state, default_flow_style=False, sort_keys=False), encoding="utf-8"
-    )
-    replace_file(scratch, sp)
+    import tempfile
+
+    fd, filename = tempfile.mkstemp(dir=sp.parent, prefix=sp.name + ".", suffix=".tmp")
+    scratch = Path(filename)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(yaml.dump(state, default_flow_style=False, sort_keys=False))
+        replace_file(scratch, sp)
+    finally:
+        scratch.unlink(missing_ok=True)
 
 
 def append_session(pdir: Path) -> dict:
