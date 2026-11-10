@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -434,8 +435,6 @@ def write_state(pdir: Path, state: dict) -> None:
     """
     sp = state_path(pdir)
     sp.parent.mkdir(parents=True, exist_ok=True)
-    import tempfile
-
     fd, filename = tempfile.mkstemp(dir=sp.parent, prefix=sp.name + ".", suffix=".tmp")
     scratch = Path(filename)
     try:

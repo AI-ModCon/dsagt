@@ -687,6 +687,30 @@ class TestSessionState:
         assert session_mod.read_state(pdir)["sessions"][-1]["id"] == 2
         assert list((pdir / ".dsagt").glob("*.tmp")) == []
 
+    def test_a_second_writer_does_not_consume_the_first_writer_s_scratch(
+        self, tmp_path, monkeypatch
+    ):
+        """Two servers write one project's state; neither may replace the
+        file the other is about to publish."""
+        from dsagt import session as session_mod
+
+        pdir = tmp_path / "proj"
+        pdir.mkdir()
+        real_replace = session_mod.replace_file
+        nested = []
+
+        def write_once_from_inside(src, dst):
+            # The other writer runs between this writer's write and replace.
+            if not nested:
+                nested.append(True)
+                session_mod.write_state(pdir, {"sessions": [{"id": 9}]})
+            real_replace(src, dst)
+
+        monkeypatch.setattr(session_mod, "replace_file", write_once_from_inside)
+        session_mod.write_state(pdir, {"sessions": [{"id": 1}]})
+        assert session_mod.read_state(pdir) == {"sessions": [{"id": 1}]}
+        assert list((pdir / ".dsagt").glob("*.tmp")) == []
+
     def test_update_cursor_roundtrip(self, tmp_path):
         from dsagt.session import read_state, update_cursor
 
