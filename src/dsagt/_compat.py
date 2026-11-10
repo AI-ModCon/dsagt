@@ -182,8 +182,16 @@ def _clear_readonly_and_retry(func, path, _exc):
     Git marks its object files read-only, and Windows refuses to delete a
     read-only file (POSIX only needs the directory to be writable).
     """
-    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
-    func(path)
+    deadline = time.monotonic() + _SHARING_RETRY_SECONDS
+    while True:
+        try:
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+            func(path)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 def remove_tree(path: str | os.PathLike, *, ignore_errors: bool = False) -> None:
