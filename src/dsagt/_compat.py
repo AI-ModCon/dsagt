@@ -347,37 +347,48 @@ def _literal_backslashes(command: str) -> str:
 
     Doubling all of them is wrong twice over: inside single quotes
     ``shlex`` already keeps a backslash, so the argument would come back
-    with two of them and stop matching the file it names; and a backslash
-    before a quote is the quote's escape, so doubling it ends the quoted
-    word early -- ``python -c "print(\\"don't\\")"`` raised ``ValueError:
-    No closing quotation``.  Both are left alone here, which is also how
-    Windows' own parser reads them.  A quoted argument that ends in a
-    backslash (``"C:\\data\\"``) therefore reads as an escaped quote, as it
-    does for every other program on the platform.
+    with two of them and stop matching the file it names; and a run of
+    backslashes before a quote is that quote's escape, so doubling it ends
+    the quoted word early -- ``python -c "print(\\"don't\\")"`` raised
+    ``ValueError: No closing quotation``.
+
+    A run before a quote is read the way Windows reads it: each pair is one
+    literal backslash, and an odd one left over makes the quote text.  So
+    ``"C:\\data\\"`` is an unterminated word, as it is for every other
+    program on the platform, while the ``"C:\\data\\\\"`` that
+    ``subprocess.list2cmdline`` writes for a directory is that directory.
     """
     out: list[str] = []
     quote: str | None = None
-    escaped = False
-    for i, char in enumerate(command):
-        if escaped:
-            # The quote this escapes is text, so it opens and closes nothing.
-            escaped = False
-            out.append(char)
+    i, end = 0, len(command)
+    while i < end:
+        char = command[i]
+        if char == "\\" and quote == "'":
+            out.append(char)  # single quotes already keep it
+            i += 1
             continue
         if char == "\\":
-            if quote == "'":
-                out.append(char)  # single quotes already keep it
-            elif i + 1 < len(command) and command[i + 1] in "\"'":
-                escaped = True
-                out.append(char)
+            run_start = i
+            while i < end and command[i] == "\\":
+                i += 1
+            run = i - run_start
+            if i < end and command[i] in "\"'":
+                out.append("\\\\" * (run // 2))
+                if run % 2:
+                    # Escapes the quote, which is then text: it opens and
+                    # closes nothing, so the quote state is left alone.
+                    out.append("\\")
+                    out.append(command[i])
+                    i += 1
             else:
-                out.append("\\\\")
+                out.append("\\\\" * run)
             continue
         if quote is None and char in "\"'":
             quote = char
         elif char == quote:
             quote = None
         out.append(char)
+        i += 1
     return "".join(out)
 
 

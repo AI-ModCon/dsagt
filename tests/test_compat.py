@@ -339,6 +339,15 @@ def test_split_command_keeps_windows_backslashes(monkeypatch):
         'print("don\'t")',
         r"C:\data\in.csv",
     ]
+    # A run of backslashes before a quote is read by parity, as Windows
+    # reads it: subprocess.list2cmdline writes a directory argument this
+    # way, and it used to raise ValueError before dsagt-run started.
+    assert split_command(r'python "C:\data folder\\" --out x') == [
+        "python",
+        "C:\\data folder\\",
+        "--out",
+        "x",
+    ]
     assert split_command(r"python C:\a\x.py \\server\share\f.csv") == [
         "python",
         r"C:\a\x.py",
