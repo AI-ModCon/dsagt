@@ -96,24 +96,35 @@ def fake_repo(tmp_path):
     # Top-level metadata files (the files that must survive)
     (repo / "pyproject.toml").write_text(
         '[project]\nname = "fakelib"\nversion = "1.2.3"\n'
-        'dependencies = ["numpy>=1.26"]\n'
+        'dependencies = ["numpy>=1.26"]\n',
+        encoding="utf-8",
     )
     (repo / "setup.py").write_text(
-        'from setuptools import setup\nsetup(name="fakelib")\n'
+        'from setuptools import setup\nsetup(name="fakelib")\n', encoding="utf-8"
     )
-    (repo / "README.md").write_text("# fakelib\n\nA fake library for tests.\n")
-    (repo / "LICENSE").write_text("Apache 2.0\n")
+    (repo / "README.md").write_text(
+        "# fakelib\n\nA fake library for tests.\n", encoding="utf-8"
+    )
+    (repo / "LICENSE").write_text("Apache 2.0\n", encoding="utf-8")
 
     # Subdirectories
     (repo / "docs").mkdir()
-    (repo / "docs" / "guide.md").write_text("# Guide\n\nUse fakelib.\n")
+    (repo / "docs" / "guide.md").write_text(
+        "# Guide\n\nUse fakelib.\n", encoding="utf-8"
+    )
 
     (repo / "fakelib").mkdir()
-    (repo / "fakelib" / "__init__.py").write_text('"""fakelib package."""\n')
-    (repo / "fakelib" / "core.py").write_text("def f():\n    return 1\n")
+    (repo / "fakelib" / "__init__.py").write_text(
+        '"""fakelib package."""\n', encoding="utf-8"
+    )
+    (repo / "fakelib" / "core.py").write_text(
+        "def f():\n    return 1\n", encoding="utf-8"
+    )
 
     (repo / "tests").mkdir()
-    (repo / "tests" / "test_core.py").write_text("def test_f():\n    assert True\n")
+    (repo / "tests" / "test_core.py").write_text(
+        "def test_f():\n    assert True\n", encoding="utf-8"
+    )
 
     return repo
 
@@ -150,8 +161,8 @@ def test_clone_with_include_keeps_top_level_files(fake_repo, tmp_path):
     # Subdirs not in include must NOT be copied.
     assert not (dest / "tests").exists()
     # The clone's commit and ref are recorded for consumers of the cache.
-    assert (dest / "SOURCE_COMMIT").read_text() == "fake0commit\n"
-    assert (dest / "SOURCE_REF").read_text() == "main\n"
+    assert (dest / "SOURCE_COMMIT").read_text(encoding="utf-8") == "fake0commit\n"
+    assert (dest / "SOURCE_REF").read_text(encoding="utf-8") == "main\n"
 
 
 def test_a_private_repository_falls_back_to_the_users_git(fake_repo, tmp_path):
@@ -167,7 +178,7 @@ def test_a_private_repository_falls_back_to_the_users_git(fake_repo, tmp_path):
     ):
         clone_github(url="git@github.com:owner/fake.git", dest=dest, branch="main")
     assert (dest / "pyproject.toml").exists()
-    assert (dest / "SOURCE_COMMIT").read_text() == "fake0commit\n"
+    assert (dest / "SOURCE_COMMIT").read_text(encoding="utf-8") == "fake0commit\n"
 
 
 def test_a_non_github_url_uses_git(fake_repo, tmp_path):
@@ -317,8 +328,8 @@ class TestEnsureAssetsTools:
         ):
             ensure_assets(["codes"], tmp_path)
             stamp = tmp_path / "codes" / CODES_STAMP_FILE
-            assert len(stamp.read_text().strip()) == 64
-            stamp.write_text("stale\n")
+            assert len(stamp.read_text(encoding="utf-8").strip()) == 64
+            stamp.write_text("stale\n", encoding="utf-8")
             # A rebuild happens in a fresh ``dsagt init`` process; chromadb
             # caches one client per path within a process, so the cache is
             # cleared here to stand in for that process boundary.
@@ -327,7 +338,7 @@ class TestEnsureAssetsTools:
             SharedSystemClient.clear_system_cache()
             third = ensure_assets(["codes"], tmp_path)
         assert third["built"] == ["codes"]
-        assert len(stamp.read_text().strip()) == 64
+        assert len(stamp.read_text(encoding="utf-8").strip()) == 64
 
     def test_build_holds_the_base_skill_codes(self, tmp_path):
         """The shared ``codes`` collection carries the base-skill codes, tagged

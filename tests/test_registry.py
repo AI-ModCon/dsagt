@@ -8,6 +8,8 @@ dsagt-run wrapping, runtime isolation, and skill discovery.
 import pytest
 import yaml
 
+from dsagt._compat import is_dir_link
+
 from dsagt.registry import (
     CodeRegistry,
     _parse_frontmatter,
@@ -31,7 +33,8 @@ class TestLenientFrontmatter:
             "---\n"
             "name: generating-datacards\n"
             "description: Generates a datacard. Supports levels: Level 1, Level 2.\n"
-            "---\n\n# Body\n"
+            "---\n\n# Body\n",
+            encoding="utf-8",
         )
         spec = _parse_frontmatter(path)  # must NOT raise
         assert spec["name"] == "generating-datacards"
@@ -49,7 +52,9 @@ class TestLenientFrontmatter:
     def test_valid_yaml_still_uses_strict_path(self, tmp_path):
         # Sanity: well-formed frontmatter is unchanged by the fallback.
         path = tmp_path / "SKILL.md"
-        path.write_text("---\nname: ok\ndescription: clean\ntags:\n  - a\n---\n")
+        path.write_text(
+            "---\nname: ok\ndescription: clean\ntags:\n  - a\n---\n", encoding="utf-8"
+        )
         spec = _parse_frontmatter(path)
         assert spec == {"name": "ok", "description": "clean", "tags": ["a"]}
 
@@ -58,7 +63,9 @@ class TestLenientFrontmatter:
         ``spec.get(...)``, so a non-dict would raise AttributeError and drop
         every skill from the source.  Always hand back a dict."""
         path = tmp_path / "SKILL.md"
-        path.write_text("---\njust some prose, no keys\n---\n# Body\n")
+        path.write_text(
+            "---\njust some prose, no keys\n---\n# Body\n", encoding="utf-8"
+        )
         spec = _parse_frontmatter(path)
         assert isinstance(spec, dict)
         assert spec.get("name") is None  # .get must not raise
@@ -107,7 +114,9 @@ def _write_tool(codes_dir, spec: dict) -> None:
     code_dir = codes_dir / spec["name"]
     code_dir.mkdir(parents=True, exist_ok=True)
     frontmatter = yaml.dump(spec, default_flow_style=False, sort_keys=False)
-    (code_dir / "SKILL.md").write_text(f"---\n{frontmatter}---\n\n# {spec['name']}\n")
+    (code_dir / "SKILL.md").write_text(
+        f"---\n{frontmatter}---\n\n# {spec['name']}\n", encoding="utf-8"
+    )
 
 
 def make_registry(tmp_path, tools: list[dict]) -> CodeRegistry:
@@ -316,12 +325,14 @@ class TestSaveTool:
         skill_path.parent.mkdir(parents=True)
         spec = TOOL_NO_PARAMS
         fm = __import__("yaml").dump(spec, default_flow_style=False, sort_keys=False)
-        skill_path.write_text(f"---\n{fm}---\n\n# Custom docs written by hand.\n")
+        skill_path.write_text(
+            f"---\n{fm}---\n\n# Custom docs written by hand.\n", encoding="utf-8"
+        )
 
         updated = {**spec, "description": "Updated description"}
         empty_registry.save_tool(updated)
 
-        content = skill_path.read_text()
+        content = skill_path.read_text(encoding="utf-8")
         assert "Custom docs written by hand." in content
 
     def test_update_overwrites_frontmatter(self, empty_registry):
@@ -455,7 +466,9 @@ def test_save_tool_writes_the_rendered_spec(tmp_path):
     }
     registry = CodeRegistry(runtime_dir=tmp_path)
     assert registry.save_tool(spec) == "added"
-    written = (tmp_path / "skills" / "count-rows" / "SKILL.md").read_text()
+    written = (tmp_path / "skills" / "count-rows" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
     assert written == render_code_spec(spec)
     assert "dsagt-run --code count-rows -- uv run --with pandas -- python" in written
 
@@ -469,9 +482,9 @@ class TestDeleteSkill:
         front = f"name: {name}\ndescription: d\n"
         if executable:
             front += f"executable: {executable}\n"
-        (d / "SKILL.md").write_text(f"---\n{front}---\n\n# {name}\n")
+        (d / "SKILL.md").write_text(f"---\n{front}---\n\n# {name}\n", encoding="utf-8")
         if provenance:
-            (d / "PROVENANCE.txt").write_text("from: catalog\n")
+            (d / "PROVENANCE.txt").write_text("from: catalog\n", encoding="utf-8")
         return d
 
     def test_a_skill_its_mirror_and_its_kb_entry_go(self, tmp_path):
@@ -500,7 +513,7 @@ class TestDeleteSkill:
         assert not (tmp_path / "skills" / "gone").exists()
         assert (tmp_path / "skills" / "keep" / "SKILL.md").exists()
         assert not (tmp_path / ".claude" / "skills" / "gone").exists()
-        assert (tmp_path / ".claude" / "skills" / "keep").is_symlink()
+        assert is_dir_link(tmp_path / ".claude" / "skills" / "keep")
 
     def test_a_skill_that_is_not_a_code_has_no_entry_to_remove(self, tmp_path):
         from dsagt.skills import delete_skill

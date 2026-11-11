@@ -26,7 +26,6 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import asyncio  # noqa: E402
 import logging  # noqa: E402
-import shutil
 import time  # noqa: E402
 import uuid  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
@@ -35,6 +34,7 @@ from pathlib import Path  # noqa: E402
 
 import mcp.types as types  # noqa: E402
 
+from dsagt._compat import is_dir_link, native_path, remove_tree  # noqa: E402
 from dsagt.knowledge import DSAGT_COLLECTIONS, KnowledgeBase  # noqa: E402
 from dsagt.mcp.server import build_dispatch_server  # noqa: E402
 from dsagt.session import _collection_exists  # noqa: E402
@@ -207,7 +207,7 @@ async def _handle_kb_ingest(
     kb: KnowledgeBase,
     job_tracker: _JobTracker,
 ) -> dict:
-    folder_path = Path(arguments["folder_path"])
+    folder_path = Path(native_path(arguments["folder_path"]))
     collection_name = arguments.get("collection_name")
     file_types = arguments.get("file_types")
 
@@ -231,7 +231,9 @@ async def _handle_kb_ingest(
     if _collection_exists(kb.index_dir / target_name):
         source_path = kb.index_dir / target_name / "source.txt"
         existing_source = (
-            source_path.read_text().strip() if source_path.exists() else None
+            source_path.read_text(encoding="utf-8").strip()
+            if source_path.exists()
+            else None
         )
         same_source = (
             existing_source is None
@@ -357,10 +359,9 @@ async def _handle_kb_delete_collection(
     # A collection provisioned by `dsagt init` is a copied directory, but one
     # can be a symlink to a shared collection, and rmtree refuses a symlink.
     # Unlinking removes this project's collection and leaves the shared one.
-    if coll_dir.is_symlink():
-        coll_dir.unlink()
-    else:
-        shutil.rmtree(coll_dir)
+    if is_dir_link(coll_dir) or coll_dir.is_dir():
+        kb.release_collection(collection)
+        remove_tree(coll_dir)
 
     return {
         "status": "ok",

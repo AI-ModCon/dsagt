@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from unittest.mock import MagicMock, patch
 
 from dsagt.commands import traces as traces_cmd
@@ -22,7 +25,9 @@ def test_missing_store_returns_error(tmp_path):
 def test_runs_catchup_then_launches_deeplinked_quiet_viewer(tmp_path, capsys):
     pdir = tmp_path / "proj"
     pdir.mkdir()
-    (pdir / "mlflow.db").write_text("")  # existence is all run() checks
+    (pdir / "mlflow.db").write_text(
+        "", encoding="utf-8"
+    )  # existence is all run() checks
 
     launched = {}
 
@@ -45,7 +50,10 @@ def test_runs_catchup_then_launches_deeplinked_quiet_viewer(tmp_path, capsys):
     catchup.assert_called_once()  # catch-up ran before the viewer
 
     cmd = launched["cmd"]
-    assert cmd[:2] == ["mlflow", "ui"]
+    # `mlflow ui`, or `<python> -m mlflow ui` where PATH has no mlflow.
+    assert cmd[: cmd.index("ui")] in (["mlflow"], [sys.executable, "-m", "mlflow"]) or (
+        Path(cmd[0]).stem.lower() == "mlflow" and cmd[1] == "ui"
+    )
     assert "--workers" in cmd and cmd[cmd.index("--workers") + 1] == "1"
     assert cmd[cmd.index("--port") + 1] == "5001"
     assert cmd[cmd.index("--backend-store-uri") + 1].startswith("sqlite:///")
@@ -61,7 +69,7 @@ def test_runs_catchup_then_launches_deeplinked_quiet_viewer(tmp_path, capsys):
 def test_launch_survives_catchup_failure(tmp_path):
     pdir = tmp_path / "proj"
     pdir.mkdir()
-    (pdir / "mlflow.db").write_text("")
+    (pdir / "mlflow.db").write_text("", encoding="utf-8")
 
     with (
         patch.object(traces_cmd, "load_config", return_value=_config(pdir)),

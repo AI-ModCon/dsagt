@@ -50,9 +50,9 @@ open(a.out, "w").write(open(a.reads).read())
 def _write_skill(root: Path) -> Path:
     skill = root / "trim-reads"
     (skill / "scripts").mkdir(parents=True)
-    (skill / "SKILL.md").write_text(SKILL_MD)
-    (skill / "scripts" / "trim.py").write_text(TRIM_PY)
-    (skill / "scripts" / "_helpers.py").write_text("X = 1\n")
+    (skill / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+    (skill / "scripts" / "trim.py").write_text(TRIM_PY, encoding="utf-8")
+    (skill / "scripts" / "_helpers.py").write_text("X = 1\n", encoding="utf-8")
     return skill
 
 
@@ -61,7 +61,9 @@ def _state(project: Path) -> dict:
     # Frontmatter and body, each stripped: save_skill and a copied file differ
     # only in the blank line between them.
     _, frontmatter, body = (
-        (project / "skills" / "trim-reads" / "SKILL.md").read_text().split("---", 2)
+        (project / "skills" / "trim-reads" / "SKILL.md")
+        .read_text(encoding="utf-8")
+        .split("---", 2)
     )
     skill_md = (frontmatter.strip(), body.strip())
     codes = {
@@ -101,7 +103,12 @@ def _via_save_skill(project: Path, skill_src: Path) -> list[str]:
         "name": "trim-reads",
         "description": _parse_frontmatter(skill_src / "SKILL.md")["description"],
     }
-    body = (skill_src / "SKILL.md").read_text().split("---", 2)[2].lstrip("\n")
+    body = (
+        (skill_src / "SKILL.md")
+        .read_text(encoding="utf-8")
+        .split("---", 2)[2]
+        .lstrip("\n")
+    )
     reply = asyncio.run(
         _handle_save_skill(
             {
@@ -173,12 +180,16 @@ class TestOneState:
         skill_src = _write_skill(tmp_path / "src")
         project = fresh_project("p")
         _via_copy(project, skill_src)
-        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         stored = "dsagt-run --code trim-reads-trim -- python skills/trim-reads/scripts/trim.py"
         assert f"{stored} --reads data/s1.fq.gz" in text
         assert f"`{stored} --help`" in text
         assert "python3 scripts/trim.py" not in text
-        provenance = (project / "skills" / "trim-reads" / "PROVENANCE.txt").read_text()
+        provenance = (project / "skills" / "trim-reads" / "PROVENANCE.txt").read_text(
+            encoding="utf-8"
+        )
         assert "scripts/trim.py" in provenance and stored in provenance
 
     def test_registration_is_idempotent(self, tmp_path, fresh_project):
@@ -222,7 +233,9 @@ class TestOneState:
         code = CodeRegistry(runtime_dir=project).get_code("trim")
         assert code["description"] == "Trim reads, the curated description."
         assert code["parameters"]["reads"]["role"] == "input"
-        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         assert (
             "dsagt-run --code trim -- python skills/trim-reads/scripts/trim.py --reads"
             in text
@@ -259,8 +272,10 @@ class TestWhatIsAScript:
         self, tmp_path, fresh_project
     ):
         skill_src = _write_skill(tmp_path / "src")
-        (skill_src / "scripts" / "models.py").write_text("class Card:\n    pass\n")
-        (skill_src / "scripts" / "run.sh").write_text("echo hi\n")
+        (skill_src / "scripts" / "models.py").write_text(
+            "class Card:\n    pass\n", encoding="utf-8"
+        )
+        (skill_src / "scripts" / "run.sh").write_text("echo hi\n", encoding="utf-8")
         project = fresh_project("p")
         _via_copy(project, skill_src)
         registry = CodeRegistry(runtime_dir=project)
@@ -275,11 +290,15 @@ class TestWhatIsAScript:
         skill_src = _write_skill(tmp_path / "src")
         md = skill_src / "SKILL.md"
         md.write_text(
-            md.read_text() + "\n- [ ] 2. Run python3 scripts/trim.py on the sample\n"
+            md.read_text(encoding="utf-8")
+            + "\n- [ ] 2. Run python3 scripts/trim.py on the sample\n",
+            encoding="utf-8",
         )
         project = fresh_project("p")
         _via_copy(project, skill_src)
-        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         assert (
             "Run dsagt-run --code trim-reads-trim -- python skills/trim-reads/scripts/trim.py on the sample"
             in text
@@ -294,16 +313,21 @@ class TestGuessedWrapperLine:
         skill_src = _write_skill(tmp_path / "src")
         md = skill_src / "SKILL.md"
         md.write_text(
-            md.read_text()
-            + "\n```bash\ndsagt-run --code trim-reads -- python scripts/trim.py --reads r.fq --out o.fq\n```\n"
+            md.read_text(encoding="utf-8")
+            + "\n```bash\ndsagt-run --code trim-reads -- python scripts/trim.py --reads r.fq --out o.fq\n```\n",
+            encoding="utf-8",
         )
         project = fresh_project("p")
         _via_copy(project, skill_src)
-        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         stored = "dsagt-run --code trim-reads-trim -- python skills/trim-reads/scripts/trim.py"
         assert f"{stored} --reads r.fq --out o.fq" in text
         assert "dsagt-run --code trim-reads --" not in text
-        provenance = (project / "skills" / "trim-reads" / "PROVENANCE.txt").read_text()
+        provenance = (project / "skills" / "trim-reads" / "PROVENANCE.txt").read_text(
+            encoding="utf-8"
+        )
         # Only the pairs that changed a line are on record, not all eight.
         assert provenance.count("rewritten by dsagt") == 2
 
@@ -335,5 +359,7 @@ class TestAnAgentSavedSpecIsKept:
         again = CodeRegistry(runtime_dir=project).get_code("trim-reads-trim")
         assert again["executable"] == with_deps["executable"]
         # The skill's usage lines follow the stored command.
-        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text()
+        text = (project / "skills" / "trim-reads" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         assert f"{with_deps['executable']} --reads data/s1.fq.gz" in text

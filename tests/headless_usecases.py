@@ -71,7 +71,7 @@ def prompts_from(readme: Path) -> list[str]:
     Raises ``ValueError`` when either heading is missing, since a README
     without them has no prompt sequence to drive.
     """
-    text = readme.read_text()
+    text = readme.read_text(encoding="utf-8")
     try:
         start = text.index("\n## Execution")
         end = text.index("\n## Post-Conditions", start)

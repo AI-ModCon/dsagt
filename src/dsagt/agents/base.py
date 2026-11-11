@@ -20,6 +20,17 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
 
+from dsagt._compat import (
+    IS_WINDOWS,
+    is_batch_program,
+    popen_command,
+    resolve_executable,
+    is_dir_link,
+    link_dir,
+    remove_dir_link,
+    remove_tree,
+)
+
 logger = logging.getLogger(__name__)
 
 # The master instructions are part of the package, one directory above this
@@ -95,6 +106,28 @@ _SHELL_ENV_PASSTHROUGH = (
     "_LMFILES_",
 )
 
+#: What a Windows process needs before it can do anything: without
+#: ``SYSTEMROOT`` Python cannot open a socket or seed its random source, and
+#: without the profile variables it cannot find the user's home, where the
+#: embedding model and the project registry are.  Codex and cline start the
+#: server from the block alone, so these are copied too.
+_WINDOWS_ENV_PASSTHROUGH = (
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "USERPROFILE",
+    "USERNAME",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "TEMP",
+    "TMP",
+)
+
 #: A name matching one of these never enters the block, whatever a config
 #: lists: the block is written into the project's agent config, which is a
 #: file, and dsagt writes no credential into a file.
@@ -149,7 +182,8 @@ def _mcp_env_block(
                 "block is written into the agent config, and a credential is read "
                 "from the shell or ~/.config/dsagt/env instead"
             )
-    for name in (*_SHELL_ENV_PASSTHROUGH, *extra):
+    base = (*_SHELL_ENV_PASSTHROUGH, *(_WINDOWS_ENV_PASSTHROUGH if IS_WINDOWS else ()))
+    for name in (*base, *extra):
         value = environ.get(name)
         if value:
             block[name] = value
@@ -170,7 +204,7 @@ def _load_master_instructions(auto_assess: bool = True) -> str | None:
         return None
     from dsagt.readiness import INSTRUCTIONS_PARAGRAPH
 
-    text = _INSTRUCTIONS_PATH.read_text()
+    text = _INSTRUCTIONS_PATH.read_text(encoding="utf-8")
     if _READINESS_MARKER not in text:
         raise RuntimeError(f"{_INSTRUCTIONS_PATH} has no readiness-check marker")
     filler = INSTRUCTIONS_PARAGRAPH + "\n" if auto_assess else ""
@@ -189,13 +223,13 @@ def _write_dsagt_block(path: Path, content: str) -> str | None:
     """
     block = f"{_BLOCK_BEGIN}\n{content.rstrip()}\n{_BLOCK_END}\n"
     if not path.exists():
-        path.write_text(block)
+        path.write_text(block, encoding="utf-8")
         return f"Wrote {path}"
-    existing = path.read_text()
+    existing = path.read_text(encoding="utf-8")
     begin = existing.find(_BLOCK_BEGIN)
     end = existing.find(_BLOCK_END, begin + 1) if begin != -1 else -1
     if end == -1:
-        path.write_text(existing.rstrip("\n") + "\n\n" + block)
+        path.write_text(existing.rstrip("\n") + "\n\n" + block, encoding="utf-8")
         return f"Appended DSAgt instructions to {path}"
     end += len(_BLOCK_END)
     if existing[end : end + 1] == "\n":
@@ -203,7 +237,7 @@ def _write_dsagt_block(path: Path, content: str) -> str | None:
     updated = existing[:begin] + block + existing[end:]
     if updated == existing:
         return None
-    path.write_text(updated)
+    path.write_text(updated, encoding="utf-8")
     return f"Updated DSAgt instructions in {path}"
 
 
@@ -222,7 +256,7 @@ def _truncate_native_description(skill_md: Path) -> None:
     """If the mirrored SKILL.md's description exceeds the native cap, trim it."""
     import yaml
 
-    text = skill_md.read_text()
+    text = skill_md.read_text(encoding="utf-8")
     if not text.startswith("---"):
         return
     parts = text.split("---", 2)
@@ -236,13 +270,13 @@ def _truncate_native_description(skill_md: Path) -> None:
     if isinstance(desc, str) and len(desc) > _NATIVE_DESCRIPTION_CAP:
         front["description"] = desc[: _NATIVE_DESCRIPTION_CAP - 1].rstrip() + "…"
         new_front = yaml.dump(front, default_flow_style=False, sort_keys=False)
-        skill_md.write_text(f"---\n{new_front}---{parts[2]}")
+        skill_md.write_text(f"---\n{new_front}---{parts[2]}", encoding="utf-8")
 
 
 def _description_fits_native_cap(skill_md: Path) -> bool:
     import yaml
 
-    text = skill_md.read_text()
+    text = skill_md.read_text(encoding="utf-8")
     parts = text.split("---", 2)
     if not text.startswith("---") or len(parts) < 3:
         return True
@@ -255,17 +289,18 @@ def _description_fits_native_cap(skill_md: Path) -> bool:
 
 
 def _remove_mirror_entry(dest: Path) -> None:
-    if dest.is_symlink():
-        dest.unlink()
+    if is_dir_link(dest):
+        remove_dir_link(dest)
     elif dest.is_dir():
-        shutil.rmtree(dest)
+        remove_tree(dest)
 
 
 def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
     """Idempotently mirror *skill_dirs* into *target_dir* (e.g. .claude/skills).
 
     Links each skill directory (SKILL.md, scripts/, references/) at
-    ``target_dir/<dir-name>``, a relative symlink, so the agent reads the
+    ``target_dir/<dir-name>``, a relative symlink (on Windows without the
+    symlink privilege, a directory junction), so the agent reads the
     current files and an edit to a skill's script or SKILL.md under
     ``skills/`` is what the next invocation reads; Claude Code and Codex
     both follow the link.  A skill whose description exceeds the native cap
@@ -280,7 +315,7 @@ def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
     previously: list[str] = []
     if manifest_path.exists():
         try:
-            previously = json.loads(manifest_path.read_text())
+            previously = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             previously = []
 
@@ -293,7 +328,11 @@ def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
         dest = target_dir / name
         _remove_mirror_entry(dest)
         if _description_fits_native_cap(src / "SKILL.md"):
-            dest.symlink_to(os.path.relpath(src.resolve(), target_dir.resolve()))
+            if not link_dir(src, dest):
+                # No link could be made (Windows, without the symlink
+                # privilege and across volumes); the copy is refreshed on
+                # every init, start and skill change.
+                shutil.copytree(src, dest)
         else:
             shutil.copytree(src, dest)
             _truncate_native_description(dest / "SKILL.md")
@@ -305,7 +344,9 @@ def _mirror_skills_to(target_dir: Path, skill_dirs: list[Path]) -> list[str]:
     for stale in set(previously) - set(managed):
         _remove_mirror_entry(target_dir / stale)
 
-    manifest_path.write_text(json.dumps(sorted(managed), indent=2) + "\n")
+    manifest_path.write_text(
+        json.dumps(sorted(managed), indent=2) + "\n", encoding="utf-8"
+    )
     if managed:
         actions.append(f"Mirrored {len(managed)} skill(s) into {target_dir}")
     return actions
@@ -341,20 +382,51 @@ def _toml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _resolved(cmd: list[str], env: dict | None = None) -> list[str]:
+    """*cmd* with its program found the way a shell finds it.
+
+    A no-op on POSIX.  On Windows an agent CLI installed with npm is a
+    ``.cmd`` shim, which ``subprocess`` does not find by its bare name.
+    """
+    path = (env or os.environ).get("PATH")
+    return [resolve_executable(cmd[0], path), *cmd[1:]]
+
+
 def _run_simple_script(
     cmd: list[str],
     env: dict,
     working_dir: Path,
     install_hint: str,
+    *,
+    stdin_marker: list[str] | None = None,
 ) -> int:
     """Common ``subprocess.run`` wrapper used by every agent's script runner.
 
     Returns the agent's exit code, 1 on FileNotFoundError (with the install
     hint logged), 0 on KeyboardInterrupt.
+
+    *stdin_marker* names the arguments that make the CLI read its prompt
+    from stdin instead of from the last argument (``[]`` for ``claude -p``,
+    ``["-"]`` for ``codex exec``).  It is used only where the argument
+    cannot carry the prompt: a CLI that npm installed on Windows is a
+    ``.cmd`` shim run by ``cmd.exe``, which ends the command line at the
+    prompt's first newline and expands ``%NAME%`` and ``&`` inside it.
     """
     logger.info("Launching: %s", " ".join(cmd))
+    argv = _resolved(cmd, env)
+    prompt = None
+    if stdin_marker is not None and IS_WINDOWS and is_batch_program(argv[0]):
+        prompt = argv[-1]
+        argv = [*argv[:-1], *stdin_marker]
     try:
-        return subprocess.run(cmd, env=env, cwd=str(working_dir)).returncode
+        return subprocess.run(
+            # Quoted for cmd.exe when the CLI is a shim; see popen_command.
+            popen_command(argv),
+            env=env,
+            cwd=str(working_dir),
+            input=prompt,
+            encoding="utf-8" if prompt is not None else None,
+        ).returncode
     except FileNotFoundError:
         logger.error("Command not found: %s. %s", cmd[0], install_hint)
         return 1

@@ -11,7 +11,6 @@ Run from the project directory, whose ``.dsagt/`` holds the lock this takes and
 the log an error goes to.
 """
 
-import fcntl
 import json
 import sys
 from pathlib import Path
@@ -25,6 +24,7 @@ def log_trace(record_path: str) -> None:
     otherwise race to create a store that does not exist yet, and all but one
     would fail.
     """
+    from dsagt._compat import file_lock
     from dsagt.observability import init_tracing, log_execution_trace
     from dsagt.session import load_user_env
 
@@ -32,9 +32,8 @@ def log_trace(record_path: str) -> None:
     # dsagt-server, so under codex and cline the credentials file is the only
     # way a shared-store key or URI reaches the trace.
     load_user_env()
-    record = json.loads(Path(record_path).read_text())
-    with open(Path(".dsagt") / "run_trace.lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    record = json.loads(Path(record_path).read_text(encoding="utf-8"))
+    with file_lock(Path(".dsagt") / "run_trace.lock"):
         init_tracing("dsagt-run", session_id=record.get("session_id"))
         log_execution_trace(record)
         import mlflow

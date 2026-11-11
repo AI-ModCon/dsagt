@@ -38,7 +38,11 @@ from pathlib import Path
 
 import yaml
 
-from dsagt.observability import experiment_name, resolve_tracking_uri
+from dsagt.observability import (
+    experiment_name,
+    resolve_tracking_uri,
+    sqlite_store_uri,
+)
 from dsagt.session import load_config, project_dir, resolve_env_vars
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
@@ -74,7 +78,10 @@ def _config_sources(project_name: str) -> list[dict]:
     are ``.dsagt/config.yaml`` and the user's shell exports.
     """
     pdir = project_dir(project_name)
-    raw = yaml.safe_load((pdir / ".dsagt" / "config.yaml").read_text()) or {}
+    raw = (
+        yaml.safe_load((pdir / ".dsagt" / "config.yaml").read_text(encoding="utf-8"))
+        or {}
+    )
 
     rows: list[dict] = []
     for path, value in _flatten(raw):
@@ -626,7 +633,10 @@ def run(project: str, as_json: bool) -> int:
     # span; any other store has no local footprint, so only the default can
     # short-circuit as "never started".
     db = pdir / "mlflow.db"
-    if tracking_uri == f"sqlite:///{db}" and not db.exists():
+    if (
+        tracking_uri in (sqlite_store_uri(db), sqlite_store_uri(db.resolve()))
+        and not db.exists()
+    ):
         # New project, or one that's never been started.  Print the header
         # so the user can verify they got the right project, then a short
         # note — rather than crashing on a missing DB.

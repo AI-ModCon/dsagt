@@ -66,7 +66,7 @@ class ExplicitMemory:
     def _load(self) -> list[dict]:
         if not self._path.exists():
             return []
-        text = self._path.read_text()
+        text = self._path.read_text(encoding="utf-8")
         if not text.strip():
             return []
         data = yaml.safe_load(text)
@@ -83,23 +83,27 @@ class ExplicitMemory:
     def _save(self, entries: list[dict]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
         self._path.write_text(
-            yaml.dump(entries, default_flow_style=False, sort_keys=False)
-            if entries
-            else ""
+            (
+                yaml.dump(entries, default_flow_style=False, sort_keys=False)
+                if entries
+                else ""
+            ),
+            encoding="utf-8",
         )
 
     def _append_history(self, entry: dict) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
         history = []
         if self._history_path.exists():
-            text = self._history_path.read_text()
+            text = self._history_path.read_text(encoding="utf-8")
             if text.strip():
                 loaded = yaml.safe_load(text)
                 if isinstance(loaded, list):
                     history = loaded
         history.append(entry)
         self._history_path.write_text(
-            yaml.dump(history, default_flow_style=False, sort_keys=False)
+            yaml.dump(history, default_flow_style=False, sort_keys=False),
+            encoding="utf-8",
         )
 
     def remember(

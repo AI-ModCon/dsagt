@@ -62,7 +62,8 @@ from mcp_helpers import call_tool_sync as call_tool
 def test_a_declared_dependency_reaches_the_run(tmp_path):
     """End to end: register a code with a dependency, run its stored line."""
     script = tmp_path / "cowsay_tool.py"
-    script.write_text(textwrap.dedent("""\
+    script.write_text(
+        textwrap.dedent("""\
         import argparse
         import json
         import cowsay
@@ -73,7 +74,9 @@ def test_a_declared_dependency_reaches_the_run(tmp_path):
 
         output = cowsay.get_output_string("cow", args.message)
         print(json.dumps({"cow_says": output, "status": "ok"}))
-    """))
+    """),
+        encoding="utf-8",
+    )
 
     project = tmp_path / "runtime"
     registry = CodeRegistry(runtime_dir=str(project))
@@ -102,7 +105,9 @@ def test_a_declared_dependency_reaches_the_run(tmp_path):
     assert "uv run --with cowsay --" in stored["executable"]
 
     (project / ".dsagt").mkdir(parents=True, exist_ok=True)
-    (project / ".dsagt" / "config.yaml").write_text("project: dep-test\n")
+    (project / ".dsagt" / "config.yaml").write_text(
+        "project: dep-test\n", encoding="utf-8"
+    )
     env = {**os.environ, "DSAGT_PROJECT_DIR": str(project)}
     result = subprocess.run(
         f"{stored['executable']} --message hello",

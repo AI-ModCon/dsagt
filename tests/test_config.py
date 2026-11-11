@@ -26,6 +26,13 @@ from dsagt.agents import (
 from dsagt.session import init_project
 
 
+def _store_uri(project_dir: str) -> str:
+    """The default trace store of *project_dir*: ``sqlite:////p/mlflow.db``
+    on POSIX; on Windows ``/p`` is on the current drive, which gives
+    ``sqlite:///C:/p/mlflow.db``."""
+    return "sqlite:///" + (Path(project_dir).resolve() / "mlflow.db").as_posix()
+
+
 @pytest.fixture(autouse=True)
 def _use_tmp_registry(tmp_path):
     """Redirect project registry and default location to tmp_path for all tests.
@@ -131,7 +138,7 @@ class TestLoadConfig:
         pdir = tmp_path / name
         (pdir / ".dsagt").mkdir(parents=True, exist_ok=True)
         (pdir / ".dsagt" / "config.yaml").write_text(
-            yaml.dump(content, default_flow_style=False)
+            yaml.dump(content, default_flow_style=False), encoding="utf-8"
         )
         return name
 
@@ -452,7 +459,9 @@ class TestInitProject:
         provider.  So no embedding, mlflow, or llm block is written."""
         pdir = init_project("test-proj", "claude")
 
-        config = yaml.safe_load((pdir / ".dsagt" / "config.yaml").read_text())
+        config = yaml.safe_load(
+            (pdir / ".dsagt" / "config.yaml").read_text(encoding="utf-8")
+        )
         assert set(config) == {"project", "agent", "knowledge", "skills"}, config
         # init_project without a readiness answer writes no block; the check
         # is then on by default at read time.
@@ -688,6 +697,62 @@ class TestSessionState:
         append_session(pdir)
         assert current_session_tag(pdir, "proj") == "proj-1"
 
+    def test_write_state_replaces_in_one_step(self, tmp_path, monkeypatch):
+        """A reader never finds ``state.yaml`` half written.
+
+        ``dsagt-run`` reads the session tag from this file on every recorded
+        command, while the server writes it.  A plain write truncates first,
+        which left a zero-byte file visible long enough on Windows for a
+        reader to parse it as nothing.  The spy stands in for that reader at
+        the one moment the old file is still in place.
+        """
+        from dsagt import session as session_mod
+
+        pdir = tmp_path / "proj"
+        pdir.mkdir()
+        session_mod.write_state(pdir, {"sessions": [{"id": 1}], "memory_cursor": {}})
+
+        seen = []
+        real_replace = session_mod.replace_file
+
+        def spy(src, dst):
+            seen.append(session_mod.read_state(pdir))
+            real_replace(src, dst)
+
+        monkeypatch.setattr(session_mod, "replace_file", spy)
+        session_mod.write_state(
+            pdir, {"sessions": [{"id": 1}, {"id": 2}], "memory_cursor": {}}
+        )
+
+        # Mid-write the reader saw the previous state whole, not an empty file.
+        assert seen == [{"sessions": [{"id": 1}], "memory_cursor": {}}]
+        assert session_mod.read_state(pdir)["sessions"][-1]["id"] == 2
+        assert list((pdir / ".dsagt").glob("*.tmp")) == []
+
+    def test_a_second_writer_does_not_consume_the_first_writer_s_scratch(
+        self, tmp_path, monkeypatch
+    ):
+        """Two servers write one project's state; neither may replace the
+        file the other is about to publish."""
+        from dsagt import session as session_mod
+
+        pdir = tmp_path / "proj"
+        pdir.mkdir()
+        real_replace = session_mod.replace_file
+        nested = []
+
+        def write_once_from_inside(src, dst):
+            # The other writer runs between this writer's write and replace.
+            if not nested:
+                nested.append(True)
+                session_mod.write_state(pdir, {"sessions": [{"id": 9}]})
+            real_replace(src, dst)
+
+        monkeypatch.setattr(session_mod, "replace_file", write_once_from_inside)
+        session_mod.write_state(pdir, {"sessions": [{"id": 1}]})
+        assert session_mod.read_state(pdir) == {"sessions": [{"id": 1}]}
+        assert list((pdir / ".dsagt").glob("*.tmp")) == []
+
     def test_update_cursor_roundtrip(self, tmp_path):
         from dsagt.session import read_state, update_cursor
 
@@ -728,7 +793,7 @@ class TestAgentRecord:
 
         mcp_path = working_dir / ".mcp.json"
         assert mcp_path.exists()
-        mcp = json.loads(mcp_path.read_text())
+        mcp = json.loads(mcp_path.read_text(encoding="utf-8"))
         assert set(mcp["mcpServers"]) == {"dsagt"}
         assert mcp["mcpServers"]["dsagt"]["args"] == ["run", "dsagt-server"]
         assert (working_dir / "CLAUDE.md").exists()
@@ -745,7 +810,7 @@ class TestAgentRecord:
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
         static_agent_record(config, "claude", working_dir)
-        text = (working_dir / "CLAUDE.md").read_text()
+        text = (working_dir / "CLAUDE.md").read_text(encoding="utf-8")
         assert text.count("#### AI-readiness check") == 1
         assert (
             text.index("### 4. Per-Operation Checks")
@@ -753,7 +818,7 @@ class TestAgentRecord:
             < text.index("### 5. File Organization")
         )
         static_agent_record(config, "claude", working_dir)
-        assert (working_dir / "CLAUDE.md").read_text() == text
+        assert (working_dir / "CLAUDE.md").read_text(encoding="utf-8") == text
 
     def test_no_readiness_paragraph_when_off(self, tmp_path):
         init_project("off", "claude", exclude=["all"], readiness={"auto_assess": False})
@@ -761,7 +826,7 @@ class TestAgentRecord:
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
         static_agent_record(config, "claude", working_dir)
-        text = (working_dir / "CLAUDE.md").read_text()
+        text = (working_dir / "CLAUDE.md").read_text(encoding="utf-8")
         assert "AI-readiness check" not in text
         assert "readiness-check" not in text
 
@@ -774,7 +839,7 @@ class TestAgentRecord:
 
         goose_path = working_dir / "goose.yaml"
         assert goose_path.exists()
-        goose = yaml.safe_load(goose_path.read_text())
+        goose = yaml.safe_load(goose_path.read_text(encoding="utf-8"))
         assert set(goose["extensions"]) == {"dsagt"}
         assert goose["extensions"]["dsagt"]["cmd"] == "uv run dsagt-server"
         assert (working_dir / ".goosehints").exists()
@@ -796,7 +861,7 @@ class TestAgentRecord:
 
         dynamic_agent_record(config, env={}, working_dir=working_dir)
         settings_path = working_dir / ".cline-data" / "cline_mcp_settings.json"
-        settings = _json.loads(settings_path.read_text())
+        settings = _json.loads(settings_path.read_text(encoding="utf-8"))
         transport = settings["mcpServers"]["dsagt"]["transport"]
         assert transport["type"] == "stdio"
         assert [transport["command"], *transport["args"]] == [
@@ -807,8 +872,10 @@ class TestAgentRecord:
         assert "DSAGT_PROJECT_DIR" in transport["env"]
 
         env = AGENTS["cline"]().runtime_env(config)
-        assert env["CLINE_MCP_SETTINGS_PATH"].endswith(
-            ".cline-data/cline_mcp_settings.json"
+        assert (
+            Path(env["CLINE_MCP_SETTINGS_PATH"])
+            .as_posix()
+            .endswith(".cline-data/cline_mcp_settings.json")
         )
         assert "CLINE_DIR" not in env
 
@@ -822,14 +889,14 @@ class TestAgentRecord:
 
         dynamic_agent_record(config, env={}, working_dir=working_dir)
         settings_path = working_dir / ".cline-data" / "cline_mcp_settings.json"
-        settings = _json.loads(settings_path.read_text())
+        settings = _json.loads(settings_path.read_text(encoding="utf-8"))
         settings["mcpServers"]["mytool"] = {
             "transport": {"type": "stdio", "command": "mytool", "args": []}
         }
-        settings_path.write_text(_json.dumps(settings))
+        settings_path.write_text(_json.dumps(settings), encoding="utf-8")
 
         dynamic_agent_record(config, env={}, working_dir=working_dir)
-        settings = _json.loads(settings_path.read_text())
+        settings = _json.loads(settings_path.read_text(encoding="utf-8"))
         assert set(settings["mcpServers"]) == {"dsagt", "mytool"}
         assert (working_dir / ".cline-data").is_dir()
 
@@ -843,11 +910,11 @@ class TestAgentRecord:
         assert (working_dir / "AGENTS.md").exists()
         # Codex loads MCP tools through tool_search; the master instructions
         # name the tools bare, so AGENTS.md carries the loading note.
-        agents_md = (working_dir / "AGENTS.md").read_text()
+        agents_md = (working_dir / "AGENTS.md").read_text(encoding="utf-8")
         assert "DSAgt Pipeline Builder" in agents_md
         assert 'tool_search(query="dsagt")' in agents_md
         assert (working_dir / ".codex-data").is_dir()
-        toml = (working_dir / ".codex-data" / "config.toml").read_text()
+        toml = (working_dir / ".codex-data" / "config.toml").read_text(encoding="utf-8")
         assert "[mcp_servers.dsagt.env]" in toml
         # Project routing comes from .dsagt/config.yaml via cwd-walk; the
         # MCP env block only carries EMBEDDING_* settings.
@@ -861,14 +928,16 @@ class TestAgentRecord:
         working_dir.mkdir()
 
         static_agent_record(config, "claude", working_dir)
-        first = (working_dir / "CLAUDE.md").read_text()
+        first = (working_dir / "CLAUDE.md").read_text(encoding="utf-8")
         assert "tool_search" not in first  # the loading note is Codex-only
         # Simulate a user edit
-        (working_dir / "CLAUDE.md").write_text(first + "\n\n## My project notes\nfoo")
-        edited = (working_dir / "CLAUDE.md").read_text()
+        (working_dir / "CLAUDE.md").write_text(
+            first + "\n\n## My project notes\nfoo", encoding="utf-8"
+        )
+        edited = (working_dir / "CLAUDE.md").read_text(encoding="utf-8")
         # Re-run static: the block is already this text, a no-op.
         assert static_agent_record(config, "claude", working_dir) == []
-        assert (working_dir / "CLAUDE.md").read_text() == edited
+        assert (working_dir / "CLAUDE.md").read_text(encoding="utf-8") == edited
 
     def test_static_rewrites_the_block_when_readiness_changes(self, tmp_path):
         """Turning the AI-readiness check off on re-init reaches the
@@ -877,16 +946,22 @@ class TestAgentRecord:
         init_project("tog", "claude", exclude=["all"], readiness={"auto_assess": True})
         working_dir = tmp_path / "workdir"
         working_dir.mkdir()
-        (working_dir / "CLAUDE.md").write_text("# Team notes\n\nBe brief.\n")
+        (working_dir / "CLAUDE.md").write_text(
+            "# Team notes\n\nBe brief.\n", encoding="utf-8"
+        )
         static_agent_record(load_config("tog"), "claude", working_dir)
         (working_dir / "CLAUDE.md").write_text(
-            (working_dir / "CLAUDE.md").read_text() + "\n## After\nmore\n"
+            (working_dir / "CLAUDE.md").read_text(encoding="utf-8")
+            + "\n## After\nmore\n",
+            encoding="utf-8",
         )
-        assert "#### AI-readiness check" in (working_dir / "CLAUDE.md").read_text()
+        assert "#### AI-readiness check" in (working_dir / "CLAUDE.md").read_text(
+            encoding="utf-8"
+        )
 
         init_project("tog", "claude", exclude=["all"], readiness={"auto_assess": False})
         actions = static_agent_record(load_config("tog"), "claude", working_dir)
-        text = (working_dir / "CLAUDE.md").read_text()
+        text = (working_dir / "CLAUDE.md").read_text(encoding="utf-8")
         assert actions == [f"Updated DSAgt instructions in {working_dir / 'CLAUDE.md'}"]
         assert "#### AI-readiness check" not in text
         assert text.startswith("# Team notes\n\nBe brief.\n")
@@ -1048,7 +1123,7 @@ class TestAgentRecord:
 
         self._write_both(config, working_dir)
 
-        mcp = json.loads((working_dir / ".mcp.json").read_text())
+        mcp = json.loads((working_dir / ".mcp.json").read_text(encoding="utf-8"))
         env = mcp["mcpServers"]["dsagt"].get("env", {})
         assert env["DSAGT_PROJECT"] == config["project"]
         assert env["DSAGT_PROJECT_DIR"] == config["project_dir"]
@@ -1075,7 +1150,9 @@ class TestResolveRecordsDirProjectAware:
 
         monkeypatch.delenv("DSAGT_PROJECT_DIR", raising=False)
         (tmp_path / ".dsagt").mkdir()
-        (tmp_path / ".dsagt" / "config.yaml").write_text("project: t\n")
+        (tmp_path / ".dsagt" / "config.yaml").write_text(
+            "project: t\n", encoding="utf-8"
+        )
         monkeypatch.chdir(tmp_path)
         assert _resolve_records_dir() == tmp_path / "trace_archive"
         monkeypatch.setenv("DSAGT_PROJECT_DIR", "/stale/proj/dir")
@@ -1124,7 +1201,7 @@ class TestAgentEnv:
         for agent in ("claude", "goose", "codex", "cline", "opencode"):
             env = agent_env(self._make_config(agent))
             # Serverless sqlite store derived from the project dir.
-            assert env["MLFLOW_TRACKING_URI"] == "sqlite:////proj/mlflow.db"
+            assert env["MLFLOW_TRACKING_URI"] == _store_uri("/proj")
             assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in env
             assert "OTEL_EXPORTER_OTLP_HEADERS" not in env
             assert "OTEL_RESOURCE_ATTRIBUTES" not in env
@@ -1257,7 +1334,7 @@ class TestConfigFlow:
         env = _mcp_env_block(config)
         assert env["DSAGT_PROJECT"] == "test"
         assert env["DSAGT_PROJECT_DIR"] == "/p"
-        assert env["MLFLOW_TRACKING_URI"] == "sqlite:////p/mlflow.db"
+        assert env["MLFLOW_TRACKING_URI"] == _store_uri("/p")
         assert env["EMBEDDING_BACKEND"] == "local"
 
     def test_mcp_env_block_omits_empty_embedding_keys(self):
@@ -1371,7 +1448,8 @@ class TestLoadUserEnv:
             "export MLFLOW_TRACKING_API_KEY='k-file'\n"
             'EMBEDDING_API_KEY="e-file"\n'
             "\n"
-            "not a pair\n"
+            "not a pair\n",
+            encoding="utf-8",
         )
         monkeypatch.delenv("MLFLOW_TRACKING_API_KEY", raising=False)
         monkeypatch.setenv("EMBEDDING_API_KEY", "e-shell")
@@ -1460,5 +1538,5 @@ def test_concurrent_registrations_are_all_kept(tmp_path):
         for n in range(6)
     ]
     assert [w.wait() for w in workers] == [0] * 6
-    registry = yaml.safe_load((tmp_path / "projects.yaml").read_text())
+    registry = yaml.safe_load((tmp_path / "projects.yaml").read_text(encoding="utf-8"))
     assert len(registry) == 120

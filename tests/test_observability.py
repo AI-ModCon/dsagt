@@ -21,6 +21,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -438,8 +439,8 @@ def test_kb_ingest_emits_embed_child(_reset_tracing, tmp_path):
     """kb.ingest opens an outer span and one child kb.embed span."""
     src = tmp_path / "docs"
     src.mkdir()
-    (src / "a.txt").write_text("alpha beta gamma")
-    (src / "b.txt").write_text("delta epsilon zeta")
+    (src / "a.txt").write_text("alpha beta gamma", encoding="utf-8")
+    (src / "b.txt").write_text("delta epsilon zeta", encoding="utf-8")
 
     with _kb_with_mocked_embedder(tmp_path) as kb:
         kb.ingest(src)
@@ -740,7 +741,10 @@ def test_resolve_tracking_uri_env_overrides_sqlite(monkeypatch):
     from dsagt.observability import resolve_tracking_uri
 
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-    assert resolve_tracking_uri({"project_dir": "/p"}) == "sqlite:////p/mlflow.db"
+    # sqlite:////p/mlflow.db on POSIX; on Windows "/p" is on the current
+    # drive, sqlite:///C:/p/mlflow.db.
+    expected = "sqlite:///" + (Path("/p").resolve() / "mlflow.db").as_posix()
+    assert resolve_tracking_uri({"project_dir": "/p"}) == expected
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.org")
     assert resolve_tracking_uri({"project_dir": "/p"}) == "https://mlflow.example.org"

@@ -34,6 +34,12 @@ import sys
 import time
 from pathlib import Path
 
+from dsagt._compat import (
+    find_bash,
+    remove_tree,
+    stdin_is_interactive,
+    use_utf8_stdio,
+)
 from dsagt.agents import (
     agent_env,
     dynamic_agent_record,
@@ -274,11 +280,9 @@ def _handle_destructive(
             for p in stale:
                 print(f"    {p}")
             if interactive and _confirm("  Delete these stale files?", default=True):
-                import shutil
-
                 for p in stale:
                     if p.is_dir():
-                        shutil.rmtree(p)
+                        remove_tree(p)
                     else:
                         p.unlink()
                 print("  Deleted.")
@@ -321,7 +325,7 @@ def _cmd_init(args):
     before any destructive change (agent switch, removed collection).
     Non-interactive (no TTY) runs from flags, the automation and test path.
     """
-    interactive = sys.stdin.isatty()
+    interactive = stdin_is_interactive()
 
     # Project name
     name = args.project
@@ -590,14 +594,24 @@ def _cmd_smoke_test(args):
         print(f"Error: smoke test script not found at {script}", file=sys.stderr)
         return 1
 
+    bash = find_bash()
+    if bash is None:
+        print(
+            "Error: the smoke test is a bash script and no bash was found. "
+            "On Windows, install Git for Windows (its Git Bash is used); "
+            "WSL's bash.exe is not, since it would run the test inside WSL.",
+            file=sys.stderr,
+        )
+        return 1
+
     if args.all:
-        return _run_smoke_all(script)
+        return _run_smoke_all(script, bash)
 
     agent = args.agent or "goose"
-    return subprocess.run(["bash", str(script), agent]).returncode
+    return subprocess.run([bash, script.as_posix(), agent]).returncode
 
 
-def _run_smoke_all(script: Path) -> int:
+def _run_smoke_all(script: Path, bash: str = "bash") -> int:
     """Run the smoke harness for every VALID_AGENTS entry in parallel.
 
     Streams each agent's stdout/stderr to a per-agent log file so the
@@ -619,7 +633,7 @@ def _run_smoke_all(script: Path) -> int:
         start = time.monotonic()
         with (log_dir / f"smoke-{agent}.log").open("w") as fh:
             rc = subprocess.run(
-                ["bash", str(script), agent],
+                [bash, script.as_posix(), agent],
                 stdout=fh,
                 stderr=subprocess.STDOUT,
             ).returncode
@@ -648,13 +662,22 @@ def _run_smoke_all(script: Path) -> int:
 
 # User-facing exception types that print as a one-line message at the CLI
 # boundary.  Every other exception propagates with its traceback.
-_USER_ERRORS = (FileNotFoundError, FileExistsError, ValueError, RuntimeError)
+# PermissionError: on Windows, a file another process still has open (a
+# running dsagt-server, a shell inside the project) cannot be removed.
+_USER_ERRORS = (
+    FileNotFoundError,
+    FileExistsError,
+    PermissionError,
+    ValueError,
+    RuntimeError,
+)
 
 
 def main(argv=None):
     from dsagt import __version__
     from dsagt.session import load_user_env
 
+    use_utf8_stdio()
     load_user_env()
     argv = list(sys.argv[1:] if argv is None else argv)
     # `dsagt mlflow <project>` is an unlisted alias for `traces`, the word

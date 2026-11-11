@@ -535,7 +535,7 @@ def main():
         raise RuntimeError(
             "dsagt-server: no .dsagt/config.yaml in cwd "
             f"({Path.cwd()}).  Launch the agent from the project "
-            "directory (`cd <pdir> && <agent>`)."
+            "directory (`cd <pdir>`, then `<agent>`)."
         )
 
     log_file = project_dir / "dsagt_server.log"
@@ -549,7 +549,7 @@ def main():
         level=_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
-            logging.FileHandler(log_file, mode="a"),
+            logging.FileHandler(log_file, mode="a", encoding="utf-8"),
             logging.StreamHandler(),
         ],
     )
@@ -559,7 +559,9 @@ def main():
     # Fill in code defaults (embedding, etc.) the same way ``load_config``
     # does; the written config carries only the user's init choices.
     config = resolve_env_vars(
-        _deep_merge(DEFAULTS, yaml.safe_load(cfg_file.read_text()) or {})
+        _deep_merge(
+            DEFAULTS, yaml.safe_load(cfg_file.read_text(encoding="utf-8")) or {}
+        )
     )
 
     # A KB misconfig (e.g. embedding.backend='api' with no base_url/API key)

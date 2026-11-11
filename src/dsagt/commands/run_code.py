@@ -16,6 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from dsagt._compat import popen_detached, use_utf8_stdio
 from dsagt.provenance import (
     _current_session_tag_from_cwd,
     _resolve_records_dir,
@@ -58,8 +59,8 @@ def _log_trace_detached(project_dir: Path):
 
     Loading the store costs about a second; the command the agent asked for
     has already finished and its record is written, so the agent's shell gets
-    its prompt back while the trace is logged.  The process has its own
-    session, so a harness that ends the turn's process group leaves it alone.
+    its prompt back while the trace is logged.  The process is detached
+    (its own session; on Windows its own process group), so a harness that ends the turn's process group leaves it alone.
     ``None`` when the records directory is outside a project, which has no
     store for the trace to go to.
     """
@@ -77,20 +78,22 @@ def _log_trace_detached(project_dir: Path):
         ]
         # A failure to log the trace is written where a person can find it;
         # the record, which is the provenance, is already on disk.
-        with open(project_dir / ".dsagt" / "run_trace.log", "a") as errors:
-            subprocess.Popen(
+        with open(
+            project_dir / ".dsagt" / "run_trace.log", "a", encoding="utf-8"
+        ) as errors:
+            popen_detached(
                 argv,
                 cwd=project_dir,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=errors,
-                start_new_session=True,
             )
 
     return start
 
 
 def main(argv: list[str] | None = None) -> int:
+    use_utf8_stdio()
     args, command = _parse_args(argv)
 
     if not command:

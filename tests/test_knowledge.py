@@ -8,8 +8,8 @@ def test_list_collections_names_purpose_keys_and_count(tmp_path):
     index = tmp_path / "kb_index"
     coll = index / "code_use"
     coll.mkdir(parents=True)
-    (coll / "chroma_ids.json").write_text("[]")
-    with open(coll / "chunks.jsonl", "w") as fh:
+    (coll / "chroma_ids.json").write_text("[]", encoding="utf-8")
+    with open(coll / "chunks.jsonl", "w", encoding="utf-8") as fh:
         for i in range(3):
             fh.write(
                 _json.dumps(
@@ -98,8 +98,12 @@ def test_delete_entries_rewrites_the_chunk_file_and_counts(tmp_path, monkeypatch
 
     rows = [
         _json.loads(line)
-        for line in (index_dir / "codes" / "chunks.jsonl").read_text().splitlines()
+        for line in (index_dir / "codes" / "chunks.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
     assert [r["metadata"]["code_name"] for r in rows] == ["b"]
-    assert _json.loads((index_dir / "codes" / "chroma_ids.json").read_text()) == ["1"]
+    assert _json.loads(
+        (index_dir / "codes" / "chroma_ids.json").read_text(encoding="utf-8")
+    ) == ["1"]

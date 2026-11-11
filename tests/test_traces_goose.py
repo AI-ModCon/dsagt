@@ -163,3 +163,24 @@ def test_end_to_end_through_the_sink(mlflow_sqlite):
     exp = mlflow.get_experiment_by_name("gooseproj")
     traces = mlflow.search_traces(locations=[exp.experiment_id], return_type="list")
     assert len(traces) == 2
+
+
+def test_reader_prefers_the_newest_session_however_windows_spelled_it(
+    tmp_path, monkeypatch
+):
+    """An exact string match may be an older session than the same directory
+    written another way; on Windows the newest wins either way."""
+    from dsagt import traces
+
+    db = tmp_path / "sessions.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE sessions(id TEXT, working_dir TEXT, updated_at INTEGER)")
+    con.execute("INSERT INTO sessions VALUES('s_exact', '/proj', 100)")
+    con.execute("INSERT INTO sessions VALUES('s_newer', '/proj/', 200)")
+    con.commit()
+    con.close()
+
+    # Set before the reader runs: on a Windows runner IS_WINDOWS is already
+    # true, so the rule under test is the only one this may assert.
+    monkeypatch.setattr(traces, "IS_WINDOWS", True)
+    assert GooseReader("/proj", db_path=db).active_source() == "s_newer"

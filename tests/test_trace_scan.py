@@ -43,7 +43,7 @@ def _user(ts, content, uuid, tool_use_result=False):
 
 
 def _append(path, *records):
-    with open(path, "a") as fh:
+    with open(path, "a", encoding="utf-8") as fh:
         for r in records:
             fh.write(json.dumps(r) + "\n")
 
@@ -216,7 +216,7 @@ def test_final_flush_skips_a_last_turn_that_has_only_called_a_tool(scan_env):
 
 def test_collect_on_empty_transcript_is_zero(scan_env):
     collector, f, _ = scan_env
-    f.write_text("")
+    f.write_text("", encoding="utf-8")
     assert collector.collect() == 0
     assert collector.collect(include_last=True) == 0
 

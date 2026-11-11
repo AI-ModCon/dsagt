@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from dsagt.agents.base import _NATIVE_DESCRIPTION_CAP
+from dsagt._compat import link_dir, remove_dir_link
 
 spec = importlib.util.spec_from_file_location(
     "headless_check", Path(__file__).parent / "headless_check.py"
@@ -19,7 +20,7 @@ spec.loader.exec_module(headless_check)
 
 def _project(root: Path, code_name: str) -> Path:
     (root / ".dsagt").mkdir(parents=True)
-    (root / ".dsagt" / "config.yaml").write_text("project: t\n")
+    (root / ".dsagt" / "config.yaml").write_text("project: t\n", encoding="utf-8")
     for skill in (*headless_check.BASE_SKILLS, "convert"):
         (root / "skills" / skill).mkdir(parents=True)
         (root / "skills" / skill / "SKILL.md").write_text(
@@ -29,10 +30,13 @@ def _project(root: Path, code_name: str) -> Path:
                 if skill == "convert"
                 else ""
             )
-            + "---\n"
+            + "---\n",
+            encoding="utf-8",
         )
     (root / ".claude" / "skills").mkdir(parents=True)
-    (root / ".claude" / "skills" / "convert").symlink_to("../../skills/convert")
+    assert link_dir(
+        root / "skills" / "convert", root / ".claude" / "skills" / "convert"
+    )
     (root / "trace_archive").mkdir()
     record = {
         "record_id": "r1",
@@ -46,7 +50,9 @@ def _project(root: Path, code_name: str) -> Path:
             "file_hashes": {},
         },
     }
-    (root / "trace_archive" / "convert_r1.json").write_text(json.dumps(record))
+    (root / "trace_archive" / "convert_r1.json").write_text(
+        json.dumps(record), encoding="utf-8"
+    )
     return root
 
 
@@ -89,9 +95,9 @@ def test_the_trace_count_is_not_checked_against_a_shared_store(tmp_path, monkeyp
 def test_a_record_missing_a_key_is_reported_not_raised(tmp_path):
     root = _project(tmp_path, "convert")
     record_path = root / "trace_archive" / "convert_r1.json"
-    record = json.loads(record_path.read_text())
+    record = json.loads(record_path.read_text(encoding="utf-8"))
     del record["execution"]["file_hashes"]
-    record_path.write_text(json.dumps(record))
+    record_path.write_text(json.dumps(record), encoding="utf-8")
     assert "every record is complete" in _failed(root)
 
 
@@ -101,19 +107,21 @@ def test_a_skill_over_the_native_description_cap_may_be_a_copy(tmp_path):
         f"---\nname: verbose\ndescription: {'x' * (_NATIVE_DESCRIPTION_CAP + 1)}\n---\n"
     )
     (root / "skills" / "verbose").mkdir()
-    (root / "skills" / "verbose" / "SKILL.md").write_text(spec)
+    (root / "skills" / "verbose" / "SKILL.md").write_text(spec, encoding="utf-8")
     (root / ".claude" / "skills" / "verbose").mkdir()
-    (root / ".claude" / "skills" / "verbose" / "SKILL.md").write_text(spec)
+    (root / ".claude" / "skills" / "verbose" / "SKILL.md").write_text(
+        spec, encoding="utf-8"
+    )
     _, passed, detail = _result(root, MIRROR)
     assert passed is True and "verbose" in detail
 
 
 def test_a_copied_skill_under_the_cap_is_a_failure(tmp_path):
     root = _project(tmp_path, "convert")
-    (root / ".claude" / "skills" / "convert").unlink()
+    remove_dir_link(root / ".claude" / "skills" / "convert")
     (root / ".claude" / "skills" / "convert").mkdir()
     (root / ".claude" / "skills" / "convert" / "SKILL.md").write_text(
-        "---\nx: 1\n---\n"
+        "---\nx: 1\n---\n", encoding="utf-8"
     )
     assert MIRROR in _failed(root)
 
@@ -121,9 +129,9 @@ def test_a_copied_skill_under_the_cap_is_a_failure(tmp_path):
 def test_an_output_path_matches_however_the_agent_spelled_it(tmp_path):
     root = _project(tmp_path, "convert")
     record_path = root / "trace_archive" / "convert_r1.json"
-    record = json.loads(record_path.read_text())
+    record = json.loads(record_path.read_text(encoding="utf-8"))
     record["execution"]["output_files"] = ["./out/table.csv", str(root / "out/two.csv")]
-    record_path.write_text(json.dumps(record))
+    record_path.write_text(json.dumps(record), encoding="utf-8")
     project = headless_check.Project.load(root)
     assert project.outputs_of(record) == ["out/table.csv", "out/two.csv"]
     for path in ("out/table.csv", "out/two.csv"):
@@ -132,10 +140,14 @@ def test_an_output_path_matches_however_the_agent_spelled_it(tmp_path):
 
 def test_only_a_non_zero_record_counts_as_a_failed_run(tmp_path):
     root = _project(tmp_path, "convert")
-    record = json.loads((root / "trace_archive" / "convert_r1.json").read_text())
+    record = json.loads(
+        (root / "trace_archive" / "convert_r1.json").read_text(encoding="utf-8")
+    )
     record["record_id"] = "r2"
     record["execution"]["return_code"] = 1
-    (root / "trace_archive" / "convert_r2.json").write_text(json.dumps(record))
+    (root / "trace_archive" / "convert_r2.json").write_text(
+        json.dumps(record), encoding="utf-8"
+    )
     project = headless_check.Project.load(root)
     observe = headless_check.failed_record_count("failed runs", r"convert")
     assert observe(project) == ("failed runs", "1 of 2")
@@ -150,6 +162,6 @@ def test_every_walkthrough_with_execution_prompts_declares_checks():
     with_prompts = {
         readme.parent.name
         for readme in use_cases.glob("*/README.md")
-        if "## Post-Conditions" in readme.read_text()
+        if "## Post-Conditions" in readme.read_text(encoding="utf-8")
     }
     assert with_prompts - {"plasma_turbulence"} <= set(headless_check.WALKTHROUGHS)

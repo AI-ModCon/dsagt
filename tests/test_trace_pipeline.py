@@ -110,7 +110,7 @@ def test_our_pipeline_matches_autolog_span_layout(tmp_path, mlflow_sqlite):
 
     # --- oracle: mlflow's maintained parser ---
     path = tmp_path / "transcript.jsonl"
-    path.write_text("\n".join(json.dumps(r) for r in TRANSCRIPT))
+    path.write_text("\n".join(json.dumps(r) for r in TRANSCRIPT), encoding="utf-8")
     oracle = process_transcript(str(path), session_id="proj:sess1")
     assert oracle is not None, "autolog parser produced no trace"
 
@@ -241,7 +241,9 @@ def test_multi_turn_each_subtree_matches_autolog_on_its_slice(tmp_path, mlflow_s
     # oracle: autolog on each turn's slice independently
     for k, slice_records in enumerate([turn1, turn2]):
         path = tmp_path / f"turn{k}.jsonl"
-        path.write_text("\n".join(json.dumps(r) for r in slice_records))
+        path.write_text(
+            "\n".join(json.dumps(r) for r in slice_records), encoding="utf-8"
+        )
         oracle = process_transcript(str(path), session_id="proj:sessM")
         assert oracle is not None
         ours = mlflow.get_trace(our_ids[k])

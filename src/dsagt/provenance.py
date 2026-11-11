@@ -40,7 +40,6 @@ Sections (top to bottom)
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import logging
@@ -55,6 +54,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+
+from dsagt._compat import (
+    IS_WINDOWS,
+    file_lock,
+    popen_command,
+    resolve_command,
+    split_command,
+)
 
 if TYPE_CHECKING:
     # Annotation-only (this module has ``from __future__ import annotations``, so
@@ -92,8 +99,6 @@ def file_roles_from_command(
     its files on every run, which is what the dependency graph in
     :func:`build_dependency_graph` reads.
     """
-    import shlex
-
     executable = spec.get("executable", "")
     marker = " -- "
     inner = (
@@ -101,9 +106,11 @@ def file_roles_from_command(
         if executable.startswith("dsagt-run")
         else executable
     )
-    prefix = _without_uv_wrapper(shlex.split(inner))
+    prefix = _without_uv_wrapper(split_command(inner))
     command = _without_uv_wrapper(list(command))
-    if command[: len(prefix)] != prefix:
+    if [_fold_path(t) for t in command[: len(prefix)]] != [
+        _fold_path(t) for t in prefix
+    ]:
         return [], []
     args = command[len(prefix) :]
     params = spec.get("parameters") or {}
@@ -181,6 +188,9 @@ def files_from_arguments(command: list[str]) -> list[str]:
     inner = _without_uv_wrapper(command)
     args = inner[1:]
     program = Path(inner[0]).name if inner else ""
+    if IS_WINDOWS:
+        # bash.exe, Python.EXE: the suffix and the case are not the name.
+        program = Path(program).stem.lower()
     if program.startswith("python") or program in _INTERPRETERS:
         script = next((a for a in args if not a.startswith("-")), None)
         if script is not None and _is_file(script):
@@ -188,7 +198,20 @@ def files_from_arguments(command: list[str]) -> list[str]:
     return [arg for arg in args if _is_file(arg) or _is_dir(arg)]
 
 
-_INTERPRETERS = ("python", "python3", "bash", "sh", "zsh", "Rscript", "perl", "node")
+_INTERPRETERS = (
+    "python",
+    "python3",
+    "py",
+    "bash",
+    "sh",
+    "zsh",
+    "Rscript",
+    "rscript",
+    "perl",
+    "node",
+    "pwsh",
+    "powershell",
+)
 
 
 def new_files_from_arguments(command: list[str], before: list[str]) -> list[str]:
@@ -241,7 +264,12 @@ def sha256_of(path: str) -> str | None:
 # -------------------------------------------------------------------------
 
 
-_FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+# SIGHUP is POSIX only; SIGBREAK (Ctrl+Break) is Windows only.
+_FORWARDED_SIGNALS = tuple(
+    getattr(signal, name)
+    for name in ("SIGTERM", "SIGINT", "SIGHUP", "SIGBREAK")
+    if hasattr(signal, name)
+)
 
 
 def _forward_signal(proc: "subprocess.Popen", signum: int) -> None:
@@ -253,7 +281,21 @@ def _forward_signal(proc: "subprocess.Popen", signum: int) -> None:
     thread was running: the caller catches ``OSError`` around the whole run
     and would report exit 1 with no output for a command that finished.
     ``proc.wait`` already holds the real status.
+
+    Windows has no signals to send.  Ctrl+C and Ctrl+Break are delivered by
+    the console to every process attached to it, so the child has already
+    received the one this handler saw and is left to finish on its own
+    terms; a SIGTERM ends the child the only way Windows offers.
     """
+    if IS_WINDOWS:
+        if signum == signal.SIGTERM:
+            try:
+                proc.terminate()
+            except OSError:
+                # Windows answers "access denied" for a process that has
+                # already exited.
+                pass
+        return
     try:
         proc.send_signal(signum)
     except ProcessLookupError:
@@ -279,11 +321,19 @@ def _run_streaming(
     env = _child_env()
     if parent:
         env["DSAGT_RUN_PARENT"] = parent
+    # Found the way the agent's shell would find it (see resolve_executable);
+    # the record keeps the command as it was typed.
+    argv = resolve_command(command, env.get("PATH"))
     proc = subprocess.Popen(
-        command,
+        # A batch file re-parses its arguments; see popen_command.
+        popen_command(argv),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        # The locale's encoding on POSIX.  On Windows that is the ANSI code
+        # page, which few command-line tools write; UTF-8 is what they
+        # write, and what _child_env asks a Python child for.
+        encoding="utf-8" if IS_WINDOWS else None,
         errors="replace",
         env=env,
     )
@@ -329,6 +379,10 @@ def _child_env() -> dict[str, str]:
     path = env.get("PATH", "")
     if bin_dir not in path.split(os.pathsep):
         env["PATH"] = f"{path}{os.pathsep}{bin_dir}" if path else bin_dir
+    if IS_WINDOWS:
+        # A Python child writes its output in the ANSI code page when its
+        # stdout is a pipe; this makes it UTF-8, which _run_streaming reads.
+        env.setdefault("PYTHONIOENCODING", "utf-8")
     return env
 
 
@@ -350,7 +404,9 @@ def log_execution_trace_if_tracing(record_path: Path) -> None:
     from dsagt import observability
 
     if observability._initialized:
-        observability.log_execution_trace(json.loads(Path(record_path).read_text()))
+        observability.log_execution_trace(
+            json.loads(Path(record_path).read_text(encoding="utf-8"))
+        )
 
 
 def run_and_record(
@@ -539,7 +595,9 @@ def _write_record(record: dict, records_dir: Path) -> Path:
     filename = f"{record['code_name']}_{ts}_{record['record_id']}.json"
     path = records_dir / filename
 
-    path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
+    path.write_text(
+        json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     return path
 
 
@@ -573,7 +631,7 @@ def index_trace_archive(
 
     for path in json_files:
         try:
-            record = json.loads(path.read_text())
+            record = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             # A truncated/corrupt record must not abort the whole batch — it
             # persists on disk and would re-fail every pass.  Skip it,
@@ -652,7 +710,7 @@ class CodeUseIndexer:
 
     def _load_acks(self) -> set[str]:
         try:
-            return set(json.loads(self._acks_path.read_text()))
+            return set(json.loads(self._acks_path.read_text(encoding="utf-8")))
         except FileNotFoundError:
             return set()
         except (json.JSONDecodeError, ValueError):
@@ -663,18 +721,14 @@ class CodeUseIndexer:
 
     def _save_acks(self, acks: set[str]) -> None:
         self._acks_path.parent.mkdir(parents=True, exist_ok=True)
-        self._acks_path.write_text(json.dumps(sorted(acks)))
+        self._acks_path.write_text(json.dumps(sorted(acks)), encoding="utf-8")
 
     @contextmanager
     def _lock(self):
         self._acks_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = self._acks_path.with_suffix(".lock")
-        with open(lock_path, "w") as lf:
-            fcntl.flock(lf, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lf, fcntl.LOCK_UN)
+        with file_lock(lock_path):
+            yield
 
     def tick(self, *, source: str | None = None) -> int:
         """Index newly-arrived records; return how many were indexed this tick.
@@ -823,7 +877,7 @@ def load_pipeline_records(trace_dir: Path, session_id: str | None = None) -> lis
 
     loaded = []
     for path in trace_dir.glob("*.json"):
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
         if raw.get("execution"):
             loaded.append(raw)
     succeeded = {
@@ -900,7 +954,7 @@ def render_bash(
     output_dirs: list[str] = []
     for record in records:
         for f in record["execution"].get("output_files", []):
-            parent = str(Path(_project_file(f, project_dir)).parent)
+            parent = Path(_project_file(f, project_dir)).parent.as_posix()
             if parent not in (".", "") and parent not in output_dirs:
                 output_dirs.append(parent)
     output_dirs = [
@@ -994,11 +1048,22 @@ def _relative_to_project(arg: str, project_dir: Path | None) -> str:
     if project_dir is None:
         return arg
     root = str(project_dir)
-    if arg == root:
+    # Windows paths compare without regard to case or to which slash was
+    # typed; the fold keeps every character's position, so the slice below
+    # is taken from the argument as written.
+    folded_arg, folded_root = _fold_path(arg), _fold_path(root)
+    if folded_arg == folded_root:
         return "."
-    if arg.startswith(root + "/"):
-        return arg[len(root) + 1 :]
+    if folded_arg.startswith(folded_root + "/"):
+        relative = arg[len(root) + 1 :]
+        # A path under the project is written with forward slashes, which
+        # the bash script it goes into needs and Windows accepts.
+        return relative.replace("\\", "/") if IS_WINDOWS else relative
     return arg
+
+
+def _fold_path(path: str) -> str:
+    return path.replace("\\", "/").lower() if IS_WINDOWS else path
 
 
 def _project_file(arg: str, project_dir: Path | None) -> str:
@@ -1009,7 +1074,12 @@ def _project_file(arg: str, project_dir: Path | None) -> str:
     comparing them as strings misses the match.  File paths go through this;
     a command argument does not, since it may be a flag or an empty string.
     """
-    return os.path.normpath(_relative_to_project(arg, project_dir)) if arg else arg
+    if not arg:
+        return arg
+    normal = os.path.normpath(_relative_to_project(arg, project_dir))
+    # Forward slashes on Windows too: the spelling goes into a bash script
+    # and a Snakemake workflow, and Windows accepts it everywhere.
+    return normal.replace("\\", "/") if IS_WINDOWS else normal
 
 
 def _shell_quote(s: str) -> str:

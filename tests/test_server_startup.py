@@ -56,7 +56,7 @@ class TestServerEntryPoint:
             "knowledge": {"chunk_size": 1024},
         }
         (project / ".dsagt" / "config.yaml").write_text(
-            yaml.dump(config, default_flow_style=False)
+            yaml.dump(config, default_flow_style=False), encoding="utf-8"
         )
         state_file = project / ".dsagt" / "state.yaml"
         proc = start_server(_SERVER_CMD, cwd=str(project))
@@ -66,7 +66,7 @@ class TestServerEntryPoint:
                     break
                 time.sleep(0.2)
             assert state_file.exists(), "server did not mint a session into state.yaml"
-            state = yaml.safe_load(state_file.read_text())
+            state = yaml.safe_load(state_file.read_text(encoding="utf-8"))
             assert state["sessions"][-1]["id"] == 1
             assert state["sessions"][-1]["started_at"].endswith("Z")
         finally:

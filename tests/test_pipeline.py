@@ -24,7 +24,7 @@ def _write_record(trace_dir: Path, record: dict) -> Path:
     rid = record.get("record_id", "r0")
     tool = record.get("code_name", "tool")
     path = trace_dir / f"{tool}_{rid}.json"
-    path.write_text(json.dumps(record))
+    path.write_text(json.dumps(record), encoding="utf-8")
     return path
 
 
@@ -488,7 +488,7 @@ class TestReadinessReports:
 
         project = tmp_path
         (project / "data").mkdir()
-        (project / "data" / "t.csv").write_text("a\n1\n")
+        (project / "data" / "t.csv").write_bytes(b"a\n1\n")
         digest = hashlib.sha256(b"a\n1\n").hexdigest()
         self._aidrin_record(
             project,
@@ -510,7 +510,7 @@ class TestReadinessReports:
 
         project = tmp_path
         (project / "data").mkdir()
-        (project / "data" / "t.csv").write_text("a\n1\n")
+        (project / "data" / "t.csv").write_bytes(b"a\n1\n")
         digest = hashlib.sha256(b"a\n1\n").hexdigest()
         self._aidrin_record(
             project,
@@ -551,7 +551,7 @@ class TestReadinessReports:
         from dsagt.provenance import readiness_reports
 
         (tmp_path / "data").mkdir()
-        (tmp_path / "data" / "t.csv").write_text("x\n")
+        (tmp_path / "data" / "t.csv").write_text("x\n", encoding="utf-8")
         self._aidrin_record(
             tmp_path,
             "data/t.csv",
